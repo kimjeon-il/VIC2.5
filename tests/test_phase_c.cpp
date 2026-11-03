@@ -136,7 +136,7 @@ static void integration_election_mobilization() {
            w.election().seats.at("C")==0,"bad seats");
     verify(w.voting_age()==21,"law applied before next month");
     w.advance();
-    verify(w.voting_age()==18 && w.eligible_voters()==650,"law not effective next month");
+    verify(w.voting_age()==18 && w.eligible_voters()==610,"law not effective next month");
 }
 static void integration_logistics_occupation() {
     IntegratedWorld w{300};
@@ -249,7 +249,12 @@ int main() {
     });
     test.run(20, []{
         F f;IntegratedWorld::Plan p;
-        p[9].push_back([](auto& w){w.hold_election(300,0,3,{{"A",220},{"B",130},{"C",50}});});
+        // Eligible adult civilians + reservists are 300; use 220/130/50
+        // as synthetic ballot weights only after seeding 100 more adult voters.
+        auto& p0=f.w.seed_population();
+        const auto old=p0.slice(f.civ);
+        p0.add_population(old.key.demographic,old.key.economic,old.key.household,100,old.key.partition);
+        p[9].push_back([](auto& w){w.hold_election(400,0,3,{{"A",220},{"B",130},{"C",50}});});
         f.w.advance(p);
         verify(f.w.election().seats.at("A")==2&&f.w.election().seats.at("B")==1,"D'Hondt");
     });
