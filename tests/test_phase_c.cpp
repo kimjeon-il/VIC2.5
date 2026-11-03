@@ -877,6 +877,34 @@ int main() {
                f.w.financial().balanced() &&
                f.w.commit_id()==0,
                "Phase B/S0/Phase C shared population-finance baseline invalid");
+        // Keep the checksum mathematically valid while altering a contract
+        // token; the loader must reject this *because of version mismatch*.
+        const auto save_path=std::filesystem::temp_directory_path()/"vic25-d4-t48-v2.dat";
+        const auto wrong_path=std::filesystem::temp_directory_path()/"vic25-d4-t48-wrong-version.dat";
+        std::filesystem::remove(save_path);
+        std::filesystem::remove(wrong_path);
+        SnapshotCodec::save(f.w,save_path);
+        auto save_bytes=read(save_path);
+        const std::string needle="phase-c-politics/1.0";
+        const auto where=save_bytes.find(needle);
+        verify(where!=std::string::npos && save_bytes.size()>8,
+               "required political contract token not saved");
+        save_bytes[where+needle.size()-1]='1';
+        const auto hash=persistence_detail::checksum(
+            save_bytes.substr(0,save_bytes.size()-8));
+        for(std::size_t i=0;i<8;++i)
+            save_bytes[save_bytes.size()-8+i]=
+                static_cast<char>((hash>>(i*8))&0xffU);
+        {
+            std::ofstream out(wrong_path,std::ios::binary|std::ios::trunc);
+            verify(static_cast<bool>(out),"cannot create version mismatch fixture");
+            out.write(save_bytes.data(),static_cast<std::streamsize>(save_bytes.size()));
+            verify(static_cast<bool>(out),"could not write version mismatch fixture");
+        }
+        verify(rejected([&]{(void)SnapshotCodec::load(wrong_path);}),
+               "checkpoint accepted altered contract token with valid checksum");
+        std::filesystem::remove(save_path);
+        std::filesystem::remove(wrong_path);
         // The *independent* Python CTest verifies exact Git blob IDs, ADR/INV
         // numbering and fixture/version contents. This bounded acceptance
         // test does NOT certify the complete CE/CP/CM feature backlog.
