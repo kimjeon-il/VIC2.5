@@ -19,3 +19,24 @@ if (BUILD_TESTING)
     target_link_libraries(vic25_core_tests PRIVATE vic25_core)
     add_test(NAME vic25_core_tests COMMAND vic25_core_tests)
 endif()
+
+# POP-I1~I4: independent social/demographic simulation (existing S0 core preserved).
+add_executable(vic25_phase_b_demo src/phase_b_demo.cpp)
+target_link_libraries(vic25_phase_b_demo PRIVATE vic25_core)
+add_executable(vic25_phase_b_scaling bench/phase_b_scaling.cpp)
+target_link_libraries(vic25_phase_b_scaling PRIVATE vic25_core)
+
+if (BUILD_TESTING)
+    add_executable(vic25_phase_b_tests tests/test_phase_b.cpp)
+    target_link_libraries(vic25_phase_b_tests PRIVATE vic25_core)
+    add_test(NAME vic25_phase_b_tests COMMAND vic25_phase_b_tests)
+
+    add_executable(vic25_phase_b_features_tests tests/test_phase_b_features.cpp)
+    target_link_libraries(vic25_phase_b_features_tests PRIVATE vic25_core)
+    add_test(NAME vic25_phase_b_features_tests COMMAND vic25_phase_b_features_tests)
+
+    add_executable(vic25_phase_b_longrun_tests tests/test_phase_b_longrun.cpp)
+    target_link_libraries(vic25_phase_b_longrun_tests PRIVATE vic25_core)
+    add_test(NAME vic25_phase_b_longrun_tests COMMAND vic25_phase_b_longrun_tests)
+    set_tests_properties(vic25_phase_b_longrun_tests PROPERTIES TIMEOUT 180)
+endif()

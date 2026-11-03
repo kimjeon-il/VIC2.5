@@ -1,3 +1,5 @@
+> **Phase B (POP-I1~I4) 기초 코드·검증 추가:** [인구·건강·가구·교육/노동 구현 범위](pop/PHASE_B_IMPLEMENTATION.md). 현재 Phase B는 기존 금융·시장 S0와 **분리되어 실행**됩니다. 아래 S0-P1~P6 경제통합 계획은 여전히 진행 대상입니다.
+
 > **D0~D3 설계 단계 완료 (코드 이식 전)**: [새 POP 설계 색인](pop/README.md)과 [인수 조건](pop/ACCEPTANCE_TESTS.md)을 참조. 구현은 기존 S0-P1 이전에 3계층 레지스트리/PopulationSlice → 상태 전이 → staging/rollback 순서로 진행합니다. 아래 S0-P1~P6은 구현 단계이며 아직 완료되지 않았습니다.
 
 # S0-POP 구현 로드맵
