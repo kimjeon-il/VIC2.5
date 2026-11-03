@@ -409,6 +409,55 @@ public:
         if(assigned==0)units_[unit].erase(source);
         events_.push_back("demobilization");
     }
+    // Multi-currency bilateral settlement. Each currency has an independent
+    // double-entry ledger; no direct sum or implicit 1:1 conversion exists.
+    void seed_forex_balance(const std::string& owner,const std::string& currency,Money amount) {
+        ensure(stage_==-1&&commit_id_==0 && actors_.contains(owner) &&
+               !currency.empty()&&currency!="TEST"&&amount>=0,
+               "invalid foreign currency opening");
+        ensure_fx_ledger(currency);
+        ensure_fx_account(owner,currency);
+        if(amount) {
+            auto& l=foreign_ledgers_.at(currency);
+            l.post({unique("fx-seed"),"foreign currency opening",{
+                {fx_acc(owner,currency,"cash"),amount,0},
+                {fx_acc(owner,currency,"capital"),0,amount}}});
+            l.post({unique("fx-bank-seed"),"matching bank currency deposit",{
+                {fx_bank(currency,"reserves"),amount,0},
+                {fx_bank(currency,"deposit"),0,amount}}});
+        }
+    }
+    [[nodiscard]] Money fx_balance(const std::string& owner,const std::string& currency) const {
+        ensure(foreign_holders_.contains({owner,currency}),"no currency wallet");
+        return foreign_ledgers_.at(currency).balance(fx_acc(owner,currency,"cash"));
+    }
+    void exchange_fx(const std::string& a,const std::string& b,
+                     const std::string& sold_currency,Money sold_amount,
+                     const std::string& bought_currency,Money bought_amount) {
+        require_stage({7});
+        ensure(a!=b&&sold_currency!=bought_currency &&
+               sold_amount>0&&bought_amount>0 &&
+               foreign_holders_.contains({a,sold_currency}) &&
+               foreign_holders_.contains({b,bought_currency}) &&
+               fx_balance(a,sold_currency)>=sold_amount &&
+               fx_balance(b,bought_currency)>=bought_amount,
+               "invalid currency exchange or insufficient actual counterparty liquidity");
+        ensure_fx_account(a,bought_currency);
+        ensure_fx_account(b,sold_currency);
+        auto& l1=foreign_ledgers_.at(sold_currency);
+        l1.post({unique("fx-sale"),"bilateral settled currency leg",{
+            {fx_acc(a,sold_currency,"capital"),sold_amount,0},
+            {fx_acc(a,sold_currency,"cash"),0,sold_amount},
+            {fx_acc(b,sold_currency,"cash"),sold_amount,0},
+            {fx_acc(b,sold_currency,"capital"),0,sold_amount}}});
+        auto& l2=foreign_ledgers_.at(bought_currency);
+        l2.post({unique("fx-buy"),"matched currency leg",{
+            {fx_acc(b,bought_currency,"capital"),bought_amount,0},
+            {fx_acc(b,bought_currency,"cash"),0,bought_amount},
+            {fx_acc(a,bought_currency,"cash"),bought_amount,0},
+            {fx_acc(a,bought_currency,"capital"),0,bought_amount}}});
+        events_.push_back("bilateral-foreign-exchange-settled");
+    }
     void seed_market(const std::string& region,const std::string& good,
                      Money price, Money floor, Money ceiling, Quantity target_stock=0) {
         ensure(stage_==-1 && commit_id_==0 && !region.empty() && !good.empty() &&
@@ -970,6 +1019,19 @@ public:
                    "invalid government institution");
         }
         ensure(money_.balanced(), "unbalanced financial ledger");
+        for(const auto& [currency,l]:foreign_ledgers_){
+            ensure(l.balanced(),"unbalanced foreign currency ledger");
+            Money total=0;
+            for(const auto& [who,c]:foreign_holders_)
+                if(c==currency){
+                    const Money amount=fx_balance(who,c);
+                    ensure(amount>=0,"negative currency position");
+                    total=phaseb::add_checked(total,amount);
+                }
+            ensure(-l.balance(fx_bank(currency,"deposit"))==total,
+                   "foreign bank deposit does not match actual currency claims");
+        }
+
         Money deposits = 0;
         for (const auto& actor : actors_) {
             ensure(cash(actor) >= 0, "negative spendable cash");
@@ -1039,6 +1101,8 @@ private:
     Money total_bad_debt_{};
     bool bank_insolvent_{};
     std::map<std::string,People> regional_food_grievance_;
+    std::map<std::string,FinancialLedger> foreign_ledgers_;
+    std::set<std::pair<std::string,std::string>> foreign_holders_;
     std::map<std::string,Reparation> reparations_;
     std::map<std::string,ProductionFacility> facilities_;
     std::map<std::int64_t,std::map<std::string,Quantity>> scheduled_site_repairs_;
@@ -1129,6 +1193,28 @@ private:
             total = phaseb::add_checked(total, last_election_.seats.at(party));
         }
         return total;
+    }
+    static std::string fx_bank(const std::string& c,const std::string& k){
+        return "FXBANK:"+c+":"+k;
+    }
+    static std::string fx_acc(const std::string& owner,const std::string& c,const std::string& k){
+        return "FX:"+c+":"+owner+":"+k;
+    }
+    void ensure_fx_ledger(const std::string& currency){
+        if(foreign_ledgers_.contains(currency))return;
+        FinancialLedger l;
+        l.add_account(fx_bank(currency,"reserves"),"FXBANK:"+currency,AccountType::asset);
+        l.add_account(fx_bank(currency,"deposit"),"FXBANK:"+currency,AccountType::liability);
+        foreign_ledgers_.emplace(currency,std::move(l));
+    }
+    void ensure_fx_account(const std::string& owner,const std::string& currency){
+        ensure(actors_.contains(owner),"unknown currency account owner");
+        ensure_fx_ledger(currency);
+        if(foreign_holders_.insert({owner,currency}).second){
+            auto& l=foreign_ledgers_.at(currency);
+            l.add_account(fx_acc(owner,currency,"cash"),owner,AccountType::asset);
+            l.add_account(fx_acc(owner,currency,"capital"),owner,AccountType::equity);
+        }
     }
     static std::string account(const std::string& who, const std::string& suffix) {
         return who + ":" + suffix;
