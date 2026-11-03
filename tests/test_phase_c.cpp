@@ -324,7 +324,21 @@ int main() {
         f.w.advance(p);
         verify(f.w.election().seats.at("A")==2&&f.w.election().seats.at("B")==1,"D'Hondt");
     });
-    test.skip(21,"per-voter/constituency identity register not implemented");
+    test.run(21, []{
+        F f;f.w.seed_person_anchor("voter-1",f.civ);
+        IntegratedWorld::Plan duplicate;
+        duplicate[9].push_back([](auto& w){
+            w.cast_named_ballot("election-1","north","voter-1","A");
+            w.cast_named_ballot("election-1","south","voter-1","B");
+        });
+        verify(rejected([&]{f.w.advance(duplicate);}),"same voter voted in two districts");
+        verify(f.w.commit_id()==0&&f.w.named_votes("election-1")==0,"failed votes persisted");
+        IntegratedWorld::Plan legitimate;
+        legitimate[9].push_back([](auto& w){w.cast_named_ballot("election-1","north","voter-1","A");});
+        f.w.advance(legitimate);
+        verify(f.w.named_votes("election-1")==1,"valid anchor vote missing");
+        verify(rejected([&]{f.w.advance(legitimate);}),"replayed same election vote");
+    });
     test.run(22, []{
         F f;
         f.w.seed_government("A","Head","Outgoing",3,2);
@@ -345,7 +359,22 @@ int main() {
         f.w.advance();
         verify(f.w.government("A").prime_minister=="NewPremier","valid coalition appointment failed");
     });
-    test.skip(23,"interest-group/movement allegiance and street participants not implemented");
+    test.run(23, []{
+        F f;f.w.seed_interest_group("Workers");f.w.seed_interest_group("Agrarians");
+        IntegratedWorld::Plan p;
+        p[9].push_back([&](auto& w){
+            w.join_interest_group(f.civ,"Workers",150);
+            w.join_interest_group(f.civ,"Agrarians",100);
+            w.protest(f.civ,"Workers",50);
+            w.protest(f.civ,"Agrarians",20);
+        });
+        f.w.advance(p);
+        verify(f.w.group_members(f.civ,"Workers")==150&&
+               f.w.group_members(f.civ,"Agrarians")==100&&
+               f.w.protest_participants(f.civ)==70&&
+               f.w.people().population()==600,
+               "group memberships and actual participants were conflated");
+    });
     test.skip(24,"public service production/capacity and law enforcement not implemented");
     test.run(25, []{F f;verify(f.w.people().population()==600 && f.w.active_strength("U")==100,"service count");});
     test.run(26, []{
@@ -416,7 +445,27 @@ int main() {
         forbidden[10].push_back([&](auto& w){w.mobilize(f.reserve,1,"U");});
         verify(rejected([&]{f.w.advance(forbidden);}),"conscription without law accepted");
     });
-    test.skip(39,"strikes and protest participation/health-to-labor effects not implemented");
+    test.run(39, []{
+        F f;f.w.seed_interest_group("Union");
+        f.w.seed_stock("F","R","ore",10);
+        IntegratedWorld::Plan first;
+        first[2].push_back([&](auto& w){w.hire(f.civ,10,"F",1);});
+        first[9].push_back([&](auto& w){
+            w.join_interest_group(f.civ,"Union",10);
+            w.protest(f.civ,"Union",7,5);
+        });
+        f.w.advance(first);
+        IntegratedWorld::Plan overwork;
+        overwork[4].push_back([](auto& w){w.produce("F","R","ore","tool",1,6);});
+        verify(rejected([&]{f.w.advance(overwork);}),"strikers used as productive labor");
+        verify(f.w.stock("F","R","ore")==10&&f.w.commit_id()==1,"failed strike month leaked");
+        IntegratedWorld::Plan lawful;
+        lawful[4].push_back([](auto& w){w.produce("F","R","ore","tool",1,5);});
+        f.w.advance(lawful);
+        verify(f.w.stock("F","R","tool")==1&&
+               f.w.people().employed(f.civ)==10,
+               "strike should reduce hours but not automatically terminate jobs");
+    });
     test.skip(40,"peace settlement obligations and demobilization/reconstruction not implemented");
     test.run(41, []{
         F f;IntegratedWorld::Plan p;
