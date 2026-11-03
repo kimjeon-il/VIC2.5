@@ -1,0 +1,68 @@
+{
+  "fixture_id": "vic25-cp-election-3seats-v1",
+  "type": "design_fixture_not_engine_save",
+  "metadata": {
+    "historical": false,
+    "fictional_test_value": true,
+    "ruleset": "phase-c-politics/1.0",
+    "month_index": 240
+  },
+  "jurisdiction": {
+    "country_id": "TEST_COUNTRY",
+    "chamber_id": "LOWER_HOUSE",
+    "district_id": "DISTRICT_1",
+    "seats": 3
+  },
+  "electoral_law": {
+    "formula": "list_pr_dhondt",
+    "party_vote_threshold_ppm": 0,
+    "single_choice_ballot": true,
+    "legal_suffrage_restrictions": "hypothetical",
+    "seat_ties": "stable_party_id"
+  },
+  "people": {
+    "registered_resident_population": 1000,
+    "eligible": 600,
+    "registered": 550,
+    "unregistered_eligible": 50,
+    "cast": 420,
+    "registered_nonvoters": 130,
+    "valid": 400,
+    "invalid": 20,
+    "ineligible": 400
+  },
+  "votes_by_party": {
+    "A": 220,
+    "B": 130,
+    "C": 50
+  },
+  "seat_quotients_selected": [
+    {
+      "party": "A",
+      "numerator": 220,
+      "denominator": 1
+    },
+    {
+      "party": "B",
+      "numerator": 130,
+      "denominator": 1
+    },
+    {
+      "party": "A",
+      "numerator": 220,
+      "denominator": 2
+    }
+  ],
+  "expected": {
+    "seat_allocations": {
+      "A": 2,
+      "B": 1,
+      "C": 0
+    },
+    "sum_seats": 3,
+    "sum_valid_votes": 400,
+    "total_population_after": 1000,
+    "winner_without_government_formation": true
+  },
+  "notes": "Genuine resident headcount stays solely in PopulationSlice; electoral numbers are derived allocations, not new people."
+}
