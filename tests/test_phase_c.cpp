@@ -1,7 +1,9 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
-#include "vic25/phase_c.hpp"
+#include "vic25/phase_c_snapshot.hpp"
+#include <filesystem>
+#include <fstream>
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
@@ -749,7 +751,71 @@ int main() {
                a.w.cash("F")==b.w.cash("F") &&
                a.w.cash("G")==b.w.cash("G"),"repeat execution drift");
     });
-    test.skip(45,"atomic persistent save/checkpoint/replay not yet implemented");
+    test.run(45, []{
+        F f;
+        f.w.seed_government("A","Head","Premier",3,2);
+        f.w.seed_shares("capital","F",10);
+        f.w.seed_forex_balance("F","USD",20);
+        f.w.seed_interest_group("Guild");
+        f.w.seed_market("R","ammunition",1,1,10);
+        IntegratedWorld::Plan p;
+        p[5].push_back([](auto& w){
+            w.command_once("persisted-command",[](auto& st){st.pay("F","H",10);});
+        });
+        p[9].push_back([&](auto& w){
+            w.hold_election(250,0,3,{{"A",150},{"B",100}});
+            w.join_interest_group(f.civ,"Guild",10);
+            w.appoint_cabinet("A","Head","NextPM",{"A"});
+        });
+        p[10].push_back([&](auto& w){
+            w.battle("U",f.active,"R",CombatLoss{1,0,0,0,0,1});
+        });
+        f.w.advance(p);
+        namespace fs=std::filesystem;
+        const auto path=fs::temp_directory_path()/"vic25-d4-snapshot-test.dat";
+        const auto corrupted=fs::temp_directory_path()/"vic25-d4-corrupt-test.dat";
+        fs::remove(path);fs::remove(corrupted);
+        SnapshotCodec::save(f.w,path);
+        auto restored=SnapshotCodec::load(path);
+        verify(restored.people().fingerprint()==f.w.people().fingerprint() &&
+               restored.cash("F")==f.w.cash("F") &&
+               restored.cash("H")==f.w.cash("H") &&
+               restored.stock("U","R","ammunition")==f.w.stock("U","R","ammunition") &&
+               restored.active_strength("U")==f.w.active_strength("U") &&
+               restored.election().valid==f.w.election().valid &&
+               restored.shares("capital","F")==10 &&
+               restored.fx_balance("F","USD")==20 &&
+               restored.group_members(f.civ,"Guild")==10 &&
+               restored.journal()==f.w.journal() &&
+               restored.commit_id()==f.w.commit_id(),
+               "serialized world lost cross-domain state");
+        const auto older=f.w;
+        f.w.advance();restored.advance();
+        verify(restored.government("A").prime_minister=="NextPM" &&
+               restored.people().fingerprint()==f.w.people().fingerprint() &&
+               restored.journal()==f.w.journal() &&
+               restored.cash("F")==f.w.cash("F"),
+               "saved world did not resume deterministic legal events");
+        IntegratedWorld::Plan replay;
+        replay[5].push_back([](auto& w){
+            w.command_once("persisted-command",[](auto& st){st.pay("F","H",10);});
+        });
+        verify(rejected([&]{restored.advance(replay);}),
+               "snapshot lost idempotent command cursor");
+        {
+            std::ifstream in(path,std::ios::binary);
+            std::string bytes((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+            bytes.at(bytes.size()/2)^=1;
+            std::ofstream out(corrupted,std::ios::binary);
+            out.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));
+        }
+        verify(rejected([&]{(void)SnapshotCodec::load(corrupted);}),
+               "corrupted checkpoint was loaded");
+        verify(rejected([&]{SnapshotCodec::save(older,path);}),
+               "committed snapshot overwritten without versioned replacement");
+        fs::remove(path);fs::remove(corrupted);
+    });
     test.skip(46,"1,200-month combined crisis dynamics not yet implemented; partial long-run smoke separate");
     test.skip(47,"100k/1M active integrated world load/performance not verified");
     test.skip(48,"full contract baseline BLOCKED pending politics source registration");
