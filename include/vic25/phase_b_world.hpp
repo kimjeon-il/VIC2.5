@@ -1,9 +1,11 @@
 #pragma once
 #include "vic25/phase_b_types.hpp"
 
+namespace vic25::phasec { struct SnapshotCodec; }
 namespace vic25::phaseb {
 
 class World {
+    friend struct ::vic25::phasec::SnapshotCodec;
 public:
     explicit World(std::int64_t month = 0) : month_(month) { default_health_ = health_profile(Health{}); default_education_ = education_profile(Education{}); }
     [[nodiscard]] std::int64_t month() const { return month_; }

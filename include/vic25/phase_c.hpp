@@ -93,6 +93,7 @@ struct AdvanceReport {
 };
 
 class IntegratedWorld {
+    friend struct SnapshotCodec;
 public:
     using Task = std::function<void(IntegratedWorld&)>;
     using Plan = std::array<std::vector<Task>, 12>;
