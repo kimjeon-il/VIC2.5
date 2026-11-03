@@ -101,7 +101,7 @@ static void perform(CrisisScenario& sc){
         });
         p[5].push_back([&](auto& x){
             if(produced)x.wages("F","H","G",5,1);
-            if(m==37)x.pay_reparation("peace","F",20);
+            if(m==37)x.pay_reparation("peace",20);
         });
         p[7].push_back([&](auto& x){
             if(produced){
