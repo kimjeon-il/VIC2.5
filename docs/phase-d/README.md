@@ -48,6 +48,6 @@
 - [C-P1~P5 정치](../phase-c/politics/README.md): 법률/인허가·정부·자치·정책 효력.
 - [C-M1~M5 군사](../phase-c/military/README.md): 군수/동원·시설피해·전시경제.
 - [C-D4 통합](../phase-c/integration/README.md): 30개 불변조건·48개 프로토타입 시험.
-- [Phase C 구현 보고서](../phase-c/ENGINE_IMPLEMENTATION_STATUS.md): 2026-11-04 기준 48개 프로토타입 회귀 PASS, 통합 C++ 코드는 별도 `work/phase-c-engine-integration`, `main` 미병합, 완성형 게임 구현 전.
+- [Phase C 구현 보고서](https://github.com/kimjeon-il/VIC2.5/blob/work/phase-c-engine-integration/docs/phase-c/ENGINE_IMPLEMENTATION_STATUS.md): 2026-11-04 기준 48개 프로토타입 회귀 PASS, 통합 C++ 코드는 별도 `work/phase-c-engine-integration`, `main` 미병합, 완성형 게임 구현 전.
 
 **현 단계에서 건설·산업·기술 C++ 코드를 구현하거나 검증했다고 주장하지 않는다.**
