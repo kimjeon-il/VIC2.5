@@ -40,6 +40,12 @@ struct CabinetChange {
     std::string country, new_head, new_prime_minister;
     bool replace_head{}, replace_prime{};
 };
+enum class EntityKind : std::uint8_t { actor, region, unit, formation, government, site, market };
+struct TypedEntityId {
+    EntityKind kind{};
+    std::uint64_t id{};
+    auto operator<=>(const TypedEntityId&) const = default;
+};
 struct PublicInstitution {
     std::string id, operator_id, region, good;
     People monthly_slots{}, patients_per_worker{3}, provided{};
@@ -120,6 +126,7 @@ public:
     void seed_actor(const std::string& who, Money amount) {
         ensure(stage_ == -1 && commit_id_ == 0, "actor seed after simulation start");
         ensure(!who.empty() && !actors_.contains(who) && amount >= 0, "invalid actor seed");
+        register_typed(EntityKind::actor,who);
         actors_.insert(who);
         for (const auto& [suffix, type] : std::array<std::pair<std::string, AccountType>, 7>{{
             {"cash", AccountType::asset}, {"capital", AccountType::equity},
@@ -139,18 +146,57 @@ public:
     void seed_stock(std::string holder, std::string region, std::string good, Quantity qty) {
         ensure(stage_ == -1 && commit_id_ == 0, "stock seed after simulation start");
         ensure(qty > 0, "invalid initial stock");
+        regions_with_initial_stock_.insert(region);
         tracked_goods_.insert(good);
         goods_.initialize({std::move(holder), std::move(region), std::move(good)}, qty);
     }
     void seed_region(std::string region, std::string sovereign) {
         ensure(stage_ == -1 && commit_id_ == 0, "region seed after simulation start");
         ensure(!region.empty() && !sovereign.empty() && !sovereignty_.contains(region), "bad region");
+        register_typed(EntityKind::region,region);
         military_control_[region] = sovereign;
         sovereignty_[std::move(region)] = std::move(sovereign);
+    }
+    [[nodiscard]] TypedEntityId typed_id(EntityKind kind,const std::string& name) const {
+        auto it=typed_entities_.find({kind,name});
+        ensure(it!=typed_entities_.end(),"unknown typed entity");
+        return it->second;
+    }
+    void require_typed(const TypedEntityId& ref,EntityKind kind) const {
+        ensure(ref.id!=0 && ref.kind==kind && !retired_typed_ids_.contains(ref.id) &&
+               typed_active_ids_.contains(ref.id) && typed_active_ids_.at(ref.id)==kind,
+               "wrong-type or retired entity reference");
+    }
+    void retire_unused_region(const std::string& original,const std::string& successor) {
+        require_stage({9});
+        const auto old=typed_id(EntityKind::region,original);
+        const auto next=typed_id(EntityKind::region,successor);
+        require_typed(old,EntityKind::region);
+        require_typed(next,EntityKind::region);
+        ensure(old.id!=next.id && !regions_with_initial_stock_.contains(original),
+               "cannot retire region with active legacy stock");
+        for(const auto& [id,sl]:people_.slices()) {
+            (void)id;
+            ensure(people_.demographic(sl.key.demographic).region!=original,
+                   "cannot retire inhabited region");
+        }
+        for(const auto& [id,shipment]:shipments_) {
+            (void)id;
+            ensure(shipment.origin!=original&&shipment.destination!=original,
+                   "cannot retire region with shipments");
+        }
+        retired_typed_ids_.insert(old.id);
+        typed_successor_[old.id]=next.id;
+        events_.push_back("typed-region-lineage-tombstone");
+    }
+    [[nodiscard]] TypedEntityId successor_of(const TypedEntityId& old) const {
+        ensure(typed_successor_.contains(old.id),"no successor lineage");
+        return {old.kind,typed_successor_.at(old.id)};
     }
     void seed_formation(const std::string& id) {
         ensure(stage_==-1 && commit_id_==0 && !id.empty() &&
                formations_.insert(id).second, "invalid formation");
+        register_typed(EntityKind::formation,id);
     }
     void attach_to_formation(const std::string& formation,const std::string& unit) {
         ensure((stage_==-1 && commit_id_==0) || stage_==9,
@@ -183,6 +229,7 @@ public:
     }
     void seed_unit(std::string unit) {
         ensure(stage_ == -1 && commit_id_ == 0 && !unit.empty() && !units_.contains(unit), "bad unit");
+        register_typed(EntityKind::unit,unit);
         units_.emplace(std::move(unit), std::map<Id, People>{});
     }
     void seed_active(std::string unit, Id slice) {
@@ -949,6 +996,7 @@ public:
     void occupy(const std::string& region, const std::string& occupier) {
         require_stage({10});
         ensure(sovereignty_.contains(region) && !occupier.empty(), "invalid occupation");
+        require_typed(typed_id(EntityKind::region,region),EntityKind::region);
         military_control_[region] = occupier;
         events_.push_back("military-control");
     }
@@ -988,6 +1036,15 @@ public:
     }
     void validate() const {
         ensure(people_.validate(), "invalid population registry");
+        for(const auto& [key,id]:typed_entities_) {
+            ensure(id.kind==key.first && id.id!=0 &&
+                   typed_active_ids_.contains(id.id) &&
+                   typed_active_ids_.at(id.id)==id.kind,"typed entity identity mismatch");
+        }
+        for(const auto& [old,newid]:typed_successor_)
+            ensure(retired_typed_ids_.contains(old)&&typed_active_ids_.contains(newid) &&
+                   !retired_typed_ids_.contains(newid),"invalid lineage/retirement");
+
         for (const auto& [anchor, slice]:person_anchors_) {
             (void)anchor;
             ensure(people_.has_slice(slice) && anchor_counts_.at(slice)<=people_.slice(slice).count,
@@ -1082,6 +1139,12 @@ private:
     std::set<std::string> actors_;
     std::set<std::string> processed_commands_;
     std::map<std::string, std::map<Id, People>> units_;
+    std::uint64_t next_typed_id_{1};
+    std::map<std::pair<EntityKind,std::string>,TypedEntityId> typed_entities_;
+    std::map<std::uint64_t,EntityKind> typed_active_ids_;
+    std::set<std::uint64_t> retired_typed_ids_;
+    std::map<std::uint64_t,std::uint64_t> typed_successor_;
+    std::set<std::string> regions_with_initial_stock_;
     std::set<std::string> formations_;
     std::map<std::string,std::string> unit_to_formation_;
     std::map<std::tuple<std::string,std::string,std::string>,Quantity> equipment_assignment_;
@@ -1193,6 +1256,13 @@ private:
             total = phaseb::add_checked(total, last_election_.seats.at(party));
         }
         return total;
+    }
+    TypedEntityId register_typed(EntityKind kind,const std::string& name) {
+        ensure(!name.empty()&&!typed_entities_.contains({kind,name}),"duplicate typed entity");
+        const TypedEntityId id{kind,next_typed_id_++};
+        typed_entities_[{kind,name}]=id;
+        typed_active_ids_[id.id]=kind;
+        return id;
     }
     static std::string fx_bank(const std::string& c,const std::string& k){
         return "FXBANK:"+c+":"+k;
