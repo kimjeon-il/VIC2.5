@@ -344,12 +344,24 @@ int main() {
     test.skip(36,"law-dependent mass conscription to industrial supply chain not implemented");
     test.skip(37,"bank insolvency and political movements not implemented");
     test.run(38, []{
-        F f;IntegratedWorld::Plan p;
-        p[5].push_back([](auto& w){w.wages("F","H","G",100,10);});
+        F f;IntegratedWorld::Plan legislation;
+        legislation[9].push_back([](auto& w){
+            w.enact_income_tax(200'000);
+            w.enact_conscription(false);
+        });
+        f.w.advance(legislation);
+        verify(f.w.income_tax_ppm()==100'000&&f.w.conscription_enabled(),
+               "law effective before next month");
+        IntegratedWorld::Plan p;
+        p[5].push_back([](auto& w){w.wages_under_law("F","H","G",100);});
         p[7].push_back([](auto& w){w.pay("G","S",10);});
         f.w.advance(p);
-        verify(f.w.cash("G")==0&&f.w.cash("H")==140&&f.w.cash("S")==10,
-               "tax and procurement");
+        verify(f.w.income_tax_ppm()==200'000&&!f.w.conscription_enabled()&&
+               f.w.cash("G")==10&&f.w.cash("H")==130&&f.w.cash("S")==10,
+               "tax law, payroll and procurement");
+        IntegratedWorld::Plan forbidden;
+        forbidden[10].push_back([&](auto& w){w.mobilize(f.reserve,1,"U");});
+        verify(rejected([&]{f.w.advance(forbidden);}),"conscription without law accepted");
     });
     test.skip(39,"strikes and protest participation/health-to-labor effects not implemented");
     test.skip(40,"peace settlement obligations and demobilization/reconstruction not implemented");
