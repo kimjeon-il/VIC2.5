@@ -40,3 +40,16 @@ if (BUILD_TESTING)
     add_test(NAME vic25_phase_b_longrun_tests COMMAND vic25_phase_b_longrun_tests)
     set_tests_properties(vic25_phase_b_longrun_tests PROPERTIES TIMEOUT 180)
 endif()
+
+# Phase C vertical slice: original Phase B POP registry + S0 finance/inventory
+# with cross-domain staging, contract tests and a 1,200-month integration loop.
+if (BUILD_TESTING)
+    add_executable(vic25_phase_c_tests tests/test_phase_c.cpp)
+    target_link_libraries(vic25_phase_c_tests PRIVATE vic25_core)
+    add_test(NAME vic25_phase_c_tests COMMAND vic25_phase_c_tests)
+
+    add_executable(vic25_phase_c_longrun tests/test_phase_c_longrun.cpp)
+    target_link_libraries(vic25_phase_c_longrun PRIVATE vic25_core)
+    add_test(NAME vic25_phase_c_longrun COMMAND vic25_phase_c_longrun)
+    set_tests_properties(vic25_phase_c_longrun PROPERTIES TIMEOUT 180)
+endif()
