@@ -126,7 +126,8 @@
       "socioeconomic_pop_id": "EP-FARM",
       "household_pool_id": "H1",
       "count": 2,
-      "revision": 1
+      "revision": 1,
+      "allocation_partition_id": "default"
     },
     {
       "id": "S2",
@@ -134,7 +135,8 @@
       "socioeconomic_pop_id": "EP-FARM",
       "household_pool_id": "H1",
       "count": 1,
-      "revision": 1
+      "revision": 1,
+      "allocation_partition_id": "default"
     },
     {
       "id": "S3",
@@ -142,7 +144,8 @@
       "socioeconomic_pop_id": "EP-NONWORKER",
       "household_pool_id": "H1",
       "count": 2,
-      "revision": 1
+      "revision": 1,
+      "allocation_partition_id": "default"
     },
     {
       "id": "S4",
@@ -150,7 +153,8 @@
       "socioeconomic_pop_id": "EP-NONWORKER",
       "household_pool_id": "H1",
       "count": 1,
-      "revision": 1
+      "revision": 1,
+      "allocation_partition_id": "default"
     }
   ],
   "expected": {

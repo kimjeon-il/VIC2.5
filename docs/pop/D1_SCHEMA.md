@@ -18,9 +18,9 @@
 |---|---|---|
 | DemographicCohort | id, key, schema_version | 읽기용 분류 사전, count 없음 |
 | DemographicCohortKey | residence_region_id, birth_month_index, sex_recorded, culture_id, religion_id, citizenship_id, legal_status_id, health_profile_id, service_status | 하나의 속성 변경은 새/기존 분류 키로 셀 이전 |
-| SocioeconomicPop | id, residence_region_id, primary_profession_id, livelihood_strategy_id, labor_market_class_id | 직업 미배정/실직도 표현; 고용·자산 원본은 아님 |
+| SocioeconomicPop | id, residence_region_id, primary_profession_id, livelihood_strategy_id, labor_market_class_id, qualification_profile_id | 직업 미배정/실직·교육/숙련 차이를 표현; 고용·자산 원본은 아님 |
 | HouseholdPool | id, residence_region_id, composition_profile_id, pooling_policy_id, household_count_estimate, estimate_provenance | 실제 개별 가족이 아님; 집단거주/미상 풀 허용 |
-| PopulationSlice | id, demographic_id, socioeconomic_pop_id, household_pool_id, count, revision | 인구수가 존재하는 유일한 위치; count>0인 활성 셀만 |
+| PopulationSlice | id, demographic_id, socioeconomic_pop_id, household_pool_id, allocation_partition_id, count, revision | 유일한 인구수 원본; 소유/계약 배분 단위가 다르면 partition으로 구분; count>0인 활성 셀만 |
 | HealthProfile | id, disease_states[], injury_states[], impairment_flags, functional_support, care_dependency | 질병·부상·장애 병존; 중증도와 시작시점은 사건 이력으로 추적 |
 | EducationProfile | id, literacy_level, education_stage, skill_tags[] | 학력·숙련을 별개로 다룸; 연결 분포는 필요한 경우 셀 단위로 세분화 |
 | PopulationEvent | event_id, month, event_type, causes[], participants[], effects[], revision_preconditions | 검증 전 계획과 커밋된 사건 분리 |
@@ -38,16 +38,17 @@
 
 ### 경제 POP와 가구
 
-- primary_profession_id는 주된 직업/직업 자격 분류이며 실업 후에도 기존 직업을 보유할 수 있다. 유아·학교 재학생 등은 not_assigned로 기록한다.
+- primary_profession_id는 주된 직업/직업 자격 분류이며 실업 후에도 기존 직업을 보유할 수 있다. qualification_profile_id는 EducationProfile의 자격·교육·숙련 분류를 참조하며, 자격이 다른 사람을 직종 동일성만으로 혼합하지 않도록 한다. 유아·학교 재학생 등은 not_assigned로 기록한다.
 - livelihood_strategy_id는 wage/self_employed/subsistence/inactive 등의 생계 전략을 표현한다. 실제 근로시간·계약은 EmploymentLedger에서 계산한다.
 - wealth_band를 POP 식별 키에서 제외한다. 분포를 무시한다는 뜻이 아니라, 금융원장과 명시적 자산 분포(구간, 표본 정보, 불확실성)를 별도로 둔다. 극단적인 분포 차이는 정책 기준에 따라 경제 POP/셀을 추가 세분한다.
+- allocation_partition_id는 같은 분류에 속하더라도 서로 다른 고용·자산·부채·정확도 분포를 가진 사람들을 구별할 때 사용한다. 단순 임의 할당으로 분할을 폭증시키지 않으며, partition 병합은 관련 원장이 동등하게 이전될 때에만 허용한다.
 - HouseholdPool.household_count_estimate는 통계적 **가구 수**이고 셀의 인구 합계와 동일하지 않다. 가구당 인원 분포/구성 프로필과 일치하는지 검사하며 자료 부족 시 estimate_provenance=unknown으로 관리한다.
 - household_pool_id는 모든 셀에 필수; 부양 관계를 알 수 없더라도 명시적인 unassigned/institutional 풀에 넣는다. 소비 계산에서 공동 예산을 가정할지 여부는 pooling_policy_id가 정한다.
 - HouseholdPool이 소유하는 계정과 경제 POP가 소유하는 예금은 별개다. 가구 공유 소득은 실제 자금 이체가 있을 때에만 이동한다.
 
 ## 인구 셀: 유일한 계수 원본
 
-PopulationSlice의 조합이 같으면 같은 월말에 활성 셀이 중복 존재할 수 없다. 레지스트리에서 분류(코호트/경제 POP/가구 풀) ID는 재사용하지만 **cell id는 영구 재사용 금지**. 활성 테이블은 nonzero count만 보유한다. 국가/지역·문화·연령별 집계는 모든 활성 셀을 필터링하여 계산한다.
+PopulationSlice는 ID가 유일한 인구 배분 단위다. 세 분류 ID가 같아도 소유·계약·분포 배정에 중요한 차이가 있으면 서로 다른 allocation_partition_id를 가지며 별개 활성 셀로 유지할 수 있다. 반대로 네 가지 (demographic_id, socioeconomic_pop_id, household_pool_id, allocation_partition_id)가 모두 같으면 같은 월말에 중복 활성 셀을 허용하지 않는다. 레지스트리에서 분류(코호트/경제 POP/가구 풀) ID는 재사용하지만 **cell id는 영구 재사용 금지**. 활성 테이블은 nonzero count만 보유한다. 국가/지역·문화·연령별 집계는 모든 활성 셀을 필터링하여 계산한다.
 
 - SUM(PopulationSlice.count) = 세계 주민 인구수(모형 범위의 실제 집계).
 - SUM(count WHERE cohort_id = X) = X 코호트의 인구수.
@@ -60,7 +61,7 @@ PopulationSlice의 조합이 같으면 같은 월말에 활성 셀이 중복 존
 ## 필수 참조 조건
 
 1. 모든 active slice의 세 외래 ID가 존재하고 동일 거주지역을 가리킨다.
-2. 모든 count는 양의 정수이며, 각 active (demographic_id, socioeconomic_pop_id, household_pool_id) 조합은 유일하다.
+2. 모든 count는 양의 정수이며, active 셀의 (demographic_id, socioeconomic_pop_id, household_pool_id, allocation_partition_id) 조합은 유일하다. 같은 세 분류가 같더라도 서로 다른 partition은 독립된 사람의 집합이며 합산 인원은 중복되지 않는다.
 3. health_profile_id 및 service_status의 참조 대상은 유효하며, 이력 삭제는 active 참조 종료 뒤에만 허용한다.
 4. 사람을 이동시킬 때 소유·계약·가구예산·교육 분포 등 **다른 원본 원장과의 관계가 끊어지지 않아야 한다**. 금액을 인구수에 따라 무조건 비례 배분하는 것은 금지한다.
 5. 군 복무 중 민간 취업 금지와 같은 자격 규칙은 시대·법률·직무에 따라 평가하되, 집계의 참조 제약과는 별개로 검증한다.

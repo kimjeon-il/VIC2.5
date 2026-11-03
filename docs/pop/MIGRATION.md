@@ -9,12 +9,12 @@
 | Pop {id, PopKey, cohorts: Map<CohortKey,People>} | 별도 DemographicRegistry/SocioeconomicRegistry/HouseholdRegistry/PopulationSliceRegistry | 기존 인구 키를 3개 분류 및 하나의 인구 셀로 정규화 |
 | PopKey.region | 세 분류의 residence_region_id | 기존 지역 기준 그대로 복제하되 동일지역 참조 검사 |
 | PopKey.culture/religion/legal_status | DemographicCohortKey | 키 사전으로 이전 |
-| PopKey.profession/livelihood | SocioeconomicPopKey | 유아·부양인구의 직업이 과거 잘못 묶였을 수 있음 → 검증/재배정 |
+| PopKey.profession/livelihood | SocioeconomicPopKey (+ qualification_profile_id) | 유아·부양인구의 직업이 과거 잘못 묶였을 수 있음 → 검증/재배정, 자격 미상은 명시적 unknown profile |
 | PopKey.wealth_band | 재산 분포 초기 추정/데이터 출처 | 신규 POP 키에서 제거; 금융자산을 직접 생성하지 않음 |
 | CohortKey.birth_month_index, sex | 인구 코호트 분류 | 원본 월 및 sex 출처를 보존; other_or_unspecified는 unknown으로 맵핑, 원본 정보 메타데이터 보존 |
 | CohortKey.health, functional_limitations | HealthProfile | well/temporary_injury/long_term_impairment/illness를 기초 프로필로 이전; 병존 상태가 소실된 원본은 복원했다고 주장하지 않음 |
 | CohortKey.military | service_status | prisoner_or_missing은 **legacy_ambiguous**로 보존; 근거 없이 포로 또는 실종 확정 금지 |
-| EmploymentLedger (pop_id) | slice_id 및 직업적격 인원 참조 | 인구 총수 아닌 실제 노동 적격 인원에 계약 할당 |
+| EmploymentLedger (pop_id) | slice_id 및 직업적격 인원 참조, 필요 시 allocation_partition_id | 인구 총수 아닌 실제 노동 적격 인원에 계약 할당 |
 | Financial/OwnershipLedger (pop_id owner) | 경제 POP/가구/자산 소유주 안정적 ID, 이벤트 연결 | 계정/지분 합계 불변; 단순 인원비례 분할 금지 |
 | MonthlyPipeline hooks | read-only opening snapshot + staged journal + atomic commit | 기존 단계 이름/순서는 유지, 롤백/검증 추가 |
 
