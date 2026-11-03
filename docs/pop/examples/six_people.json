@@ -1,0 +1,171 @@
+{
+  "contract_version": "pop-design/1.1",
+  "example_only": true,
+  "time": {
+    "month_index": 24000,
+    "calendar_id": "gregorian-month"
+  },
+  "regions": [
+    {
+      "id": "R1",
+      "name": "sample_region"
+    }
+  ],
+  "health_profiles": [
+    {
+      "id": "HP-WELL",
+      "conditions": [],
+      "impairment_flags": 0
+    },
+    {
+      "id": "HP-ILL",
+      "conditions": [
+        {
+          "kind": "illness",
+          "severity": "mild"
+        }
+      ],
+      "impairment_flags": 0
+    }
+  ],
+  "qualification_profiles": [
+    {
+      "id": "Q-NA",
+      "education_stage": "not_assigned"
+    },
+    {
+      "id": "Q-FARM",
+      "education_stage": "informal",
+      "skill_tags": [
+        "farming"
+      ]
+    }
+  ],
+  "demographic_cohorts": [
+    {
+      "id": "D1",
+      "residence_region_id": "R1",
+      "birth_month_index": 23700,
+      "sex_recorded": "female",
+      "culture_id": "C",
+      "religion_id": "REL",
+      "citizenship_id": "NAT",
+      "legal_status_id": "citizen",
+      "health_profile_id": "HP-WELL",
+      "service_status": "civilian"
+    },
+    {
+      "id": "D2",
+      "residence_region_id": "R1",
+      "birth_month_index": 23700,
+      "sex_recorded": "male",
+      "culture_id": "C",
+      "religion_id": "REL",
+      "citizenship_id": "NAT",
+      "legal_status_id": "citizen",
+      "health_profile_id": "HP-WELL",
+      "service_status": "civilian"
+    },
+    {
+      "id": "D3",
+      "residence_region_id": "R1",
+      "birth_month_index": 23976,
+      "sex_recorded": "female",
+      "culture_id": "C",
+      "religion_id": "REL",
+      "citizenship_id": "NAT",
+      "legal_status_id": "citizen",
+      "health_profile_id": "HP-WELL",
+      "service_status": "civilian"
+    },
+    {
+      "id": "D4",
+      "residence_region_id": "R1",
+      "birth_month_index": 23988,
+      "sex_recorded": "male",
+      "culture_id": "C",
+      "religion_id": "REL",
+      "citizenship_id": "NAT",
+      "legal_status_id": "citizen",
+      "health_profile_id": "HP-ILL",
+      "service_status": "civilian"
+    }
+  ],
+  "socioeconomic_pops": [
+    {
+      "id": "EP-FARM",
+      "residence_region_id": "R1",
+      "primary_profession_id": "farmer",
+      "livelihood_strategy_id": "subsistence",
+      "labor_market_class_id": "self_employed",
+      "qualification_profile_id": "Q-FARM"
+    },
+    {
+      "id": "EP-NONWORKER",
+      "residence_region_id": "R1",
+      "primary_profession_id": "not_assigned",
+      "livelihood_strategy_id": "inactive",
+      "labor_market_class_id": "ineligible",
+      "qualification_profile_id": "Q-NA"
+    }
+  ],
+  "household_pools": [
+    {
+      "id": "H1",
+      "residence_region_id": "R1",
+      "composition_profile_id": "mixed_households",
+      "pooling_policy_id": "illustrative",
+      "household_count_estimate": 2,
+      "estimate_provenance": "synthetic_test"
+    }
+  ],
+  "population_slices": [
+    {
+      "id": "S1",
+      "demographic_id": "D1",
+      "socioeconomic_pop_id": "EP-FARM",
+      "household_pool_id": "H1",
+      "count": 2,
+      "revision": 1,
+      "allocation_partition_id": "default"
+    },
+    {
+      "id": "S2",
+      "demographic_id": "D2",
+      "socioeconomic_pop_id": "EP-FARM",
+      "household_pool_id": "H1",
+      "count": 1,
+      "revision": 1,
+      "allocation_partition_id": "default"
+    },
+    {
+      "id": "S3",
+      "demographic_id": "D3",
+      "socioeconomic_pop_id": "EP-NONWORKER",
+      "household_pool_id": "H1",
+      "count": 2,
+      "revision": 1,
+      "allocation_partition_id": "default"
+    },
+    {
+      "id": "S4",
+      "demographic_id": "D4",
+      "socioeconomic_pop_id": "EP-NONWORKER",
+      "household_pool_id": "H1",
+      "count": 1,
+      "revision": 1,
+      "allocation_partition_id": "default"
+    }
+  ],
+  "expected": {
+    "world_population": 6,
+    "population_by_economic_pop": {
+      "EP-FARM": 3,
+      "EP-NONWORKER": 3
+    },
+    "population_by_household_pool": {
+      "H1": 6
+    },
+    "eligible_workers_before_policy": 3
+  }
+}
