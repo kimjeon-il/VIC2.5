@@ -409,7 +409,33 @@ int main() {
                f.w.people().population()==600,
                "group memberships and actual participants were conflated");
     });
-    test.skip(24,"public service production/capacity and law enforcement not implemented");
+    test.run(24, []{
+        F f;
+        f.w.seed_public_institution("hospital","G","R","medicine",3);
+        f.w.seed_stock("G","R","medicine",2);
+        IntegratedWorld::Plan legislature;
+        legislature[9].push_back([](auto& w){w.enact_public_healthcare(true);});
+        f.w.advance(legislature);
+        verify(!f.w.has_public_healthcare_right(),"new healthcare law applied too early");
+        IntegratedWorld::Plan impossible;
+        impossible[2].push_back([&](auto& w){w.hire(f.civ,1,"G",10);});
+        impossible[3].push_back([](auto& w){w.pay("F","G",20);});
+        impossible[5].push_back([](auto& w){w.wages("G","H","S",10,0);});
+        impossible[7].push_back([&](auto& w){w.provide_public_healthcare("hospital",f.civ,3);});
+        verify(rejected([&]{f.w.advance(impossible);}),"medical care without medicine allowed");
+        verify(f.w.stock("G","R","medicine")==2 && f.w.people().employed(f.civ)==0,
+               "failed healthcare month leaked");
+        IntegratedWorld::Plan actual;
+        actual[2].push_back([&](auto& w){w.hire(f.civ,1,"G",10);});
+        actual[3].push_back([](auto& w){w.pay("F","G",20);});
+        actual[5].push_back([](auto& w){w.wages("G","H","S",10,0);});
+        actual[7].push_back([&](auto& w){w.provide_public_healthcare("hospital",f.civ,2);});
+        f.w.advance(actual);
+        verify(f.w.has_public_healthcare_right() &&
+               f.w.public_services_rendered("hospital")==2 &&
+               f.w.stock("G","R","medicine")==0 &&
+               f.w.people().population()==600,"public care without real resource/worker");
+    });
     test.run(25, []{F f;verify(f.w.people().population()==600 && f.w.active_strength("U")==100,"service count");});
     test.run(26, []{
         F f;IntegratedWorld::Plan p;
