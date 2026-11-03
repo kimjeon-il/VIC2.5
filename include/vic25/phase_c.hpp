@@ -358,6 +358,26 @@ public:
                     quantity, loss, month() + travel_months, false});
         events_.push_back("dispatch");
     }
+    [[nodiscard]] bool conscription_enabled() const { return conscription_enabled_; }
+    [[nodiscard]] int income_tax_ppm() const { return income_tax_ppm_; }
+    void enact_conscription(bool enabled) {
+        require_stage({9});
+        scheduled_conscription_[month() + 1] = enabled;
+        events_.push_back("conscription-law-scheduled");
+    }
+    void enact_income_tax(int ppm) {
+        require_stage({9});
+        ensure(ppm >= 0 && ppm <= 1'000'000, "invalid income tax ppm");
+        scheduled_income_tax_[month() + 1] = ppm;
+        events_.push_back("income-tax-law-scheduled");
+    }
+    void wages_under_law(const std::string& payer, const std::string& worker,
+                         const std::string& treasury, Money gross) {
+        require_stage({5});
+        ensure(gross > 0, "invalid gross wage");
+        const auto withholding = positive_product(gross, income_tax_ppm_) / 1'000'000;
+        wages(payer, worker, treasury, gross, withholding);
+    }
     void enact_voting_age(int new_age) {
         require_stage({9});
         ensure(new_age >= 0 && new_age <= 120, "invalid voting age");
@@ -410,6 +430,7 @@ public:
                "invalid mobilization");
         const auto s = people_.slice(source);
         const auto service = people_.demographic(s.key.demographic).service;
+        ensure(conscription_enabled_, "conscription not currently authorized");
         ensure(service == phaseb::Service::civilian || service == phaseb::Service::reserve,
                "not mobilizable");
         ensure(n <= s.count - assigned(source), "overallocated recruit");
@@ -542,6 +563,10 @@ private:
     std::map<std::string, Shipment> shipments_;
     std::set<std::string> tracked_goods_;
     std::map<std::string, std::string> sovereignty_, military_control_;
+    std::map<std::int64_t, bool> scheduled_conscription_;
+    std::map<std::int64_t, int> scheduled_income_tax_;
+    int income_tax_ppm_{100'000};
+    bool conscription_enabled_{true};
     std::map<std::int64_t, int> scheduled_voting_age_;
     ElectionResult last_election_;
     phaseb::DemographyRules demographic_rules_;
@@ -600,6 +625,14 @@ private:
         if (it != scheduled_voting_age_.end()) {
             voting_age_years_ = it->second;
             scheduled_voting_age_.erase(it);
+        }
+        if (auto c = scheduled_conscription_.find(month()); c != scheduled_conscription_.end()) {
+            conscription_enabled_ = c->second;
+            scheduled_conscription_.erase(c);
+        }
+        if (auto t = scheduled_income_tax_.find(month()); t != scheduled_income_tax_.end()) {
+            income_tax_ppm_ = t->second;
+            scheduled_income_tax_.erase(t);
         }
         for (auto& [key, cargo] : shipments_) {
             (void)key;
