@@ -11,14 +11,24 @@ on:
 
 jobs:
   cpp:
-    name: GCC C++20 build and CTest
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: C++20 CTest / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
       - name: Build
-        run: cmake --build build --parallel 2
-      - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        run: cmake --build build --config Release --parallel 2
+      - name: CTest all registered executable suites
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Report 48-ID D4 subset statuses
+        if: runner.os == 'Linux'
+        run: ./build/vic25_phase_c_tests
+      - name: Report 1200-month demographic/economic regression
+        if: runner.os == 'Linux'
+        run: ./build/vic25_phase_c_longrun
