@@ -240,9 +240,32 @@ int main() {
         verify(f.w.cash("F")==1070 && f.w.financial().balance("F:debt")==-70,
                "loan principal not conserved");
     });
-    test.skip(14,"cash dividend and share subscriptions not connected");
+    test.run(14, []{
+        F f;f.w.seed_shares("firm-equity", "F", 100);
+        IntegratedWorld::Plan p;
+        p[7].push_back([](auto& w){w.sell_shares("firm-equity","F","H",10);});
+        p[9].push_back([](auto& w){w.declare_dividend("firm-equity","F","H",3);});
+        f.w.advance(p);
+        verify(f.w.shares("firm-equity","F")==90 &&
+               f.w.shares("firm-equity","H")==10 &&
+               f.w.cash("H")==40, "share title/cash mismatch");
+        IntegratedWorld::Plan next;
+        next[5].push_back([](auto& w){w.pay_dividend("firm-equity","H");});
+        f.w.advance(next);
+        verify(f.w.cash("H")==43 && f.w.shares("firm-equity","H")==10,
+               "dividend payment not matched to shares");
+    });
     test.run(15, []{F f;salary(f);verify(f.w.cash("G")==20&&f.w.cash("H")==230,"wage withholding");});
-    test.skip(16,"government bonds and appropriations not connected");
+    test.run(16, []{
+        F f;IntegratedWorld::Plan p;
+        p[1].push_back([](auto& w){w.issue_bond("issue-001","G","H",40);});
+        f.w.advance(p);
+        verify(f.w.cash("G")==40 && f.w.cash("H")==10 &&
+               f.w.shares("bond:issue-001","H")==40 &&
+               f.w.financial().balance("G:debt")==-40 &&
+               f.w.financial().balance("H:security:bond:issue-001")==40,
+               "bond issuance without actual paid proceeds");
+    });
     test.skip(17,"constitution/office authorization graph not implemented");
     test.run(18, []{
         F f;IntegratedWorld::Plan p;
