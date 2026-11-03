@@ -197,7 +197,21 @@ int main() {
         verify(rejected([&]{f.w.advance(p);}),"overallocated civilian");
         verify(f.w.month()==24000 && f.w.people().employed(f.civ)==0,"partial rollback");
     });
-    test.skip(3,"state succession and government offices not implemented");
+    test.run(3, []{
+        F f;
+        f.w.seed_government("A","King","Prime",3,2);
+        const Money cash_before=f.w.cash("F");
+        IntegratedWorld::Plan p;
+        p[9].push_back([](auto& w){w.change_head_of_state("A","King","Queen");});
+        f.w.advance(p);
+        verify(f.w.government("A").head_of_state=="King", "succession retroactive");
+        f.w.advance();
+        verify(f.w.government("A").head_of_state=="Queen" &&
+               f.w.government("A").prime_minister=="Prime" &&
+               f.w.cash("F")==cash_before &&
+               f.w.people().population()==600,
+               "government succession reset state or obligations");
+    });
     test.run(4, []{
         F f;IntegratedWorld::Plan p;
         p[10].push_back([](auto& w){w.occupy("R","B");});
@@ -266,7 +280,27 @@ int main() {
                f.w.financial().balance("H:security:bond:issue-001")==40,
                "bond issuance without actual paid proceeds");
     });
-    test.skip(17,"constitution/office authorization graph not implemented");
+    test.run(17, []{
+        F f;
+        f.w.seed_government("A","Head","Premier",3,2);
+        IntegratedWorld::Plan illegal;
+        illegal[9].push_back([](auto& w){
+            w.hold_election(250,0,3,{{"A",160},{"B",90}});
+            w.propose_tax_law("A","Intruder",{"A"},300'000);
+        });
+        verify(rejected([&]{f.w.advance(illegal);}),"unauthorized law passed");
+        verify(f.w.month()==24000 && f.w.income_tax_ppm()==100'000,
+               "illegal bill changed month or tax");
+        IntegratedWorld::Plan valid;
+        valid[9].push_back([](auto& w){
+            w.hold_election(250,0,3,{{"A",160},{"B",90}});
+            w.propose_tax_law("A","Premier",{"A"},300'000);
+        });
+        f.w.advance(valid);
+        verify(f.w.income_tax_ppm()==100'000,"new statute applied same month");
+        f.w.advance();
+        verify(f.w.income_tax_ppm()==300'000,"valid legislature failed");
+    });
     test.run(18, []{
         F f;IntegratedWorld::Plan p;
         p[9].push_back([](auto& w){w.enact_voting_age(18);});
@@ -291,7 +325,26 @@ int main() {
         verify(f.w.election().seats.at("A")==2&&f.w.election().seats.at("B")==1,"D'Hondt");
     });
     test.skip(21,"per-voter/constituency identity register not implemented");
-    test.skip(22,"coalition and constitutional cabinet formation not implemented");
+    test.run(22, []{
+        F f;
+        f.w.seed_government("A","Head","Outgoing",3,2);
+        IntegratedWorld::Plan bad;
+        bad[9].push_back([](auto& w){
+            w.hold_election(250,0,3,{{"A",160},{"B",90}});
+            w.appoint_cabinet("A","Head","NewPremier",{"B"});
+        });
+        verify(rejected([&]{f.w.advance(bad);}),"minority appointed without confidence");
+        verify(f.w.government("A").prime_minister=="Outgoing","failed appointment mutated state");
+        IntegratedWorld::Plan legal;
+        legal[9].push_back([](auto& w){
+            w.hold_election(250,0,3,{{"A",160},{"B",90}});
+            w.appoint_cabinet("A","Head","NewPremier",{"A"});
+        });
+        f.w.advance(legal);
+        verify(f.w.government("A").prime_minister=="Outgoing","new cabinet active too early");
+        f.w.advance();
+        verify(f.w.government("A").prime_minister=="NewPremier","valid coalition appointment failed");
+    });
     test.skip(23,"interest-group/movement allegiance and street participants not implemented");
     test.skip(24,"public service production/capacity and law enforcement not implemented");
     test.run(25, []{F f;verify(f.w.people().population()==600 && f.w.active_strength("U")==100,"service count");});
