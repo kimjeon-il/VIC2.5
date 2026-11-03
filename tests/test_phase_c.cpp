@@ -483,7 +483,31 @@ int main() {
     test.run(33, integration_election_mobilization);
     test.run(34, integration_logistics_occupation);
     test.skip(35,"food market shortage and endogenous political-movement response not implemented");
-    test.skip(36,"law-dependent mass conscription to industrial supply chain not implemented");
+    test.run(36, []{
+        F f;f.w.seed_stock("F","R","ore",30);
+        IntegratedWorld::Plan disabled;
+        disabled[9].push_back([](auto& w){w.enact_conscription(false);});
+        f.w.advance(disabled);
+        IntegratedWorld::Plan peacetime;
+        peacetime[2].push_back([&](auto& w){w.hire(f.reserve,10,"F",1);});
+        peacetime[4].push_back([](auto& w){w.produce("F","R","ore","tool",10,10);});
+        peacetime[9].push_back([](auto& w){w.enact_conscription(true);});
+        f.w.advance(peacetime);
+        verify(!f.w.conscription_enabled()&&f.w.people().employed(f.reserve)==10,
+               "early draft law wrongly changed labor");
+        IntegratedWorld::Plan wartime;
+        wartime[4].push_back([](auto& w){w.produce("F","R","ore","tool",10,10);});
+        wartime[10].push_back([&](auto& w){w.mobilize(f.reserve,8,"U");});
+        f.w.advance(wartime);
+        verify(f.w.conscription_enabled()&&f.w.people().employed(f.reserve)==2 &&
+               f.w.active_strength("U")==108 && f.w.stock("F","R","tool")==20,
+               "late mobilization did not contract next-month workforce");
+        IntegratedWorld::Plan next;
+        next[4].push_back([](auto& w){w.produce("F","R","ore","tool",10,10);});
+        verify(rejected([&]{f.w.advance(next);}),"industry used mobilized workers");
+        verify(f.w.stock("F","R","ore")==10&&f.w.commit_id()==3,
+               "workforce shortage did not roll back unfinished production");
+    });
     test.skip(37,"bank insolvency and political movements not implemented");
     test.run(38, []{
         F f;IntegratedWorld::Plan legislation;
