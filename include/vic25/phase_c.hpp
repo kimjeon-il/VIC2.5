@@ -386,7 +386,12 @@ public:
                     phaseb::Engine engine{stage.demographic_rules_};
                     (void)engine.advance(stage.people_);
                     stage.sync_service_transitions(before);
-                } else stage.people_.finish_month();
+                } else {
+                    stage.people_.finish_month();
+                    // End-of-month aging must invalidate contracts before
+                    // the stage-11 commit even when endogenous demography is off.
+                    stage.people_.release_ineligible();
+                }
             }
             stage.validate();
         }
