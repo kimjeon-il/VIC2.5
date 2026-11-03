@@ -1,0 +1,21 @@
+cmake_minimum_required(VERSION 3.20)
+project(VIC25 VERSION 0.1 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_library(vic25_core INTERFACE)
+target_include_directories(vic25_core INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(vic25_core INTERFACE -Wall -Wextra -Wpedantic)
+endif()
+
+add_executable(vic25_demo src/main.cpp)
+target_link_libraries(vic25_demo PRIVATE vic25_core)
+
+include(CTest)
+if (BUILD_TESTING)
+    add_executable(vic25_core_tests tests/test_core.cpp)
+    target_link_libraries(vic25_core_tests PRIVATE vic25_core)
+    add_test(NAME vic25_core_tests COMMAND vic25_core_tests)
+endif()
