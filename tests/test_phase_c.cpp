@@ -219,7 +219,32 @@ int main() {
         verify(f.w.military_control("R")=="B"&&f.w.sovereignty("R")=="A","sovereignty mutated");
     });
     test.skip(5,"typed cross-domain entity registry and historical lineage not implemented");
-    test.skip(6,"ownership/financial distribution on partial migration not implemented");
+    test.run(6, []{
+        F f;
+        f.w.seed_actor("H2",0);
+        f.w.seed_shares("land","H",5);
+        auto& p=f.w.seed_population();
+        const auto economic=p.economic_profile({"R","farmer","subsistence","self_employed",p.default_education()});
+        const auto old=p.slice(f.civ);
+        const auto origin=p.seed_population(old.key.demographic,economic,old.key.household,10,8801);
+        const auto hh2=p.household_profile({"R2","migrants","shared",2});
+        const Money before=f.w.cash("H")+f.w.cash("H2");
+        IntegratedWorld::Plan plan;
+        plan[10].push_back([&](auto& w){
+            const auto arrived=w.migrate_with_explicit_property_allocation(
+                origin,2,"R2",hh2,"H","H2",20,"land",2);
+            verify(w.people().demographic(w.people().slice(arrived).key.demographic).region=="R2",
+                   "migrant destination not allocated");
+        });
+        f.w.advance(plan);
+        verify(f.w.people().population()==610 &&
+               f.w.cash("H")+f.w.cash("H2")==before &&
+               f.w.cash("H")==30 && f.w.cash("H2")==20 &&
+               f.w.shares("land","H")==3 && f.w.shares("land","H2")==2 &&
+               f.w.financial().balance("H2:security:land")==2 &&
+               f.w.people().slice(origin).count==8,
+               "partial migration duplicated residents or lost explicitly allocated property");
+    });
     test.skip(7,"multi-currency FX clearing not implemented");
     test.run(8, []{
         F f;IntegratedWorld::Plan p;
