@@ -214,6 +214,77 @@ public:
             {account(buyer, "cash"), 0, face}}});
         events_.push_back("bond-issued-paid");
     }
+    // A named voter occupies one real population place. The anchor never
+    // creates headcount; duplicate anchors are capped by their source slice.
+    void seed_person_anchor(const std::string& anchor, Id slice) {
+        ensure(stage_==-1 && commit_id_==0 && !anchor.empty() &&
+               !person_anchors_.contains(anchor) && people_.has_slice(slice) &&
+               anchor_counts_[slice] < people_.slice(slice).count,
+               "invalid or unbacked voter identity");
+        person_anchors_[anchor]=slice;
+        ++anchor_counts_[slice];
+    }
+    void cast_named_ballot(const std::string& election_id, const std::string& district,
+                           const std::string& anchor, const std::string& party) {
+        require_stage({9});
+        ensure(!election_id.empty() && !district.empty() && !party.empty() &&
+               person_anchors_.contains(anchor), "unknown election identity");
+        const Id slice=person_anchors_.at(anchor);
+        ensure(people_.has_slice(slice), "voter no longer exists");
+        const auto& dem=people_.demographic(people_.slice(slice).key.demographic);
+        ensure(dem.citizenship=="citizen" && dem.service!=phaseb::Service::active &&
+               dem.service!=phaseb::Service::pow && dem.service!=phaseb::Service::missing &&
+               people_.age_months(people_.slice(slice).key.demographic)>=
+                   static_cast<std::int64_t>(voting_age_years_)*12,
+               "ineligible voter");
+        ensure(ballot_ids_.insert({election_id,anchor}).second, "duplicate ballot");
+        ballot_votes_[election_id][party] =
+            phaseb::add_checked(ballot_votes_[election_id][party],1);
+        events_.push_back("named-ballot:"+election_id+":"+district);
+    }
+    [[nodiscard]] People named_votes(const std::string& election_id) const {
+        auto it=ballot_votes_.find(election_id);
+        if(it==ballot_votes_.end())return 0;
+        People n=0;
+        for(const auto& [party, count]:it->second){(void)party;n=phaseb::add_checked(n,count);}
+        return n;
+    }
+    void seed_interest_group(std::string group) {
+        ensure(stage_==-1 && commit_id_==0 && !group.empty() &&
+               interest_groups_.insert(std::move(group)).second, "invalid interest group");
+    }
+    void join_interest_group(Id slice, const std::string& group, People n) {
+        require_stage({9});
+        ensure(people_.has_slice(slice) && interest_groups_.contains(group) &&
+               n>0 && n<=people_.slice(slice).count, "invalid group membership");
+        membership_[{slice,group}]=n;
+        events_.push_back("interest-group-membership");
+    }
+    [[nodiscard]] People group_members(Id slice,const std::string& group) const {
+        auto it=membership_.find({slice,group});
+        return it==membership_.end()?0:it->second;
+    }
+    void protest(Id slice, const std::string& group, People participants,
+                 People strikers=0) {
+        require_stage({9});
+        ensure(people_.has_slice(slice) && participants>0 && strikers>=0 &&
+               participants<=group_members(slice,group) &&
+               participation_this_month_[slice]+participants<=people_.slice(slice).count &&
+               strikers<=participants && strikers<=people_.employed(slice) &&
+               scheduled_strikes_[month()+1][slice]+strikers<=people_.employed(slice),
+               "political action exceeds actual participants or workers");
+        participation_this_month_[slice]+=participants;
+        scheduled_strikes_[month()+1][slice]+=strikers;
+        events_.push_back("verified-protest");
+    }
+    [[nodiscard]] People protest_participants(Id slice) const {
+        auto it=participation_this_month_.find(slice);
+        return it==participation_this_month_.end()?0:it->second;
+    }
+    [[nodiscard]] People currently_striking(Id slice) const {
+        auto it=strike_active_.find(slice);
+        return it==strike_active_.end()?0:it->second;
+    }
     void seed_government(std::string country, std::string head,
                          std::string prime, People chamber_seats, People quorum) {
         ensure(stage_ == -1 && commit_id_ == 0 && !country.empty() &&
@@ -550,6 +621,9 @@ public:
             if (n == 0) stage.open_month();
             for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
             if (n == 10) {
+                // Strikes reserve actual working time only for this month's
+                // production; they must not outlive a later death or split.
+                stage.strike_active_.clear();
                 const std::size_t before = stage.people_.events().size();
                 if (stage.demography_enabled_) {
                     phaseb::Engine engine{stage.demographic_rules_};
@@ -571,6 +645,17 @@ public:
     }
     void validate() const {
         ensure(people_.validate(), "invalid population registry");
+        for (const auto& [anchor, slice]:person_anchors_) {
+            (void)anchor;
+            ensure(people_.has_slice(slice) && anchor_counts_.at(slice)<=people_.slice(slice).count,
+                   "orphaned or duplicate voter identity");
+        }
+        for (const auto& [key, n]:membership_) {
+            ensure(interest_groups_.contains(key.second) && people_.has_slice(key.first) &&
+                   n>=0 && n<=people_.slice(key.first).count,"unbacked interest-group membership");
+        }
+        for (const auto& [slice,n]:strike_active_)
+            ensure(people_.has_slice(slice)&&n<=people_.employed(slice),"invalid strike allocation");
         for (const auto& [id,g] : governments_) {
             ensure(id==g.country && !g.head_of_state.empty() && !g.prime_minister.empty() &&
                    g.chamber_seats>0 && g.quorum>0 && g.quorum<=g.chamber_seats,
@@ -627,6 +712,14 @@ private:
         std::int64_t due{};
     };
     std::map<std::string, DividendDue> dividends_;
+    std::map<std::string, Id> person_anchors_;
+    std::map<Id, People> anchor_counts_;
+    std::set<std::pair<std::string,std::string>> ballot_ids_;
+    std::map<std::string,std::map<std::string,People>> ballot_votes_;
+    std::set<std::string> interest_groups_;
+    std::map<std::pair<Id,std::string>, People> membership_;
+    std::map<Id, People> participation_this_month_, strike_active_;
+    std::map<std::int64_t,std::map<Id,People>> scheduled_strikes_;
     std::map<std::string, GovernmentState> governments_;
     std::map<std::int64_t, std::vector<CabinetChange>> scheduled_cabinets_;
     std::map<std::string, Shipment> shipments_;
@@ -695,11 +788,21 @@ private:
         People n = 0;
         for (const auto& [id, job] : people_.jobs()) {
             (void)id;
-            if (job.employer == who) n = phaseb::add_checked(n, job.count);
+            if (job.employer == who) {
+                const People unavailable = currently_striking(id);
+                ensure(unavailable<=job.count, "strike exceeds employment");
+                n = phaseb::add_checked(n, job.count-unavailable);
+            }
         }
         return n;
     }
     void open_month() {
+        participation_this_month_.clear();
+        strike_active_.clear();
+        if(auto strikers=scheduled_strikes_.find(month());strikers!=scheduled_strikes_.end()){
+            strike_active_=strikers->second;
+            scheduled_strikes_.erase(strikers);
+        }
         if (auto pending=scheduled_cabinets_.find(month()); pending!=scheduled_cabinets_.end()) {
             for (const auto& c : pending->second) {
                 auto& g=governments_.at(c.country);
