@@ -1,13 +1,14 @@
 name: VIC2.5 Phase C C++ verification
 
 on:
-  push:
-    branches:
-      - work/phase-c-engine-integration
   pull_request:
     branches:
       - main
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cpp:
