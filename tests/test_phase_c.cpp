@@ -482,7 +482,28 @@ int main() {
     });
     test.run(33, integration_election_mobilization);
     test.run(34, integration_logistics_occupation);
-    test.skip(35,"food market shortage and endogenous political-movement response not implemented");
+    test.run(35, []{
+        F f;
+        f.w.seed_interest_group("Food Movement");
+        f.w.seed_stock("S","R","food",5);
+        f.w.seed_market("R","food",4,2,10,1);
+        IntegratedWorld::Plan p;
+        p[7].push_back([](auto& w){
+            verify(w.clear_consumer_market("S","H","R","food",10)==5,
+                   "harvest/stock shortage did not cap supply");
+        });
+        p[9].push_back([&](auto& w){
+            verify(w.food_grievance("R")==5,"material shortage not exposed to political model");
+            w.organize_from_food_grievance(f.civ,"Food Movement",5);
+            w.protest(f.civ,"Food Movement",5);
+        });
+        f.w.advance(p);
+        verify(f.w.group_members(f.civ,"Food Movement")==5 &&
+               f.w.protest_participants(f.civ)==5 &&
+               f.w.market("R","food").price>4 &&
+               f.w.people().population()==600,
+               "shortage/price/political organization not causally linked");
+    });
     test.run(36, []{
         F f;f.w.seed_stock("F","R","ore",30);
         IntegratedWorld::Plan disabled;
@@ -508,7 +529,28 @@ int main() {
         verify(f.w.stock("F","R","ore")==10&&f.w.commit_id()==3,
                "workforce shortage did not roll back unfinished production");
     });
-    test.skip(37,"bank insolvency and political movements not implemented");
+    test.run(37, []{
+        F f;f.w.seed_interest_group("Debt Reform");
+        IntegratedWorld::Plan crisis;
+        crisis[1].push_back([](auto& w){w.lend("F",100);});
+        crisis[8].push_back([](auto& w){w.forgive_defaulted_loan("F",60);});
+        crisis[9].push_back([&](auto& w){
+            verify(w.bank_insolvent() && w.bank_losses()==60,
+                   "bank insolvency not recognized");
+            w.join_interest_group(f.civ,"Debt Reform",30);
+            w.protest(f.civ,"Debt Reform",10);
+        });
+        f.w.advance(crisis);
+        verify(f.w.financial().balance("F:debt")==-40 &&
+               f.w.financial().balance("BANK:loan")==40 &&
+               f.w.financial().balance("BANK:loan_loss")==60 &&
+               f.w.group_members(f.civ,"Debt Reform")==30 &&
+               f.w.protest_participants(f.civ)==10,
+               "credit loss or financial-stress organization mismatch");
+        IntegratedWorld::Plan next;
+        next[1].push_back([](auto& w){w.lend("F",1);});
+        verify(rejected([&]{f.w.advance(next);}),"insolvent bank extended unsupported credit");
+    });
     test.run(38, []{
         F f;IntegratedWorld::Plan legislation;
         legislation[9].push_back([](auto& w){
