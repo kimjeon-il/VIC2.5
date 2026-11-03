@@ -15,7 +15,7 @@
 - [DESIGN_DECISIONS](DESIGN_DECISIONS.md): 설계결정(ADR) 및 구현 중 튜닝/보류 항목
 - [MIGRATION](MIGRATION.md): 기존 1.0 Pop/CohortKey/원장과 호환·전환 계획
 - [ACCEPTANCE_TESTS](ACCEPTANCE_TESTS.md): D0~D3 구현 게이트/반례/장기 검증 계획
-- [6인구 기준 fixture](examples/six_people.json): 스키마·집계·비노동인구 검수용 예시 JSON
+- [6인구 기준 fixture](examples/six_people.json) · [예시 JSON Schema](examples/pop-design-1.1.schema.json): 스키마·집계·비노동인구 검수용 데이터. JSON Schema는 교차 참조/수량 보존까지 보장하지 않음
 
 ## 작업 완료와 미완료 구분
 

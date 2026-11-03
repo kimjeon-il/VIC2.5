@@ -1,0 +1,404 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vic25:pop-design:1.1:fixture",
+  "title": "VIC2.5 POP-D0~D3 synthetic snapshot fixture, not the binary save format",
+  "description": "Validates JSON shape only; relationships, aggregate conservation and ledger invariants require runtime checks in ACCEPTANCE_TESTS.md",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "time",
+    "health_profiles",
+    "qualification_profiles",
+    "demographic_cohorts",
+    "socioeconomic_pops",
+    "household_pools",
+    "population_slices"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "pop-design/1.1"
+    },
+    "example_only": {
+      "type": "boolean"
+    },
+    "time": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "month_index",
+        "calendar_id"
+      ],
+      "properties": {
+        "month_index": {
+          "type": "integer"
+        },
+        "calendar_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "regions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/region"
+      }
+    },
+    "health_profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/health"
+      }
+    },
+    "qualification_profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/qualification"
+      }
+    },
+    "demographic_cohorts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/demographic"
+      }
+    },
+    "socioeconomic_pops": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/economic"
+      }
+    },
+    "household_pools": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/household"
+      }
+    },
+    "population_slices": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/slice"
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "world_population"
+      ],
+      "properties": {
+        "world_population": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "population_by_economic_pop": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "population_by_household_pool": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "eligible_workers_before_policy": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "conditions",
+        "impairment_flags"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "severity"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "minLength": 1
+              },
+              "severity": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "impairment_flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "functional_support": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "care_dependency": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "qualification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "education_stage"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "education_stage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "literacy_level": {
+          "type": "string",
+          "minLength": 1
+        },
+        "skill_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "demographic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "residence_region_id",
+        "birth_month_index",
+        "sex_recorded",
+        "culture_id",
+        "religion_id",
+        "citizenship_id",
+        "legal_status_id",
+        "health_profile_id",
+        "service_status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "residence_region_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "birth_month_index": {
+          "type": "integer"
+        },
+        "sex_recorded": {
+          "enum": [
+            "female",
+            "male",
+            "another_recorded",
+            "unknown"
+          ]
+        },
+        "culture_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "religion_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "citizenship_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "legal_status_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "health_profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "service_status": {
+          "enum": [
+            "civilian",
+            "active",
+            "reserve",
+            "pow",
+            "missing",
+            "legacy_ambiguous"
+          ]
+        }
+      }
+    },
+    "economic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "residence_region_id",
+        "primary_profession_id",
+        "livelihood_strategy_id",
+        "labor_market_class_id",
+        "qualification_profile_id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "residence_region_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "primary_profession_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "livelihood_strategy_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labor_market_class_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "qualification_profile_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "household": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "residence_region_id",
+        "composition_profile_id",
+        "pooling_policy_id",
+        "household_count_estimate",
+        "estimate_provenance"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "residence_region_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "composition_profile_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pooling_policy_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "household_count_estimate": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "estimate_provenance": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "slice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "demographic_id",
+        "socioeconomic_pop_id",
+        "household_pool_id",
+        "allocation_partition_id",
+        "count",
+        "revision"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "demographic_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "socioeconomic_pop_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "household_pool_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allocation_partition_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

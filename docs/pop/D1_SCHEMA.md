@@ -3,6 +3,8 @@
 상태: **설계 확정 (구현 전)** · 계약 버전: pop-design/1.1
 선행: [D0 계층 정의](D0_ARCHITECTURE.md) · 후속: [D2 전이 규약](D2_TRANSITIONS.md)
 
+**기계 판독 샘플:** [fixture용 JSON Schema](examples/pop-design-1.1.schema.json)와 [6인구 샘플](examples/six_people.json). JSON Schema는 필드 형식만 검증하며 인구 보존·참조 무결성·계정 일치는 [인수 테스트](ACCEPTANCE_TESTS.md)에서 검증한다. 이 JSON은 실제 엔진 저장 포맷이 아니다.
+
 ## 형식·타입 정책
 
 - People: **signed int64** 값으로 연산하고 저장 인원은 0 이상의 정수. 음수는 사건 델타에만 허용; 체크된 가감 및 128-bit 중간 합산을 사용한다.

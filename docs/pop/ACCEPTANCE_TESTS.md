@@ -38,7 +38,7 @@
 
 ## 테스트 데이터
 
-- [six_people.json](examples/six_people.json): D0/D1용 작은 통계적 가구/코호트 fixture. 실제 인구 미시데이터가 아니다.
+- [six_people.json](examples/six_people.json)과 [pop-design-1.1.schema.json](examples/pop-design-1.1.schema.json): D0/D1용 작은 통계적 가구/코호트 fixture 및 구조 검증 계약. JSON Schema만으로 참조/인구 합계는 검증할 수 없다. 실제 인구 미시데이터가 아니다.
 - 예시 전투 손실: 1000 → 950, (건강한 현역 700 / 일시 부상 180 / 장기 손상 70).
 - 이주·사망·계약/자산 이동은 거부 케이스까지 포함한 단위/속성 기반 테스트를 작성한다.
 - 무작위 테스트에서는 인구·상품·현금의 각 계수에 미승인 증감이 없는지 검사한다.
