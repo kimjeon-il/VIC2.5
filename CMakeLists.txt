@@ -57,3 +57,12 @@ endif()
 # Observed large-slice performance; not automatically a 100-year stress pass.
 add_executable(vic25_phase_c_scaling bench/phase_c_scaling.cpp)
 target_link_libraries(vic25_phase_c_scaling PRIVATE vic25_core)
+
+# Bounded 1,200-month multi-domain scenario with economic, political, military
+# shocks. Its PASS does not replace the full D4-T46 suite with demographic risks.
+if (BUILD_TESTING)
+    add_executable(vic25_phase_c_combined_longrun tests/test_phase_c_combined_longrun.cpp)
+    target_link_libraries(vic25_phase_c_combined_longrun PRIVATE vic25_core)
+    add_test(NAME vic25_phase_c_combined_longrun COMMAND vic25_phase_c_combined_longrun)
+    set_tests_properties(vic25_phase_c_combined_longrun PROPERTIES TIMEOUT 180)
+endif()
