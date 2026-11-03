@@ -1,0 +1,226 @@
+{
+  "fixture_schema_version": "d4-design-fixture/1.0",
+  "fixture_id": "d4-f2-war-logistics-occupation",
+  "type": "synthetic_design_oracle_not_executable_save",
+  "contract_versions": {
+    "pop": "pop-design/1.1",
+    "common": "phase-c-common/1.0",
+    "economy": "phase-c-economy/1.0",
+    "politics": "phase-c-politics/1.0",
+    "military": "phase-c-military/1.0",
+    "integration": "phase-c-integration/1.0"
+  },
+  "metadata": {
+    "fictional_test_value": true,
+    "month_index_start": 300,
+    "currency_id": "TEST",
+    "goods_unit": "box",
+    "seed": 98765,
+    "source_provenance": "synthetic acceptance fixture",
+    "historical": false,
+    "bank_counterparts_initialized": true
+  },
+  "assumptions": [
+    "One already legally ongoing conflict between A and B and valid orders/commanders",
+    "A has 100 preexisting active soldiers, B region X has 500 residents: 480 civilian and 20 B soldiers",
+    "B 20 defenders have 5 ammunition available and retreat to adjacent B area after battle; no B casualties",
+    "All A casualties occur in A's preexisting 100 active soldiers, not B residents",
+    "All logistical payments are made in one common currency from balanced existing bank deposit claims",
+    "The medical service has at least 7 staffed treatment slots; treatment does not produce immediate recovery",
+    "No birth, natural death, other trade, other casualties, extra expenditures or interest",
+    "The territory X has B sovereignty, civil administration and fiscal authority; military control initially B",
+    "A's med supplies in transit 2 months; customs/tax arrangements waived by valid military transit agreement"
+  ],
+  "opening": {
+    "world_population": 600,
+    "population_by_country": {
+      "A": {
+        "active": 100,
+        "civilian": 0
+      },
+      "B": {
+        "active": 20,
+        "civilian": 480
+      }
+    },
+    "money": {
+      "A_treasury": 200,
+      "A_producer": 0,
+      "A_carrier": 0,
+      "total_customer_deposits": 200
+    },
+    "military": {
+      "A_active_strength": 100,
+      "B_defending_strength": 20,
+      "B_defending_ammunition": 5
+    },
+    "goods": {
+      "A_producer_medicine": 60,
+      "in_transit_medicine": 0,
+      "front_medicine": 0
+    },
+    "territory_X": {
+      "sovereignty": "B",
+      "civil_administration": "B",
+      "fiscal_authority": "B",
+      "military_control": "B"
+    }
+  },
+  "events": [
+    {
+      "month": 300,
+      "stage": 1,
+      "kind": "approved_purchase_and_freight",
+      "good": "medicine",
+      "quantity": 60,
+      "goods_cost": 120,
+      "freight_cost": 10,
+      "travel_months": 2
+    },
+    {
+      "month": 300,
+      "stage": 7,
+      "kind": "actual_payment",
+      "from": "A_treasury",
+      "to": "A_producer",
+      "currency": "TEST",
+      "amount": 120
+    },
+    {
+      "month": 300,
+      "stage": 7,
+      "kind": "actual_freight_payment",
+      "from": "A_treasury",
+      "to": "A_carrier",
+      "currency": "TEST",
+      "amount": 10
+    },
+    {
+      "month": 300,
+      "stage": 7,
+      "kind": "dispatch",
+      "inventory_move": {
+        "A_producer_medicine": -60,
+        "in_transit_medicine": 60,
+        "front_medicine": 0
+      }
+    },
+    {
+      "month": 301,
+      "stage": 0,
+      "kind": "in_transit_not_delivered",
+      "front_available": 0
+    },
+    {
+      "month": 302,
+      "stage": 0,
+      "kind": "actual_arrival",
+      "inventory_move": {
+        "in_transit_medicine": -60,
+        "front_medicine": 55
+      },
+      "documented_loss": 5
+    },
+    {
+      "month": 302,
+      "stage": 10,
+      "kind": "combat",
+      "A_exposed": 100,
+      "A_outcomes": {
+        "killed": 3,
+        "acute_injury": 7,
+        "long_term_impairment": 0,
+        "captured": 0,
+        "missing": 0,
+        "unharmed": 90
+      },
+      "B_exposed": 20,
+      "B_outcomes": {
+        "killed": 0,
+        "acute_injury": 0,
+        "long_term_impairment": 0,
+        "captured": 0,
+        "missing": 0,
+        "unharmed": 20
+      },
+      "B_ammunition_consumed": 5,
+      "B_20_retreat_valid": true
+    },
+    {
+      "month": 302,
+      "stage": 10,
+      "kind": "medical_use",
+      "medicine_boxes_consumed": 7,
+      "patient_treatment_events": 7,
+      "immediate_recovery": 0
+    },
+    {
+      "month": 302,
+      "stage": 10,
+      "kind": "military_control_effective_event",
+      "region": "X",
+      "from": "B",
+      "to": "A",
+      "legal_sovereignty_change": false
+    },
+    {
+      "month": 302,
+      "stage": 11,
+      "kind": "validate_world_and_commit"
+    }
+  ],
+  "expected": {
+    "money_after_month300": {
+      "A_treasury": 70,
+      "A_producer": 120,
+      "A_carrier": 10,
+      "total_customer_deposits": 200
+    },
+    "inventory_after_month300": {
+      "A_producer_medicine": 0,
+      "in_transit_medicine": 60,
+      "front_medicine": 0
+    },
+    "inventory_after_month301": {
+      "A_producer_medicine": 0,
+      "in_transit_medicine": 60,
+      "front_medicine": 0
+    },
+    "month302": {
+      "transit_loss": 5,
+      "medicine_delivered": 55,
+      "medicine_treatment_use": 7,
+      "medicine_remaining_front": 48,
+      "B_ammunition_remaining": 0
+    },
+    "world_population_after_month302": 597,
+    "service_people_after_month302": {
+      "A_active": 97,
+      "B_active": 20,
+      "B_civilian": 480
+    },
+    "A_health_state_after_combat": {
+      "uninjured_active": 90,
+      "acute_injury_active": 7
+    },
+    "territory_X_after_month302": {
+      "sovereignty": "B",
+      "civil_administration": "B",
+      "fiscal_authority": "B",
+      "military_control": "A"
+    },
+    "no_automatic_citizenship_tax_authority_or_property_transfer": true
+  },
+  "oracle_checks": [
+    "200=70+120+10",
+    "60=5+7+48",
+    "600=100+20+480",
+    "597=600-3",
+    "597=97+20+480",
+    "100=3+7+0+0+0+90",
+    "20=0+0+0+0+0+20",
+    "B ammunition end 5-5=0",
+    "X military_control A, all other jurisdictions B",
+    "No use of m+2 delivery in months m or m+1"
+  ]
+}
