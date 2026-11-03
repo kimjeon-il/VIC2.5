@@ -129,6 +129,81 @@ public:
         ensure(assigned(slice) == 0, "duplicate service assignment");
         units_[unit][slice] = s.count;
     }
+    void seed_shares(const std::string& asset, const std::string& holder, Money units) {
+        ensure(stage_ == -1 && commit_id_ == 0 && units > 0 &&
+               actors_.contains(holder) && !tracked_assets_.contains(asset) &&
+               !asset.empty(), "invalid share issue");
+        ownership_.issue(asset, holder, units);
+        tracked_assets_.insert(asset);
+        ensure_security_account(holder, asset);
+        money_.post({unique("share-seed"), "opening securities ownership", {
+            {security_account(holder, asset), units, 0},
+            {account(holder, "capital"), 0, units}}});
+    }
+    [[nodiscard]] Money shares(const std::string& asset, const std::string& holder) const {
+        return ownership_.units(asset, holder);
+    }
+    // V1 fixed book price = one minor monetary unit per issued share.
+    // This is a validated settlement slice, not a full stock exchange.
+    void sell_shares(const std::string& asset, const std::string& seller,
+                     const std::string& buyer, Money units) {
+        require_stage({7});
+        ensure(tracked_assets_.contains(asset) && units > 0 &&
+               actors_.contains(seller) && actors_.contains(buyer) &&
+               buyer != seller && shares(asset, seller) >= units &&
+               cash(buyer) >= units, "invalid security transfer");
+        ensure_security_account(buyer, asset);
+        ownership_.transfer(asset, seller, buyer, units);
+        money_.post({unique("share-sale"), "share ownership and cash swap", {
+            {security_account(buyer, asset), units, 0},
+            {account(buyer, "cash"), 0, units},
+            {account(seller, "cash"), units, 0},
+            {security_account(seller, asset), 0, units}}});
+        events_.push_back("security-transfer");
+    }
+    void declare_dividend(const std::string& asset, const std::string& payer,
+                          const std::string& holder, Money amount) {
+        require_stage({9});
+        ensure(!asset.empty() && tracked_assets_.contains(asset) &&
+               actors_.contains(payer) && actors_.contains(holder) &&
+               payer != holder && amount > 0 && shares(asset, holder) > 0 &&
+               !dividends_.contains(asset + ":" + holder),
+               "invalid dividend declaration");
+        dividends_[asset + ":" + holder] = {asset, payer, holder, amount, month() + 1};
+        events_.push_back("dividend-declared");
+    }
+    void pay_dividend(const std::string& asset, const std::string& holder) {
+        require_stage({5});
+        const std::string id = asset + ":" + holder;
+        ensure(dividends_.contains(id), "no dividend payable");
+        const auto d = dividends_.at(id);
+        ensure(d.due <= month() && cash(d.payer) >= d.amount,
+               "dividend not yet due or unfunded");
+        money_.post({unique("dividend"), "dividend settles shareholder payable", {
+            {account(d.payer, "capital"), d.amount, 0},
+            {account(d.payer, "cash"), 0, d.amount},
+            {account(holder, "cash"), d.amount, 0},
+            {account(holder, "revenue"), 0, d.amount}}});
+        dividends_.erase(id);
+        events_.push_back("dividend-paid");
+    }
+    void issue_bond(const std::string& bond_id, const std::string& government,
+                    const std::string& buyer, Money face) {
+        require_stage({1});
+        ensure(!bond_id.empty() && face > 0 && actors_.contains(government) &&
+               actors_.contains(buyer) && government != buyer && cash(buyer) >= face &&
+               !tracked_assets_.contains("bond:" + bond_id), "unfunded bond issue");
+        const auto asset = "bond:" + bond_id;
+        ownership_.issue(asset, buyer, face);
+        tracked_assets_.insert(asset);
+        ensure_security_account(buyer, asset);
+        money_.post({unique("bond"), "paid bond subscription", {
+            {account(government, "cash"), face, 0},
+            {account(government, "debt"), 0, face},
+            {security_account(buyer, asset), face, 0},
+            {account(buyer, "cash"), 0, face}}});
+        events_.push_back("bond-issued-paid");
+    }
     void set_voting_age(int age) {
         ensure(stage_ == -1 && commit_id_ == 0 && age >= 0 && age <= 120, "bad opening voting age");
         voting_age_years_ = age;
@@ -423,6 +498,11 @@ public:
                "bank deposit liabilities do not match customer assets");
         for (const auto& g : tracked_goods_)
             ensure(goods_.conserved(g), "inconsistent commodity conservation");
+        for (const auto& a : tracked_assets_)
+            ensure(ownership_.conserved(a), "inconsistent asset ownership");
+        for (const auto& [owner, asset] : security_accounts_)
+            ensure(money_.balance(security_account(owner, asset)) ==
+                   ownership_.units(asset, owner), "financial security and title disagree");
         std::map<Id, People> assigned_by_slice;
         for (const auto& [unit, people] : units_) {
             (void)unit;
@@ -451,6 +531,14 @@ private:
     std::set<std::string> actors_;
     std::set<std::string> processed_commands_;
     std::map<std::string, std::map<Id, People>> units_;
+    std::set<std::string> tracked_assets_;
+    std::set<std::pair<std::string, std::string>> security_accounts_;
+    struct DividendDue {
+        std::string asset, payer, holder;
+        Money amount{};
+        std::int64_t due{};
+    };
+    std::map<std::string, DividendDue> dividends_;
     std::map<std::string, Shipment> shipments_;
     std::set<std::string> tracked_goods_;
     std::map<std::string, std::string> sovereignty_, military_control_;
@@ -481,6 +569,13 @@ private:
             std::swap(c, d);
             direction = -direction;
         }
+    }
+    static std::string security_account(const std::string& who, const std::string& asset) {
+        return who + ":security:" + asset;
+    }
+    void ensure_security_account(const std::string& who, const std::string& asset) {
+        if (security_accounts_.insert({who, asset}).second)
+            money_.add_account(security_account(who, asset), who, AccountType::asset);
     }
     static std::string account(const std::string& who, const std::string& suffix) {
         return who + ":" + suffix;
