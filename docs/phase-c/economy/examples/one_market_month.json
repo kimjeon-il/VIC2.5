@@ -1,0 +1,183 @@
+{
+  "fixture_id": "ce-test-single-market-1.0",
+  "type": "design_example_not_engine_save",
+  "metadata": {
+    "scenario": "closed_one_currency_with_inventory_drawdown",
+    "historical": false,
+    "fictional_test_value": true,
+    "month_index": 42,
+    "currency_id": "TEST",
+    "money_unit": "minor-unit",
+    "quantity_scale": {
+      "grain": 1,
+      "bread": 1
+    },
+    "requires_validated_opening_bank_accounts": true
+  },
+  "population": {
+    "eligible_workers": 4,
+    "employed_at_F": 4,
+    "one_main_contract_per_person": true
+  },
+  "opening": {
+    "deposit_balances": {
+      "F": 100,
+      "S": 0,
+      "H": 44,
+      "G": 0
+    },
+    "total_customer_deposits": 144,
+    "bank_counterpart": {
+      "reserves_asset": 144,
+      "customer_deposit_liability": 144
+    },
+    "inventory": [
+      {
+        "holder": "S",
+        "good": "grain",
+        "quantity": 10,
+        "carrying_value": 30,
+        "production_period": "earlier_month"
+      },
+      {
+        "holder": "F",
+        "good": "grain",
+        "quantity": 0
+      },
+      {
+        "holder": "F",
+        "good": "bread",
+        "quantity": 0
+      }
+    ]
+  },
+  "factory": {
+    "operator": "F",
+    "wage_per_worker": 10,
+    "workers": 4,
+    "recipe": {
+      "inputs": {
+        "grain": 1
+      },
+      "outputs": {
+        "bread": 1
+      }
+    },
+    "capacity": 10,
+    "price_per_bread": 8
+  },
+  "stage_events": [
+    {
+      "stage": 1,
+      "kind": "reserve_funding",
+      "owner": "F",
+      "purpose": "intermediate_goods",
+      "amount": 30
+    },
+    {
+      "stage": 1,
+      "kind": "reserve_funding",
+      "owner": "F",
+      "purpose": "gross_payroll",
+      "amount": 40
+    },
+    {
+      "stage": 3,
+      "kind": "deliver_intermediate",
+      "seller": "S",
+      "buyer": "F",
+      "good": "grain",
+      "quantity": 10,
+      "payment_minor": 30
+    },
+    {
+      "stage": 4,
+      "kind": "produce",
+      "operator": "F",
+      "consume": {
+        "grain": 10
+      },
+      "produce": {
+        "bread": 10
+      },
+      "labor_workers": 4
+    },
+    {
+      "stage": 5,
+      "kind": "gross_payroll",
+      "payer": "F",
+      "gross": 40,
+      "net_to": "H",
+      "net": 36,
+      "withholding_to": "G",
+      "withholding": 4
+    },
+    {
+      "stage": 7,
+      "kind": "final_purchase_and_consume",
+      "seller": "F",
+      "buyer": "H",
+      "good": "bread",
+      "quantity": 10,
+      "payment_minor": 80
+    }
+  ],
+  "expected": {
+    "closing_deposit_balances": {
+      "F": 110,
+      "S": 30,
+      "H": 0,
+      "G": 4
+    },
+    "sum_closing_customer_deposits": 144,
+    "intermediate_delivered_to_factory": 10,
+    "final_bread_sold_and_consumed": 10,
+    "end_unsold_inventory": {
+      "grain": 0,
+      "bread": 0
+    },
+    "economic_accounts": {
+      "F": {
+        "sales": 80,
+        "intermediate_consumption": 30,
+        "gross_value_added": 50,
+        "gross_wage_expense": 40,
+        "pretax_profit": 10
+      },
+      "S": {
+        "sales_from_prior_period_inventory": 30,
+        "inventory_cost_of_goods_sold": 30,
+        "current_period_gross_value_added": 0,
+        "current_period_profit": 0
+      },
+      "G": {
+        "wage_withholding_revenue": 4
+      },
+      "H": {
+        "net_wages": 36,
+        "final_consumption_expenditure": 80
+      }
+    },
+    "GDP_by_production": {
+      "factory_value_added": 50,
+      "supplier_current_value_added": 0,
+      "total": 50
+    },
+    "GDP_by_expenditure": {
+      "household_final_consumption": 80,
+      "inventory_change_at_carrying_value": -30,
+      "total": 50
+    },
+    "GDP_by_income": {
+      "wages": 40,
+      "profit": 10,
+      "total": 50
+    },
+    "failure_if": {
+      "grain_delivered_at_stage3_from_current_month_stage4": true,
+      "multiple_cash_income_for_in_kind": false,
+      "double_count_intermediate_sales_in_GDP": true
+    }
+  },
+  "caution": "Full financial accounts require bank/customer/currency opening balance-sheet counterpart; this scenario primarily specifies flow deltas and macro-accounting reconciliation."
+}

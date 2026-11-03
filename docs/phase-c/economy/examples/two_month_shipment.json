@@ -1,0 +1,148 @@
+{
+  "fixture_id": "ce-test-shipping-tplus2-1.0",
+  "type": "design_example_not_engine_save",
+  "metadata": {
+    "scenario": "cross_border_freight_with_transit_loss_and_customs",
+    "historical": false,
+    "fictional_test_value": true,
+    "month_index": "t",
+    "currency_id": "TEST",
+    "good_id": "iron",
+    "unit": "tonne",
+    "price_minor_per_tonne": 5
+  },
+  "parties": {
+    "seller": "Seller-A",
+    "importer": "Buyer-B",
+    "carrier": "Carrier",
+    "customs_authority": "Customs-B"
+  },
+  "territory": {
+    "origin_country": "A",
+    "destination_country": "B",
+    "route": [
+      "A-origin",
+      "A-B-border",
+      "B-port"
+    ],
+    "customs_tariff_percent": 10
+  },
+  "route": {
+    "maximum_capacity_tonnes": 10,
+    "travel_months": 2,
+    "freight_fee_minor": 2
+  },
+  "payment_terms": {
+    "title_transfer": "on_actual_delivery",
+    "risk_of_loss": "seller_until_delivery",
+    "principal_payment": "upon_delivery",
+    "customs_due": "at_customs_clearance",
+    "no_insurance": true
+  },
+  "opening": {
+    "goods": {
+      "seller_A_warehouse": 10,
+      "in_transit": 0,
+      "buyer_B_warehouse": 0
+    },
+    "deposits": {
+      "seller": 0,
+      "buyer": 100,
+      "carrier": 0,
+      "customs": 0
+    },
+    "requires_validated_bank_opening": true
+  },
+  "events": [
+    {
+      "month": "t",
+      "stage": 1,
+      "kind": "route_capacity_and_payment_reservation",
+      "tonnes": 10,
+      "freight_fee_minor": 2
+    },
+    {
+      "month": "t",
+      "stage": 7,
+      "kind": "dispatch",
+      "move": {
+        "seller_A_warehouse": -10,
+        "in_transit": 10
+      },
+      "actual_freight_payment": {
+        "from": "buyer",
+        "to": "carrier",
+        "minor": 2
+      }
+    },
+    {
+      "month": "t+1",
+      "stage": 0,
+      "kind": "not_due_yet",
+      "available_for_B_manufacture": 0
+    },
+    {
+      "month": "t+2",
+      "stage": 0,
+      "kind": "ship_loss_and_clearance",
+      "loss_tonnes": 2,
+      "arrived_tonnes": 8,
+      "move": {
+        "in_transit": -10,
+        "buyer_B_warehouse": 8,
+        "recorded_loss": 2
+      },
+      "title_transfer_tonnes": 8,
+      "customs_taxable_minor": 40,
+      "customs_duty_minor": 4
+    },
+    {
+      "month": "t+2",
+      "stage": 0,
+      "kind": "settle_delivered_goods_and_customs",
+      "actual_payments": [
+        {
+          "from": "buyer",
+          "to": "seller",
+          "minor": 40
+        },
+        {
+          "from": "buyer",
+          "to": "customs",
+          "minor": 4
+        }
+      ],
+      "note": "Delivery settlement ordering is a deterministic subevent at the month opening; failure keeps goods pending clearance and does not silently finalize delivery."
+    }
+  ],
+  "expected": {
+    "goods_after_dispatch_t": {
+      "seller_A_warehouse": 0,
+      "in_transit": 10,
+      "buyer_B_warehouse": 0
+    },
+    "goods_month_t_plus_1": {
+      "seller_A_warehouse": 0,
+      "in_transit": 10,
+      "buyer_B_warehouse": 0
+    },
+    "goods_after_arrival_t_plus_2": {
+      "seller_A_warehouse": 0,
+      "in_transit": 0,
+      "buyer_B_warehouse": 8,
+      "documented_loss": 2
+    },
+    "money_after_settlement": {
+      "seller": 40,
+      "buyer": 54,
+      "carrier": 2,
+      "customs": 4,
+      "total_customer_deposits": 100
+    },
+    "no_buyer_intermediate_production_using_iron_until": "t+2",
+    "tariff_calculation": "0.1 * (8*5) = 4 minor",
+    "no_double_created_stock": true,
+    "no_automatic_cash_if_delivery_did_not_happen": true
+  },
+  "caution": "Simplified fixture assumes adequate bank settlement liquidity, a legally valid zero-frequency-month customs event at opening, actual t+2 delivery; excludes seller insurance and detailed multi-currency FX. Not an executable engine save."
+}
