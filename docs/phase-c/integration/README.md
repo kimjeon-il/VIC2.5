@@ -17,6 +17,7 @@
 | [D4-5 테스트 매트릭스](D4-5_TEST_MATRIX.md) | 48개 통합 게이트·에러 주입·해당 원본 계약 대응 |
 | [D4-6 재현성·저장·성능](D4-6_DETERMINISM_RECOVERY_PERFORMANCE.md) | 고정소수점/병렬·세이브/리플레이·장기 회귀·계측·조정 |
 | [D4-7 수락/구현 로드맵](D4-7_RELEASE_GATES_AND_ADRS.md) | 선행 계약/브랜치 통합·단계별 완료정의·병합/회귀·ADR |
+| [검증 매니페스트](verification_manifest.json) | 30개 불변조건·48개 테스트 ID·계약 버전/미구현·BLOCKED 상태를 기계 판독으로 고정 |
 | [경제→정치→동원 복합 fixture](examples/cross_domain_reform_mobilization.json) | 월 240 법률·선거·임금·징병·전사/부상·차월 적격 비교 |
 | [군수→전투→점령 복합 fixture](examples/logistics_war_occupation.json) | 군수 대금·2개월 운송/손실·전투 소비·포로/인구·점령과 주권 분리 |
 
