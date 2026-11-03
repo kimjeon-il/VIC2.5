@@ -207,7 +207,16 @@ int main() {
     test.skip(5,"typed cross-domain entity registry and historical lineage not implemented");
     test.skip(6,"ownership/financial distribution on partial migration not implemented");
     test.skip(7,"multi-currency FX clearing not implemented");
-    test.skip(8,"cross-domain command ID dedupe not implemented (POP apply_once exists)");
+    test.run(8, []{
+        F f;IntegratedWorld::Plan p;
+        p[5].push_back([](auto& w){
+            w.command_once("pay-1", [](auto& x){x.pay("F","H",10);});
+            w.command_once("pay-1", [](auto& x){x.pay("F","H",10);});
+        });
+        verify(rejected([&]{f.w.advance(p);}),"duplicate command applied");
+        verify(f.w.cash("F")==1000&&f.w.cash("H")==50&&f.w.commit_id()==0,
+               "duplicate command did not roll back");
+    });
     test.run(9, []{
         F f;IntegratedWorld::Plan p;
         p[2].push_back([&](auto& w){w.hire(f.civ,2,"F",10);});
@@ -333,7 +342,21 @@ int main() {
         p[2].push_back([](auto& w){w.pay("F","H",10);});
         verify(rejected([&]{f.w.advance(p);}),"wrong stage accepted");
     });
-    test.skip(43,"cross-domain idempotent replay cursor not implemented");
+    test.run(43, []{
+        F f;IntegratedWorld::Plan first;
+        first[5].push_back([](auto& w){
+            w.command_once("receipt-007",[](auto& x){x.pay("F","H",10);});
+        });
+        f.w.advance(first);
+        verify(f.w.cash("H")==60,"first command not executed");
+        IntegratedWorld::Plan again;
+        again[5].push_back([](auto& w){
+            w.command_once("receipt-007",[](auto& x){x.pay("F","H",10);});
+        });
+        verify(rejected([&]{f.w.advance(again);}),"command replay accepted");
+        verify(f.w.cash("H")==60&&f.w.commit_id()==1,
+               "cross-month replay or partial commit");
+    });
     test.run(44, []{
         F a,b;
         IntegratedWorld::Plan p;
