@@ -951,6 +951,29 @@ public:
         election_this_month_ = true;
         events_.push_back("election");
     }
+    // Actual epidemic shock: death plus a non-overlapping illness allocation
+    // through the same Phase B population source of truth. Applied in stage 10.
+    void epidemic(Id source,People newly_ill,People deaths) {
+        require_stage({10});
+        ensure(people_.has_slice(source) && newly_ill>=0 && deaths>=0 &&
+               newly_ill+deaths>0 &&
+               newly_ill+deaths<=people_.slice(source).count,
+               "epidemic exceeds actual exposed population");
+        const auto& before=people_.slice(source);
+        const auto current=people_.demographic(before.key.demographic);
+        ensure(!people_.health(current.health).ill,"already sick cohort");
+        // The source slice can have an existing job contract. Use the
+        // explicitly uncontracted subset for this simple epidemic fixture.
+        const People available=before.count-people_.employed(source);
+        ensure(newly_ill+deaths<=available,"cannot silently terminate unknown labor allocations");
+        if(deaths) people_.death(source,deaths,0,"epidemic");
+        if(newly_ill){
+            auto hp=people_.health(current.health);
+            hp.ill=true;
+            (void)people_.change_health(source,newly_ill,hp,phaseb::EventKind::illness,0);
+        }
+        events_.push_back("verified-epidemic-population-shock");
+    }
     void mobilize(Id source, People n, const std::string& unit) {
         require_stage({10});
         ensure(units_.contains(unit) && n > 0 && people_.has_slice(source),
