@@ -125,14 +125,13 @@ def main() -> int:
         fail("aggregate C++ test must verify binary save versions")
 
     cpp = (root / "include/vic25/phase_c.hpp").read_text(encoding="utf-8")
-    if any(x not in cpp for x in (
+    for field in (
         "phaseb::World people_", "FinancialLedger money_", "InventoryLedger goods_",
-        "OwnershipLedger ownership_", "StagingWorld", "void validate() const",
-    )):
-        # StagingWorld is an architecture role, not a distinct class in the first
-        # implementation. The 'stage = *this' snapshot is its current representation.
-        if "IntegratedWorld stage = *this;" not in cpp:
-            fail("C-D0 shared staged-world ownership not implemented")
+        "OwnershipLedger ownership_", "void validate() const",
+        "IntegratedWorld stage = *this;",
+    ):
+        if field not in cpp:
+            fail(f"C-D0 shared-world ledger or month staging missing: {field}")
     snapshot = (root / "include/vic25/phase_c_snapshot.hpp").read_text(encoding="utf-8")
     if manifest["checkpoint_schema"] not in snapshot:
         fail("checkpoint schema version absent")
