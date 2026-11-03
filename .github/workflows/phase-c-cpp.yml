@@ -33,3 +33,9 @@ jobs:
       - name: Report 1200-month demographic/economic regression
         if: runner.os == 'Linux'
         run: ./build/vic25_phase_c_longrun
+      - name: Benchmark 100k active POP slices with real cross-ledger trades
+        if: runner.os == 'Linux'
+        run: ./build/vic25_phase_c_scaling 100000
+      - name: Benchmark 1M active POP slices with real cross-ledger trades
+        if: runner.os == 'Linux'
+        run: ./build/vic25_phase_c_scaling 1000000
