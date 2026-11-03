@@ -62,7 +62,7 @@ cash_available_at_stage_6 = opening_spendable_balance
 | `FundingReservation` | reservation_id, account_id, currency, amount, purpose, expiry, priority, revision |
 | `Default/ResolutionEvent` | contract_ref, due/paid/unpaid, claimant/obligor, bankruptcy_priority, actual write-down & asset transfer refs |
 
-금융채권/채무의 정본은 FinancialLedger이며 OwnershipLedger는 지분·채권증서·담보권의 **권리 귀속**을 참조한다. 채권증서 자체의 얼굴값과 FinancialLedger 채무를 별개의 추가 재산으로 더하지 않는다.
+`LoanContract.principal_outstanding` 같은 계약 잔액 필드는 FinancialLedger의 채무/대출채권에서 계산된 검증 캐시 또는 계약 스케줄 참조로 취급하며 독립적 쓰기 가능한 두 번째 원본이 아니다. 금융채권/채무의 정본은 FinancialLedger이며 OwnershipLedger는 지분·채권증서·담보권의 **권리 귀속**을 참조한다. 채권증서 자체의 얼굴값과 FinancialLedger 채무를 별개의 추가 재산으로 더하지 않는다.
 
 모든 분개는 경제주체별 차변=대변이며, 동일 통화별 자산·부채와 기관 간 결제의 대응관계를 검증한다. 단일 `Money` 정수에 통화 없는 숫자를 섞어 더할 수 없다. 계좌 잔액은 회계 방향(자산/부채)에 따라 처리하며, `spendable_balance=positive_available_balance-unreleased_reservations`이다. 명시적 승인 없는 마이너스 예금과 중복지출은 거부한다.
 
