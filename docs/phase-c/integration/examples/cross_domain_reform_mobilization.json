@@ -1,0 +1,203 @@
+{
+  "fixture_schema_version": "d4-design-fixture/1.0",
+  "fixture_id": "d4-f1-reform-mobilization",
+  "type": "synthetic_design_oracle_not_executable_save",
+  "contract_versions": {
+    "pop": "pop-design/1.1",
+    "common": "phase-c-common/1.0",
+    "economy": "phase-c-economy/1.0",
+    "politics": "phase-c-politics/1.0",
+    "military": "phase-c-military/1.0",
+    "integration": "phase-c-integration/1.0"
+  },
+  "metadata": {
+    "fictional_test_value": true,
+    "month_index": 240,
+    "currency_id": "TEST",
+    "seed": 123456,
+    "source_provenance": "synthetic acceptance fixture",
+    "historical": false,
+    "bank_customer_deposit_counterparts_initialized": true
+  },
+  "assumptions": [
+    "No births natural deaths migration or birthdays cross voting age threshold during evaluated month",
+    "Initial active100 cannot vote under valid month240 election law and the 10 KIA are all from these 100",
+    "Fifty eligible 18-20-year-olds are in civilian population and survive the month",
+    "Three hundred employed include forty reservists scheduled for end-month mobilization",
+    "No additional government/military payday or procurement due in month 240; training supplies and enrollment capacity for 40 exist in opening state",
+    "No other wage, financial, employment or election transactions; no new hires before month241 labor clearance"
+  ],
+  "opening": {
+    "world_population": 1000,
+    "population_by_service": {
+      "civilian": 800,
+      "reserve": 100,
+      "active": 100,
+      "pow": 0,
+      "missing": 0
+    },
+    "employed_primary_workers": 300,
+    "employed_reservists_to_mobilize": 40,
+    "entity_cash_deposits": {
+      "firm": 500,
+      "households": 0,
+      "treasury": 0
+    },
+    "financial_counterparts": "All customer deposit assets and bank liabilities balanced at opening",
+    "voting_law": {
+      "minimum_age_years": 21,
+      "military_active_enfranchised": false
+    },
+    "election": {
+      "eligible": 600,
+      "registered": 550,
+      "cast": 420,
+      "valid": 400,
+      "invalid": 20,
+      "party_votes": {
+        "A": 220,
+        "B": 130,
+        "C": 50
+      },
+      "seats_total": 3,
+      "system": "D_HONDT_LIST_PR",
+      "threshold_percent": 0
+    },
+    "service_eligible_reservists_to_mobilize": 40,
+    "combat_deployed_eligible_existing_active": 100
+  },
+  "events": [
+    {
+      "stage": 1,
+      "kind": "mobilization_order",
+      "count": 40,
+      "source_service": "reserve",
+      "effective_on": "end_of_month",
+      "law": "already_effective"
+    },
+    {
+      "stage": 2,
+      "kind": "labor_clearance",
+      "confirmed_employed": 300
+    },
+    {
+      "stage": 5,
+      "kind": "gross_wage",
+      "payer": "firm",
+      "gross": 300,
+      "recipient": "households",
+      "net": 270,
+      "withholding_recipient": "treasury",
+      "withholding": 30
+    },
+    {
+      "stage": 9,
+      "subphase": "9c",
+      "kind": "election_count_and_seats",
+      "party_votes": {
+        "A": 220,
+        "B": 130,
+        "C": 50
+      },
+      "seats": {
+        "A": 2,
+        "B": 1,
+        "C": 0
+      }
+    },
+    {
+      "stage": 9,
+      "subphase": "9d",
+      "kind": "enact_law",
+      "change": {
+        "minimum_voting_age_years": {
+          "from": 21,
+          "to": 18
+        }
+      },
+      "adopted_month": 240,
+      "effective_month": 241
+    },
+    {
+      "stage": 10,
+      "subphase": "10a-10c",
+      "kind": "battle_on_preexisting_active",
+      "exposed": 100,
+      "outcomes": {
+        "killed": 10,
+        "acute_injury": 20,
+        "long_term_impairment": 0,
+        "captured": 0,
+        "missing": 0,
+        "unharmed": 70
+      }
+    },
+    {
+      "stage": 10,
+      "subphase": "10e",
+      "kind": "mobilize_confirmed",
+      "count": 40,
+      "from_service": "reserve",
+      "to_service": "active",
+      "next_month_labor_contract_release": 40
+    },
+    {
+      "stage": 11,
+      "kind": "all_ledger_validate_and_commit",
+      "month_committed": 240
+    }
+  ],
+  "expected_after_month240": {
+    "population": 990,
+    "by_service": {
+      "civilian": 800,
+      "reserve": 60,
+      "active": 130,
+      "pow": 0,
+      "missing": 0
+    },
+    "active_health": {
+      "unharmed_old_active": 70,
+      "acute_injury_old_active": 20,
+      "new_active_untrained": 40
+    },
+    "firm_deposits": 200,
+    "household_deposits": 270,
+    "treasury_deposits": 30,
+    "total_customer_deposits": 500,
+    "completed_gross_wage": 300,
+    "completed_registered_votes": 550,
+    "completed_cast_ballots": 420,
+    "completed_valid_ballots": 400,
+    "completed_invalid_ballots": 20,
+    "party_seats": {
+      "A": 2,
+      "B": 1,
+      "C": 0
+    },
+    "law_240_min_voting_age": 21,
+    "next_month_law_241_min_voting_age": 18,
+    "old_240_electoral_eligible": 600,
+    "old_month_transaction_retrospectively_modified": false
+  },
+  "expected_month241_without_other_events": {
+    "eligible_voters": 650,
+    "remaining_preexisting_civilian_primary_employment": 260,
+    "actual_active_service": 130,
+    "actual_reserve": 60,
+    "population": 990
+  },
+  "oracle_checks": [
+    "1000=800+100+100",
+    "990=1000-10",
+    "990=800+60+130",
+    "300=270+30",
+    "500=200+270+30",
+    "420=400+20",
+    "400=220+130+50",
+    "D'Hondt A2 B1 C0",
+    "650=600+50",
+    "260=300-40",
+    "New 40 mobilized at stage10 did not participate in prior stage10 battle"
+  ]
+}
