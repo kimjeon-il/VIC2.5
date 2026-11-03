@@ -176,6 +176,16 @@ public:
         return total;
     }
 
+    // Execute an externally identified command at most once across committed
+    // months. A failed staged month also rolls back its dedupe set.
+    void command_once(const std::string& external_id, const Task& command) {
+        ensure(stage_ >= 0 && !external_id.empty() &&
+               !processed_commands_.contains(external_id),
+               "duplicate or invalid command");
+        command(*this);
+        processed_commands_.insert(external_id);
+        events_.push_back("command:" + external_id);
+    }
     void pay(const std::string& from, const std::string& to, Money amount) {
         require_stage({3, 5, 7, 8});
         ensure(amount > 0 && cash(from) >= amount && actors_.contains(to) && from != to,
@@ -439,6 +449,7 @@ private:
     InventoryLedger goods_;
     OwnershipLedger ownership_;
     std::set<std::string> actors_;
+    std::set<std::string> processed_commands_;
     std::map<std::string, std::map<Id, People>> units_;
     std::map<std::string, Shipment> shipments_;
     std::set<std::string> tracked_goods_;
