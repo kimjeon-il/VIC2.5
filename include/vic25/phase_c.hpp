@@ -421,11 +421,13 @@ public:
     [[nodiscard]] int income_tax_ppm() const { return income_tax_ppm_; }
     void enact_conscription(bool enabled) {
         require_stage({9});
+        ensure(governments_.empty(), "constitutional government requires authorized policy procedure");
         scheduled_conscription_[month() + 1] = enabled;
         events_.push_back("conscription-law-scheduled");
     }
     void enact_income_tax(int ppm) {
         require_stage({9});
+        ensure(governments_.empty(), "constitutional government requires authorized policy procedure");
         ensure(ppm >= 0 && ppm <= 1'000'000, "invalid income tax ppm");
         scheduled_income_tax_[month() + 1] = ppm;
         events_.push_back("income-tax-law-scheduled");
@@ -439,6 +441,7 @@ public:
     }
     void enact_voting_age(int new_age) {
         require_stage({9});
+        ensure(governments_.empty(), "constitutional government requires authorized policy procedure");
         ensure(new_age >= 0 && new_age <= 120, "invalid voting age");
         scheduled_voting_age_[month() + 1] = new_age;
         events_.push_back("law-adopted-next-month");
