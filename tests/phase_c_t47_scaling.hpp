@@ -6,6 +6,7 @@
 #include <ctime>
 #include <cstdint>
 #include <iostream>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <vector>
