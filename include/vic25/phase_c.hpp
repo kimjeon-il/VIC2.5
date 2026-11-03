@@ -40,6 +40,10 @@ struct CabinetChange {
     std::string country, new_head, new_prime_minister;
     bool replace_head{}, replace_prime{};
 };
+struct MarketQuote {
+    Money price{}, floor{1}, ceiling{}, target_stock{};
+    Quantity solvent_demand{}, delivered{}, unmet{}, stock_offered{};
+};
 struct ElectionResult {
     People eligible{}, registered{}, cast{}, invalid{}, valid{};
     std::map<std::string, People> votes;
@@ -213,6 +217,67 @@ public:
             {security_account(buyer, asset), face, 0},
             {account(buyer, "cash"), 0, face}}});
         events_.push_back("bond-issued-paid");
+    }
+    void seed_market(const std::string& region,const std::string& good,
+                     Money price, Money floor, Money ceiling, Quantity target_stock=0) {
+        ensure(stage_==-1 && commit_id_==0 && !region.empty() && !good.empty() &&
+               price>0 && floor>0 && ceiling>=price && floor<=price &&
+               target_stock>=0 && !markets_.contains({region,good}),
+               "invalid market seed");
+        markets_[{region,good}]={price,floor,ceiling,target_stock,0,0,0,0};
+    }
+    [[nodiscard]] const MarketQuote& market(const std::string& region,const std::string& good) const {
+        return markets_.at({region,good});
+    }
+    Quantity clear_consumer_market(const std::string& seller,const std::string& buyer,
+                                  const std::string& region,const std::string& good,
+                                  Quantity requested) {
+        require_stage({7});
+        ensure(requested>=0 && markets_.contains({region,good}) &&
+               actors_.contains(buyer) && actors_.contains(seller) && buyer!=seller,
+               "invalid market order");
+        auto& m=markets_.at({region,good});
+        const Quantity solvent=std::min(requested,cash(buyer)/m.price);
+        const Quantity available=stock(seller,region,good);
+        const Quantity fulfilled=std::min(solvent,available);
+        m.solvent_demand=phaseb::add_checked(m.solvent_demand,solvent);
+        m.stock_offered=phaseb::add_checked(m.stock_offered,available);
+        m.delivered=phaseb::add_checked(m.delivered,fulfilled);
+        m.unmet=phaseb::add_checked(m.unmet,solvent-fulfilled);
+        if(fulfilled>0) trade(seller,buyer,region,good,fulfilled,m.price);
+        events_.push_back("solvent-demand-market-clearance");
+        return fulfilled;
+    }
+    void household_produce(Id slice,const std::string& good,Quantity output,
+                           Quantity max_output_per_person) {
+        require_stage({4});
+        ensure(people_.has_slice(slice) && !good.empty() && output>0 &&
+               max_output_per_person>0, "invalid household production");
+        const auto& row=people_.slice(slice);
+        const auto& econ=people_.economic(row.key.economic);
+        const auto& demo=people_.demographic(row.key.demographic);
+        ensure(econ.livelihood=="subsistence"||econ.livelihood=="self_employed",
+               "not own-account labor");
+        const Quantity limit=positive_product(row.count,max_output_per_person);
+        ensure(household_output_[slice]+output<=limit,"subsistence labor overproduced");
+        household_output_[slice]+=output;
+        tracked_goods_.insert(good);
+        goods_.produce({"HH:"+std::to_string(row.key.household),demo.region,good},output);
+        events_.push_back("household-actual-in-kind-output");
+    }
+    void household_consume(Id slice,const std::string& good,Quantity qty) {
+        require_stage({7});
+        ensure(people_.has_slice(slice)&&qty>0,"invalid household consumption");
+        const auto& row=people_.slice(slice);
+        const auto& demo=people_.demographic(row.key.demographic);
+        goods_.consume({"HH:"+std::to_string(row.key.household),demo.region,good},qty);
+        household_consumed_[{row.key.household,good}] =
+            phaseb::add_checked(household_consumed_[{row.key.household,good}],qty);
+        events_.push_back("household-actual-in-kind-consumption");
+    }
+    [[nodiscard]] Quantity actual_household_consumption(Id household,const std::string& good) const {
+        auto it=household_consumed_.find({household,good});
+        return it==household_consumed_.end()?0:it->second;
     }
     // A named voter occupies one real population place. The anchor never
     // creates headcount; duplicate anchors are capped by their source slice.
@@ -636,6 +701,7 @@ public:
                     stage.people_.release_ineligible();
                 }
             }
+            if (n == 11) stage.reprice_markets();
             stage.validate();
         }
         stage.stage_ = -1;
@@ -712,6 +778,9 @@ private:
         std::int64_t due{};
     };
     std::map<std::string, DividendDue> dividends_;
+    std::map<std::pair<std::string,std::string>, MarketQuote> markets_;
+    std::map<Id, Quantity> household_output_;
+    std::map<std::pair<Id,std::string>, Quantity> household_consumed_;
     std::map<std::string, Id> person_anchors_;
     std::map<Id, People> anchor_counts_;
     std::set<std::pair<std::string,std::string>> ballot_ids_;
@@ -764,6 +833,19 @@ private:
         if (security_accounts_.insert({who, asset}).second)
             money_.add_account(security_account(who, asset), who, AccountType::asset);
     }
+    void reprice_markets() {
+        for(auto& [key,m]:markets_) {
+            (void)key;
+            if(m.unmet>0) {
+                const Money step=std::max<Money>(1,m.price/10);
+                m.price=std::min(m.ceiling,phaseb::add_checked(m.price,step));
+            } else if(m.solvent_demand>0 && m.delivered==m.solvent_demand &&
+                      m.stock_offered>m.solvent_demand+m.target_stock) {
+                const Money step=std::max<Money>(1,m.price/10);
+                m.price=std::max(m.floor,m.price-step);
+            }
+        }
+    }
     [[nodiscard]] People coalition_seats(const std::vector<std::string>& party_ids) const {
         std::set<std::string> unique;
         People total = 0;
@@ -797,6 +879,12 @@ private:
         return n;
     }
     void open_month() {
+        household_output_.clear();
+        household_consumed_.clear();
+        for(auto& [key,m]:markets_) {
+            (void)key;
+            m.solvent_demand=0;m.delivered=0;m.unmet=0;m.stock_offered=0;
+        }
         participation_this_month_.clear();
         strike_active_.clear();
         if(auto strikers=scheduled_strikes_.find(month());strikers!=scheduled_strikes_.end()){
