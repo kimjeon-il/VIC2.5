@@ -3,6 +3,7 @@
 #endif
 #include "vic25/phase_c_snapshot.hpp"
 #include "phase_c_t46_crisis.hpp"
+#include "phase_c_t47_scaling.hpp"
 #include <filesystem>
 #include <fstream>
 #include <cassert>
@@ -828,7 +829,15 @@ int main() {
                a.w.active_strength("U")==b.w.active_strength("U"),
                "D4-T46 1200-month integrated crisis not deterministic");
     });
-    test.skip(47,"100k/1M active integrated world load/performance not verified");
+    test.run(47, []{
+        const auto small=vic25::phasec::acceptance::integrated_scale_benchmark(100000,8);
+        const auto large=vic25::phasec::acceptance::integrated_scale_benchmark(1000000,8);
+        verify(small.cells==100000 && large.cells==1000000 &&
+               small.months==8 && large.months==8 &&
+               small.events>=8000 && large.events>=8000 &&
+               small.median_ms>0 && large.p95_ms>0,
+               "D4-T47 representative multi-market/firm/army performance benchmark invalid");
+    });
     test.skip(48,"full contract baseline BLOCKED pending politics source registration");
 
     for (const auto& s : test.status) std::cout << s << '\n';
