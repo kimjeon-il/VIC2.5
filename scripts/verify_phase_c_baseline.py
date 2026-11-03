@@ -20,7 +20,18 @@ def fail(why: str) -> None:
 
 
 def blob_hash(data: bytes) -> str:
-    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+    # Windows Git checkouts may transparently turn canonical LF text blobs into
+    # CRLF working-tree files (core.autocrlf). The locked references are Git
+    # *blob* IDs, not platform-dependent working-file byte IDs. Every pinned
+    # artifact is Markdown/JSON text, so normalize only legitimate CRLF pairs.
+    if b"\0" in data:
+        fail("binary bytes in canonical text document")
+    normalized = data.replace(b"\r\n", b"\n")
+    if b"\r" in normalized:
+        fail("unexpected lone carriage return in canonical document")
+    return hashlib.sha1(
+        b"blob " + str(len(normalized)).encode() + b"\0" + normalized
+    ).hexdigest()
 
 
 def numbered_rows(text: str, prefix: str, width: int, n: int) -> None:
