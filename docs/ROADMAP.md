@@ -28,3 +28,7 @@ S0-A(금융), S0-B(노동), S0-C(가격·생산), S0-D(장기검증)의 기존 �
 ## Phase C 군사 설계(설계 확정 · C++ 미구현)
 
 [군사 C-M1~M5 상세 설계](phase-c/military/README.md)에서 징병·예비군/제대, 부대/편제·장비/지휘, 군수·물류, 작전/전투·사상자/회복, 전쟁/점령·종전/복구를 [C-D0](phase-c/C-D0_COMMON_CONTRACT.md) 및 [C-E1~E5](phase-c/economy/README.md)와 호환되게 확정했습니다. [군사 인수시험](phase-c/military/MILITARY_ACCEPTANCE_TESTS.md)에는 인구·복무·군수품·재정·사상자·관할권 관련 불변식과 30개 시나리오가 포함됩니다. 실제 통합 엔진/실측 역사계수/장기 C-D4 검증은 미완료입니다. 정치 C-P1~P5는 별도 문서로 작성되었지만 GitHub 병합은 완료되지 않았습니다.
+
+## Phase C-D4 통합 검증 설계(문서 확정 · 구현 미실행)
+
+[C-D4 통합 검증 계약](phase-c/integration/README.md)은 C-D0 및 C-E1~E5·C-P1~P5·C-M1~M5의 공통 World/12단계·인구/금융·재고/선거·동원/전투·관할 원장 정합성, [30개 불변조건](phase-c/integration/D4-3_INVARIANTS.md), [48개 통합 시험](phase-c/integration/D4-5_TEST_MATRIX.md), 결정론/세이브·롤백/100년·대규모 성능 인수 기준을 문서로 확정했습니다. 실제 C++ 통합 테스트/1,200개월 실행은 하지 않았습니다. L0 선행조건인 `phase-c-politics/1.0` 정치 설계 GitHub 등록 및 `work/pop-phase-b`의 단일 World 통합이 미완료이므로 완료/배포 판정은 **BLOCKED**입니다.
