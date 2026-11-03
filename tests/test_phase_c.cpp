@@ -426,7 +426,33 @@ int main() {
         verify(f.w.cash("H")==90&&f.w.people().labor().employed==0&&
                f.w.active_strength("U")==140,"employment before mobilization");
     });
-    test.skip(28,"formation hierarchy and equipment assignment not yet implemented");
+    test.run(28, []{
+        F f;
+        f.w.seed_unit("V");
+        f.w.seed_formation("DIV");
+        f.w.attach_to_formation("DIV","U");
+        f.w.attach_to_formation("DIV","V");
+        const auto& row=f.w.seed_population().slice(f.active);
+        auto other=f.w.seed_population().seed_population(
+            row.key.demographic,row.key.economic,row.key.household,60,7878);
+        f.w.seed_active("V",other);
+        f.w.seed_stock("U","R","rifle",70);
+        verify(f.w.formation_strength("DIV")==160,"double counted formation");
+        IntegratedWorld::Plan duplicate;
+        duplicate[7].push_back([](auto& w){
+            w.assign_equipment("U","R","rifle",70);
+            w.assign_equipment("V","R","rifle",70);
+        });
+        verify(rejected([&]{f.w.advance(duplicate);}),"equipment duplicate accepted");
+        verify(f.w.commit_id()==0,"failed allocation leaked");
+        IntegratedWorld::Plan real;
+        real[7].push_back([](auto& w){w.assign_equipment("U","R","rifle",70);});
+        f.w.advance(real);
+        verify(f.w.assigned_equipment("U","R","rifle")==70&&
+               f.w.assigned_equipment("V","R","rifle")==0&&
+               f.w.formation_strength("DIV")==160,
+               "real formation/equipment invalid");
+    });
     test.run(29, []{
         F f;IntegratedWorld::Plan p;
         p[7].push_back([](auto& w){w.ship("a","S","H","R","B","ore",60,2,5);});
