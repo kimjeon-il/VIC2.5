@@ -75,3 +75,16 @@ if (BUILD_TESTING)
     add_test(NAME vic25_phase_c_population_crisis COMMAND vic25_phase_c_population_crisis)
     set_tests_properties(vic25_phase_c_population_crisis PROPERTIES TIMEOUT 240)
 endif()
+
+# C-D4-T48 is a contract/source baseline gate, not the final complete-game release.
+# The audit fails on edited canonical Git blobs, missing Phase B/P code, or
+# incomplete D4 test IDs. The C++ D4-T48 itself is an aggregate of 47 real cases.
+if (BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    target_compile_definitions(vic25_phase_c_tests PRIVATE VIC25_SOURCE_ROOT=\"${CMAKE_SOURCE_DIR}\")
+    add_test(
+        NAME vic25_phase_c_contract_audit
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/verify_phase_c_baseline.py"
+                --root "${CMAKE_SOURCE_DIR}"
+    )
+endif()
