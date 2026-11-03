@@ -1,0 +1,133 @@
+{
+  "fixture_id": "cm3-two-month-medical-supply-v1",
+  "contract_version": "phase-c-military/1.0",
+  "type": "design_test_fixture_not_executable_save",
+  "metadata": {
+    "fictional_test_value": true,
+    "scenario": "military medical supplies from producer to front unit with 2-month transit, loss and actual treatment",
+    "currency_id": "TEST",
+    "time_step": "monthly",
+    "quantity_unit": "box",
+    "money_unit": "minor_unit"
+  },
+  "participants": {
+    "producer": "F",
+    "treasury": "G",
+    "carrier": "T",
+    "unit": "MED-UNIT-1",
+    "origin_region": "A",
+    "destination_region": "B",
+    "route_travel_months": 2
+  },
+  "opening": {
+    "inventory": {
+      "producer": 60,
+      "in_transit": 0,
+      "unit": 0
+    },
+    "cash_deposits": {
+      "producer": 0,
+      "treasury": 200,
+      "carrier": 0
+    },
+    "source_lot": {
+      "good_id": "medicine_box",
+      "quantity": 60
+    },
+    "unit_medical_slots_at_arrival": 25
+  },
+  "stage_events": [
+    {
+      "month": "m",
+      "stage": 1,
+      "kind": "approved_procurment_funding_reservation",
+      "gross_goods_cost": 120,
+      "freight_cost": 10
+    },
+    {
+      "month": "m",
+      "stage": 7,
+      "kind": "goods_purchase",
+      "units": 60,
+      "unit_price": 2,
+      "paid_from": "treasury",
+      "paid_to": "producer",
+      "amount": 120
+    },
+    {
+      "month": "m",
+      "stage": 7,
+      "kind": "freight_payment",
+      "paid_from": "treasury",
+      "paid_to": "carrier",
+      "amount": 10
+    },
+    {
+      "month": "m",
+      "stage": 7,
+      "kind": "dispatch",
+      "inventory_move": {
+        "producer": -60,
+        "in_transit": 60,
+        "unit": 0
+      }
+    },
+    {
+      "month": "m+1",
+      "stage": 0,
+      "kind": "still_in_transit",
+      "available_to_unit": 0
+    },
+    {
+      "month": "m+2",
+      "stage": 0,
+      "kind": "arrive_loss",
+      "transit_decrease": 60,
+      "unit_increase": 55,
+      "recorded_loss": 5
+    },
+    {
+      "month": "m+2",
+      "stage": 10,
+      "kind": "medical_care",
+      "actual_service_events": 20,
+      "medicine_boxes_used": 20,
+      "limit_at_arrival": 25
+    }
+  ],
+  "expected": {
+    "deposit_balances_after_month_m": {
+      "producer": 120,
+      "treasury": 70,
+      "carrier": 10,
+      "total": 200
+    },
+    "physical_inventory_after_dispatch": {
+      "producer": 0,
+      "in_transit": 60,
+      "unit": 0
+    },
+    "physical_inventory_month_m_plus_1": {
+      "producer": 0,
+      "in_transit": 60,
+      "unit": 0
+    },
+    "physical_inventory_after_arrival_and_care_m_plus_2": {
+      "producer": 0,
+      "in_transit": 0,
+      "unit": 35,
+      "consumed": 20,
+      "documented_loss": 5
+    },
+    "global_material_accounting": "initial 60 = unit stock 35 + care used 20 + cargo loss 5",
+    "cannot_use_in_month_m_or_m_plus_1": true,
+    "delivered_treatment_uses_actual_slots_and_goods": true,
+    "no_double_owned_stock": true
+  },
+  "reject_cases": [
+    "hospital receives 60 when 5 boxes lost in transit",
+    "medicine used before actual unit arrival",
+    "treatment 30 while site has only 25 slots",
+    "treasury approved but no payment recorded as fully paid"
+  ]
+}

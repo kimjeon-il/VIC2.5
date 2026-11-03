@@ -1,3 +1,5 @@
+> **Phase C-M1~M5 군사 상세 설계 (phase-c-military/1.0)**: [docs/phase-c/military/README.md](docs/phase-c/military/README.md)에서 병역·동원·예비군, 부대·장비·훈련, 군수·보급, 작전·사상자, 전쟁·점령·종전 및 [군사 인수시험](docs/phase-c/military/MILITARY_ACCEPTANCE_TESTS.md)을 확인할 수 있습니다. **설계 완료이며 전체 C++ 통합 구현·전쟁 시뮬레이션 회귀 전**입니다.
+
 > **Phase C-E1~E5 경제 상세 설계 (phase-c-economy/1.0)**: [docs/phase-c/economy/README.md](docs/phase-c/economy/README.md)에서 기업·노동·생산, 상품·시장·가격, 가계·금융·투자, 조세·정부재정, 운송·무역의 구조·연산 규약과 [경제 인수시험](docs/phase-c/economy/ECONOMIC_ACCEPTANCE_TESTS.md)을 확인할 수 있습니다. **설계 완료이며 전체 C++20 경제 엔진 구현·검증 전**입니다.
 
 > **Phase C-D0 공통 설계 계약 (phase-c-common/1.0)**: [docs/phase-c/README.md](docs/phase-c/README.md)에서 경제·정치·군사의 공통 객체·원장 소유권·월별 12단계·정책 효력·군사 배속·통합 사건/롤백 규격을 확인할 수 있습니다. **설계 확정이며 전체 C++ 통합 구현/장기 검증이 끝난 것은 아닙니다.**

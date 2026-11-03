@@ -24,3 +24,7 @@ S0-A(금융), S0-B(노동), S0-C(가격·생산), S0-D(장기검증)의 기존 �
 ## Phase C 공통·경제 상세 설계(설계 완료 · 구현 전)
 
 [Phase C-D0 공통 설계 계약](phase-c/C-D0_COMMON_CONTRACT.md)을 확정했습니다. POP-D0~D3의 단일 인구 원본과 월별 12단계를 유지하며 경제(C-E1~E5)·정치(C-P1~P5)·군사(C-M1~M5)의 영역별 세부 설계 및 C-D4 통합 검증을 후속으로 진행합니다. 또한 [경제 C-E1~E5 설계](phase-c/economy/README.md)를 확정하여 기업·생산·고용, 수요·시장·가격, 가계·은행·투자, 세금·정부예산, 운송·무역의 상세 사건/계산 및 [인수시험](phase-c/economy/ECONOMIC_ACCEPTANCE_TESTS.md)을 정했습니다. 별도 `work/pop-phase-b` 브랜치의 인구·사회 기초 엔진은 C-D0 및 C-E의 통합 구현 완료와 구분합니다.
+
+## Phase C 군사 설계(설계 확정 · C++ 미구현)
+
+[군사 C-M1~M5 상세 설계](phase-c/military/README.md)에서 징병·예비군/제대, 부대/편제·장비/지휘, 군수·물류, 작전/전투·사상자/회복, 전쟁/점령·종전/복구를 [C-D0](phase-c/C-D0_COMMON_CONTRACT.md) 및 [C-E1~E5](phase-c/economy/README.md)와 호환되게 확정했습니다. [군사 인수시험](phase-c/military/MILITARY_ACCEPTANCE_TESTS.md)에는 인구·복무·군수품·재정·사상자·관할권 관련 불변식과 30개 시나리오가 포함됩니다. 실제 통합 엔진/실측 역사계수/장기 C-D4 검증은 미완료입니다. 정치 C-P1~P5는 별도 문서로 작성되었지만 GitHub 병합은 완료되지 않았습니다.
