@@ -66,3 +66,12 @@ if (BUILD_TESTING)
     add_test(NAME vic25_phase_c_combined_longrun COMMAND vic25_phase_c_combined_longrun)
     set_tests_properties(vic25_phase_c_combined_longrun PROPERTIES TIMEOUT 180)
 endif()
+
+# D4-T46: 1,200 months x2 with endogenous population dynamics and simultaneous
+# economic, political, military, healthcare and financial crisis events.
+if (BUILD_TESTING)
+    add_executable(vic25_phase_c_population_crisis tests/test_phase_c_population_crisis.cpp)
+    target_link_libraries(vic25_phase_c_population_crisis PRIVATE vic25_core)
+    add_test(NAME vic25_phase_c_population_crisis COMMAND vic25_phase_c_population_crisis)
+    set_tests_properties(vic25_phase_c_population_crisis PROPERTIES TIMEOUT 240)
+endif()
