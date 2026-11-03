@@ -291,7 +291,7 @@ public:
             ensure(!name.empty() && n >= 0, "invalid party vote");
             total = phaseb::add_checked(total, n);
         }
-        ensure(total <= registered - invalid, "ballots exceed registration");
+        ensure(total > 0 && total <= registered - invalid, "ballots exceed registration");
         ElectionResult result;
         result.eligible = eligible;
         result.registered = registered;
@@ -306,11 +306,12 @@ public:
             std::string chosen;
             for (const auto& [name, n] : votes) {
                 if (chosen.empty()) { chosen = name; continue; }
-                const auto l = static_cast<__int128>(n) *
-                               (result.seats[chosen] + 1);
-                const auto r = static_cast<__int128>(votes.at(chosen)) *
-                               (result.seats[name] + 1);
-                if (l > r || (l == r && name < chosen)) chosen = name;
+                const int order = compare_nonnegative_ratios(
+                    static_cast<std::uint64_t>(n),
+                    static_cast<std::uint64_t>(result.seats[name] + 1),
+                    static_cast<std::uint64_t>(votes.at(chosen)),
+                    static_cast<std::uint64_t>(result.seats[chosen] + 1));
+                if (order > 0 || (order == 0 && name < chosen)) chosen = name;
             }
             ++result.seats[chosen];
         }
@@ -451,6 +452,25 @@ private:
     int stage_{-1}, voting_age_years_{21};
     bool election_this_month_{}, demography_enabled_{};
 
+    // Exact nonnegative fraction comparison using Euclid/continued fractions:
+    // no 128-bit GNU extension, overflow or floating-point ties (MSVC friendly).
+    static int compare_nonnegative_ratios(std::uint64_t a, std::uint64_t b,
+                                          std::uint64_t c, std::uint64_t d) {
+        ensure(b != 0 && d != 0, "zero election divisor");
+        int direction = 1;
+        for (;;) {
+            const auto qa = a / b, qc = c / d;
+            if (qa != qc) return (qa > qc ? 1 : -1) * direction;
+            a %= b; c %= d;
+            if (a == 0 || c == 0) {
+                if (a == c) return 0;
+                return (a == 0 ? -1 : 1) * direction;
+            }
+            std::swap(a, b);
+            std::swap(c, d);
+            direction = -direction;
+        }
+    }
     static std::string account(const std::string& who, const std::string& suffix) {
         return who + ":" + suffix;
     }
