@@ -361,6 +361,39 @@ public:
     [[nodiscard]] Money reparations_outstanding(const std::string& id) const {
         return reparations_.at(id).remaining;
     }
+    Id migrate_with_explicit_property_allocation(
+        Id source,People count,const std::string& destination_region,Id destination_household,
+        const std::string& old_owner,const std::string& new_owner,
+        Money moving_cash,const std::string& asset,Money moving_shares) {
+        require_stage({10});
+        ensure(people_.has_slice(source) && count>0 &&
+               count<=people_.slice(source).count && actors_.contains(old_owner) &&
+               actors_.contains(new_owner)&&old_owner!=new_owner &&
+               moving_cash>=0&&cash(old_owner)>=moving_cash &&
+               moving_shares>=0 &&
+               (moving_shares==0||(tracked_assets_.contains(asset) &&
+                shares(asset,old_owner)>=moving_shares)),
+               "invalid explicit migration and ownership allocation");
+        const Id arrived=people_.migrate(source,count,destination_region,destination_household,0);
+        if(moving_cash) {
+            money_.post({unique("migration-cash"),"explicit household capital reallocation",{
+                {account(old_owner,"capital"),moving_cash,0},
+                {account(old_owner,"cash"),0,moving_cash},
+                {account(new_owner,"cash"),moving_cash,0},
+                {account(new_owner,"capital"),0,moving_cash}}});
+        }
+        if(moving_shares) {
+            ensure_security_account(new_owner,asset);
+            ownership_.transfer(asset,old_owner,new_owner,moving_shares);
+            money_.post({unique("migration-share"),"explicit migration securities allocation",{
+                {account(old_owner,"capital"),moving_shares,0},
+                {security_account(old_owner,asset),0,moving_shares},
+                {security_account(new_owner,asset),moving_shares,0},
+                {account(new_owner,"capital"),0,moving_shares}}});
+        }
+        events_.push_back("population-migration-with-explicit-asset-rights");
+        return arrived;
+    }
     void demobilize(const std::string& unit,Id source,People n) {
         require_stage({10});
         ensure(units_.contains(unit)&&units_.at(unit).contains(source)&&
