@@ -1,3 +1,5 @@
+> **Phase D-D0 건설·산업·기술 공통 설계 확정 (`phase-d-common/1.0`, 2026-11-04):** [docs/phase-d/README.md](docs/phase-d/README.md)에서 공사·산업·기술의 단일 원본, 월별 12단계, 14개 불변조건, 20개 ADR, 24개 인수시험을 확인할 수 있습니다. **설계 문서 확정이며 Phase D C++ 구현 및 24개 인수시험 실행 전**입니다. 이 설계는 `work/phase-d-design` 브랜치에 있으며 `main`에 아직 반영되지 않았습니다.
+
 > **Phase C-D4 통합 검증 설계 (phase-c-integration/1.0)**: [docs/phase-c/integration/README.md](docs/phase-c/integration/README.md)에서 POP·경제·정치·군사 통합 World, 30개 불변조건·48개 교차 시험·월별 12단계·저장/복구/100년 장기 시험과 실제 구현 게이트를 확인할 수 있습니다. **설계 문서 확정이며 C++ 통합 엔진/장기 회귀는 미실행**입니다. 정치 C-P 설계 GitHub 정본 등록·Phase B 원장 통합이 선행조건입니다.
 
 > **Phase C-M1~M5 군사 상세 설계 (phase-c-military/1.0)**: [docs/phase-c/military/README.md](docs/phase-c/military/README.md)에서 병역·동원·예비군, 부대·장비·훈련, 군수·보급, 작전·사상자, 전쟁·점령·종전 및 [군사 인수시험](docs/phase-c/military/MILITARY_ACCEPTANCE_TESTS.md)을 확인할 수 있습니다. **설계 완료이며 전체 C++ 통합 구현·전쟁 시뮬레이션 회귀 전**입니다.
