@@ -1,3 +1,5 @@
+> **Phase C-D0 공통 설계 계약 (phase-c-common/1.0)**: [docs/phase-c/README.md](docs/phase-c/README.md)에서 경제·정치·군사의 공통 객체·원장 소유권·월별 12단계·정책 효력·군사 배속·통합 사건/롤백 규격을 확인할 수 있습니다. **설계 확정이며 전체 C++ 통합 구현/장기 검증이 끝난 것은 아닙니다.**
+
 > **신규 POP-D0~D3 설계 계약 (pop-design/1.1)**: [docs/pop/README.md](docs/pop/README.md)에서 인구 코호트·경제 POP·가구 풀/희소 PopulationSlice, 전이 이벤트, 월별 원자적 실행 규칙과 구현 인수조건을 확인할 수 있습니다. **설계 문서 완료이며 C++20 실물 엔진 이식/장기 검증은 아직 미실행입니다.** 기존 README 아래의 자료구조 설명은 초기 골격 기준입니다.
 
 # VIC2.5 — POP 중심 역사 대전략 시뮬레이션
