@@ -40,6 +40,10 @@ struct CabinetChange {
     std::string country, new_head, new_prime_minister;
     bool replace_head{}, replace_prime{};
 };
+struct PublicInstitution {
+    std::string id, operator_id, region, good;
+    People monthly_slots{}, patients_per_worker{3}, provided{};
+};
 struct Reparation {
     std::string id, payer, recipient;
     Money total{}, remaining{};
@@ -263,6 +267,42 @@ public:
             {security_account(buyer, asset), face, 0},
             {account(buyer, "cash"), 0, face}}});
         events_.push_back("bond-issued-paid");
+    }
+    void seed_public_institution(const std::string& id,const std::string& operator_id,
+                                 const std::string& region,const std::string& medicine,
+                                 People monthly_slots,People patients_per_worker=3) {
+        ensure(stage_==-1&&commit_id_==0&&!id.empty()&&
+               actors_.contains(operator_id)&&!region.empty()&&!medicine.empty()&&
+               monthly_slots>0&&patients_per_worker>0&&!public_institutions_.contains(id),
+               "invalid public institution");
+        public_institutions_[id]={id,operator_id,region,medicine,monthly_slots,patients_per_worker,0};
+    }
+    void enact_public_healthcare(bool enabled) {
+        require_stage({9});
+        ensure(governments_.empty(),"constitutional government requires authorized public law");
+        scheduled_public_healthcare_[month()+1]=enabled;
+        events_.push_back("public-right-next-month");
+    }
+    [[nodiscard]] bool has_public_healthcare_right() const {return healthcare_right_;}
+    void provide_public_healthcare(const std::string& institution,Id patient_slice,People patients) {
+        require_stage({7});
+        ensure(healthcare_right_&&public_institutions_.contains(institution)&&
+               people_.has_slice(patient_slice)&&patients>0,
+               "no legal entitlement or patient population");
+        auto& service=public_institutions_.at(institution);
+        ensure(patients<=people_.slice(patient_slice).count &&
+               service.provided+patients<=service.monthly_slots &&
+               patients<=positive_product(employed_by(service.operator_id),
+                                           service.patients_per_worker) &&
+               paid_staff_this_month_[service.operator_id]>0 &&
+               stock(service.operator_id,service.region,service.good)>=patients,
+               "public service cannot exceed actual paid staff facility and supplies");
+        goods_.consume({service.operator_id,service.region,service.good},patients);
+        service.provided+=patients;
+        events_.push_back("actual-public-medical-service");
+    }
+    [[nodiscard]] People public_services_rendered(const std::string& id) const {
+        return public_institutions_.at(id).provided;
     }
     void seed_production_facility(const std::string& id,const std::string& owner,
                                   const std::string& region,Quantity capacity) {
@@ -602,6 +642,7 @@ public:
             p.push_back({account(treasury, "revenue"), 0, withheld});
         }
         money_.post({unique("payroll"), "gross payroll with withholding", p});
+        paid_staff_this_month_[payer]=phaseb::add_checked(paid_staff_this_month_[payer],gross);
         events_.push_back("wages");
     }
     void lend(const std::string& borrower, Money amount) {
@@ -881,6 +922,11 @@ public:
             ensure(t.total>0&&t.remaining>=0&&t.remaining<=t.total,
                    "invalid reparation amount");
         }
+        for(const auto& [id,svc]:public_institutions_) {
+            ensure(id==svc.id && svc.provided>=0 &&
+                   svc.provided<=svc.monthly_slots &&
+                   svc.monthly_slots>0,"invalid public services accounting");
+        }
         for(const auto& [id,site]:facilities_) {
             ensure(id==site.id&&site.capacity>0&&site.damaged>=0&&
                    site.damaged<=site.capacity,"invalid physical facility");
@@ -953,6 +999,10 @@ private:
         std::int64_t due{};
     };
     std::map<std::string, DividendDue> dividends_;
+    bool healthcare_right_{};
+    std::map<std::int64_t,bool> scheduled_public_healthcare_;
+    std::map<std::string,PublicInstitution> public_institutions_;
+    std::map<std::string,Money> paid_staff_this_month_;
     Money total_bad_debt_{};
     bool bank_insolvent_{};
     std::map<std::string,People> regional_food_grievance_;
@@ -1070,6 +1120,13 @@ private:
         return n;
     }
     void open_month() {
+        paid_staff_this_month_.clear();
+        for(auto& [key,svc]:public_institutions_) {(void)key;svc.provided=0;}
+        if(auto law=scheduled_public_healthcare_.find(month());
+           law!=scheduled_public_healthcare_.end()){
+            healthcare_right_=law->second;
+            scheduled_public_healthcare_.erase(law);
+        }
         for(auto& [id,t]:reparations_) {
             (void)id;
             if(!t.recognized&&t.effective_month<=month()){
