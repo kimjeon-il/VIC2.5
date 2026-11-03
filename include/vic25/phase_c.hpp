@@ -91,6 +91,7 @@ public:
         money_.add_account("BANK:deposit", "BANK", AccountType::liability);
         money_.add_account("BANK:reserves", "BANK", AccountType::asset);
         money_.add_account("BANK:loan", "BANK", AccountType::asset);
+        money_.add_account("BANK:loan_loss", "BANK", AccountType::expense);
     }
 
     [[nodiscard]] const phaseb::World& people() const { return people_; }
@@ -605,11 +606,46 @@ public:
     }
     void lend(const std::string& borrower, Money amount) {
         require_stage({1});
-        ensure(amount > 0 && actors_.contains(borrower), "invalid loan");
+        ensure(amount > 0 && actors_.contains(borrower) && !bank_insolvent_,
+               "bank insolvent or borrower invalid");
         money_.post({unique("loan"), "bank loan creates matching deposit", {
             {"BANK:loan", amount, 0}, {"BANK:deposit", 0, amount},
             {account(borrower, "cash"), amount, 0}, {account(borrower, "debt"), 0, amount}}});
         events_.push_back("loan");
+    }
+    void forgive_defaulted_loan(const std::string& borrower, Money amount) {
+        require_stage({8});
+        ensure(actors_.contains(borrower)&&amount>0 &&
+               -money_.balance(account(borrower,"debt"))>=amount &&
+               money_.balance("BANK:loan")>=amount,
+               "invalid defaulted loan debt forgiveness");
+        money_.post({unique("loan-loss"),"bank recognizes loss, borrower released from debt",{
+            {"BANK:loan_loss",amount,0},{"BANK:loan",0,amount},
+            {account(borrower,"debt"),amount,0},
+            {account(borrower,"revenue"),0,amount}}});
+        total_bad_debt_=phaseb::add_checked(total_bad_debt_,amount);
+        const Money loans=money_.balance("BANK:loan");
+        const Money deposits=-money_.balance("BANK:deposit");
+        const Money reserves=money_.balance("BANK:reserves");
+        bank_insolvent_ = (loans+reserves < deposits);
+        events_.push_back("defaulted-bank-asset-recognition");
+    }
+    [[nodiscard]] Money bank_losses() const { return total_bad_debt_; }
+    [[nodiscard]] bool bank_insolvent() const { return bank_insolvent_; }
+    [[nodiscard]] People food_grievance(const std::string& region) const {
+        auto it=regional_food_grievance_.find(region);
+        return it==regional_food_grievance_.end()?0:it->second;
+    }
+    void organize_from_food_grievance(Id slice,const std::string& group,People n) {
+        require_stage({9});
+        ensure(people_.has_slice(slice)&&n>0&&interest_groups_.contains(group),
+               "invalid political issue association");
+        const auto& d=people_.demographic(people_.slice(slice).key.demographic);
+        ensure(n<=food_grievance(d.region)&&
+               group_members(slice,group)+n<=people_.slice(slice).count,
+               "political organization exceeds actual grievance or persons");
+        membership_[{slice,group}]+=n;
+        events_.push_back("material-shortage-political-organization");
     }
     void repay(const std::string& borrower, Money amount) {
         require_stage({8});
@@ -802,6 +838,7 @@ public:
             stage.stage_ = n;
             if (n == 0) stage.open_month();
             for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
+            if (n == 9) stage.collect_market_grievances();
             if (n == 10) {
                 // Strikes reserve actual working time only for this month's
                 // production; they must not outlive a later death or split.
@@ -916,6 +953,9 @@ private:
         std::int64_t due{};
     };
     std::map<std::string, DividendDue> dividends_;
+    Money total_bad_debt_{};
+    bool bank_insolvent_{};
+    std::map<std::string,People> regional_food_grievance_;
     std::map<std::string,Reparation> reparations_;
     std::map<std::string,ProductionFacility> facilities_;
     std::map<std::int64_t,std::map<std::string,Quantity>> scheduled_site_repairs_;
@@ -973,6 +1013,16 @@ private:
     void ensure_security_account(const std::string& who, const std::string& asset) {
         if (security_accounts_.insert({who, asset}).second)
             money_.add_account(security_account(who, asset), who, AccountType::asset);
+    }
+    void collect_market_grievances() {
+        for(const auto& [key,m]:markets_) {
+            const auto& [region,good]=key;
+            if(good=="food"&&m.unmet>0) {
+                regional_food_grievance_[region]=phaseb::add_checked(
+                    regional_food_grievance_[region],m.unmet);
+                events_.push_back("observed-food-shortage");
+            }
+        }
     }
     void reprice_markets() {
         for(auto& [key,m]:markets_) {
