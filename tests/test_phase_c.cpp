@@ -218,7 +218,29 @@ int main() {
         f.w.advance(p);
         verify(f.w.military_control("R")=="B"&&f.w.sovereignty("R")=="A","sovereignty mutated");
     });
-    test.skip(5,"typed cross-domain entity registry and historical lineage not implemented");
+    test.run(5, []{
+        F f;
+        f.w.seed_actor("U",0);
+        f.w.seed_region("Unused","A");
+        f.w.seed_region("Replacement","A");
+        const auto military_id=f.w.typed_id(EntityKind::unit,"U");
+        const auto financial_id=f.w.typed_id(EntityKind::actor,"U");
+        const auto old=f.w.typed_id(EntityKind::region,"Unused");
+        const auto successor=f.w.typed_id(EntityKind::region,"Replacement");
+        verify(military_id!=financial_id,"typed ID namespaces collapsed");
+        verify(rejected([&]{f.w.require_typed(military_id,EntityKind::region);}),
+               "wrong entity type accepted");
+        verify(rejected([&]{f.w.seed_region("Unused","A");}),"duplicate region ID issued");
+        IntegratedWorld::Plan retire;
+        retire[9].push_back([](auto& w){w.retire_unused_region("Unused","Replacement");});
+        f.w.advance(retire);
+        verify(f.w.successor_of(old)==successor,"lineage successor not recorded");
+        verify(rejected([&]{f.w.require_typed(old,EntityKind::region);}),
+               "retired typed ID was reused");
+        IntegratedWorld::Plan abuse;
+        abuse[10].push_back([](auto& w){w.occupy("Unused","B");});
+        verify(rejected([&]{f.w.advance(abuse);}),"tombstoned location accepted orders");
+    });
     test.run(6, []{
         F f;
         f.w.seed_actor("H2",0);
