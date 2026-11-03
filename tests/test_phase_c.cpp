@@ -526,7 +526,36 @@ int main() {
                f.w.people().employed(f.civ)==10,
                "strike should reduce hours but not automatically terminate jobs");
     });
-    test.skip(40,"peace settlement obligations and demobilization/reconstruction not implemented");
+    test.run(40, []{
+        F f;
+        f.w.seed_stock("F","R","building_materials",4);
+        f.w.seed_production_facility("factory","F","R",10);
+        IntegratedWorld::Plan treaty;
+        treaty[2].push_back([&](auto& w){w.hire(f.civ,4,"F",1);});
+        treaty[9].push_back([](auto& w){w.sign_reparation_treaty("peace-1","F","H",100);});
+        treaty[10].push_back([](auto& w){w.war_damage_facility("factory",4);});
+        f.w.advance(treaty);
+        verify(f.w.reparations_outstanding("peace-1")==100&&
+               f.w.facility("factory").damaged==4&&
+               f.w.cash("H")==50,"peace generated cash or instant restoration");
+        IntegratedWorld::Plan recovery;
+        recovery[4].push_back([](auto& w){
+            w.rebuild_facility("factory","building_materials",4,4);
+        });
+        recovery[5].push_back([](auto& w){w.pay_reparation("peace-1",20);});
+        recovery[10].push_back([&](auto& w){w.demobilize("U",f.active,10);});
+        f.w.advance(recovery);
+        verify(f.w.cash("H")==70&&f.w.reparations_outstanding("peace-1")==80 &&
+               f.w.financial().balance("F:reparations_payable")==-80 &&
+               f.w.financial().balance("H:reparations_receivable")==80 &&
+               f.w.facility("factory").damaged==4 &&
+               f.w.active_strength("U")==90 && f.w.people().population()==600 &&
+               f.w.stock("F","R","building_materials")==0,
+               "unpaid treaty or demobilization/rebuilding accounting incorrect");
+        f.w.advance();
+        verify(f.w.facility("factory").damaged==0,
+               "material-backed reconstruction did not become operational next month");
+    });
     test.run(41, []{
         F f;IntegratedWorld::Plan p;
         p[5].push_back([](auto& w){w.pay("F","H",100);});
