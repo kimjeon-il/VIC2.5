@@ -1014,8 +1014,8 @@ public:
         for (int n = 0; n != 12; ++n) {
             stage.stage_ = n;
             if (n == 0) stage.open_month();
+            if (n == 9) stage.collect_market_grievances(); // actual stage-7 shortages precede political decisions
             for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
-            if (n == 9) stage.collect_market_grievances();
             if (n == 10) {
                 // Strikes reserve actual working time only for this month's
                 // production; they must not outlive a later death or split.
