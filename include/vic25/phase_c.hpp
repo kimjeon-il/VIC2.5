@@ -30,6 +30,16 @@ inline Money positive_product(Money a, Money b) {
     return phaseb::mul_checked(a, b);
 }
 
+// Scope: one chamber per country, with government continuity across office changes.
+struct GovernmentState {
+    std::string country, head_of_state, prime_minister;
+    People chamber_seats{}, quorum{};
+    std::uint64_t revision{1};
+};
+struct CabinetChange {
+    std::string country, new_head, new_prime_minister;
+    bool replace_head{}, replace_prime{};
+};
 struct ElectionResult {
     People eligible{}, registered{}, cast{}, invalid{}, valid{};
     std::map<std::string, People> votes;
@@ -203,6 +213,55 @@ public:
             {security_account(buyer, asset), face, 0},
             {account(buyer, "cash"), 0, face}}});
         events_.push_back("bond-issued-paid");
+    }
+    void seed_government(std::string country, std::string head,
+                         std::string prime, People chamber_seats, People quorum) {
+        ensure(stage_ == -1 && commit_id_ == 0 && !country.empty() &&
+               !head.empty() && !prime.empty() && chamber_seats > 0 &&
+               quorum > 0 && quorum <= chamber_seats &&
+               !governments_.contains(country), "invalid government seed");
+        bool sovereign_exists = false;
+        for (const auto& [region, sovereign] : sovereignty_) {
+            (void)region;
+            if (sovereign == country) sovereign_exists = true;
+        }
+        ensure(sovereign_exists, "country has no region");
+        governments_.emplace(country, GovernmentState{country, head, prime, chamber_seats, quorum, 1});
+    }
+    [[nodiscard]] const GovernmentState& government(const std::string& country) const {
+        return governments_.at(country);
+    }
+    void propose_tax_law(const std::string& country, const std::string& proposer,
+                         const std::vector<std::string>& supporting_parties, int ppm) {
+        require_stage({9});
+        ensure(ppm >= 0 && ppm <= 1'000'000, "invalid tax rate");
+        const auto& g = governments_.at(country);
+        ensure(g.prime_minister == proposer && last_election_.total_seats == g.chamber_seats,
+               "unauthorized tax bill or missing legislature");
+        ensure(coalition_seats(supporting_parties) >= g.quorum, "insufficient legislative votes");
+        scheduled_income_tax_[month()+1] = ppm;
+        events_.push_back("constitutional-tax-law");
+    }
+    void appoint_cabinet(const std::string& country, const std::string& head,
+                        std::string minister, const std::vector<std::string>& supporting_parties) {
+        require_stage({9});
+        const auto& g=governments_.at(country);
+        ensure(g.head_of_state == head && !minister.empty() &&
+               last_election_.total_seats == g.chamber_seats &&
+               coalition_seats(supporting_parties) >= g.quorum,
+               "cabinet lacks appointment authority or majority");
+        scheduled_cabinets_[month()+1].push_back({country, "", std::move(minister), false, true});
+        events_.push_back("cabinet-approved");
+    }
+    void change_head_of_state(const std::string& country,
+                              const std::string& current_head,
+                              std::string successor) {
+        require_stage({9});
+        const auto& g=governments_.at(country);
+        ensure(g.head_of_state == current_head && !successor.empty() &&
+               current_head != successor, "invalid head-of-state succession");
+        scheduled_cabinets_[month()+1].push_back({country, std::move(successor), "", true, false});
+        events_.push_back("head-of-state-succession");
     }
     void set_voting_age(int age) {
         ensure(stage_ == -1 && commit_id_ == 0 && age >= 0 && age <= 120, "bad opening voting age");
@@ -509,6 +568,11 @@ public:
     }
     void validate() const {
         ensure(people_.validate(), "invalid population registry");
+        for (const auto& [id,g] : governments_) {
+            ensure(id==g.country && !g.head_of_state.empty() && !g.prime_minister.empty() &&
+                   g.chamber_seats>0 && g.quorum>0 && g.quorum<=g.chamber_seats,
+                   "invalid government institution");
+        }
         ensure(money_.balanced(), "unbalanced financial ledger");
         Money deposits = 0;
         for (const auto& actor : actors_) {
@@ -560,6 +624,8 @@ private:
         std::int64_t due{};
     };
     std::map<std::string, DividendDue> dividends_;
+    std::map<std::string, GovernmentState> governments_;
+    std::map<std::int64_t, std::vector<CabinetChange>> scheduled_cabinets_;
     std::map<std::string, Shipment> shipments_;
     std::set<std::string> tracked_goods_;
     std::map<std::string, std::string> sovereignty_, military_control_;
@@ -602,6 +668,16 @@ private:
         if (security_accounts_.insert({who, asset}).second)
             money_.add_account(security_account(who, asset), who, AccountType::asset);
     }
+    [[nodiscard]] People coalition_seats(const std::vector<std::string>& party_ids) const {
+        std::set<std::string> unique;
+        People total = 0;
+        for (const auto& party : party_ids) {
+            ensure(unique.insert(party).second && last_election_.seats.contains(party),
+                   "duplicate or unknown coalition party");
+            total = phaseb::add_checked(total, last_election_.seats.at(party));
+        }
+        return total;
+    }
     static std::string account(const std::string& who, const std::string& suffix) {
         return who + ":" + suffix;
     }
@@ -621,6 +697,15 @@ private:
         return n;
     }
     void open_month() {
+        if (auto pending=scheduled_cabinets_.find(month()); pending!=scheduled_cabinets_.end()) {
+            for (const auto& c : pending->second) {
+                auto& g=governments_.at(c.country);
+                if (c.replace_head) g.head_of_state=c.new_head;
+                if (c.replace_prime) g.prime_minister=c.new_prime_minister;
+                ++g.revision;
+            }
+            scheduled_cabinets_.erase(pending);
+        }
         auto it = scheduled_voting_age_.find(month());
         if (it != scheduled_voting_age_.end()) {
             voting_age_years_ = it->second;
