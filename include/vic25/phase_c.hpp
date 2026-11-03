@@ -108,6 +108,7 @@ public:
     void seed_stock(std::string holder, std::string region, std::string good, Quantity qty) {
         ensure(stage_ == -1 && commit_id_ == 0, "stock seed after simulation start");
         ensure(qty > 0, "invalid initial stock");
+        tracked_goods_.insert(good);
         goods_.initialize({std::move(holder), std::move(region), std::move(good)}, qty);
     }
     void seed_region(std::string region, std::string sovereign) {
@@ -237,6 +238,7 @@ public:
         ensure(stock(firm, region, input) >= qty, "missing production input");
         goods_.consume({firm, region, input}, qty);
         goods_.produce({firm, region, output}, qty);
+        tracked_goods_.insert(output);
         events_.push_back("production");
     }
     void trade(const std::string& seller, const std::string& buyer,
