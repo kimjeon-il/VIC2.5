@@ -2,6 +2,7 @@
 #undef NDEBUG
 #endif
 #include "vic25/phase_c_snapshot.hpp"
+#include "phase_c_t46_crisis.hpp"
 #include <filesystem>
 #include <fstream>
 #include <cassert>
@@ -816,7 +817,17 @@ int main() {
                "committed snapshot overwritten without versioned replacement");
         fs::remove(path);fs::remove(corrupted);
     });
-    test.skip(46,"1,200-month combined crisis dynamics not yet implemented; partial long-run smoke separate");
+    test.run(46, []{
+        CrisisScenario a,b;
+        perform(a);
+        perform(b);
+        verify(a.w.people().fingerprint()==b.w.people().fingerprint() &&
+               a.w.journal()==b.w.journal() &&
+               a.w.commit_id()==1200 && b.w.commit_id()==1200 &&
+               a.w.cash("F")==b.w.cash("F") &&
+               a.w.active_strength("U")==b.w.active_strength("U"),
+               "D4-T46 1200-month integrated crisis not deterministic");
+    });
     test.skip(47,"100k/1M active integrated world load/performance not verified");
     test.skip(48,"full contract baseline BLOCKED pending politics source registration");
 
