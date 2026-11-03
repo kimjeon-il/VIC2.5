@@ -94,7 +94,7 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,Shipment>){
         V(id);V(from);V(to);V(origin);V(destination);V(good);
         V(quantity);V(loss);V(arrival_month);V(delivered);
-    } else if constexpr(std::is_same_v<X,IntegratedWorld::DividendDue>){
+    } else if constexpr(std::is_same_v<X,DividendDue>){
         V(asset);V(payer);V(holder);V(amount);V(due);
     } else {
         static_assert(sizeof(X)==0,"SnapshotCodec needs an explicit struct layout");

@@ -50,6 +50,11 @@ struct PublicInstitution {
     std::string id, operator_id, region, good;
     People monthly_slots{}, patients_per_worker{3}, provided{};
 };
+struct DividendDue {
+    std::string asset, payer, holder;
+    Money amount{};
+    std::int64_t due{};
+};
 struct Reparation {
     std::string id, payer, recipient;
     Money total{}, remaining{};
@@ -1152,11 +1157,6 @@ private:
 
     std::set<std::string> tracked_assets_;
     std::set<std::pair<std::string, std::string>> security_accounts_;
-    struct DividendDue {
-        std::string asset, payer, holder;
-        Money amount{};
-        std::int64_t due{};
-    };
     std::map<std::string, DividendDue> dividends_;
     bool healthcare_right_{};
     std::map<std::int64_t,bool> scheduled_public_healthcare_;
