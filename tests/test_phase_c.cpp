@@ -285,7 +285,7 @@ int main() {
         // as synthetic ballot weights only after seeding 100 more adult voters.
         auto& p0=f.w.seed_population();
         const auto old=p0.slice(f.civ);
-        p0.add_population(old.key.demographic,old.key.economic,old.key.household,100,old.key.partition);
+        p0.seed_population(old.key.demographic,old.key.economic,old.key.household,100,old.key.partition);
         p[9].push_back([](auto& w){w.hold_election(400,0,3,{{"A",220},{"B",130},{"C",50}});});
         f.w.advance(p);
         verify(f.w.election().seats.at("A")==2&&f.w.election().seats.at("B")==1,"D'Hondt");
