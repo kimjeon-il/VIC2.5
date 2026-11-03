@@ -53,3 +53,7 @@ if (BUILD_TESTING)
     add_test(NAME vic25_phase_c_longrun COMMAND vic25_phase_c_longrun)
     set_tests_properties(vic25_phase_c_longrun PROPERTIES TIMEOUT 180)
 endif()
+
+# Observed large-slice performance; not automatically a 100-year stress pass.
+add_executable(vic25_phase_c_scaling bench/phase_c_scaling.cpp)
+target_link_libraries(vic25_phase_c_scaling PRIVATE vic25_core)
