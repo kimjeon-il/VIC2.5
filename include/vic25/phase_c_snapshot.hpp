@@ -290,12 +290,25 @@ struct SnapshotCodec {
         w.validate();
         return w;
     }
+    // Version lock identifies the exact POP/common/economy/politics/military
+    // contract families and the limited numeric/ruleset semantics actually
+    // implemented by this integration slice. It does not imply full
+    // historical calibration or feature-complete engine certification.
+    [[nodiscard]] static constexpr std::array<const char*,9> contract_header() {
+        return {{"pop-design/1.1", "phase-c-common/1.0",
+                 "phase-c-economy/1.0", "phase-c-politics/1.0",
+                 "phase-c-military/1.0", "phase-c-integration/1.0",
+                 "checked-int64/1", "integer-lot/1",
+                 "vertical-slice-ruleset/1"}};
+    }
     static void save(const IntegratedWorld& w,const std::filesystem::path& path){
         const auto payload=encode(w);
         std::ostringstream header(std::ios::binary|std::ios::out);
         persistence_detail::BinaryWriter ar{header};
-        const std::string magic="VIC25_SNAPSHOT_PHASEC_1";
-        ar(magic);ar(static_cast<std::uint64_t>(payload.size()));
+        const std::string magic="VIC25_SNAPSHOT_PHASEC_2";
+        ar(magic);
+        for (const char* version : contract_header()) ar(std::string(version));
+        ar(static_cast<std::uint64_t>(payload.size()));
         std::string bytes=header.str()+payload;
         std::ostringstream trailing(std::ios::binary|std::ios::out);
         persistence_detail::BinaryWriter trailing_writer{trailing};
@@ -322,10 +335,20 @@ struct SnapshotCodec {
         std::istringstream is(bytes,std::ios::binary|std::ios::in);
         persistence_detail::BinaryReader rd{is};
         std::string magic;std::uint64_t n{};
-        rd(magic);rd(n);
-        if(magic!="VIC25_SNAPSHOT_PHASEC_1" || n>512'000'000 ||
-           static_cast<std::uint64_t>(bytes.size()-static_cast<std::size_t>(is.tellg()))!=n+8)
-            throw std::runtime_error("wrong version or truncated snapshot");
+        rd(magic);
+        if (magic!="VIC25_SNAPSHOT_PHASEC_2")
+            throw std::runtime_error("unsupported checkpoint schema version");
+        for (const char* expected_version : contract_header()) {
+            std::string version;
+            rd(version);
+            if (version!=expected_version)
+                throw std::runtime_error("checkpoint contract, numeric policy or ruleset version mismatch");
+        }
+        rd(n);
+        const auto header_pos=is.tellg();
+        if(header_pos<0 || n>512'000'000 ||
+           static_cast<std::uint64_t>(bytes.size()-static_cast<std::size_t>(header_pos))!=n+8)
+            throw std::runtime_error("truncated snapshot");
         std::string payload(static_cast<std::size_t>(n),'\0');
         is.read(payload.data(),static_cast<std::streamsize>(n));
         if(!is)throw std::runtime_error("truncated payload");
