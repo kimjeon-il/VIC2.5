@@ -1,0 +1,508 @@
+#pragma once
+
+// Phase C integration vertical slice. Reuses Phase B as the ONLY population
+// headcount and job authority, and S0's checked double-entry and stock ledgers.
+// Implements actual staged transactions; high-detail political/war models remain
+// separate future modules (see docs/phase-c/integration/).
+#include "vic25/phase_b.hpp"
+#include "vic25/ledgers.hpp"
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <limits>
+#include <map>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace vic25::phasec {
+using Id = phaseb::Id;
+using People = phaseb::People;
+using Money = std::int64_t;
+inline void ensure(bool yes, const char* msg) {
+    if (!yes) throw std::invalid_argument(msg);
+}
+inline Money positive_product(Money a, Money b) {
+    ensure(a >= 0 && b >= 0, "negative amount");
+    return phaseb::mul_checked(a, b);
+}
+
+struct ElectionResult {
+    People eligible{}, registered{}, cast{}, invalid{}, valid{};
+    std::map<std::string, People> votes;
+    std::map<std::string, People> seats;
+    People total_seats{};
+};
+struct Shipment {
+    std::string id, from, to, origin, destination, good;
+    Quantity quantity{}, loss{};
+    std::int64_t arrival_month{};
+    bool delivered{};
+};
+struct UnitAssignment {
+    std::string unit;
+    Id slice{};
+    People count{};
+};
+struct CombatLoss {
+    People killed{}, acute{}, long_term{}, pow{}, missing{};
+    Quantity ammunition{};
+};
+struct AdvanceReport {
+    std::int64_t starting_month{};
+    std::int64_t finished_month{};
+    People population{};
+    std::uint64_t commit_id{};
+};
+
+class IntegratedWorld {
+public:
+    using Task = std::function<void(IntegratedWorld&)>;
+    using Plan = std::array<std::vector<Task>, 12>;
+
+    explicit IntegratedWorld(std::int64_t month = 24000) : people_(month) {
+        money_.add_account("BANK:deposit", "BANK", AccountType::liability);
+        money_.add_account("BANK:reserves", "BANK", AccountType::asset);
+        money_.add_account("BANK:loan", "BANK", AccountType::asset);
+    }
+
+    [[nodiscard]] const phaseb::World& people() const { return people_; }
+    phaseb::World& seed_population() {
+        ensure(stage_ == -1 && commit_id_ == 0, "population seed after simulation start");
+        return people_;
+    }
+    [[nodiscard]] std::int64_t month() const { return people_.month(); }
+    [[nodiscard]] std::uint64_t commit_id() const { return commit_id_; }
+    [[nodiscard]] const FinancialLedger& financial() const { return money_; }
+    [[nodiscard]] const InventoryLedger& inventory() const { return goods_; }
+    [[nodiscard]] const std::vector<std::string>& journal() const { return events_; }
+    [[nodiscard]] const ElectionResult& election() const { return last_election_; }
+    [[nodiscard]] int voting_age() const { return voting_age_years_; }
+    [[nodiscard]] const std::string& military_control(const std::string& region) const {
+        return military_control_.at(region);
+    }
+    [[nodiscard]] const std::string& sovereignty(const std::string& region) const {
+        return sovereignty_.at(region);
+    }
+
+    void seed_actor(const std::string& who, Money amount) {
+        ensure(stage_ == -1 && commit_id_ == 0, "actor seed after simulation start");
+        ensure(!who.empty() && !actors_.contains(who) && amount >= 0, "invalid actor seed");
+        actors_.insert(who);
+        for (const auto& [suffix, type] : std::array<std::pair<std::string, AccountType>, 5>{{
+            {"cash", AccountType::asset}, {"capital", AccountType::equity},
+            {"revenue", AccountType::revenue}, {"expense", AccountType::expense},
+            {"debt", AccountType::liability}}}) {
+            money_.add_account(account(who, suffix), who, type);
+        }
+        if (amount) {
+            money_.post({unique("seed"), "opening cash", {
+                {account(who, "cash"), amount, 0}, {account(who, "capital"), 0, amount}}});
+            money_.post({unique("bank-seed"), "matching opening deposits", {
+                {"BANK:reserves", amount, 0}, {"BANK:deposit", 0, amount}}});
+        }
+    }
+    void seed_stock(std::string holder, std::string region, std::string good, Quantity qty) {
+        ensure(stage_ == -1 && commit_id_ == 0, "stock seed after simulation start");
+        ensure(qty > 0, "invalid initial stock");
+        goods_.initialize({std::move(holder), std::move(region), std::move(good)}, qty);
+    }
+    void seed_region(std::string region, std::string sovereign) {
+        ensure(stage_ == -1 && commit_id_ == 0, "region seed after simulation start");
+        ensure(!region.empty() && !sovereign.empty() && !sovereignty_.contains(region), "bad region");
+        military_control_[region] = sovereign;
+        sovereignty_[std::move(region)] = std::move(sovereign);
+    }
+    void seed_unit(std::string unit) {
+        ensure(stage_ == -1 && commit_id_ == 0 && !unit.empty() && !units_.contains(unit), "bad unit");
+        units_.emplace(std::move(unit), std::map<Id, People>{});
+    }
+    void seed_active(std::string unit, Id slice) {
+        ensure(stage_ == -1 && commit_id_ == 0, "seed active after start");
+        ensure(units_.contains(unit), "unknown unit");
+        const auto& s = people_.slice(slice);
+        ensure(people_.demographic(s.key.demographic).service == phaseb::Service::active, "not active");
+        ensure(assigned(slice) == 0, "duplicate service assignment");
+        units_[unit][slice] = s.count;
+    }
+    void set_voting_age(int age) {
+        ensure(stage_ == -1 && commit_id_ == 0 && age >= 0 && age <= 120, "bad opening voting age");
+        voting_age_years_ = age;
+    }
+    void enable_demography(phaseb::DemographyRules rules) {
+        ensure(stage_ == -1 && commit_id_ == 0, "demography mode must be chosen before start");
+        demography_enabled_ = true;
+        demographic_rules_ = std::move(rules);
+    }
+    [[nodiscard]] Money cash(const std::string& who) const {
+        ensure(actors_.contains(who), "missing wallet");
+        return money_.balance(account(who, "cash"));
+    }
+    [[nodiscard]] Quantity stock(const std::string& holder, const std::string& region,
+                                 const std::string& good) const {
+        return goods_.stock({holder, region, good});
+    }
+    [[nodiscard]] People active_strength(const std::string& unit) const {
+        const auto& a = units_.at(unit);
+        People total = 0;
+        for (const auto& [id, n] : a) { (void)id; total = phaseb::add_checked(total, n); }
+        return total;
+    }
+    [[nodiscard]] People assigned(Id slice) const {
+        People total = 0;
+        for (const auto& [unit, assignments] : units_) {
+            (void)unit;
+            auto it = assignments.find(slice);
+            if (it != assignments.end()) total = phaseb::add_checked(total, it->second);
+        }
+        return total;
+    }
+    [[nodiscard]] People eligible_voters() const {
+        People total = 0;
+        for (const auto& [id, s] : people_.slices()) {
+            (void)id;
+            const auto& d = people_.demographic(s.key.demographic);
+            if (d.citizenship == "citizen" &&
+                d.service != phaseb::Service::active &&
+                d.service != phaseb::Service::pow &&
+                d.service != phaseb::Service::missing &&
+                people_.age_months(s.key.demographic) >= static_cast<std::int64_t>(voting_age_years_) * 12)
+                total = phaseb::add_checked(total, s.count);
+        }
+        return total;
+    }
+
+    void pay(const std::string& from, const std::string& to, Money amount) {
+        require_stage({3, 5, 7, 8});
+        ensure(amount > 0 && cash(from) >= amount && actors_.contains(to) && from != to,
+               "unfunded payment");
+        money_.post({unique("pay"), "confirmed transfer", {
+            {account(from, "expense"), amount, 0}, {account(from, "cash"), 0, amount},
+            {account(to, "cash"), amount, 0}, {account(to, "revenue"), 0, amount}}});
+        events_.push_back("payment");
+    }
+    void wages(const std::string& payer, const std::string& worker,
+               const std::string& treasury, Money gross, Money withheld) {
+        require_stage({5});
+        ensure(gross > 0 && withheld >= 0 && withheld <= gross && cash(payer) >= gross,
+               "unfunded gross wage");
+        ensure(actors_.contains(worker) && actors_.contains(treasury) &&
+               worker != treasury && payer != worker && payer != treasury, "bad payroll parties");
+        const Money net = gross - withheld;
+        std::vector<Posting> p{{account(payer, "expense"), gross, 0},
+                               {account(payer, "cash"), 0, gross}};
+        if (net) {
+            p.push_back({account(worker, "cash"), net, 0});
+            p.push_back({account(worker, "revenue"), 0, net});
+        }
+        if (withheld) {
+            p.push_back({account(treasury, "cash"), withheld, 0});
+            p.push_back({account(treasury, "revenue"), 0, withheld});
+        }
+        money_.post({unique("payroll"), "gross payroll with withholding", p});
+        events_.push_back("wages");
+    }
+    void lend(const std::string& borrower, Money amount) {
+        require_stage({1});
+        ensure(amount > 0 && actors_.contains(borrower), "invalid loan");
+        money_.post({unique("loan"), "bank loan creates matching deposit", {
+            {"BANK:loan", amount, 0}, {"BANK:deposit", 0, amount},
+            {account(borrower, "cash"), amount, 0}, {account(borrower, "debt"), 0, amount}}});
+        events_.push_back("loan");
+    }
+    void repay(const std::string& borrower, Money amount) {
+        require_stage({8});
+        ensure(amount > 0 && actors_.contains(borrower) && cash(borrower) >= amount &&
+               -money_.balance(account(borrower, "debt")) >= amount, "invalid loan repayment");
+        money_.post({unique("repay"), "loan principal retirement", {
+            {account(borrower, "debt"), amount, 0}, {account(borrower, "cash"), 0, amount},
+            {"BANK:deposit", amount, 0}, {"BANK:loan", 0, amount}}});
+        events_.push_back("repay");
+    }
+    void hire(Id slice, People count, const std::string& employer, Money wage) {
+        require_stage({2});
+        ensure(actors_.contains(employer), "unknown employer");
+        people_.hire(slice, count, employer, "worker", wage, phaseb::JobRequirements{});
+        events_.push_back("hire");
+    }
+    void produce(const std::string& firm, const std::string& region,
+                 const std::string& input, const std::string& output,
+                 Quantity qty, People workers_required) {
+        require_stage({4});
+        ensure(qty > 0 && workers_required > 0 && workers_required <= employed_by(firm),
+               "insufficient production labor");
+        ensure(stock(firm, region, input) >= qty, "missing production input");
+        goods_.consume({firm, region, input}, qty);
+        goods_.produce({firm, region, output}, qty);
+        events_.push_back("production");
+    }
+    void trade(const std::string& seller, const std::string& buyer,
+               const std::string& region, const std::string& good,
+               Quantity qty, Money unit_price) {
+        require_stage({3, 7});
+        ensure(qty > 0 && unit_price > 0 && stock(seller, region, good) >= qty,
+               "insufficient sale stock");
+        const Money cost = positive_product(qty, unit_price);
+        ensure(cash(buyer) >= cost, "buyer cannot pay");
+        goods_.transfer({seller, region, good}, {buyer, region, good}, qty);
+        pay(buyer, seller, cost);
+        events_.push_back("trade");
+    }
+    void consume(const std::string& owner, const std::string& region,
+                 const std::string& good, Quantity qty) {
+        require_stage({7, 10});
+        goods_.consume({owner, region, good}, qty);
+        events_.push_back("consumption");
+    }
+    void ship(std::string id, std::string seller, std::string buyer,
+              std::string origin, std::string destination, std::string good,
+              Quantity quantity, std::int64_t travel_months, Quantity loss = 0) {
+        require_stage({7});
+        ensure(!id.empty() && !shipments_.contains(id) && quantity > 0 &&
+               travel_months > 0 && loss >= 0 && loss <= quantity, "bad shipment");
+        ensure(stock(seller, origin, good) >= quantity, "unfunded shipment stock");
+        const auto key = InventoryKey{"TRANSIT:" + id, "in_transit", good};
+        goods_.transfer({seller, origin, good}, key, quantity);
+        shipments_.emplace(id, Shipment{id, std::move(seller), std::move(buyer),
+                    std::move(origin), std::move(destination), std::move(good),
+                    quantity, loss, month() + travel_months, false});
+        events_.push_back("dispatch");
+    }
+    void enact_voting_age(int new_age) {
+        require_stage({9});
+        ensure(new_age >= 0 && new_age <= 120, "invalid voting age");
+        scheduled_voting_age_[month() + 1] = new_age;
+        events_.push_back("law-adopted-next-month");
+    }
+    void hold_election(People registered, People invalid, People seats,
+                       const std::map<std::string, People>& votes) {
+        require_stage({9});
+        ensure(!election_this_month_, "duplicate election this month");
+        const People eligible = eligible_voters();
+        ensure(registered >= 0 && registered <= eligible && invalid >= 0 &&
+               seats > 0 && !votes.empty(), "invalid election");
+        People total = 0;
+        for (const auto& [name, n] : votes) {
+            ensure(!name.empty() && n >= 0, "invalid party vote");
+            total = phaseb::add_checked(total, n);
+        }
+        ensure(total <= registered - invalid, "ballots exceed registration");
+        ElectionResult result;
+        result.eligible = eligible;
+        result.registered = registered;
+        result.valid = total;
+        result.invalid = invalid;
+        result.cast = phaseb::add_checked(total, invalid);
+        result.votes = votes;
+        result.total_seats = seats;
+        for (const auto& [name, n] : votes) { (void)n; result.seats[name] = 0; }
+        // Exact integer quotients; no platform-specific float tie break.
+        for (People i = 0; i < seats; ++i) {
+            std::string chosen;
+            for (const auto& [name, n] : votes) {
+                if (chosen.empty()) { chosen = name; continue; }
+                const auto l = static_cast<__int128>(n) *
+                               (result.seats[chosen] + 1);
+                const auto r = static_cast<__int128>(votes.at(chosen)) *
+                               (result.seats[name] + 1);
+                if (l > r || (l == r && name < chosen)) chosen = name;
+            }
+            ++result.seats[chosen];
+        }
+        last_election_ = std::move(result);
+        election_this_month_ = true;
+        events_.push_back("election");
+    }
+    void mobilize(Id source, People n, const std::string& unit) {
+        require_stage({10});
+        ensure(units_.contains(unit) && n > 0 && people_.has_slice(source),
+               "invalid mobilization");
+        const auto s = people_.slice(source);
+        const auto service = people_.demographic(s.key.demographic).service;
+        ensure(service == phaseb::Service::civilian || service == phaseb::Service::reserve,
+               "not mobilizable");
+        ensure(n <= s.count - assigned(source), "overallocated recruit");
+        const People hired = people_.employed(source);
+        const People to_release = std::min(hired, n);
+        if (to_release) people_.release(source, to_release);
+        const Id active = people_.set_service(source, n, phaseb::Service::active, 0);
+        ensure(assigned(active) + n <= people_.slice(active).count, "duplicate military assignment");
+        units_[unit][active] = phaseb::add_checked(units_[unit][active], n);
+        events_.push_back("mobilization");
+    }
+    void battle(const std::string& unit, Id source, const std::string& region,
+                CombatLoss loss) {
+        require_stage({10});
+        ensure(units_.contains(unit) && people_.has_slice(source) &&
+               units_.at(unit).contains(source) &&
+               units_.at(unit).at(source) == people_.slice(source).count,
+               "battle requires exclusively assigned active slice");
+        const auto count = people_.slice(source).count;
+        const People casualties = phaseb::add_checked(
+            phaseb::add_checked(loss.killed, loss.acute),
+            phaseb::add_checked(loss.long_term, phaseb::add_checked(loss.pow, loss.missing)));
+        ensure(casualties >= 0 && casualties <= count && loss.ammunition >= 0 &&
+               stock(unit, region, "ammunition") >= loss.ammunition,
+               "combat exceeds people or ammunition");
+        if (loss.ammunition) goods_.consume({unit, region, "ammunition"}, loss.ammunition);
+        const auto before = people_.events().size();
+        people_.battle_losses(source, loss.killed, loss.acute, loss.long_term,
+                              loss.pow, loss.missing);
+        units_[unit].erase(source);
+        if (people_.has_slice(source)) units_[unit][source] = people_.slice(source).count;
+        const auto& log = people_.events();
+        for (std::size_t i = before; i < log.size(); ++i) {
+            const auto& e = log[i];
+            if (e.from != source || e.to == 0 || e.to == source) continue;
+            const auto service = people_.demographic(people_.slice(e.to).key.demographic).service;
+            if (service == phaseb::Service::active)
+                units_[unit][e.to] = phaseb::add_checked(units_[unit][e.to], e.count);
+        }
+        events_.push_back("battle");
+    }
+    void occupy(const std::string& region, const std::string& occupier) {
+        require_stage({10});
+        ensure(sovereignty_.contains(region) && !occupier.empty(), "invalid occupation");
+        military_control_[region] = occupier;
+        events_.push_back("military-control");
+    }
+
+    AdvanceReport advance(const Plan& plan = {}) {
+        IntegratedWorld stage = *this;
+        const auto start = month();
+        stage.election_this_month_ = false;
+        for (int n = 0; n != 12; ++n) {
+            stage.stage_ = n;
+            if (n == 0) stage.open_month();
+            for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
+            if (n == 10) {
+                const std::size_t before = stage.people_.events().size();
+                if (stage.demography_enabled_) {
+                    phaseb::Engine engine{stage.demographic_rules_};
+                    (void)engine.advance(stage.people_);
+                    stage.sync_service_transitions(before);
+                } else stage.people_.finish_month();
+            }
+            stage.validate();
+        }
+        stage.stage_ = -1;
+        ++stage.commit_id_;
+        *this = std::move(stage);
+        return {start, month(), people_.population(), commit_id_};
+    }
+    void validate() const {
+        ensure(people_.validate(), "invalid population registry");
+        ensure(money_.balanced(), "unbalanced financial ledger");
+        Money deposits = 0;
+        for (const auto& actor : actors_) {
+            ensure(cash(actor) >= 0, "negative spendable cash");
+            deposits = phaseb::add_checked(deposits, cash(actor));
+        }
+        ensure(-money_.balance("BANK:deposit") == deposits,
+               "bank deposit liabilities do not match customer assets");
+        for (const auto& g : tracked_goods_)
+            ensure(goods_.conserved(g), "inconsistent commodity conservation");
+        std::map<Id, People> assigned_by_slice;
+        for (const auto& [unit, people] : units_) {
+            (void)unit;
+            for (const auto& [slice, n] : people) {
+                ensure(n > 0 && people_.has_slice(slice), "orphaned service assignment");
+                const auto& row = people_.slice(slice);
+                ensure(people_.demographic(row.key.demographic).service == phaseb::Service::active,
+                       "non-active soldier assignment");
+                assigned_by_slice[slice] = phaseb::add_checked(assigned_by_slice[slice], n);
+            }
+        }
+        for (const auto& [id, n] : assigned_by_slice)
+            ensure(n <= people_.slice(id).count, "military headcount duplicated");
+        for (const auto& [id, s] : people_.slices()) {
+            const auto& d = people_.demographic(s.key.demographic);
+            if (d.service == phaseb::Service::active)
+                ensure(assigned_by_slice[id] == s.count, "active personnel without assignment");
+        }
+    }
+
+private:
+    phaseb::World people_;
+    FinancialLedger money_;
+    InventoryLedger goods_;
+    OwnershipLedger ownership_;
+    std::set<std::string> actors_;
+    std::map<std::string, std::map<Id, People>> units_;
+    std::map<std::string, Shipment> shipments_;
+    std::set<std::string> tracked_goods_;
+    std::map<std::string, std::string> sovereignty_, military_control_;
+    std::map<std::int64_t, int> scheduled_voting_age_;
+    ElectionResult last_election_;
+    phaseb::DemographyRules demographic_rules_;
+    std::vector<std::string> events_;
+    std::uint64_t commit_id_{};
+    std::uint64_t sequence_{};
+    int stage_{-1}, voting_age_years_{21};
+    bool election_this_month_{}, demography_enabled_{};
+
+    static std::string account(const std::string& who, const std::string& suffix) {
+        return who + ":" + suffix;
+    }
+    std::string unique(const char* kind) {
+        return std::string(kind) + ":" + std::to_string(month()) + ":" + std::to_string(++sequence_);
+    }
+    void require_stage(std::initializer_list<int> accepted) const {
+        for (int s : accepted) if (s == stage_) return;
+        throw std::logic_error("event submitted in wrong stage");
+    }
+    [[nodiscard]] People employed_by(const std::string& who) const {
+        People n = 0;
+        for (const auto& [id, job] : people_.jobs()) {
+            (void)id;
+            if (job.employer == who) n = phaseb::add_checked(n, job.count);
+        }
+        return n;
+    }
+    void open_month() {
+        auto it = scheduled_voting_age_.find(month());
+        if (it != scheduled_voting_age_.end()) {
+            voting_age_years_ = it->second;
+            scheduled_voting_age_.erase(it);
+        }
+        for (auto& [key, cargo] : shipments_) {
+            (void)key;
+            if (cargo.delivered || cargo.arrival_month > month()) continue;
+            auto transit = InventoryKey{"TRANSIT:" + cargo.id, "in_transit", cargo.good};
+            if (cargo.loss) goods_.consume(transit, cargo.loss);
+            const Quantity delivered = cargo.quantity - cargo.loss;
+            if (delivered) goods_.transfer(transit, {cargo.to, cargo.destination, cargo.good}, delivered);
+            cargo.delivered = true;
+            events_.push_back("cargo-arrival");
+        }
+    }
+    // Phase B's autonomous population dynamics is allowed only as part of the
+    // same staging world. Full-slice active military transitions are reconciled.
+    // Ambiguous partial military allocations fail rather than duplicating people.
+    void sync_service_transitions(std::size_t begin) {
+        const auto& log = people_.events();
+        for (std::size_t i = begin; i < log.size(); ++i) {
+            const auto& e = log[i];
+            if (!e.from || e.from == e.to || !e.count) continue;
+            People n = assigned(e.from);
+            if (!n) continue;
+            ensure(n >= e.count, "ambiguous military demographic allocation");
+            for (auto& [unit, rows] : units_) {
+                auto it = rows.find(e.from);
+                if (it == rows.end()) continue;
+                const People moving = std::min(it->second, e.count);
+                it->second -= moving;
+                if (!it->second) rows.erase(it);
+                if (e.to && moving && people_.has_slice(e.to) &&
+                    people_.demographic(people_.slice(e.to).key.demographic).service ==
+                        phaseb::Service::active)
+                    rows[e.to] = phaseb::add_checked(rows[e.to], moving);
+                break;
+            }
+        }
+    }
+};
+} // namespace vic25::phasec
