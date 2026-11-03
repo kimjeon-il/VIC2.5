@@ -16,7 +16,8 @@
 | C-E4 | [재정·공공부문](C-E4_FISCAL_PUBLIC_SECTOR.md) | 과세권·세목·지출·국채·부채·공공서비스·재정효과 |
 | C-E5 | [운송·국제무역](C-E5_TRANSPORT_INTERNATIONAL_TRADE.md) | 운송망·용량·기간·비용·소유/보관·관세·환거래·통관 |
 | 검증 | [경제 인수검증](ECONOMIC_ACCEPTANCE_TESTS.md) | 구현 시 필수 불변식·시나리오·장기 회귀 |
-| 결정 | [경제 ADR 기록](ECONOMIC_ADRS.md) | 공통 및 개별 단계 핵심 결정/향후 보정 경계 |
+| 결정 | [경제 ADR 기록](ECONOMIC_ADRS.md) | 확정 ADR 28개, 상세 구조/역사 계수 보정 경계 |
+| 예시 | [단일 시장 1개월 현금/부가가치](examples/one_market_month.json), [2개월 운송·관세](examples/two_month_shipment.json) | 구현용 테스트 fixture의 숫자·단계·예상 결과(실제 엔진 세이브 형식이 아님) |
 
 ## 모델 간 의존관계
 
