@@ -1,0 +1,55 @@
+{
+  "fixture_id": "vic25-cp-law-voting-age-effective-next-month-v1",
+  "type": "design_fixture_not_engine_save",
+  "metadata": {
+    "historical": false,
+    "fictional_test_value": true,
+    "ruleset": "phase-c-politics/1.0"
+  },
+  "population": {
+    "age_18_to_20": 40,
+    "age_21_plus": 60,
+    "sum": 100
+  },
+  "opening_month_240_law": {
+    "minimum_voting_age_years": 21,
+    "effective_month": 120,
+    "legal_eligible": 60
+  },
+  "month_240_legislative_events": [
+    {
+      "stage": "saving_and_investment.9d",
+      "kind": "bill_passed",
+      "actor": "LEGISLATURE",
+      "proper_quorum": true,
+      "legal_authority": true
+    },
+    {
+      "stage": "saving_and_investment.9d",
+      "kind": "assent_and_promulgation",
+      "authority": "HEAD_OF_STATE",
+      "law_version": "LAW_V2",
+      "adopted_month": 240,
+      "effective_month": 241
+    }
+  ],
+  "month_240_expected": {
+    "minimum_voting_age_years": 21,
+    "legal_eligible": 60,
+    "new_votes_automatically_added": 0
+  },
+  "month_241_stage_0_expected": {
+    "minimum_voting_age_years": 18,
+    "legal_eligible": 100,
+    "population_total": 100,
+    "ballots_cast_without_election": 0
+  },
+  "negative_tests": [
+    "inadequate_quorum",
+    "unauthorized_promulgation",
+    "same_month_retroactivity",
+    "invalid_effective_date",
+    "duplicate_event_id"
+  ],
+  "notes": "Legal voting-age eligibility is not the same as registration, access, turnout, or valid votes."
+}
