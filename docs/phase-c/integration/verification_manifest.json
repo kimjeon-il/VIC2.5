@@ -1,6 +1,6 @@
 {
   "schema_version": "d4-verification-manifest/1.0",
-  "document_status": "DESIGN_SPECIFIED_NOT_IMPLEMENTED",
+  "document_status": "DESIGN_VERIFIED_AND_BOUNDED_PROTOTYPE_D4_48_PASS",
   "contract_versions": {
     "pop": "pop-design/1.1",
     "common": "phase-c-common/1.0",
@@ -11,20 +11,20 @@
   },
   "dependencies": {
     "politics_design": {
-      "status": "AVAILABLE_AS_USER_DELIVERED_FILES_NOT_MAIN",
+      "status": "REGISTERED_IN_MAIN_AND_WORK_BRANCH",
       "aggregated_markdown_sha256": "16ba370c017453011752a7ce7375a10e9b020231c787fb77d7885f042417be5d",
       "registration_gate": "D4-L0"
     },
     "phase_b_engine": {
-      "status": "WORK_BRANCH_NOT_INTEGRATED",
+      "status": "INTEGRATED_IN_WORK_BRANCH_NOT_MAIN",
       "ref": "work/pop-phase-b",
       "integration_gate": "D4-L0"
     },
     "integrated_world": {
-      "status": "NOT_IMPLEMENTED"
+      "status": "PARTIAL_CPP_STAGING_RUNTIME"
     },
     "actual_cpp_test_run": {
-      "status": "NOT_RUN"
+      "status": "PASS_48_SYNTHETIC_GATES_LINUX_WINDOWS"
     }
   },
   "design_counts": {
@@ -120,17 +120,31 @@
     "examples/logistics_war_occupation.json"
   ],
   "gates": {
-    "D4-DESIGN": "DOCUMENTATION_VERIFY_AFTER_LINK_AND_NUMERIC_AUDIT",
-    "D4-L0": "BLOCKED",
-    "D4-L1": "NOT_STARTED",
-    "D4-L2": "NOT_STARTED",
-    "D4-L3": "NOT_STARTED",
-    "D4-L4": "NOT_STARTED",
-    "D4-L5": "NOT_STARTED",
-    "D4-L6": "NOT_STARTED",
-    "D4-L7": "NOT_STARTED",
-    "D4-DONE": "NOT_STARTED"
+    "D4-DESIGN": "VERIFIED",
+    "D4-L0": "PASS_ON_WORK_BRANCH_ONLY",
+    "D4-L1": "PARTIAL_CPP",
+    "D4-L2": "PARTIAL_ECONOMY",
+    "D4-L3": "PARTIAL_POLITICS",
+    "D4-L4": "PARTIAL_MILITARY",
+    "D4-L5": "D4_48_SYNTHETIC_PASS_CE_CP_CM_FULL_COVERAGE_PENDING",
+    "D4-L6": "SNAPSHOT_V2_PASS_CRASH_AND_PARALLEL_PENDING",
+    "D4-L7": "BOUNDED_1200_MONTH_AND_1M_BENCH_PASS",
+    "D4-DONE": "NOT_MET_COMPLETE_GAME_CONTRACTS"
   },
-  "test_run_evidence": null,
-  "final_note": "No engine test PASS or runtime performance claims are made by this contract manifest."
+  "test_run_evidence": {
+    "code_commit": "a686dfffe6dc10eb5953e909169918f1f12ea655",
+    "run_url": "https://github.com/kimjeon-il/VIC2.5/actions/runs/41725230435",
+    "d4": {
+      "pass": 48,
+      "blocked": 0,
+      "fail": 0
+    },
+    "ctest": {
+      "linux": "9/9",
+      "windows": "9/9"
+    },
+    "scope": "representative_synthetic_prototype_contract_only"
+  },
+  "final_note": "T46/T47/T48 all PASS on audited bounded prototype. Final L0–L7 complete-game acceptance remains NOT_MET; separate CE/CP/CM historical implementation and domain-gate tests are unfinished.",
+  "contract_baseline_file": "docs/phase-c/integration/contract_baseline.json"
 }
