@@ -131,6 +131,39 @@ public:
         military_control_[region] = sovereign;
         sovereignty_[std::move(region)] = std::move(sovereign);
     }
+    void seed_formation(const std::string& id) {
+        ensure(stage_==-1 && commit_id_==0 && !id.empty() &&
+               formations_.insert(id).second, "invalid formation");
+    }
+    void attach_to_formation(const std::string& formation,const std::string& unit) {
+        ensure((stage_==-1 && commit_id_==0) || stage_==9,
+               "formation changes only before simulation or at policy stage");
+        ensure(formations_.contains(formation) && units_.contains(unit) &&
+               !unit_to_formation_.contains(unit), "invalid/duplicate formation assignment");
+        unit_to_formation_[unit]=formation;
+        events_.push_back("unit-formation-link");
+    }
+    [[nodiscard]] People formation_strength(const std::string& formation) const {
+        ensure(formations_.contains(formation), "unknown formation");
+        People total=0;
+        for(const auto& [unit,parent]:unit_to_formation_)
+            if(parent==formation) total=phaseb::add_checked(total,active_strength(unit));
+        return total;
+    }
+    void assign_equipment(const std::string& unit,const std::string& region,
+                          const std::string& good,Quantity n) {
+        require_stage({7});
+        ensure(units_.contains(unit) && n>0 &&
+               equipment_assignment_[{unit,region,good}]+n<=stock(unit,region,good),
+               "equipment not physically present in unit");
+        equipment_assignment_[{unit,region,good}]+=n;
+        events_.push_back("real-equipment-assignment");
+    }
+    [[nodiscard]] Quantity assigned_equipment(const std::string& unit,const std::string& region,
+                                               const std::string& good) const {
+        auto it=equipment_assignment_.find({unit,region,good});
+        return it==equipment_assignment_.end()?0:it->second;
+    }
     void seed_unit(std::string unit) {
         ensure(stage_ == -1 && commit_id_ == 0 && !unit.empty() && !units_.contains(unit), "bad unit");
         units_.emplace(std::move(unit), std::map<Id, People>{});
@@ -737,6 +770,14 @@ public:
                "bank deposit liabilities do not match customer assets");
         for (const auto& g : tracked_goods_)
             ensure(goods_.conserved(g), "inconsistent commodity conservation");
+        for(const auto& [unit,formation]:unit_to_formation_)
+            ensure(units_.contains(unit)&&formations_.contains(formation),"orphaned formation membership");
+        for(const auto& [key,n]:equipment_assignment_) {
+            const auto& [unit,region,good]=key;
+            ensure(units_.contains(unit)&&n>=0&&n<=stock(unit,region,good),
+                   "equipment assignment exceeds real inventory");
+        }
+
         for (const auto& a : tracked_assets_)
             ensure(ownership_.conserved(a), "inconsistent asset ownership");
         for (const auto& [owner, asset] : security_accounts_)
@@ -770,6 +811,10 @@ private:
     std::set<std::string> actors_;
     std::set<std::string> processed_commands_;
     std::map<std::string, std::map<Id, People>> units_;
+    std::set<std::string> formations_;
+    std::map<std::string,std::string> unit_to_formation_;
+    std::map<std::tuple<std::string,std::string,std::string>,Quantity> equipment_assignment_;
+
     std::set<std::string> tracked_assets_;
     std::set<std::pair<std::string, std::string>> security_accounts_;
     struct DividendDue {
