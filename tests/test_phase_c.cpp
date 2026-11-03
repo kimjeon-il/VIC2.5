@@ -245,7 +245,24 @@ int main() {
                f.w.people().slice(origin).count==8,
                "partial migration duplicated residents or lost explicitly allocated property");
     });
-    test.skip(7,"multi-currency FX clearing not implemented");
+    test.run(7, []{
+        F f;
+        f.w.seed_forex_balance("F","USD",100);
+        f.w.seed_forex_balance("F","EUR",0);
+        f.w.seed_forex_balance("H","EUR",90);
+        f.w.seed_forex_balance("H","USD",0);
+        IntegratedWorld::Plan exchange;
+        exchange[7].push_back([](auto& w){w.exchange_fx("F","H","USD",100,"EUR",90);});
+        f.w.advance(exchange);
+        verify(f.w.fx_balance("F","USD")==0&&f.w.fx_balance("F","EUR")==90&&
+               f.w.fx_balance("H","USD")==100&&f.w.fx_balance("H","EUR")==0&&
+               f.w.cash("F")==1000&&f.w.cash("H")==50,
+               "currency exchange minted or merged unrelated currency balances");
+        IntegratedWorld::Plan nonexistent;
+        nonexistent[7].push_back([](auto& w){w.exchange_fx("F","H","USD",50,"EUR",50);});
+        verify(rejected([&]{f.w.advance(nonexistent);}),
+               "unfunded foreign exchange was created");
+    });
     test.run(8, []{
         F f;IntegratedWorld::Plan p;
         p[5].push_back([](auto& w){
