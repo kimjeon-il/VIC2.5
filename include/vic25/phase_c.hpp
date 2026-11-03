@@ -40,6 +40,16 @@ struct CabinetChange {
     std::string country, new_head, new_prime_minister;
     bool replace_head{}, replace_prime{};
 };
+struct Reparation {
+    std::string id, payer, recipient;
+    Money total{}, remaining{};
+    std::int64_t effective_month{};
+    bool recognized{};
+};
+struct ProductionFacility {
+    std::string id, owner, region;
+    Quantity capacity{}, damaged{};
+};
 struct MarketQuote {
     Money price{}, floor{1}, ceiling{}, target_stock{};
     Quantity solvent_demand{}, delivered{}, unmet{}, stock_offered{};
@@ -106,10 +116,12 @@ public:
         ensure(stage_ == -1 && commit_id_ == 0, "actor seed after simulation start");
         ensure(!who.empty() && !actors_.contains(who) && amount >= 0, "invalid actor seed");
         actors_.insert(who);
-        for (const auto& [suffix, type] : std::array<std::pair<std::string, AccountType>, 5>{{
+        for (const auto& [suffix, type] : std::array<std::pair<std::string, AccountType>, 7>{{
             {"cash", AccountType::asset}, {"capital", AccountType::equity},
             {"revenue", AccountType::revenue}, {"expense", AccountType::expense},
-            {"debt", AccountType::liability}}}) {
+            {"debt", AccountType::liability},
+            {"reparations_payable", AccountType::liability},
+            {"reparations_receivable", AccountType::asset}}}) {
             money_.add_account(account(who, suffix), who, type);
         }
         if (amount) {
@@ -250,6 +262,78 @@ public:
             {security_account(buyer, asset), face, 0},
             {account(buyer, "cash"), 0, face}}});
         events_.push_back("bond-issued-paid");
+    }
+    void seed_production_facility(const std::string& id,const std::string& owner,
+                                  const std::string& region,Quantity capacity) {
+        ensure(stage_==-1 && commit_id_==0 && !id.empty() && !facilities_.contains(id) &&
+               actors_.contains(owner) && !region.empty() && capacity>0,
+               "invalid facility seed");
+        facilities_[id]={id,owner,region,capacity,0};
+    }
+    [[nodiscard]] const ProductionFacility& facility(const std::string& id) const {
+        return facilities_.at(id);
+    }
+    void war_damage_facility(const std::string& id,Quantity destroyed) {
+        require_stage({10});
+        auto& site=facilities_.at(id);
+        ensure(destroyed>0 && site.damaged+destroyed<=site.capacity,
+               "damage exceeds physical facility");
+        site.damaged+=destroyed;
+        events_.push_back("physical-facility-war-damage");
+    }
+    void rebuild_facility(const std::string& id,const std::string& building_good,
+                          Quantity restored,People construction_workers) {
+        require_stage({4});
+        const auto& site=facilities_.at(id);
+        ensure(restored>0 && construction_workers>0 && restored<=site.damaged &&
+               stock(site.owner,site.region,building_good)>=restored &&
+               employed_by(site.owner)>=construction_workers &&
+               scheduled_site_repairs_[month()+1][id]+restored<=site.damaged,
+               "rebuild requires actual material labor and destroyed capacity");
+        goods_.consume({site.owner,site.region,building_good},restored);
+        scheduled_site_repairs_[month()+1][id]+=restored;
+        events_.push_back("rebuild-work-physical-input");
+    }
+    void sign_reparation_treaty(const std::string& id,const std::string& payer,
+                               const std::string& recipient,Money amount) {
+        require_stage({9});
+        ensure(!id.empty() && !reparations_.contains(id) && amount>0 &&
+               actors_.contains(payer)&&actors_.contains(recipient)&&payer!=recipient,
+               "invalid treaty reparations");
+        reparations_[id]={id,payer,recipient,amount,amount,month()+1,false};
+        events_.push_back("treaty-reparations-effective-next-month");
+    }
+    void pay_reparation(const std::string& id,Money amount) {
+        require_stage({5});
+        ensure(reparations_.contains(id),"unknown reparations");
+        auto& t=reparations_.at(id);
+        ensure(t.recognized&&amount>0&&amount<=t.remaining &&
+               cash(t.payer)>=amount,"unfunded/unrecognized reparation");
+        money_.post({unique("reparation-paid"),"debt obligation settled by actual cash",{
+            {account(t.payer,"reparations_payable"),amount,0},
+            {account(t.payer,"cash"),0,amount},
+            {account(t.recipient,"cash"),amount,0},
+            {account(t.recipient,"reparations_receivable"),0,amount}}});
+        t.remaining-=amount;
+        events_.push_back("reparation-settled");
+    }
+    [[nodiscard]] Money reparations_outstanding(const std::string& id) const {
+        return reparations_.at(id).remaining;
+    }
+    void demobilize(const std::string& unit,Id source,People n) {
+        require_stage({10});
+        ensure(units_.contains(unit)&&units_.at(unit).contains(source)&&
+               n>0&&n<=units_.at(unit).at(source),
+               "invalid demobilization");
+        ensure(people_.has_slice(source),"missing active slice");
+        const auto& row=people_.slice(source);
+        ensure(people_.demographic(row.key.demographic).service==phaseb::Service::active,
+               "nonactive demobilization");
+        people_.set_service(source,n,phaseb::Service::reserve,0);
+        auto& assigned=units_[unit].at(source);
+        assigned-=n;
+        if(assigned==0)units_[unit].erase(source);
+        events_.push_back("demobilization");
     }
     void seed_market(const std::string& region,const std::string& good,
                      Money price, Money floor, Money ceiling, Quantity target_stock=0) {
@@ -755,6 +839,15 @@ public:
         }
         for (const auto& [slice,n]:strike_active_)
             ensure(people_.has_slice(slice)&&n<=people_.employed(slice),"invalid strike allocation");
+        for(const auto& [id,t]:reparations_) {
+            (void)id;
+            ensure(t.total>0&&t.remaining>=0&&t.remaining<=t.total,
+                   "invalid reparation amount");
+        }
+        for(const auto& [id,site]:facilities_) {
+            ensure(id==site.id&&site.capacity>0&&site.damaged>=0&&
+                   site.damaged<=site.capacity,"invalid physical facility");
+        }
         for (const auto& [id,g] : governments_) {
             ensure(id==g.country && !g.head_of_state.empty() && !g.prime_minister.empty() &&
                    g.chamber_seats>0 && g.quorum>0 && g.quorum<=g.chamber_seats,
@@ -823,6 +916,9 @@ private:
         std::int64_t due{};
     };
     std::map<std::string, DividendDue> dividends_;
+    std::map<std::string,Reparation> reparations_;
+    std::map<std::string,ProductionFacility> facilities_;
+    std::map<std::int64_t,std::map<std::string,Quantity>> scheduled_site_repairs_;
     std::map<std::pair<std::string,std::string>, MarketQuote> markets_;
     std::map<Id, Quantity> household_output_;
     std::map<std::pair<Id,std::string>, Quantity> household_consumed_;
@@ -924,6 +1020,26 @@ private:
         return n;
     }
     void open_month() {
+        for(auto& [id,t]:reparations_) {
+            (void)id;
+            if(!t.recognized&&t.effective_month<=month()){
+                money_.post({unique("reparation-liability"),"treaty creates payable and receivable",{
+                    {account(t.payer,"expense"),t.total,0},
+                    {account(t.payer,"reparations_payable"),0,t.total},
+                    {account(t.recipient,"reparations_receivable"),t.total,0},
+                    {account(t.recipient,"revenue"),0,t.total}}});
+                t.recognized=true;
+            }
+        }
+        if(auto pending=scheduled_site_repairs_.find(month());
+           pending!=scheduled_site_repairs_.end()){
+            for(const auto& [id,n]:pending->second){
+                auto& site=facilities_.at(id);
+                ensure(n<=site.damaged,"rebuild exceeds war damage");
+                site.damaged-=n;
+            }
+            scheduled_site_repairs_.erase(pending);
+        }
         household_output_.clear();
         household_consumed_.clear();
         for(auto& [key,m]:markets_) {
