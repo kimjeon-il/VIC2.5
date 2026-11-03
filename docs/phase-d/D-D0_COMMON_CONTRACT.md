@@ -108,7 +108,7 @@
 ### 5.1 지식과 기술 채택 분리
 
 - `TechnologyDefinition`: tech_id, domain_tags(산업/군사/사회 등 다중 태그), prerequisites(지식/실험/기반), empirical_requirements, discoverability/transfer_rules, valid_historical_metadata. 방향 비순환 선행관계가 필요하면 해당 `ruleset`이 명시하고, 모든 기술을 고정된 3개 트리·5개 시대로 제한하지 않는다.
-- `KnowledgeState`: holder_id(`Country`/`Institution`/`Firm`/연구 조직 등 유효 주체), tech_id, status(unknown/observed/understood/usable), research_progress, provenance, effective_month. 연구 진척은 기술 적용의 상시 성능 보너스나 판매 가능한 상품 재고가 아니다.
+- `KnowledgeState`: holder_id(`Country`/`Institution`/`Firm`/연구 조직 등 유효 주체), tech_id, status(unknown/observed/understood/usable), research_progress, provenance, effective_month. 연구 진척은 **ResearchProject/ResearchWorkEvent의 검증된 사건에서 집계하는 조회값**이며 별도의 쓰기 가능한 연구 진척 원본이 아니다. 기술 적용의 상시 성능 보너스나 판매 가능한 상품 재고도 아니다.
 - `KnowledgeHolder`의 '국가 전체 기술 보유'는 기관/기업·정부가 갖는 지식 및 공개 접근권을 집계한 뷰다. 공유/비공개/기술이전·특허/독점권/면허를 분리하며, 단일 국가 전체에 모든 지식이 자동·즉시 확산되지는 않는다.
 - `SiteTechniqueAssignment`: site_id, technique_id, status(proposed/training/retrofit_ready/installed/active/obsolete), effective_period, permit/license_refs, required_capital_refs, workforce_training_refs, source_event_id. **지식 보유 ≠ 기술 도입 ≠ 충분한 숙련 ≠ 실제 생산량**이다.
 - 지식·기술 목록, 인적 숙련, 설비 소유, 법적 독점권/실시권은 각각 다른 정본이다. `KnowledgeRegistry`가 사람 수·학력이나 특허 소유권을 중복 보유하지 않는다.
