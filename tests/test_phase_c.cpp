@@ -838,7 +838,49 @@ int main() {
                small.median_ms>0 && large.p95_ms>0,
                "D4-T47 representative multi-market/firm/army performance benchmark invalid");
     });
-    test.skip(48,"full contract baseline BLOCKED pending politics source registration");
+    test.run(48, [&]{
+        verify(test.pass==47 && test.blocked==0 && test.failed==0,
+               "D4-T48 cannot pass unless all preceding 47 D4 cases passed");
+        const auto expected=std::array<std::string,9>{{
+            "pop-design/1.1", "phase-c-common/1.0",
+            "phase-c-economy/1.0", "phase-c-politics/1.0",
+            "phase-c-military/1.0", "phase-c-integration/1.0",
+            "checked-int64/1", "integer-lot/1",
+            "vertical-slice-ruleset/1"
+        }};
+        const auto tokens=SnapshotCodec::contract_header();
+        for(std::size_t i=0;i<expected.size();++i)
+            verify(expected[i]==tokens[i],"runtime checkpoint contract version mismatch");
+#ifndef VIC25_SOURCE_ROOT
+#error "D4-T48 requires the configured repository source root"
+#endif
+        const auto root=std::filesystem::path{VIC25_SOURCE_ROOT};
+        const auto pinned=root/"docs/phase-c/integration/contract_baseline.json";
+        const auto politics=root/"docs/phase-c/politics/C-P1_STATE_GOVERNMENT_INSTITUTIONS.md";
+        const auto political_audit=root/"docs/phase-c/politics/POLITICAL_ACCEPTANCE_TESTS.md";
+        verify(std::filesystem::is_regular_file(pinned)&&
+               std::filesystem::is_regular_file(politics)&&
+               std::filesystem::is_regular_file(political_audit),
+               "registered P1–P5 contract or baseline is missing");
+        auto read=[](const auto& p)->std::string{
+            std::ifstream in(p,std::ios::binary);
+            verify(static_cast<bool>(in),"contract file cannot be read");
+            return std::string{std::istreambuf_iterator<char>(in),
+                               std::istreambuf_iterator<char>()};
+        };
+        verify(read(pinned).find("d4-contract-baseline/1.0")!=std::string::npos &&
+               read(politics).find("phase-c-politics/1.0")!=std::string::npos &&
+               read(political_audit).find("CP-T25")!=std::string::npos,
+               "contract text/registry verification failed");
+        F f;
+        verify(f.w.people().population()==600 &&
+               f.w.financial().balanced() &&
+               f.w.commit_id()==0,
+               "Phase B/S0/Phase C shared population-finance baseline invalid");
+        // The *independent* Python CTest verifies exact Git blob IDs, ADR/INV
+        // numbering and fixture/version contents. This bounded acceptance
+        // test does NOT certify the complete CE/CP/CM feature backlog.
+    });
 
     for (const auto& s : test.status) std::cout << s << '\n';
     std::cout << "D4 integration runnable subset: PASS=" << test.pass
