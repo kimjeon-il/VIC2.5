@@ -1,0 +1,90 @@
+{
+  "fixture_id": "cm4-battle-losses-1000-v1",
+  "contract_version": "phase-c-military/1.0",
+  "type": "design_test_fixture_not_executable_save",
+  "metadata": {
+    "fictional_test_value": true,
+    "month_index": 100,
+    "scenario": "one preexisting active unit, stage10 battle casualties",
+    "source_provenance": "synthetic QA",
+    "population_contract": "pop-design/1.1",
+    "numeric_policy": "checked_int64_people"
+  },
+  "opening": {
+    "unit_id": "UNIT-A",
+    "unit_location": "REGION-X",
+    "eligible_active_people": 1000,
+    "assignments": [
+      {
+        "population_slice_id": "SL-1000",
+        "status": "active",
+        "count": 1000
+      }
+    ],
+    "authorized_strength": 1000,
+    "present_for_duty": 1000,
+    "serviceable_equipment": {
+      "rifle": 1000
+    },
+    "unit_inventory": {
+      "ammunition": 150
+    },
+    "prior_month_wages": "already settled, no backdated modification"
+  },
+  "engagements": [
+    {
+      "engagement_id": "ENG-1",
+      "stage": 10,
+      "exposed": 1000,
+      "requested_consumables": {
+        "ammunition": 120
+      },
+      "result": {
+        "killed": 50,
+        "acute_injury": 180,
+        "long_term_impairment_from_this_event": 70,
+        "captured": 0,
+        "missing": 0,
+        "unharmed": 700
+      },
+      "provenance": "synthetic deterministic outcome; no historical casualty-rate claim"
+    }
+  ],
+  "expected": {
+    "aggregate_count_of_disjoint_outcomes": 1000,
+    "end_world_population_delta": -50,
+    "end_unit_service_assigned_survivors": 950,
+    "end_unit_immediately_combat_eligible_assuming_injured_unfit": 700,
+    "health_allocations": {
+      "unharmed_active": 700,
+      "acute_injury_active": 180,
+      "long_term_impairment_active": 70
+    },
+    "service_status_counts": {
+      "active": 950,
+      "pow": 0,
+      "missing": 0
+    },
+    "unit_inventory_end": {
+      "ammunition": 30
+    },
+    "consumption_record": {
+      "ammunition": 120
+    },
+    "financial_effect": "none directly without a separate legal due/payment event",
+    "required_cross_ledger_updates": [
+      "PopulationEvent: SL-1000 count -50 KIA; 180 acute injury transfer; 70 long-term profile transfer",
+      "ServiceAssignment: 50 killed removed; surviving 950 mapped to active health-profile slices",
+      "MilitaryEvent: battle result + unit fatigue/readiness/event history",
+      "InventoryLedger: 120 ammunition consumed",
+      "Ownership/Estate if applicable: preserve claims and obligations of the killed"
+    ]
+  },
+  "reject_cases": [
+    "same source slice overallocated when multiple engagements compete",
+    "ammunition consumption greater than 150",
+    "victim counted both KIA and injury or natural death",
+    "deceased counted in active 950",
+    "same-month retroactive changes to already-paid wages"
+  ]
+}
