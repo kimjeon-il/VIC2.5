@@ -244,8 +244,42 @@ int main() {
         verify(rejected([&]{f.w.advance(p);}),"overspend allowed");
         verify(f.w.cash("F")==1000 && f.w.stock("S","R","ore")==200,"money/stock rollback failed");
     });
-    test.skip(11,"household in-kind consumption attribution not yet integrated");
-    test.skip(12,"endogenous market demand and price ceilings not implemented");
+    test.run(11, []{
+        F f;
+        auto& p=f.w.seed_population();
+        auto e=p.economic_profile({"R","farmer","subsistence","self_employed",p.default_education()});
+        const auto old=p.slice(f.civ);
+        const auto household=old.key.household;
+        const auto own=p.seed_population(old.key.demographic,e,household,3,999);
+        const Money initial_cash=f.w.cash("H");
+        IntegratedWorld::Plan plan;
+        plan[4].push_back([own](auto& w){w.household_produce(own,"food",6,2);});
+        plan[7].push_back([own](auto& w){w.household_consume(own,"food",4);});
+        f.w.advance(plan);
+        verify(f.w.people().population()==603&&
+               f.w.actual_household_consumption(household,"food")==4&&
+               f.w.stock("HH:"+std::to_string(household),"R","food")==2&&
+               f.w.cash("H")==initial_cash,
+               "in-kind produce/consume invented cash or stock");
+    });
+    test.run(12, []{
+        F f;
+        f.w.seed_stock("S","R","food",5);
+        f.w.seed_market("R","food",4,2,5,1);
+        IntegratedWorld::Plan plan;
+        plan[7].push_back([](auto& w){
+            verify(w.clear_consumer_market("S","H","R","food",10)==5,
+                   "market sold more than stock");
+        });
+        f.w.advance(plan);
+        const auto& m=f.w.market("R","food");
+        verify(m.delivered==5 && m.solvent_demand==10 && m.unmet==5 &&
+               m.price==5 && f.w.stock("S","R","food")==0 &&
+               f.w.stock("H","R","food")==5 && f.w.cash("H")==30,
+               "market shortage and next-month quote mismatch");
+        f.w.advance();
+        verify(f.w.market("R","food").price==5,"price altered without new price pressure");
+    });
     test.run(13, []{
         F f;IntegratedWorld::Plan p;
         p[1].push_back([](auto& w){w.lend("F",100);});
