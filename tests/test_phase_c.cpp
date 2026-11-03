@@ -1,0 +1,353 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+#include "vic25/phase_c.hpp"
+#include <cassert>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+using namespace vic25::phasec;
+using vic25::phaseb::Service;
+using vic25::phaseb::Sex;
+
+static void verify(bool ok, const char* why) {
+    if (!ok) throw std::runtime_error(why);
+}
+template<class Fn> static bool rejected(Fn&& fn) {
+    try { fn(); } catch (const std::exception&) { return true; }
+    return false;
+}
+struct F {
+    IntegratedWorld w{24000};
+    Id civ{}, reserve{}, active{}, child{};
+    F() {
+        w.seed_actor("F", 1000);
+        w.seed_actor("H", 50);
+        w.seed_actor("G", 0);
+        w.seed_actor("S", 0);
+        w.seed_actor("T", 0);
+        w.seed_stock("S", "R", "ore", 200);
+        w.seed_stock("U", "R", "ammunition", 100);
+        w.seed_region("R", "A");
+        w.seed_unit("U");
+        auto& p = w.seed_population();
+        auto h = p.household_profile({"R", "mixed", "shared", 10});
+        auto e = p.economic_profile({"R", "worker", "wage", "employee", p.default_education()});
+        auto nc = p.economic_profile({"R", "not_assigned", "inactive", "ineligible", p.default_education()});
+        auto make = [&](Service service, std::int64_t birth, Id economic, People count) -> Id {
+            const auto d = p.demographic_profile(
+                {"R", birth, Sex::male, "culture", "religion", "citizen",
+                 "free", p.default_health(), service});
+            return p.seed_population(d, economic, h, count);
+        };
+        civ = make(Service::civilian, 23640, e, 200);
+        reserve = make(Service::reserve, 23640, e, 100);
+        active = make(Service::active, 23640, e, 100);
+        child = make(Service::civilian, 23900, nc, 200);
+        w.seed_active("U", active);
+        w.validate();
+    }
+};
+struct Suite {
+    int pass = 0, blocked = 0, failed = 0;
+    std::vector<std::string> status;
+    void run(int number, const std::function<void()>& fn) {
+        const auto id = "D4-T" + (number < 10 ? std::string("0") : std::string()) +
+                        std::to_string(number);
+        try {
+            fn();
+            status.push_back(id + " PASS");
+            ++pass;
+        } catch (const std::exception& ex) {
+            status.push_back(id + " FAIL: " + ex.what());
+            ++failed;
+        }
+    }
+    void skip(int number, const std::string& reason) {
+        const auto id = "D4-T" + (number < 10 ? std::string("0") : std::string()) +
+                        std::to_string(number);
+        status.push_back(id + " BLOCKED: " + reason);
+        ++blocked;
+    }
+};
+
+static void salary(F& f) {
+    IntegratedWorld::Plan p;
+    p[2].push_back([&](auto& w){w.hire(f.civ, 20, "F", 10);});
+    p[5].push_back([](auto& w){w.wages("F", "H", "G", 200, 20);});
+    f.w.advance(p);
+}
+static void election(F& f) {
+    IntegratedWorld::Plan p;
+    p[9].push_back([](auto& w){
+        w.hold_election(250, 20, 3, {{"A", 130}, {"B", 70}, {"C", 30}});
+    });
+    f.w.advance(p);
+}
+static void combat(F& f) {
+    IntegratedWorld::Plan p;
+    p[10].push_back([&](auto& w){w.battle("U", f.active, "R", CombatLoss{50, 20, 10, 0, 0, 5});});
+    f.w.advance(p);
+}
+static void integration_election_mobilization() {
+    IntegratedWorld w{240};
+    w.seed_actor("F",500);
+    w.seed_actor("H",0);
+    w.seed_actor("G",0);
+    w.seed_region("R","A");
+    w.seed_unit("U");
+    w.seed_stock("U","R","ammunition",20);
+    auto& p=w.seed_population();
+    const auto h=p.household_profile({"R","households","shared",500});
+    const auto e=p.economic_profile({"R","worker","wage","employee",p.default_education()});
+    const auto n=p.economic_profile({"R","not_assigned","inactive","ineligible",p.default_education()});
+    auto add=[&](Service service,int age,People count,Id econ){
+        auto d=p.demographic_profile({"R",240-age*12,Sex::male,"c","r","citizen","free",p.default_health(),service});
+        return p.seed_population(d,econ,h,count);
+    };
+    const Id adult=add(Service::civilian,25,500,e);
+    add(Service::civilian,19,50,e);
+    add(Service::civilian,10,250,n);
+    const Id reserve=add(Service::reserve,25,100,e);
+    const Id active=add(Service::active,25,100,e);
+    w.seed_active("U",active);
+    verify(w.people().population()==1000 && w.eligible_voters()==600,"bad initial voter count");
+    IntegratedWorld::Plan plan;
+    plan[2].push_back([adult,reserve](auto& st){
+        st.hire(adult,260,"F",1);
+        st.hire(reserve,40,"F",1);
+    });
+    plan[5].push_back([](auto& st){st.wages("F","H","G",300,30);});
+    plan[9].push_back([](auto& st){
+        st.hold_election(550,20,3,{{"A",220},{"B",130},{"C",50}});
+        st.enact_voting_age(18);
+    });
+    plan[10].push_back([active,reserve](auto& st){
+        st.battle("U",active,"R",CombatLoss{10,20,0,0,0,10});
+        st.mobilize(reserve,40,"U");
+    });
+    w.advance(plan);
+    verify(w.people().population()==990 && w.active_strength("U")==130,"bad casualty/mobilization");
+    verify(w.cash("F")==200 && w.cash("H")==270 && w.cash("G")==30,"bad payroll/tax");
+    verify(w.people().labor().employed==260,"employment not released by mobilization");
+    verify(w.election().seats.at("A")==2 && w.election().seats.at("B")==1 &&
+           w.election().seats.at("C")==0,"bad seats");
+    verify(w.voting_age()==21,"law applied before next month");
+    w.advance();
+    verify(w.voting_age()==18 && w.eligible_voters()==650,"law not effective next month");
+}
+static void integration_logistics_occupation() {
+    IntegratedWorld w{300};
+    w.seed_actor("G",200);
+    w.seed_actor("F",0);
+    w.seed_actor("T",0);
+    w.seed_region("A","A");
+    w.seed_region("X","B");
+    w.seed_unit("A-UNIT");
+    w.seed_unit("B-UNIT");
+    w.seed_stock("F","A","medicine",60);
+    w.seed_stock("B-UNIT","X","ammunition",5);
+    auto& p=w.seed_population();
+    auto ha=p.household_profile({"A","families","shared",50});
+    auto hb=p.household_profile({"X","families","shared",200});
+    auto ea=p.economic_profile({"A","soldier","wage","employee",p.default_education()});
+    auto eb=p.economic_profile({"X","soldier","wage","employee",p.default_education()});
+    auto ec=p.economic_profile({"X","farmer","subsistence","self_employed",p.default_education()});
+    auto da=p.demographic_profile({"A",0,Sex::male,"a","r","citizen","free",p.default_health(),Service::active});
+    auto db=p.demographic_profile({"X",0,Sex::male,"b","r","citizen","free",p.default_health(),Service::active});
+    auto dc=p.demographic_profile({"X",0,Sex::female,"b","r","citizen","free",p.default_health(),Service::civilian});
+    auto a=p.seed_population(da,ea,ha,100);
+    auto b=p.seed_population(db,eb,hb,20);
+    p.seed_population(dc,ec,hb,480);
+    w.seed_active("A-UNIT",a);
+    w.seed_active("B-UNIT",b);
+    IntegratedWorld::Plan first;
+    first[7].push_back([](auto& st){
+        st.pay("G","F",120);
+        st.pay("G","T",10);
+        st.ship("med-1","F","A-UNIT","A","X","medicine",60,2,5);
+    });
+    w.advance(first);
+    verify(w.cash("G")==70 && w.cash("F")==120 && w.cash("T")==10,"bad procurement");
+    verify(w.stock("A-UNIT","X","medicine")==0 && w.stock("TRANSIT:med-1","in_transit","medicine")==60,
+           "bad cargo dispatch");
+    w.advance();
+    verify(w.stock("A-UNIT","X","medicine")==0,"used cargo before arrival");
+    IntegratedWorld::Plan final;
+    final[10].push_back([a,b](auto& st){
+        st.battle("A-UNIT",a,"X",CombatLoss{3,7,0,0,0,0});
+        st.battle("B-UNIT",b,"X",CombatLoss{0,0,0,0,0,5});
+        st.consume("A-UNIT","X","medicine",7);
+        st.occupy("X","A");
+    });
+    w.advance(final);
+    verify(w.people().population()==597 && w.active_strength("A-UNIT")==97, "bad combat");
+    verify(w.stock("A-UNIT","X","medicine")==48,"bad treatment stock");
+    verify(w.military_control("X")=="A" && w.sovereignty("X")=="B","occupation overwrote sovereign");
+}
+int main() {
+    Suite test;
+    test.run(1, []{ F f;verify(f.w.people().population()==600,"duplicated population"); });
+    test.run(2, []{
+        F f; IntegratedWorld::Plan p;
+        p[2].push_back([&](auto& w){w.hire(f.civ,200,"F",1);});
+        p[10].push_back([&](auto& w){w.mobilize(f.civ,201,"U");});
+        verify(rejected([&]{f.w.advance(p);}),"overallocated civilian");
+        verify(f.w.month()==24000 && f.w.people().employed(f.civ)==0,"partial rollback");
+    });
+    test.skip(3,"state succession and government offices not implemented");
+    test.run(4, []{
+        F f;IntegratedWorld::Plan p;
+        p[10].push_back([](auto& w){w.occupy("R","B");});
+        f.w.advance(p);
+        verify(f.w.military_control("R")=="B"&&f.w.sovereignty("R")=="A","sovereignty mutated");
+    });
+    test.skip(5,"typed cross-domain entity registry and historical lineage not implemented");
+    test.skip(6,"ownership/financial distribution on partial migration not implemented");
+    test.skip(7,"multi-currency FX clearing not implemented");
+    test.skip(8,"cross-domain command ID dedupe not implemented (POP apply_once exists)");
+    test.run(9, []{
+        F f;IntegratedWorld::Plan p;
+        p[2].push_back([&](auto& w){w.hire(f.civ,2,"F",10);});
+        p[4].push_back([](auto& w){w.produce("F","R","ore","tool",5,2);});
+        verify(rejected([&]{f.w.advance(p);}),"missing input should fail");
+        verify(f.w.month()==24000 && f.w.stock("F","R","tool")==0,"rollback failed");
+    });
+    test.run(10, []{
+        F f;IntegratedWorld::Plan p;
+        p[3].push_back([](auto& w){w.trade("S","F","R","ore",200,10);});
+        verify(rejected([&]{f.w.advance(p);}),"overspend allowed");
+        verify(f.w.cash("F")==1000 && f.w.stock("S","R","ore")==200,"money/stock rollback failed");
+    });
+    test.skip(11,"household in-kind consumption attribution not yet integrated");
+    test.skip(12,"endogenous market demand and price ceilings not implemented");
+    test.run(13, []{
+        F f;IntegratedWorld::Plan p;
+        p[1].push_back([](auto& w){w.lend("F",100);});
+        p[8].push_back([](auto& w){w.repay("F",30);});
+        f.w.advance(p);
+        verify(f.w.cash("F")==1070 && f.w.financial().balance("F:debt")==-70,
+               "loan principal not conserved");
+    });
+    test.skip(14,"cash dividend and share subscriptions not connected");
+    test.run(15, []{F f;salary(f);verify(f.w.cash("G")==20&&f.w.cash("H")==230,"wage withholding");});
+    test.skip(16,"government bonds and appropriations not connected");
+    test.skip(17,"constitution/office authorization graph not implemented");
+    test.run(18, []{
+        F f;IntegratedWorld::Plan p;
+        p[9].push_back([](auto& w){w.enact_voting_age(18);});
+        f.w.advance(p);
+        verify(f.w.voting_age()==21,"law effective same month");
+        f.w.advance();verify(f.w.voting_age()==18,"law did not become effective");
+    });
+    test.run(19, []{
+        F f;election(f);
+        const auto& e=f.w.election();
+        verify(e.eligible==300&&e.cast==250&&e.valid==230&&e.invalid==20,"ballot accounting");
+    });
+    test.run(20, []{
+        F f;IntegratedWorld::Plan p;
+        p[9].push_back([](auto& w){w.hold_election(300,0,3,{{"A",220},{"B",130},{"C",50}});});
+        f.w.advance(p);
+        verify(f.w.election().seats.at("A")==2&&f.w.election().seats.at("B")==1,"D'Hondt");
+    });
+    test.skip(21,"per-voter/constituency identity register not implemented");
+    test.skip(22,"coalition and constitutional cabinet formation not implemented");
+    test.skip(23,"interest-group/movement allegiance and street participants not implemented");
+    test.skip(24,"public service production/capacity and law enforcement not implemented");
+    test.run(25, []{F f;verify(f.w.people().population()==600 && f.w.active_strength("U")==100,"service count");});
+    test.run(26, []{
+        F f;IntegratedWorld::Plan p;
+        p[10].push_back([&](auto& w){w.mobilize(f.reserve,40,"U");w.mobilize(f.reserve,60,"U");});
+        f.w.advance(p);
+        verify(f.w.active_strength("U")==200&&f.w.people().population()==600,"mobilization");
+    });
+    test.run(27, []{
+        F f;IntegratedWorld::Plan p;
+        p[2].push_back([&](auto& w){w.hire(f.reserve,40,"F",1);});
+        p[5].push_back([](auto& w){w.wages("F","H","G",40,0);});
+        p[10].push_back([&](auto& w){w.mobilize(f.reserve,40,"U");});
+        f.w.advance(p);
+        verify(f.w.cash("H")==90&&f.w.people().labor().employed==0&&
+               f.w.active_strength("U")==140,"employment before mobilization");
+    });
+    test.skip(28,"formation hierarchy and equipment assignment not yet implemented");
+    test.run(29, []{
+        F f;IntegratedWorld::Plan p;
+        p[7].push_back([](auto& w){w.ship("a","S","H","R","B","ore",60,2,5);});
+        f.w.advance(p);verify(f.w.stock("H","B","ore")==0,"instant arrival");
+        f.w.advance();verify(f.w.stock("H","B","ore")==0,"early arrival");
+        f.w.advance();verify(f.w.stock("H","B","ore")==55,"wrong arrival/loss");
+    });
+    test.run(30, []{
+        F f;IntegratedWorld::Plan p;
+        p[10].push_back([&](auto& w){
+            w.battle("U",f.active,"R",CombatLoss{0,0,0,0,0,70});
+            w.battle("U",f.active,"R",CombatLoss{0,0,0,0,0,40});
+        });
+        verify(rejected([&]{f.w.advance(p);}),"double ammo allowed");
+        verify(f.w.stock("U","R","ammunition")==100,"roll back ammo");
+    });
+    test.run(31, []{
+        F f;combat(f);verify(f.w.people().population()==550 && f.w.active_strength("U")==50,
+                             "battle population/assignment");
+        verify(f.w.stock("U","R","ammunition")==95,"ammunition");
+    });
+    test.run(32, []{
+        F f;IntegratedWorld::Plan p;
+        p[10].push_back([](auto& w){w.occupy("R","B");});
+        f.w.advance(p);verify(f.w.sovereignty("R")=="A"&&f.w.military_control("R")=="B",
+                              "control vs sovereignty");
+    });
+    test.run(33, integration_election_mobilization);
+    test.run(34, integration_logistics_occupation);
+    test.skip(35,"food market shortage and endogenous political-movement response not implemented");
+    test.skip(36,"law-dependent mass conscription to industrial supply chain not implemented");
+    test.skip(37,"bank insolvency and political movements not implemented");
+    test.run(38, []{
+        F f;IntegratedWorld::Plan p;
+        p[5].push_back([](auto& w){w.wages("F","H","G",100,10);});
+        p[7].push_back([](auto& w){w.pay("G","S",10);});
+        f.w.advance(p);
+        verify(f.w.cash("G")==0&&f.w.cash("H")==140&&f.w.cash("S")==10,
+               "tax and procurement");
+    });
+    test.skip(39,"strikes and protest participation/health-to-labor effects not implemented");
+    test.skip(40,"peace settlement obligations and demobilization/reconstruction not implemented");
+    test.run(41, []{
+        F f;IntegratedWorld::Plan p;
+        p[5].push_back([](auto& w){w.pay("F","H",100);});
+        p[11].push_back([](auto&){throw std::runtime_error("injected failure");});
+        verify(rejected([&]{f.w.advance(p);}),"missing stage11 rollback");
+        verify(f.w.cash("F")==1000 && f.w.month()==24000&&f.w.commit_id()==0,"world partially committed");
+    });
+    test.run(42, []{
+        F f;IntegratedWorld::Plan p;
+        p[2].push_back([](auto& w){w.pay("F","H",10);});
+        verify(rejected([&]{f.w.advance(p);}),"wrong stage accepted");
+    });
+    test.skip(43,"cross-domain idempotent replay cursor not implemented");
+    test.run(44, []{
+        F a,b;
+        IntegratedWorld::Plan p;
+        p[2].push_back([&](auto& w){w.hire(a.civ,20,"F",10);});
+        p[5].push_back([](auto& w){w.wages("F","H","G",100,10);});
+        a.w.advance(p);b.w.advance(p);
+        verify(a.w.people().fingerprint()==b.w.people().fingerprint() &&
+               a.w.cash("F")==b.w.cash("F") &&
+               a.w.cash("G")==b.w.cash("G"),"repeat execution drift");
+    });
+    test.skip(45,"atomic persistent save/checkpoint/replay not yet implemented");
+    test.skip(46,"1,200-month combined crisis dynamics not yet implemented; partial long-run smoke separate");
+    test.skip(47,"100k/1M active integrated world load/performance not verified");
+    test.skip(48,"full contract baseline BLOCKED pending politics source registration");
+
+    for (const auto& s : test.status) std::cout << s << '\n';
+    std::cout << "D4 integration runnable subset: PASS=" << test.pass
+              << " BLOCKED=" << test.blocked << " FAIL=" << test.failed
+              << " TOTAL=" << test.status.size() << "/48\n";
+    verify(test.status.size()==48,"missing test IDs");
+    return test.failed ? 1 : 0;
+}
