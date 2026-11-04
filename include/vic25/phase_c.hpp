@@ -859,6 +859,23 @@ public:
             phaseb::add_checked(ballot_votes_[election_id][party],1);
         events_.push_back("named-ballot:"+election_id+":"+district);
     }
+    // Phase E uses the Phase C eligibility and named-person registry,
+    // not a duplicated writable population/electoral ledger.
+    [[nodiscard]] Id phase_e_anchor_slice(const std::string& anchor)const {
+        ensure(person_anchors_.contains(anchor),"unknown election anchor");
+        return person_anchors_.at(anchor);
+    }
+    [[nodiscard]] People phase_e_eligible_slice(Id slice)const {
+        if(!people_.has_slice(slice))return 0;
+        const auto& d=people_.demographic(people_.slice(slice).key.demographic);
+        return (d.citizenship=="citizen" &&
+               d.service!=phaseb::Service::active &&
+               d.service!=phaseb::Service::pow &&
+               d.service!=phaseb::Service::missing &&
+               people_.age_months(people_.slice(slice).key.demographic)>=
+                   static_cast<std::int64_t>(voting_age_years_)*12)?
+               people_.slice(slice).count:0;
+    }
     [[nodiscard]] People named_votes(const std::string& election_id) const {
         auto it=ballot_votes_.find(election_id);
         if(it==ballot_votes_.end())return 0;

@@ -46,7 +46,7 @@ static void plan(World& w,std::function<void(SpatialStage&)> f,int at=9) {
     w.advance(commands);
 }
 static void apply(World& w) {w.advance();}
-static void seed_pop(World& w,Id province,People n) {
+static vic25::phaseb::Id seed_pop(World& w,Id province,People n) {
     auto& pop=w.seed_core().seed_core().seed_population();
     const auto region="R"+std::to_string(province);
     const auto h=pop.household_profile({region,"mixed","shared",n});
@@ -54,7 +54,7 @@ static void seed_pop(World& w,Id province,People n) {
     const auto d=pop.demographic_profile({region,w.month()-400,vic25::phaseb::Sex::female,
                                         "culture","religion","citizen","free",
                                         pop.default_health(),vic25::phaseb::Service::civilian});
-    pop.seed_population(d,e,h,n,static_cast<vic25::phaseb::Id>(pop.slices().size()+1));
+    return pop.seed_population(d,e,h,n,static_cast<vic25::phaseb::Id>(pop.slices().size()+1));
 }
 static void test_01(){auto w=fixture();check(fails([&]{w.seed_province(1,"P","A");}),"duplicate province");}
 static void test_02(){auto w=fixture();check(w.province(1).neighbors.contains(2)&&
@@ -166,6 +166,87 @@ static void test_29(){auto w=fixture();plan(w,[](SpatialStage& s){s.queue_rename
 static void test_31(){auto w=fixture();TerritorialScope sc;sc.id=1;sc.kind="lower-house";sc.provinces={1,4,7,10};
     w.seed_scope(sc);check(w.scope_members(1).contains(7)&&w.leaf(7)==201,
                          "district independent of State");}
+
+static void test_32(){
+    auto w=fixture();
+    const auto slice=seed_pop(w,2,100);
+    w.seed_core().seed_core().seed_person_anchor("P2-ANCHOR",slice);
+    w.seed_scope({301,"lower-house",ScopeMode::explicit_provinces,0,{2}});
+    w.seed_scope({302,"lower-house",ScopeMode::explicit_provinces,0,{2}});
+    plan(w,[slice](SpatialStage& s){
+        s.open_election("HOUSE", {301,302});
+        s.allocate_electors("HOUSE",301,slice,60);
+        s.allocate_electors("HOUSE",302,slice,40);
+        s.register_elector("HOUSE",301,"P2-ANCHOR");
+        s.cast_elector_ballot("HOUSE",301,"P2-ANCHOR","PARTY-A");
+    });
+    check(w.core().core().named_votes("HOUSE")==1,"real Phase C ballot registered once");
+    const auto state=SnapshotCodec::encode(w);
+    check(fails([&]{plan(w,[](SpatialStage& s){
+        s.register_elector("HOUSE",302,"P2-ANCHOR");
+    });})&&SnapshotCodec::encode(w)==state,"duplicated named voter rolled back");
+    check(fails([&]{plan(w,[slice](SpatialStage& s){
+        s.allocate_electors("HOUSE",302,slice,1);
+    });}),"same slice district allocation cannot silently expand");
+}
+static void test_37(){
+    auto w=fixture();
+    const auto first=seed_pop(w,1,100),second=seed_pop(w,2,300);
+    w.seed_core().seed_core().seed_actor("WORKSHOP1",0);
+    w.seed_core().seed_core().seed_actor("WORKSHOP2",0);
+    World::Plan plan_;
+    plan_[2].push_back([first,second](SpatialStage& s){
+        s.phase_c().hire(first,100,"WORKSHOP1",10);
+        s.phase_c().hire(second,300,"WORKSHOP2",20);
+    });
+    w.advance(plan_);
+    const auto [money,n]=w.contractual_wage_mean({1,2});
+    check(money==7000&&n==400&&money/n==17&&money%n==200,
+          "worker-weighted contracted wage 17.5, not naive mean15");
+}
+static void test_39(){
+    auto w=fixture();
+    const auto slice=seed_pop(w,3,100);
+    w.seed_core().seed_core().seed_person_anchor("VOTER_P3",slice);
+    w.seed_scope({450,"lower-house",ScopeMode::derived_administrative,101,{}});
+    plan(w,[slice](SpatialStage& s){
+        s.open_election("ELECTION-01",{450});
+        s.allocate_electors("ELECTION-01",450,slice,1);
+        s.register_elector("ELECTION-01",450,"VOTER_P3");
+        s.queue_reassign("future-admin",3,102);
+    });
+    const auto frozen=w.election("ELECTION-01").provinces_by_district.at(450);
+    w.advance();
+    check(!w.scope_members(450).contains(3)&&frozen.contains(3),
+          "frozen election boundary must outlive admin change");
+    plan(w,[](SpatialStage& s){
+        s.cast_elector_ballot("ELECTION-01",450,"VOTER_P3","PARTY-A");
+    });
+    check(w.core().core().named_votes("ELECTION-01")==1,
+          "valid historic ballot uses frozen scope, not latest administrative map");
+}
+static void test_40(){
+    auto w=fixture();
+    const auto slice=seed_pop(w,2,100);
+    w.seed_scope({501,"lower-house",ScopeMode::explicit_provinces,0,{2}});
+    w.seed_scope({502,"lower-house",ScopeMode::explicit_provinces,0,{2}});
+    plan(w,[slice](SpatialStage& s) {
+        s.open_election("SPLIT-P2",{501,502});
+        s.allocate_electors("SPLIT-P2",501,slice,60);
+        s.allocate_electors("SPLIT-P2",502,slice,40);
+    });
+    check(w.election("SPLIT-P2").split_without_geometry.contains(2)&&
+          w.election("SPLIT-P2").allocated.at({501,slice})+
+          w.election("SPLIT-P2").allocated.at({502,slice})==100 &&
+          w.province(2).id==2,
+          "population electoral partition must never invent Province geometry");
+    const auto before=SnapshotCodec::encode(w);
+    check(fails([&]{plan(w,[slice](SpatialStage& s) {
+        s.allocate_electors("SPLIT-P2",501,slice,61);
+    });})&&before==SnapshotCodec::encode(w),
+        "no overloaded or rewritten electorate");
+}
+
 static void test_33(){auto w=fixture();TerritorialScope a{1,"lower-house",ScopeMode::explicit_provinces,0,{1,2}};
     TerritorialScope b{2,"municipal",ScopeMode::explicit_provinces,0,{1,2}};
     w.seed_scope(a);w.seed_scope(b);
@@ -299,8 +380,8 @@ int main(){
       {15,test_15},{16,test_16},{17,test_17},{18,test_18},{19,test_19},{20,test_20},
       {21,test_21},{22,test_22},{23,test_23},{24,test_24},{25,test_25},
       {26,test_26},{27,test_27},{28,test_28},{29,test_29},{30,test_30},
-      {31,test_31},{33,test_33},{34,test_34},{35,test_35},{36,test_36},
-      {38,test_38},{41,test_41},{42,test_42},{44,test_44},
+      {31,test_31},{32,test_32},{33,test_33},{34,test_34},{35,test_35},{36,test_36},{37,test_37},
+      {38,test_38},{39,test_39},{40,test_40},{41,test_41},{42,test_42},{44,test_44},
       {46,test_46},{47,test_47},{48,test_48},{50,test_50},{51,test_51},{52,test_52},
       {54,test_54},{55,test_55},{56,test_56},{58,test_58}
     };
