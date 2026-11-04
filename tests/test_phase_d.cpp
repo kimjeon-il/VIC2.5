@@ -27,7 +27,7 @@ static Id people(World& w,const std::string& region,People n) {
 static void seed_actor_set(World& w) {
     auto& c=w.seed_core();
     c.seed_actor("CLIENT",200);
-    c.seed_actor("BUILDER",0);
+    c.seed_actor("BUILDER",10); // actually funded buyer for stage7 steel trade
     c.seed_actor("GOV",100);
     c.seed_actor("LAB",0);
     c.seed_actor("FACTORY",20);
