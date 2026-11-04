@@ -498,6 +498,51 @@ public:
             {key,amount,0},{account(owner,"expense"),0,amount}}});
         events_.push_back("phase-d-capitalized-verified-paid-work");
     }
+    // Accrual path is separate from the older paid-cost capitalization path.
+    // Verified progress creates a *receivable/payable*, not spendable cash.
+    void phase_d_accrue_certified_work(const std::string& client,
+                       const std::string& contractor,Money amount) {
+        require_stage({8});
+        ensure(client!=contractor&&actors_.contains(client) &&
+               actors_.contains(contractor)&&amount>0,
+               "invalid certified progress counterparties");
+        const auto register_account=[&](const std::string& owner,
+                                        const std::string& suffix,AccountType type){
+            const auto key=account(owner,suffix);
+            try {(void)money_.balance(key);}
+            catch(const std::out_of_range&) {money_.add_account(key,owner,type);}
+        };
+        register_account(client,"wip",AccountType::asset);
+        register_account(client,"construction_payable",AccountType::liability);
+        register_account(contractor,"construction_receivable",AccountType::asset);
+        money_.post({unique("phase-d-accrual"),"certified construction work accrued",{
+            {account(client,"wip"),amount,0},
+            {account(client,"construction_payable"),0,amount},
+            {account(contractor,"construction_receivable"),amount,0},
+            {account(contractor,"revenue"),0,amount}}});
+        events_.push_back("phase-d-certified-construction-accrued");
+    }
+    void phase_d_settle_certified_work(const std::string& client,
+                        const std::string& contractor,Money amount) {
+        require_stage({5,8});
+        ensure(actors_.contains(client)&&actors_.contains(contractor)&&
+               client!=contractor&&amount>0&&cash(client)>=amount &&
+               -money_.balance(account(client,"construction_payable"))>=amount &&
+               money_.balance(account(contractor,"construction_receivable"))>=amount,
+               "unfunded or unbacked certified work payment");
+        if(phase_d_reservation_mode_)
+            resources_.assert_cash_available(client,amount,cash(client));
+        money_.post({unique("phase-d-accrual-settle"),"cash settles construction receivable",{
+            {account(client,"construction_payable"),amount,0},
+            {account(client,"cash"),0,amount},
+            {account(contractor,"cash"),amount,0},
+            {account(contractor,"construction_receivable"),0,amount}}});
+        events_.push_back("phase-d-certified-invoice-paid");
+    }
+    [[nodiscard]] Money phase_d_payable(const std::string& client)const{
+        try {return -money_.balance(account(client,"construction_payable"));}
+        catch(const std::out_of_range&){return 0;}
+    }
     [[nodiscard]] Money phase_d_wip(const std::string& owner) const {
         ensure(actors_.contains(owner),"unknown phase D WIP owner");
         try { return money_.balance(account(owner,"wip")); }
