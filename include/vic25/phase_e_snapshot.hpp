@@ -17,6 +17,7 @@ using Reader=phasec::persistence_detail::BinaryReader;
 template<class A> void op(A& ar,Operation& x) {
     ar(x.id);ar(x.kind);ar(x.provinces);ar(x.unit);ar(x.other);
     ar(x.value);ar(x.other_value);ar(x.effective);
+    ar(x.leader);ar(x.minister);ar(x.chamber_seats);ar(x.quorum);
 }
 template<class A> void log(A& ar,ChangeLog& x) {
     ar(x.event_id);ar(x.kind);ar(x.effective);ar(x.provinces);
@@ -87,7 +88,7 @@ template<class A>void state(A& ar,SpatialState& s) {
 
 struct SnapshotCodec {
     static constexpr const char* magic="VIC25_PHASEE_SNAPSHOT_1";
-    static constexpr const char* version="phase-e-cpp/0.1";
+    static constexpr const char* version="phase-e-cpp/0.2";
     static std::string encode(const World& w) {
         w.validate();
         std::ostringstream out(std::ios::binary|std::ios::out);

@@ -54,7 +54,8 @@ struct TerritorialScope {
 struct Claim {Id province{};std::string claimant;bool active{true};};
 enum class OpKind:std::uint8_t {
     transfer, reassign, rename, create_admin, merge_admin,
-    reparent_admin, add_claim, remove_claim, set_civil, set_fiscal
+    reparent_admin, add_claim, remove_claim, set_civil, set_fiscal,
+    found_country
 };
 struct Operation {
     std::string id;
@@ -63,6 +64,8 @@ struct Operation {
     Id unit{},other{};
     std::string value,other_value;
     Month effective{};
+    std::string leader,minister;
+    People chamber_seats{},quorum{};
 };
 struct ChangeLog {
     std::string event_id;
@@ -165,6 +168,29 @@ inline void apply_operation(SpatialState& s,phasec::IntegratedWorld& c,const Ope
         require(s.provinces.contains(id),"ED0_ERR_INVALID_PROVINCE");
     };
     switch(op.kind) {
+    case OpKind::found_country: {
+        require(op.unit!=0&&!s.units.contains(op.unit)&&
+                !op.value.empty()&&!op.other_value.empty() &&
+                !op.provinces.empty()&&!op.leader.empty()&&!op.minister.empty()&&
+                op.chamber_seats>0&&op.quorum>0&&op.quorum<=op.chamber_seats,
+                "ED0_ERR_INVALID_AUTHORITY");
+        std::set<Id> unique(op.provinces.begin(),op.provinces.end());
+        require(unique.size()==op.provinces.size(),"ED0_ERR_INVALID_PROVINCE");
+        for(Id id:unique) {
+            valid_province(id);
+            require(c.sovereignty(s.provinces.at(id).region)!=op.value,
+                    "ED0_ERR_INVALID_AUTHORITY");
+        }
+        s.units.emplace(op.unit,AdministrativeUnit{
+            op.unit,op.other_value,op.value,0,true});
+        for(Id id:unique) {
+            c.phase_e_transfer_sovereignty(s.provinces.at(id).region,op.value);
+            s.membership[id]=op.unit;
+        }
+        c.phase_e_found_government(op.value,op.leader,op.minister,
+                                   op.chamber_seats,op.quorum);
+        break;
+    }
     case OpKind::transfer: {
         require(s.units.contains(op.unit)&&s.units.at(op.unit).active&&
                 s.units.at(op.unit).country==op.value && !op.provinces.empty(),
@@ -268,6 +294,18 @@ public:
                         require(false,"ED0_ERR_REVISION_CONFLICT");
         s_.pending[op.effective].push_back(std::move(op));
     }
+    // Atomic multi-province secession with an actual Phase C government.
+    void queue_independence(std::string event,std::vector<Id> ids,
+                            std::string country,Id new_admin,
+                            std::string admin_name,std::string head,
+                            std::string prime,People seats,People quorum) {
+        std::sort(ids.begin(),ids.end());
+        Operation op{std::move(event),OpKind::found_country,std::move(ids),
+                     new_admin,0,std::move(country),std::move(admin_name)};
+        op.leader=std::move(head);op.minister=std::move(prime);
+        op.chamber_seats=seats;op.quorum=quorum;
+        schedule(std::move(op));
+    }
     void queue_transfer(std::string event,std::vector<Id> ids,
                         std::string country,Id new_leaf) {
         std::sort(ids.begin(),ids.end());
@@ -323,6 +361,7 @@ private:
             // Create administrative structures first, then sovereignty/assignment
             const auto priority=[](OpKind k){
                 if(k==OpKind::create_admin)return 0;
+                if(k==OpKind::found_country)return 1;
                 if(k==OpKind::reparent_admin)return 1;
                 if(k==OpKind::transfer)return 2;
                 return 3;

@@ -1317,6 +1317,29 @@ public:
         events_.push_back("phase-e-sovereignty-transfer");
     }
 
+    // Called only during Phase E stage-0 atomic territorial independence.
+    // Country / government identity is distinct from province ownership,
+    // and does not create money, POPs, state debt or company titles.
+    void phase_e_found_government(const std::string& country,
+                                  const std::string& head,
+                                  const std::string& prime,
+                                  People seats,People quorum) {
+        require_stage({0});
+        ensure(!country.empty()&&!head.empty()&&!prime.empty()&&
+               seats>0&&quorum>0&&quorum<=seats&&
+               !governments_.contains(country),"phase E invalid new country");
+        bool has_sovereignty=false;
+        for(const auto& [region,sovereign]:sovereignty_) {
+            (void)region;
+            if(sovereign==country) {has_sovereignty=true;break;}
+        }
+        ensure(has_sovereignty,"phase E government requires actual new territory");
+        governments_.emplace(country,GovernmentState{
+            country,head,prime,seats,quorum,1
+        });
+        events_.push_back("phase-e-country-government-founded");
+    }
+
     void occupy(const std::string& region, const std::string& occupier) {
         require_stage({10});
         ensure(sovereignty_.contains(region) && !occupier.empty(), "invalid occupation");

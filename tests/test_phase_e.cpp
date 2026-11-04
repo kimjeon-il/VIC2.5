@@ -89,6 +89,44 @@ static void test_16(){auto w=fixture();plan(w,[](SpatialStage& s){
     s.queue_transfer("swap1",{1},"B",201);s.queue_transfer("swap2",{7},"A",101);
 });apply(w);check(w.sovereign(1)=="B"&&w.sovereign(7)=="A"&&
 w.sovereign_provinces("A").size()==6,"territory exchange");}
+
+static void test_17(){
+    auto w=fixture();
+    for(Id p=1;p<=12;++p)seed_pop(w,p,100);
+    w.seed_core().seed_core().seed_actor("CREDITOR",425);
+    const auto funds=w.core().core().cash("CREDITOR");
+    const auto before=w.population(w.sovereign_provinces("A"))+
+                      w.population(w.sovereign_provinces("B"));
+    plan(w,[](SpatialStage& s) {
+        s.queue_independence("independence-C",{4,5},"C",301,
+                             "C-PROVINCE","HEAD_C","PRIME_C",7,4);
+    });
+    check(w.sovereign_provinces("A").size()==6,"independence not applied early");
+    apply(w);
+    check(w.sovereign_provinces("A").size()==4&&
+          w.sovereign_provinces("B").size()==6&&
+          w.sovereign_provinces("C").size()==2 &&
+          w.provinces_in_unit(301)==std::set<Id>({4,5}) &&
+          w.core().core().government("C").prime_minister=="PRIME_C" &&
+          w.core().core().cash("CREDITOR")==funds &&
+          w.population(w.sovereign_provinces("A"))+
+          w.population(w.sovereign_provinces("B"))+
+          w.population(w.sovereign_provinces("C"))==before,
+          "independence must preserve POP and financial titles");
+    const auto saved=SnapshotCodec::encode(w);
+    auto roundtrip=SnapshotCodec::decode(saved);
+    check(SnapshotCodec::encode(roundtrip)==saved,"independence save replay");
+    const auto original=SnapshotCodec::encode(w);
+    plan(w,[](SpatialStage& s){
+        s.queue_independence("invalid-independence",{7,999},"D",302,
+                             "D-PROVINCE","HEAD_D","PRIME_D",1,1);
+    });
+    const auto beforeReject=SnapshotCodec::encode(w);
+    check(fails([&]{w.advance();})&&
+          beforeReject==SnapshotCodec::encode(w),"invalid independence rollback");
+    (void)original;
+}
+
 static void test_18(){auto w=fixture();plan(w,[](SpatialStage& s){s.occupy(2,"B");},10);
     check(!w.spatial().fiscal.contains(2),"occupation cannot auto-create tax authority");}
 static void test_19(){auto w=fixture();check(fails([&]{plan(w,[](SpatialStage& s){
@@ -258,7 +296,7 @@ int main(){
     const std::map<int,std::function<void()>> implemented={
       {1,test_01},{2,test_02},{3,test_03},{4,test_04},{5,test_05},{6,test_06},{7,test_07},{8,test_08},
       {9,test_09},{11,test_11},{12,test_12},{13,test_13},{14,test_14},
-      {15,test_15},{16,test_16},{18,test_18},{19,test_19},{20,test_20},
+      {15,test_15},{16,test_16},{17,test_17},{18,test_18},{19,test_19},{20,test_20},
       {21,test_21},{22,test_22},{23,test_23},{24,test_24},{25,test_25},
       {26,test_26},{27,test_27},{28,test_28},{29,test_29},{30,test_30},
       {31,test_31},{33,test_33},{34,test_34},{35,test_35},{36,test_36},
