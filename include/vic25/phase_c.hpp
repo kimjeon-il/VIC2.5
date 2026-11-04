@@ -1304,6 +1304,19 @@ public:
         }
         events_.push_back("battle");
     }
+    // Phase E single-authority adapter: sovereignty lives only in Phase C.
+    // Called by the spatial staged month during stage 0; Phase E never stores
+    // an independent writable country-per-province copy.
+    void phase_e_transfer_sovereignty(const std::string& region,
+                                      const std::string& sovereign) {
+        require_stage({0});
+        ensure(sovereignty_.contains(region) && !sovereign.empty(),
+               "phase E invalid territory or sovereign");
+        require_typed(typed_id(EntityKind::region,region), EntityKind::region);
+        sovereignty_[region]=sovereign;
+        events_.push_back("phase-e-sovereignty-transfer");
+    }
+
     void occupy(const std::string& region, const std::string& occupier) {
         require_stage({10});
         ensure(sovereignty_.contains(region) && !occupier.empty(), "invalid occupation");
