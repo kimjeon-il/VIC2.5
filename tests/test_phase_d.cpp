@@ -268,6 +268,21 @@ static void test_unsupported_retrofit_is_rejected() {
           w.state().pending_adoptions.empty(),
           "unimplemented retrofit must fail closed");
 }
+static void test_unsupported_nonstorable_dispatch_rejected() {
+    World w{10000};seed_actor_set(w);
+    const auto id=people(w,"R",1);
+    w.seed_core().seed_production_facility("OLD_MILL","FACTORY","R",1);
+    w.seed_core().seed_stock("FACTORY","R","ore",1);
+    auto r=recipe(); r.requires_same_stage_nonstorable_energy=true;
+    w.seed_recipe(r);
+    World::Plan p;
+    p[2].push_back([id](Stage& s){s.phase_c().hire(id,1,"FACTORY",1);});
+    p[4].push_back([](Stage& s){s.manufacture("RECIPE",1);});
+    check(reject([&]{w.advance(p);}) && w.month()==10000 &&
+          w.core().stock("FACTORY","R","ore")==1 &&
+          w.core().stock("FACTORY","R","bars")==0,
+          "unapproved I2-DISPATCH must fail without consuming material");
+}
 static void test_repeated_world_deterministic() {
     auto run=[] {
         World w{11000};seed_actor_set(w);
@@ -298,8 +313,9 @@ int main() {
         test_funding_and_research_material_fail_closed();
         test_late_failure_rolls_back_all_domains();
         test_unsupported_retrofit_is_rejected();
+        test_unsupported_nonstorable_dispatch_rejected();
         test_repeated_world_deterministic();
-        std::cout<<"Phase D bounded integration: 10 scenario cases PASS. "
+        std::cout<<"Phase D bounded integration: 11 scenario cases PASS. "
                     "This is not the D-V 72/279 acceptance suite.\n";
         return 0;
     } catch(const std::exception& e) {
