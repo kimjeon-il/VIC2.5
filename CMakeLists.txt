@@ -169,3 +169,10 @@ if (BUILD_TESTING)
         set_tests_properties(vic25_phase_e_scale_1m PROPERTIES TIMEOUT 900 RUN_SERIAL TRUE)
     endif()
 endif()
+
+# Strict EV-T60 final acceptance (intentionally not a success-oriented CTest).
+if (BUILD_TESTING)
+    add_custom_target(vic25_phase_e_release_gate
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_phase_e_gate.py" --phase-e-test $<TARGET_FILE:vic25_phase_e_tests>
+        DEPENDS vic25_phase_e_tests)
+endif()

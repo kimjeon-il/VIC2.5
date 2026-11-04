@@ -32,6 +32,4 @@ jobs:
       - name: Build C/D/E regression targets
         run: cmake --build build --config Release --parallel 2
       - name: Execute CTest suite
-        run: ctest --test-dir build -C Release --output-on-failure
-      - name: Phase E granular output
-        run: ctest --test-dir build -C Release -R "^vic25_phase_e_tests$" -V
+        run: ctest --test-dir build -C Release --output-on-failure -V
