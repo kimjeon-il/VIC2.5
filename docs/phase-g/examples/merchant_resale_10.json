@@ -1,0 +1,39 @@
+{
+  "$schema": "vic25-design-fixture/phase-g-1.0",
+  "status": "NOT_EXECUTED",
+  "tests": [
+    "GT1-T02",
+    "GT5-T06"
+  ],
+  "assumptions": [
+    "one currency",
+    "all goods identical; no loss",
+    "cost 150 paid to actual service firms",
+    "sample accounting only; not a compiled engine save"
+  ],
+  "input": {
+    "good_id": "IRON",
+    "quantity": 10,
+    "seller": "Firm_A",
+    "merchant": "Firm_M",
+    "buyer": "Firm_B",
+    "purchase_total_minor": 1000,
+    "service_cost_total_minor": 150,
+    "resale_total_minor": 1400
+  },
+  "expected": {
+    "physical_goods_created": 10,
+    "physical_goods_after_resale": 10,
+    "iron_production_from_resale": 0,
+    "merchant_revenue_minor": 1400,
+    "merchant_acquisition_minor": 1000,
+    "merchant_service_cost_minor": 150,
+    "merchant_net_margin_minor": 250,
+    "title_trace": [
+      "Firm_A",
+      "Firm_M",
+      "Firm_B"
+    ],
+    "double_entry_balanced": true
+  }
+}
