@@ -1,0 +1,160 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "phase-d-integration/1.0",
+  "fixture_type": "fictional_test_value",
+  "fixture_id": "DV-X2",
+  "name": "Deterministic competition for six steel lots across state-owned military, construction, manufacturing and research",
+  "world": {
+    "region": "REGION_B",
+    "controller": "GOV_B",
+    "population_total_in_fixture": 8,
+    "one_public_steel_depot_inventory": 6,
+    "government_cash": 40,
+    "worker_cash": 0,
+    "equipment_service_capacity": 4,
+    "available_jobs": {
+      "military": 2,
+      "construction": 2,
+      "manufacturing": 2,
+      "research": 2
+    }
+  },
+  "law_priority_rule": {
+    "version": "fictional-law-P1",
+    "explicit_priority": [
+      "military",
+      "construction",
+      "manufacturing",
+      "research"
+    ],
+    "military_requisition_active": true,
+    "stable_tie_break": "typed_id_ascending",
+    "no_universal_priority_implied": true
+  },
+  "resource": "steel_lot",
+  "month_index": 700,
+  "requests": [
+    {
+      "consumer": "military_workshop",
+      "steel_requested": 2,
+      "steel_technically_feasible": 2,
+      "allocated": 2,
+      "role_priority": 1,
+      "machine_service_needed": 0,
+      "pop_workers_or_soldiers": 2,
+      "wage_funding": 8,
+      "actual_stage4_use": 2
+    },
+    {
+      "consumer": "construction_workpackage",
+      "steel_requested": 3,
+      "steel_technically_feasible": 2,
+      "limited_by": "labor_and_machine_cap_2",
+      "allocated": 2,
+      "role_priority": 2,
+      "machine_service_needed": 2,
+      "pop_workers_or_soldiers": 2,
+      "wage_funding": 8,
+      "actual_stage4_use": 2
+    },
+    {
+      "consumer": "industrial_machine_shop",
+      "steel_requested": 3,
+      "steel_technically_feasible": 2,
+      "limited_by": "machine_cap_2",
+      "allocated": 2,
+      "role_priority": 3,
+      "machine_service_needed": 2,
+      "pop_workers_or_soldiers": 2,
+      "wage_funding": 8,
+      "actual_stage4_use": 2
+    },
+    {
+      "consumer": "research_test_workshop",
+      "steel_requested": 1,
+      "steel_technically_feasible": 1,
+      "allocated": 0,
+      "role_priority": 4,
+      "machine_service_needed": 0,
+      "pop_workers_or_soldiers": 2,
+      "wage_funding": 8,
+      "actual_stage4_use": 0,
+      "reason": "no_valid_stock_remaining"
+    }
+  ],
+  "stages": {
+    "1": {
+      "government_wage_funding_reserved": 32,
+      "actual_government_cash_available": 40,
+      "steel_warehouse_stock_before": 6
+    },
+    "2": {
+      "total_real_people_allocated": 8,
+      "military_service": 2,
+      "construction_employed": 2,
+      "manufacturing_employed": 2,
+      "research_employed": 2,
+      "double_allocations": 0
+    },
+    "3": {
+      "steel_lots_transferred_to_allocated_custodians": 6,
+      "source_depot_reduction": 6,
+      "unallocated_steel": 0,
+      "equipment_service_reserved": 4
+    },
+    "4": {
+      "military_workshop_steel_used": 2,
+      "construction_steel_used": 2,
+      "manufacturing_steel_used": 2,
+      "research_steel_used": 0,
+      "construction_work_units_accepted": 2,
+      "manufactured_parts_units_output": 2,
+      "research_work_units_created": 0,
+      "equipment_service_used": 4
+    },
+    "5": {
+      "government_actual_wages_paid_total": 32,
+      "worker_cash_received_total": 32
+    },
+    "11": {
+      "steel_remaining": 0,
+      "government_cash": 8,
+      "worker_cash": 32,
+      "world_cash_total": 40,
+      "people_count": 8,
+      "valid_steel_lot_use_total": 6,
+      "valid_equipment_service_use_total": 4
+    }
+  },
+  "oracles": {
+    "steel_opening": 6,
+    "requested_steel_total": 9,
+    "actual_steel_use_total": 6,
+    "unmet_steel_by_consumer": {
+      "military": 0,
+      "construction": 1,
+      "manufacturing": 1,
+      "research": 1
+    },
+    "pop_double_allocations": 0,
+    "cash_total_opening": 40,
+    "cash_total_closing": 40,
+    "capacity_overuse": 0,
+    "research_knowledge_events_due_to_steel_shortage": 0,
+    "deterministic_tie_order": true
+  },
+  "negative_variant": {
+    "inject": "duplicate_final_steel_consumption_by_research_after_allocation",
+    "extra_steel_requested": 1,
+    "expected_error": "D4_ERR_INVENTORY_OVERDRAWN",
+    "expected_abort": true,
+    "world_hash_equal_to_opening": true,
+    "month_index_unchanged": true,
+    "all_reservations_rolled_back": true
+  },
+  "notes": [
+    "All values are fictional test values; the military preference is granted explicitly by this fixture's valid fictional law and is not a universal game priority.",
+    "All entities are publicly owned in this minimal fixture, so goods move between custodians without external purchase; wages are paid from existing actual government cash.",
+    "Workers remain employed and paid even if a planned research task cannot progress due to lack of steel, unless a separate valid contract/layoff event changes this."
+  ]
+}
