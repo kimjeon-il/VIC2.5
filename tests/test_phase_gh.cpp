@@ -174,13 +174,78 @@ static void rejected_authority_and_zero_resources() {
     check(w.commit_id()==0 && w.diplomacy().crises.empty(),
           "no automatic crisis without real claim");
 }
+
+static void industry_production_then_export() {
+    World w=make_world(false);
+    auto& e=w.seed_geography();
+    auto& d=e.seed_core();
+    auto& c=d.seed_core();
+    c.seed_actor("FACTORY",100);
+    c.seed_production_facility("MILL","FACTORY","RA",2);
+    c.seed_stock("FACTORY","RA","ore",3);
+    c.seed_market("RA","bars",100,1,300);
+    c.seed_market("RB","bars",150,1,300);
+    auto& pop=c.seed_population();
+    const auto household=pop.household_profile({"RA","mixed","shared",2});
+    const auto economy=pop.economic_profile({"RA","worker","wage","employee",pop.default_education()});
+    const auto demo=pop.demographic_profile({"RA",w.month()-300,
+                  vic25::phaseb::Sex::female,"culture","faith",
+                  "citizen","free",pop.default_health(),
+                  vic25::phaseb::Service::civilian});
+    const auto slice=pop.seed_population(demo,economy,household,2,1);
+    vic25::phased::IndustryRecipe recipe;
+    recipe.id="BAR_RECIPE"; recipe.site="MILL";
+    recipe.inputs={{"ore",1}}; recipe.outputs={{"bars",2}};
+    recipe.workers_per_batch=1;recipe.capacity_per_batch=1;
+    d.seed_recipe(recipe);
+    w.seed_route(Route{"bars-export","FACTORY","BUYER","bars",1,2,4,1});
+    World::Plan first;
+    first[2].push_back([slice](Stage& s){
+        s.phase_c().hire(slice,2,"FACTORY",1);
+    });
+    first[4].push_back([](Stage& s){
+        s.phase_d().manufacture("BAR_RECIPE",2);
+    });
+    w.advance(first);
+    check(w.base().core().core().stock("FACTORY","RA","bars")==4 &&
+          w.commerce().fills.empty(),
+          "actual D production needs completion before G export planning");
+    w.advance();
+    check(w.base().core().core().stock("FACTORY","RA","bars")==0 &&
+          w.base().core().core().stock("TRANSIT:G:bars-export:101","in_transit","bars")==4 &&
+          w.commerce().fills.size()==1,
+          "D-manufactured bars exported with G and real C shipment");
+}
+static void reparation_treaty_actual_c_financial_settlement() {
+    World w=make_world(false);
+    World::Plan first;
+    first[9].push_back([](Stage& s) {
+        s.link_reparation_treaty("repair-1","A","B",100,"PM_A");
+    });
+    w.advance(first);
+    check(w.base().core().core().cash("A")==200 &&
+          w.base().core().core().cash("B")==200,
+          "signature cannot immediately transfer money");
+    World::Plan second;
+    second[5].push_back([](Stage& s){
+        s.pay_reparation("repair-1",20);
+    });
+    w.advance(second);
+    const auto& c=w.base().core().core();
+    check(c.cash("A")==180 && c.cash("B")==220 &&
+          c.reparations_outstanding("repair-1")==80,
+          "H obligation must be settled only by C financial repayment journal");
+}
+
 int main() {
     try {
         tariffs_trade_and_diplomatic_influence();
         international_organization_and_crisis();
         cross_domain_atomic_rollback();
         rejected_authority_and_zero_resources();
-        std::cout << "Phase G/H bounded C/D/E integration: 4 scenario groups passed\n";
+        industry_production_then_export();
+        reparation_treaty_actual_c_financial_settlement();
+        std::cout << "Phase G/H bounded C/D/E integration: 6 scenario groups passed\n";
         return 0;
     } catch(const std::exception& e) {
         std::cerr << "Phase G/H bounded integration FAIL: "<<e.what()<<"\n";
