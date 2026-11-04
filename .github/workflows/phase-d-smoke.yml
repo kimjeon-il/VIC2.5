@@ -20,5 +20,5 @@ jobs:
         run: ctest --test-dir build -C Release -R '^vic25_phase_d_' --output-on-failure
       - name: Measure 100k and 1m sparse POP + industrial event loads
         run: |
-          ./build/vic25_phase_d_population_scale 100000 2
-          ./build/vic25_phase_d_population_scale 1000000 2
+          ./build/vic25_phase_d_population_scale 100000 8
+          ./build/vic25_phase_d_population_scale 1000000 8
