@@ -88,7 +88,7 @@ int main(){
         check(rejected([&]{(void)SnapshotCodec::decode(tampered);}),
               "corrupted snapshot silently accepted");
         std::string old_contract=bytes;
-        const std::string correct="phase-d-cpp/0.1",invalid="phase-d-cpp/0.0";
+        const std::string correct="phase-d-cpp/0.2",invalid="phase-d-cpp/0.0";
         const auto pos=old_contract.find(correct);
         check(pos!=std::string::npos,"missing contract version in binary snapshot");
         old_contract.replace(pos,correct.size(),invalid);
