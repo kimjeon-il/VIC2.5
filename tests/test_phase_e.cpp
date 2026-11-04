@@ -1,5 +1,6 @@
 #include "vic25/phase_e_snapshot.hpp"
 #include "vic25/phase_e_raster.hpp"
+#include "vic25/phase_e_view.hpp"
 #include <algorithm>
 #include <array>
 #include <filesystem>
@@ -271,6 +272,32 @@ static void test_41(){auto pos=sphere_pick({2,0,0,-1,0,0});
 static void test_42(){RasterIdTile t{2,2,{101,102,103,104}};
     check(t.sample(0,0)==101&&t.sample(1,0)==102&&
           t.sample(0,1)==103&&t.sample(1,1)==104,"integer id sampling");}
+
+static void test_43(){
+    auto w=fixture();
+    vic25::phasee::view::Locator locator;
+    locator.add(9,12.75,42.1,w);
+    const std::set<Id> visible={1,2,3,4,5,6,7,8,10,11,12};
+    const auto fallback=locator.invisible_in(visible);
+    check(fallback.size()==1&&fallback[0].province==9&&
+          locator.pick_near(12.75,42.1,1.0,visible)==std::optional<Id>{9}&&
+          w.province(9).id==9,
+          "small island retains authoritative ID and a georeferenced LOD marker");
+}
+static void test_45(){
+    auto w=fixture();
+    vic25::phasee::view::Display renderer(w);
+    const auto snapshot=SnapshotCodec::encode(w);
+    check(renderer.owner(1)=="A","sovereignty display");
+    renderer.set_layer(vic25::phasee::view::Layer::administration);
+    check(renderer.owner(1)=="ADMIN:101","administrative display");
+    renderer.set_layer(vic25::phasee::view::Layer::military);
+    check(renderer.owner(1)=="A","military mode");
+    renderer.set_layer(vic25::phasee::view::Layer::sovereign);
+    check(renderer.owner(1)=="A"&&SnapshotCodec::encode(w)==snapshot,
+          "palette modes must never mutate Phase C sovereign state");
+}
+
 static void test_44(){auto w=fixture();RasterIdTile t{2,2,{1,2,3,4}};
     const auto id_before=t.ids;plan(w,[](SpatialStage& s){s.queue_transfer("change",{1},"B",201);});apply(w);
     check(t.ids==id_before&&w.sovereign(1)=="B","static raster unchanged");}
@@ -417,7 +444,7 @@ int main(){
       {21,test_21},{22,test_22},{23,test_23},{24,test_24},{25,test_25},
       {26,test_26},{27,test_27},{28,test_28},{29,test_29},{30,test_30},
       {31,test_31},{32,test_32},{33,test_33},{34,test_34},{35,test_35},{36,test_36},{37,test_37},
-      {38,test_38},{39,test_39},{40,test_40},{41,test_41},{42,test_42},{44,test_44},
+      {38,test_38},{39,test_39},{40,test_40},{41,test_41},{42,test_42},{43,test_43},{44,test_44},{45,test_45},
       {46,test_46},{47,test_47},{48,test_48},{50,test_50},{51,test_51},{52,test_52},{53,test_53},
       {54,test_54},{55,test_55},{56,test_56},{58,test_58}
     };
