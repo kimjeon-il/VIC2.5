@@ -4,8 +4,7 @@
   "status": "NOT_EXECUTED",
   "test_ids": [
     "HV-T03",
-    "HV-T10",
-    "HV-T25"
+    "HV-T10"
   ],
   "depends_on": [
     "H-D3 TreatyTerm/C-P ratification",
