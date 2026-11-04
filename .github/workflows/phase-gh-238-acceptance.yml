@@ -27,12 +27,14 @@ jobs:
         run: python scripts/verify_phase_gh_238.py --root . --audit
       - name: CMake configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-      - name: Build all Phase C-D-E-G-H regression and acceptance targets
-        run: cmake --build build --config Release --parallel 2
-      - name: Execute full CTest regression and each G/H acceptance ID
-        run: ctest --test-dir build -C Release --output-on-failure --parallel 2
+      - name: Build focused acceptance executable
+        run: cmake --build build --config Release --target vic25_phase_gh_acceptance --parallel 2
       - name: Per-ID original-spec PASS FAIL BLOCKED JSON report
         run: python scripts/verify_phase_gh_238.py --root . --binary "${{ matrix.binary }}" --report "build/gh-238-${{ matrix.os }}.json"
+      - name: Build all C D E G H regression targets
+        run: cmake --build build --config Release --parallel 2
+      - name: Execute full CTest regression and 238 individually registered G/H IDs
+        run: ctest --test-dir build -C Release --output-on-failure --parallel 2
       - name: Upload per-case acceptance evidence even on partial failure
         if: always()
         uses: actions/upload-artifact@v4
