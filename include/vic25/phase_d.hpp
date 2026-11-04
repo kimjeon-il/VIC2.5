@@ -238,9 +238,12 @@ public:
         must(1);
         auto& p=d_.constructions.at(project);
         require(units>0 && p.accepted_work+units<=p.work_required &&
-                !p.ready&&!p.commissioned,"invalid construction plan");
-        c_.phase_d_reserve_cash(p.client,"construction:"+project,
-                                 product(units,p.cash_price_per_work));
+                !p.ready&&!p.commissioned &&
+                (!p.permit_required||p.permit_valid),
+                "invalid construction plan, permit or physical scope");
+        if(!p.allow_accrued_invoice_commission)
+            c_.phase_d_reserve_cash(p.client,"construction:"+project,
+                                     product(units,p.cash_price_per_work));
         p.planned_work=phaseb::add_checked(p.planned_work,units);
     }
     void plan_package(const std::string& id,Quantity attempt_units) {
