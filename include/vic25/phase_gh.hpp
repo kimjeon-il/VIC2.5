@@ -187,6 +187,7 @@ struct Treaty {
     std::set<std::string> parties, ratifications;
     std::vector<TreatyClause> clauses;
     bool pending_termination{};
+    std::set<std::string> termination_approvals;
 };
 struct Organization {
     std::string id;
@@ -508,6 +509,10 @@ public:
              const std::set<std::string>& parties,
              std::vector<TreatyClause> clauses,
              const std::string& proposer,const std::string& prime);
+    void ratify_package_member(const std::string& id,
+             const std::string& country,const std::string& prime);
+    void terminate_treaty(const std::string& id,
+             const std::string& requesting_country,const std::string& prime);
     void configure_organization(const std::string& id,
              OrganizationRule rule,const std::string& proposing_prime);
     void hold_organization_vote(const std::string& org,const std::string& id,
@@ -558,8 +563,20 @@ public:
         std::erase_if(diplomacy_.scheduled_tariffs,[&](const PendingTariff& rule){
             return rule.effective<=phase_c().month();
         });
+        std::erase_if(trade_.edge_usage,[&](const auto& kv){
+            return kv.first.first<phase_c().month();
+        });
+        std::erase_if(diplomacy_.quota_used,[&](const auto& kv){
+            return std::get<3>(kv.first)<phase_c().month();
+        });
         for(auto& [id,t]:diplomacy_.treaties) {
             (void)id;
+            if(t.pending_termination){
+                t.active=false;
+                t.pending_termination=false;
+                ++diplomacy_.revision;
+                continue;
+            }
             const bool fully_ratified=t.parties.empty()?
                                (t.ratified_a&&t.ratified_b):
                                std::all_of(t.parties.begin(),t.parties.end(),
@@ -706,6 +723,8 @@ public:
         for(const auto& fill:trade_.fills) {
             if(fill.buyer_country!=target ||
                fill.seller_country==target)continue;
+            // Values denominated in different currencies are not additive.
+            if(fill.currency!="TEST"){view.foreign_currency_excluded=true;continue;}
             view.target_total_imports=phaseb::add_checked(
                                 view.target_total_imports,fill.goods_value);
             if(fill.seller_country==source)
@@ -820,6 +839,7 @@ inline void Stage::plan_contracts() {
             const auto main_cash=core.phase_d_cash_available(agreement.buyer);
             if(main_unit>0)q=std::min(q,main_cash/main_unit);
         }
+        q=lawful_trade_quantity(country_from,country_to,agreement.good,q);
         if(q<=0)continue;
         if(!agreement.partial && q!=agreement.contracted-agreement.fulfilled)
             continue;
@@ -835,6 +855,7 @@ inline void Stage::plan_contracts() {
         if(agreement.currency!="TEST")
             trade_.fx_held[{agreement.buyer,agreement.currency}]=phaseb::add_checked(
                   trade_.fx_held[{agreement.buyer,agreement.currency}],base);
+        reserve_trade_quota(country_from,country_to,agreement.good,q);
         if(path)for(const auto& edge_id:path->edges) {
             trade_.edge_usage[{month,edge_id}]=phaseb::add_checked(
                       trade_.edge_usage[{month,edge_id}],q);
@@ -874,10 +895,9 @@ inline void Stage::plan_autonomous_trade() {
         const auto available_stock=core.phase_d_material_available(
                                  route.seller,origin,route.good);
         const auto available_cash=core.phase_d_cash_available(route.buyer);
-        const Quantity qty=std::min({
-            route.maximum_quantity,max_route,available_stock,
-            available_cash/landed_unit
-        });
+        const Quantity qty=lawful_trade_quantity(from,to,route.good,
+             std::min({route.maximum_quantity,max_route,available_stock,
+                       available_cash/landed_unit}));
         if(qty<=0)continue;
         const Money goods_cost=phaseb::mul_checked(qty,price);
         const Money duty=phaseb::mul_checked(goods_cost,ppm)/1'000'000;
@@ -889,6 +909,7 @@ inline void Stage::plan_autonomous_trade() {
         if(duty>0)(void)core.cash(to);
         core.phase_d_reserve_cash(route.buyer,eid,total);
         core.phase_d_reserve_material(route.seller,origin,route.good,eid,qty);
+        reserve_trade_quota(from,to,route.good,qty);
         if(path)for(const auto& edge_id:path->edges)
             trade_.edge_usage[{core.month(),edge_id}]=phaseb::add_checked(
                 trade_.edge_usage[{core.month(),edge_id}],qty);
@@ -975,3 +996,4 @@ inline void Stage::execute_autonomous_trade() {
 
 } // namespace vic25::phasegh
 #include "vic25/phase_gh_extensions.hpp"
+#include "vic25/phase_gh_diplomacy.hpp"
