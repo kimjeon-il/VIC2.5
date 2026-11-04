@@ -319,3 +319,12 @@ endif()
 # and seed; cannot silently manufacture sub-month historical events.
 add_executable(vic25_daily_migrate src/migrate_daily_save.cpp)
 target_link_libraries(vic25_daily_migrate PRIVATE vic25_core)
+
+# Native daily Domain B/C/D/G/H integration: real POP, production, work,
+# exact-day transit and legally effective day-dated treaties.
+if (BUILD_TESTING)
+    add_executable(vic25_daily_native_tests tests/test_daily_native.cpp)
+    target_link_libraries(vic25_daily_native_tests PRIVATE vic25_core Threads::Threads)
+    add_test(NAME vic25_daily_native_tests COMMAND vic25_daily_native_tests)
+    set_tests_properties(vic25_daily_native_tests PROPERTIES TIMEOUT 240)
+endif()

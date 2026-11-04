@@ -162,6 +162,7 @@ static void exact_legacy_migration() {
     std::ifstream legacy_input(legacy_c_path,std::ios::binary);
     const std::string old_saved_bytes{std::istreambuf_iterator<char>{legacy_input},
                                       std::istreambuf_iterator<char>{}};
+    legacy_input.close();
     auto migrated_c_file=Migrator::phase_c_file(legacy_c_path,54321);
     check(migrated_c_file.migration_checksum()==
               vic25::phasec::persistence_detail::checksum(old_saved_bytes) &&

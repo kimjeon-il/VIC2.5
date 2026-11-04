@@ -22,9 +22,14 @@ jobs:
       - name: Configure C++20 (headless)
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF
       - name: Build daily migration and engine tests
-        run: cmake --build build --config Release --parallel 2 --target vic25_daily_time_tests vic25_daily_migrate
+        run: cmake --build build --config Release --parallel 2 --target vic25_daily_time_tests vic25_daily_native_tests vic25_daily_migrate
       - name: Daily real-ledger / Gregorian / restore / rollback
-        run: ctest --test-dir build -C Release -R '^vic25_daily_time_tests$' -V --output-on-failure
+        run: ctest --test-dir build -C Release -R '^vic25_daily_(time|native)_tests -V --output-on-failure
+      - name: Build existing B/C/D/E/GH regression targets
+        run: cmake --build build --config Release --parallel 2 --target vic25_phase_b_tests vic25_phase_c_tests vic25_phase_d_tests vic25_phase_e_tests vic25_phase_gh_tests vic25_phase_gh_snapshot_tests
+      - name: Execute existing B/C/D/E/GH regressions
+        run: ctest --test-dir build -C Release -R '^(vic25_phase_b_tests|vic25_phase_c_tests|vic25_phase_d_tests|vic25_phase_e_tests|vic25_phase_gh_tests|vic25_phase_gh_snapshot_tests)$' --output-on-failure
+ -V --output-on-failure
       - name: Build existing B/C/D/E/GH regression targets
         run: cmake --build build --config Release --parallel 2 --target vic25_phase_b_tests vic25_phase_c_tests vic25_phase_d_tests vic25_phase_e_tests vic25_phase_gh_tests vic25_phase_gh_snapshot_tests
       - name: Execute existing B/C/D/E/GH regressions
