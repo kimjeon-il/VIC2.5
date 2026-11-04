@@ -10,6 +10,10 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <optional>
+#include <queue>
+#include <tuple>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -43,6 +47,44 @@ struct TradeFill {
     Quantity quantity{};
     Money goods_value{}, duty_paid{};
     bool shipped{};
+    Money freight_paid{};
+    std::string contract_id, currency{"TEST"};
+    std::vector<std::string> physical_path;
+};
+struct TransportEdge {
+    std::string id, carrier;
+    Id from{}, to{};
+    Quantity monthly_capacity{};
+    Money freight_per_unit{};
+    Month transit_months{};
+    bool enabled{true};
+};
+struct CustomsRecord {
+    std::string execution_id, importer, treasury, good, policy_source;
+    Month month{};
+    Money taxable_value{}, assessed{}, paid{};
+    Quantity cleared_quantity{};
+};
+struct TradeContract {
+    std::string id, seller, buyer, good, currency{"TEST"};
+    Id origin{}, destination{};
+    Quantity contracted{}, fulfilled{}, monthly_limit{};
+    Money unit_price{};
+    Month effective{}, expires{};
+    bool partial{true}, active{true};
+};
+struct CreditFacility {
+    std::string id, borrower, pledge_region, pledge_good;
+    Quantity pledged_goods{};
+    Money limit{}, drawn{};
+    Month effective{};
+    bool active{true};
+};
+struct CargoInsurance {
+    std::string id, shipment_id, insurer, beneficiary;
+    Money premium{}, maximum_claim{}, claim_due{}, claim_paid{};
+    Quantity insured_quantity{};
+    bool premium_paid{};
 };
 
 struct PlannedTrade {
@@ -50,11 +92,21 @@ struct PlannedTrade {
                 destination_region, seller_country, buyer_country;
     Quantity quantity{};
     Month travel_months{};
-    Money unit_price{}, total_cost{}, duty{};
+    Money unit_price{}, total_cost{}, duty{}, freight{};
+    std::string contract_id, settlement_currency{"TEST"};
+    std::vector<std::string> path_edges;
 };
 
 struct TradeState {
     std::map<std::string, Route> routes;
+    std::map<std::string, TransportEdge> transport_edges;
+    std::map<Id,std::vector<std::string>> transport_adjacency;
+    std::map<std::pair<Month,std::string>,Quantity> edge_usage;
+    std::map<std::string,TradeContract> contracts;
+    std::map<std::string,CreditFacility> credit;
+    std::map<std::string,CargoInsurance> insurance;
+    std::vector<CustomsRecord> customs;
+    std::map<std::pair<std::string,std::string>,Money> fx_held;
     std::vector<PlannedTrade> pending;
     std::vector<TradeFill> fills;
     std::set<std::string> executed;
