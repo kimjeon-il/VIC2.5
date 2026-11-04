@@ -1,0 +1,26 @@
+name: Phase D C++ integration (bounded)
+on:
+  push:
+    branches:
+      - work/phase-d-cpp-integration
+  pull_request:
+    branches:
+      - work/phase-c-engine-integration
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Compile all registered targets
+        run: cmake --build build --config Release --parallel 2
+      - name: CTest (including Phase C regression and Phase D slice)
+        run: ctest --test-dir build -C Release --output-on-failure
