@@ -123,11 +123,12 @@ inline void Stage::terminate_treaty(const std::string& id,
     require(!t.parties.empty()&&t.parties.contains(requesting_country)&&
             t.active&& !t.pending_termination,
             "H_ERR_ILLEGAL_TREATY_TERMINATION");
-    // Bounded profile: unanimous termination is required. Caller must provide
-    // a fully authorized negotiation outside this API before ending terms.
-    require(t.ratifications.size()==t.parties.size(),
-            "H_ERR_TERMINATION_NOT_UNANIMOUS");
-    t.pending_termination=true;
+    // Termination signatures are distinct from the signatures that originally
+    // ratified the treaty; old ratification must NOT count as new consent.
+    require(t.termination_approvals.insert(requesting_country).second,
+            "H_ERR_DUPLICATE_TERMINATION_CONSENT");
+    if(t.termination_approvals.size()==t.parties.size())
+        t.pending_termination=true;
     ++diplomacy_.revision;
 }
 inline Quantity Stage::lawful_trade_quantity(
