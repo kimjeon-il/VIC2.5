@@ -155,7 +155,7 @@ static void t_gd03(){
         CargoInsurance insurance;
         insurance.id="I";insurance.shipment_id="G:R:100";
         insurance.insurer="INSURER";insurance.beneficiary="BUYER";
-        insurance.premium=30;insurance.maximum_claim=500;
+        insurance.premium=30;insurance.maximum_claim=1000;
         insurance.insured_quantity=10;
         s.insure_cargo(insurance);
     });
