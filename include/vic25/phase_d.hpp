@@ -11,6 +11,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -916,9 +917,12 @@ public:
                 if(i==11)next.finalize(live);
             });
         }
-        auto staged_core=core_;
-        const auto report=staged_core.advance(bridge);
-        core_=std::move(staged_core);
+        // Phase C::advance already clones and atomically commits the complete
+        // core. Avoid an additional full POP copy: at 1m sparse slices it
+        // triples peak population RAM without adding rollback safety.
+        static_assert(std::is_nothrow_move_assignable_v<DomainState>,
+                      "Phase D domain commit must never throw after Phase C commit");
+        const auto report=core_.advance(bridge);
         domain_=std::move(next);
         return report;
     }
