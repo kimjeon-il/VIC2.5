@@ -3,7 +3,7 @@
   "contract_id": "D-V",
   "contract_version": "phase-d-integration/1.0",
   "finalized_date": "2026-11-04",
-  "source_branch": "work/phase-d-design",
+  "source_branch": "work/merge-all-to-main",
   "status": {
     "design": "CONFIRMED",
     "static_contract_audit": "PASS",
@@ -46,7 +46,7 @@
     },
     {
       "path": "docs/phase-d/integration/D-V3_INVARIANTS.md",
-      "git_blob_sha": "95683ccb9fc7f83e0f05a03b28e05b6154149b8c"
+      "git_blob_sha": "3f246abd4b185b1835cec6d42c8b460db6a0ae18"
     },
     {
       "path": "docs/phase-d/integration/D-V4_SCENARIOS_ORACLES.md",
@@ -54,7 +54,7 @@
     },
     {
       "path": "docs/phase-d/integration/D-V5_TEST_MATRIX.md",
-      "git_blob_sha": "8d7dfaa6d9fca1d059a77e2f562c0899da0ac9ca"
+      "git_blob_sha": "c8ee98c790e0c9909c4488b1b110f935a487883a"
     },
     {
       "path": "docs/phase-d/integration/D-V6_DETERMINISM_RECOVERY_PERFORMANCE.md",
@@ -569,5 +569,8 @@
     "Neither 1,200 months nor 100k/1m sparse POP large-slice benchmarks were executed for Phase D.",
     "I2-DISPATCH nonstorable same-stage power is explicitly unsupported in the I2-SAFE profile.",
     "The 279 count includes D4 48 existing prototype test IDs and four Phase D specification families plus DV new tests; it excludes additional POP/CE/CP/CM suites."
-  ]
+  ],
+  "merged_resource_contract": "phase-j-resource-flow/1.0",
+  "merge_audit_date": "2026-11-05",
+  "historical_source_sha_policy": "Modified design and test entries repointed to integrated blob SHA; this does not imply tests PASS."
 }

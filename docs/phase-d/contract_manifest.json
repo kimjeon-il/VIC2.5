@@ -26,7 +26,7 @@
     },
     {
       "path": "docs/phase-d/D-D0_ACCEPTANCE_TESTS.md",
-      "git_blob_sha": "087e834ecfabc1c07c0c93544dc74b481d5c6934"
+      "git_blob_sha": "340b238375ee3f5acd745b1d42c061f7e65b636a"
     }
   ],
   "invariant_ids": [
@@ -102,5 +102,8 @@
   "invariant_gate": "all hard errors abort the entire StagingWorld; stage11 commits once",
   "implementation_scope": "source contract and acceptance definitions only; no C++ runtime or passed tests implied",
   "integrated_resource_contract": "phase-j-resource-flow/1.0",
-  "resource_contract_note": "Historical underground remaining/depletion clauses superseded by J-R1. Other D-V tests remain not fully accepted."
+  "resource_contract_note": "Historical underground remaining/depletion clauses superseded by J-R1. Other D-V tests remain not fully accepted.",
+  "merged_resource_contract": "phase-j-resource-flow/1.0",
+  "merge_audit_date": "2026-11-05",
+  "historical_source_sha_policy": "Modified design and test entries repointed to integrated blob SHA; this does not imply tests PASS."
 }

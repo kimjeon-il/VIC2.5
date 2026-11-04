@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "contract_version": "phase-d-industry/1.0",
   "fixture_type": "fictional_test_value",
-  "name": "Two-month ore transport, depletion and joint steelmaking",
+  "name": "Two-month ore transport, operational flow and joint steelmaking",
   "month_indices": [
     300,
     301,
@@ -10,7 +10,6 @@
   ],
   "units": {
     "people": "person",
-    "deposit": "recoverable_ore_unit",
     "ore": "lot",
     "coal": "lot",
     "steel": "lot",
@@ -18,7 +17,8 @@
     "emission": "lot_equivalent_in_fictional_recipe",
     "currency": "TEST_CURRENCY",
     "money": "minor_unit",
-    "transport_duration": "month"
+    "transport_duration": "month",
+    "monthly_resource_flow": "ore_lot_per_month"
   },
   "entities": {
     "mine": {
@@ -30,7 +30,7 @@
       ],
       "opening_cash": 40,
       "workers": 2,
-      "opening_confirmed_ore_deposit": 12
+      "monthly_operational_capacity": 10
     },
     "buyer": {
       "firm_id": "firm_steel_B",
@@ -53,11 +53,11 @@
   "recipes": {
     "extraction": {
       "id": "recipe_ore_extraction",
-      "requires_actual_deposit": true,
       "required_mine_workers": 2,
       "extract_ore": 6,
       "wages": 10,
-      "other_inputs": "assumed available from valid existing assets"
+      "other_inputs": "assumed available from valid existing assets",
+      "requires_operational_resource_site": true
     },
     "steelmaking": {
       "id": "recipe_steel_joint",
@@ -100,8 +100,9 @@
         "mine_employment_count": 2
       },
       "stage4": {
-        "resource_stock_delta": -6,
-        "ore_output": 6
+        "ore_output": 6,
+        "resource_site_produced_this_month": 6,
+        "cumulative_resource_output": 6
       },
       "stage5": {
         "mine_wages_paid": 10
@@ -114,7 +115,6 @@
         "buyer_payment": 36
       },
       "stage11": {
-        "mine_confirmed_ore_deposit": 6,
         "mine_ore_inventory": 0,
         "transit_ore_inventory": 6,
         "buyer_ore_inventory": 0,
@@ -122,7 +122,9 @@
         "buyer_cash": 64,
         "carrier_cash": 6,
         "workers_cash": 10,
-        "steel_output": 0
+        "steel_output": 0,
+        "mine_monthly_operational_capacity": 10,
+        "mine_cumulative_output": 6
       }
     },
     {
@@ -178,7 +180,6 @@
     }
   ],
   "oracles": {
-    "mine_deposit_end": 6,
     "ore_created_by_mine": 6,
     "ore_arriving_before_month_302": 0,
     "ore_total_after_month_302": "buyer_inventory_ore(2)+steel_recipe_ore_input(4)=6",
@@ -189,11 +190,14 @@
     "transit_custodian_not_double_counted": true,
     "steel_site_can_only_use_delivered_goods": true,
     "coal_initial_must_not_be_spontaneously_created": true,
-    "each_production_event_has_inventory_and_resource_journals": true
+    "each_production_event_has_inventory_and_resource_journals": true,
+    "mine_monthly_operational_capacity": 10,
+    "mine_cumulative_output_end": 6
   },
   "notes": [
     "All numeric values are fictional; the conversion of ore/coal to steel/slag/waste is a toy material balance, not metallurgy or Victoria 3 statistics.",
     "Mine wages, steel wages and ore/freight payments have explicit matching counterparties; full executable implementation must use the FinancialLedger double-entry representation.",
-    "All equipment, worker eligibility, transport permissions and safety restrictions are valid in this test by assumption, and must be enforced by executable fixtures."
+    "All equipment, worker eligibility, transport permissions and safety restrictions are valid in this test by assumption, and must be enforced by executable fixtures.",
+    "The mine's monthly operational capacity is a flow constraint, not an underground total or a remaining reserve; prior cumulative production is historical output only."
   ]
 }

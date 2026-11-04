@@ -27,7 +27,7 @@
   "source_documents": [
     {
       "path": "docs/phase-d/industry/README.md",
-      "git_blob_sha": "a3907f50ef0f932388824ac2932411dfe0045113"
+      "git_blob_sha": "aeab496ad1e0b097145e70a3170e9c934a91153a"
     },
     {
       "path": "docs/phase-d/industry/D-I1_CLASSIFICATION_FIRMS_SITES.md",
@@ -43,23 +43,23 @@
     },
     {
       "path": "docs/phase-d/industry/D-I4_LOCATION_CLUSTERS_LOGISTICS.md",
-      "git_blob_sha": "54001181bbb75732c6986e26d267efe4fede8136"
+      "git_blob_sha": "466e47e23a56b6e53340262f42f42fa699f98674"
     },
     {
       "path": "docs/phase-d/industry/D-I5_INDUSTRIALIZATION_POLICY_TRANSITION.md",
-      "git_blob_sha": "ac56cafb5a36d38afd0c77cea8ccbfcf6ee29d6f"
+      "git_blob_sha": "cc2fb9aecfa4927ebbfd3a39ed1b90521304ec60"
     },
     {
       "path": "docs/phase-d/industry/INDUSTRY_ACCEPTANCE_TESTS.md",
-      "git_blob_sha": "66a042df0de714863419fa45d6da94c313b3b94b"
+      "git_blob_sha": "4d73a58d6522d2cc42f728ed1ac61ff2f2c00651"
     },
     {
       "path": "docs/phase-d/industry/INDUSTRY_ADRS.md",
-      "git_blob_sha": "e716acf328f8b81749ecd3852e9d57844eb7321c"
+      "git_blob_sha": "6a7bc28358ca5466b59ef28f577fb40b076c1140"
     },
     {
       "path": "docs/phase-d/industry/examples/ore_steel_supply_chain.json",
-      "git_blob_sha": "78ab93b7e6183179c2995c2e60e297daced4bfd0"
+      "git_blob_sha": "1c816718db1391e3d260a051dee1d2ef0880575d"
     },
     {
       "path": "docs/phase-d/industry/examples/mechanization_retrofit.json",
@@ -209,5 +209,8 @@
   },
   "note": "Design-stage audit only: no executable C++ industrial tests or historical calibration have been performed.",
   "integrated_resource_contract": "phase-j-resource-flow/1.0",
-  "resource_contract_note": "D-I2 now uses operational monthly flow for geology and standing biomass for renewables; full industry 45 not fully accepted."
+  "resource_contract_note": "D-I2 now uses operational monthly flow for geology and standing biomass for renewables; full industry 45 not fully accepted.",
+  "merged_resource_contract": "phase-j-resource-flow/1.0",
+  "merge_audit_date": "2026-11-05",
+  "historical_source_sha_policy": "Modified design and test entries repointed to integrated blob SHA; this does not imply tests PASS."
 }
