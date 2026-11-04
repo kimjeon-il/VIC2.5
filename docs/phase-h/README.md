@@ -1,6 +1,6 @@
 # VIC2.5 Phase H — 외교·국제관계
 
-> **H-D0 공통 + H-D1~D7 상세 설계 문서 작성 완료 / C++ 엔진·실제 인수시험 미실행**
+> **H-D0 공통 + H-D1~D7 상세 + H-V 통합 검증 설계 문서 작성 완료 / C++ 엔진·실제 인수시험 미실행**
 > 2026-11-04 · 공통 계약 phase-h-common/1.0 · 상세 설계 phase-h-diplomacy/1.0
 > 브랜치: work/phase-g-h-d0 (기준: work/phase-e-cpp-integration)
 
@@ -18,6 +18,7 @@
 | **H-D7** | [**국제위기·다자 중재·강화**](H-D7_INTERNATIONAL_CRISES_PEACE.md) | 실제 분쟁 기반 위기·소국/중립/제3국 참여·부분합의/동결·전쟁/평화 연계 |
 | 인수 | [104개 상세 인수시험 명세](DIPLOMACY_ACCEPTANCE_TESTS.md) | H-D0 기존 20 + H-D1~D7 각 12 = **총 104개 고유 시험** (NOT_RUN) |
 | ADR | [35개 외교 설계 결정](DIPLOMACY_ADRS.md) | 관계/협상/조약/종속·국제협력체/영향력/국제위기 구분·중복원장·월효력 |
+| **H-V** | [**외교·전분야 통합 검증 설계**](integration/README.md) | H-V1~V7: 36개 교차 불변식, 72개 신규 교차시험, 30개 ADR, 6개 복합 수치 예제, 6개 수락 게이트; 기존 104 + 신규 72 = **176개 정의 시험** (NOT_RUN) |
 
 ## 기계판독 예제 — 설계 fixture, 실제 세이브/실행결과 아님
 
@@ -45,8 +46,10 @@
 - [C-M5](../phase-c/military/C-M5_WARS_OCCUPATION_PEACE.md): 전쟁·실제 참전/점령·휴전/평화의 군사 원본.
 - Phase D 설계 정본은 별도의 work/phase-d-design 브랜치, 실제 제한 구현은 Phase D C++ 통합 브랜치에 있으므로 상태를 혼동하지 않는다.
 
-## 후속 인수/구현
+## 외교 통합 검증과 실제 구현 후속 순서
 
-H-V 통합 검증 상세 설계는 별도 단계다. 우선 H-D1→D2→D3→D4→D5→D6→D7 실제 C++ 연동 후 H-D0 기본20 + H-D1~D7 상세84 = 104개 독립시험, POP/C-D4/D-V/E-V/G 연동 회귀, 저장/worker1/N 결정론, 1,200개월·대표 국가/경제/POP 부하·역사시기별 법률 검증을 실행해야 한다.
+[H-V — 외교 통합 검증 설계](integration/README.md)에서 조약·국제협력체·국가 간 영향력·국제위기가 POP·경제·정치·군사·건설/산업/기술·지리/주권·무역/물류의 **실제 단일 World/원장**을 통해 연결되는지 검사하는 구조를 확정했다. 신규 HV-T01~72(71개 독립 교차 + 1개 증거 메타게이트)는 기존 H-D0 20·H-D1~D7 84개와 별개이다. 총 176개 외교 시험의 실제 코드는 아직 작성/실행하지 않았다.
 
-**현재 검증 상태: 상세 설계·GitHub 파일 저장 확인 / 104개 인수시험 NOT_RUN / 신규 Phase H C++ 엔진 NOT_IMPLEMENTED / main 미병합.**
+실제 구현 순서: HV-L0 계약/소스 원본 감사 → H-D1..D7 C++ 구현·C-D0 StagingWorld 연동(HV-L1/2) → 104+72 및 기존 POP/C-D4/D-V/E-V/G 회귀(HV-L3) → 저장/worker1/N/전원차단 복구(HV-L4) → 1,200개월·국가/조직·무역/군사·POP 대표 부하, AI/툴팁/역사법제 검증(HV-L5).
+
+**현재 검증 상태: 설계 문서·GitHub 저장 확인 / 기존 H 104 + H-V 72 = 176개 정의, 실행 0 / Phase H C++ 엔진 NOT_IMPLEMENTED / HV-COMPLETE NOT_DONE / main 미병합.**
