@@ -24,7 +24,7 @@ static World seed() {
     auto& pop=c.seed_population();
     const auto h=pop.household_profile({"R","shared","shared",2});
     const auto e=pop.economic_profile({"R","worker","wage","employee",pop.default_education()});
-    const auto d=pop.demographic_profile({"R",700,Sex::female,"culture","faith",
+    const auto d=pop.demographic_profile({"R",w.month()-300,Sex::female,"culture","faith",
                                           "citizen","free",pop.default_health(),Service::civilian});
     const auto id=pop.seed_population(d,e,h,2);
     ConstructionProject p;
