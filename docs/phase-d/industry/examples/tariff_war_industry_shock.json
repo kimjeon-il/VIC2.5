@@ -141,13 +141,13 @@
     "cash_end_month_702": 100,
     "tariff_in_month_701": 0,
     "tariff_due_in_month_702": 8,
-    "parts_ore_in_transit_month_701": 4,
     "actual_buyer_parts_received_month_702": 4,
     "stage4_machine_output_month_702": 2,
     "unsold_output_is_inventory_not_cash": true,
     "stage10_war_damage_not_retroactive_to_702_production": true,
     "active_factory_capacity_next_month": 1,
-    "month_703_free_restoration": 0
+    "month_703_free_restoration": 0,
+    "parts_in_transit_month_701": 4
   },
   "notes": [
     "All values synthetic; law becomes effective in month 702 only; customs clearance and goods availability depend on actual arrival/rights.",
