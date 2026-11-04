@@ -1,0 +1,229 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "phase-d-technology/1.0",
+  "fixture_type": "fictional_test_value",
+  "name": "Mill knowledge does not produce goods until machine is purchased, training completed, and retrofit commissioned",
+  "units": {
+    "calendar": "month_index",
+    "goods": "lot",
+    "people": "person",
+    "money": "TEST_CURRENCY_minor_unit",
+    "asset": "installed_unit"
+  },
+  "actors": {
+    "firm": "mill_F",
+    "site": "mill_site",
+    "original_worker_population_partition": "mill_workers_10",
+    "contractor": "builder_B",
+    "contractor_worker_partition": "builder_workers_2",
+    "trainer": "trainer_T",
+    "equipment_supplier": "machine_M"
+  },
+  "opening": {
+    "month_index": 700,
+    "firm_cash": 120,
+    "mill_worker_household_cash": 0,
+    "machine_supplier_cash": 0,
+    "contractor_cash": 0,
+    "contractor_worker_cash": 0,
+    "trainer_cash": 0,
+    "mill_worker_population": 10,
+    "other_contractor_workers": 2,
+    "other_trainer_workers": 1,
+    "mill_grain_inventory": 20,
+    "mill_fuel_inventory": 2,
+    "installed_machine_units": 0,
+    "mill_knowledge_state": "usable",
+    "license_active": true,
+    "installed_machine_book_value": 0,
+    "world_cash_total": 120
+  },
+  "ruleset": {
+    "version": "dt-adoption-example/1.0",
+    "seed": 70077,
+    "manual_recipe": {
+      "grain_per_batch": 10,
+      "labor_per_batch": 10,
+      "machine_per_batch": 0,
+      "fuel_per_batch": 0,
+      "output_flour": 10
+    },
+    "machine_recipe": {
+      "grain_per_batch": 10,
+      "labor_per_batch": 4,
+      "machine_service_per_batch": 1,
+      "fuel_per_batch": 2,
+      "output_flour": 10
+    },
+    "machine_price": 40,
+    "retrofitting_construction_service_price": 20,
+    "training_provider_fee": 4,
+    "training_worker_wages": 12,
+    "manual_worker_wages": 20,
+    "post_training_machine_worker_wages": 8,
+    "commissioning": "following_month_stage0",
+    "trained_operators_required": 4
+  },
+  "events": [
+    {
+      "month_index": 700,
+      "stage2": {
+        "mill_workers_employed": 10,
+        "mill_workers_unassigned": 0
+      },
+      "stage3": {
+        "grain_consumed": 10
+      },
+      "stage4": {
+        "manual_output": 10,
+        "machine_output": 0
+      },
+      "stage5": {
+        "mill_wages_paid": 20
+      },
+      "stage9a": {
+        "technology_adoption_proposed": true,
+        "planned_retrofit": true
+      },
+      "stage11": {
+        "firm_cash": 100,
+        "mill_worker_household_cash": 20,
+        "knowledge_state": "usable",
+        "active_production_method": "manual",
+        "installed_machine_units": 0
+      }
+    },
+    {
+      "month_index": 701,
+      "stage2": {
+        "mill_workers_employed": 0,
+        "mill_workers_unassigned": 10
+      },
+      "stage7": {
+        "machine_inventory_purchased": 1,
+        "machine_payment": 40
+      },
+      "stage11": {
+        "firm_cash": 60,
+        "machine_supplier_cash": 40,
+        "warehouse_machine_units": 1,
+        "installed_machine_units": 0,
+        "active_production_method": "manual",
+        "new_machine_production_output": 0
+      }
+    },
+    {
+      "month_index": 702,
+      "stage1": {
+        "actual_retrospective_funding_reserved": 36
+      },
+      "stage2": {
+        "mill_training_workers_employed": 4,
+        "mill_workers_unassigned": 6,
+        "independent_contractor_workers_employed": 2,
+        "trainer_workers_employed": 1
+      },
+      "stage3": {
+        "machine_good_reserved_for_installation": 1
+      },
+      "stage4": {
+        "actual_retrofit_work_complete": true,
+        "machine_inventory_installed_not_active": 1,
+        "actual_training_service_delivered_to_mill_workers": 4,
+        "machine_production_output": 0
+      },
+      "stage5": {
+        "mill_trainee_wages_paid": 12,
+        "builder_worker_wages_paid_by_contractor": 20
+      },
+      "stage8": {
+        "contractor_earned_construction_service": 20,
+        "firm_paid_contractor": 20,
+        "trainer_service_fee_paid": 4,
+        "firm_capital_wip": 60,
+        "book_cost_machine": 40,
+        "book_cost_retrofit": 20,
+        "training_fee_expensed": 4,
+        "training_wages_expensed": 12
+      },
+      "stage10": {
+        "actual_qualifications_changed": 4,
+        "qualifications_effective_next_month": true
+      },
+      "stage11": {
+        "firm_cash": 24,
+        "mill_worker_household_cash": 32,
+        "contractor_worker_cash": 20,
+        "machine_supplier_cash": 40,
+        "trainer_cash": 4,
+        "contractor_cash": 0,
+        "installed_machine_active_units": 0,
+        "ready_for_commission": true
+      }
+    },
+    {
+      "month_index": 703,
+      "stage0": {
+        "knowledge_state": "usable",
+        "technique_assignment": "active_machine_assisted",
+        "wip_to_capital_asset_reclassification": 60,
+        "active_installed_machine_units": 1
+      },
+      "stage2": {
+        "mill_worker_count": 4,
+        "unassigned_original_workers": 6
+      },
+      "stage3": {
+        "grain_consumed": 10,
+        "stored_fuel_consumed": 2
+      },
+      "stage4": {
+        "machine_flour_output": 10,
+        "manual_output": 0
+      },
+      "stage5": {
+        "machine_operator_wages_paid": 8
+      },
+      "stage11": {
+        "firm_cash": 16,
+        "mill_worker_household_cash": 40,
+        "contractor_worker_cash": 20,
+        "machine_supplier_cash": 40,
+        "trainer_cash": 4,
+        "contractor_cash": 0,
+        "total_world_cash": 120,
+        "original_mill_population": 10,
+        "original_mill_workers_in_other_jobs_or_unemployed": 6,
+        "warehouse_machine_units": 0,
+        "installed_machine_active_units": 1,
+        "wip_remaining": 0
+      }
+    }
+  ],
+  "oracles": {
+    "new_method_in_month_700": false,
+    "new_method_in_month_701": false,
+    "new_method_in_month_702": false,
+    "first_new_method_month": 703,
+    "initial_mill_population": 10,
+    "final_mill_population": 10,
+    "trained_workers": 4,
+    "other_original_workers": 6,
+    "initial_machine_stock": 0,
+    "machine_purchased_once": 1,
+    "machine_active_after_commission": 1,
+    "asset_book_value": 60,
+    "wip_reclassified_exactly_once": 60,
+    "total_world_cash_conserved": 120,
+    "training_payments_not_free_knowledge_or_income": true,
+    "knowledge_without_machine_creates_no_output": true,
+    "manual_method_can_remain_a_valid_option": true
+  },
+  "notes": [
+    "Fictional example; factory idle in months 701-702 while transitioning, not a general rule for all technological improvements.",
+    "The 10 original mill workers still exist; other contractor and trainer employees belong to separate POP partitions and are not counted twice.",
+    "The actual WIP 60 is machine purchase 40 plus construction service 20; worker training wages 12 and trainer fees 4 are expenses, not cash created by WIP.",
+    "Factory uses stocked fuel rather than hypothetical same-stage nonstorable electricity. I2-DISPATCH remains unsupported until explicit upstream contract revision.",
+    "The builder receives 20 from the mill and pays 20 to its own workers in a paired transaction. These nested payments and account rights need executable FinancialLedger posting in later C++ tests."
+  ]
+}
