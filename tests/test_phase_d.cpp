@@ -22,7 +22,7 @@ static Id people(World& w,const std::string& region,People n) {
     const auto e=p.economic_profile({region,"worker","wage","employee",p.default_education()});
     const auto d=p.demographic_profile({region,w.month()-300,Sex::female,"culture","faith",
                                         "citizen","free",p.default_health(),Service::civilian});
-    return p.seed_population(d,e,h,n);
+    return p.seed_population(d,e,h,n,static_cast<Id>(p.slices().size()+1));
 }
 static void seed_actor_set(World& w) {
     auto& c=w.seed_core();
