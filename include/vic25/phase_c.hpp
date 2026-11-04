@@ -774,6 +774,39 @@ public:
             {fx_acc(a,bought_currency,"capital"),0,bought_amount}}});
         events_.push_back("bilateral-foreign-exchange-settled");
     }
+    // Phase G/ H must settle foreign-denominated obligations through C's
+    // actual per-currency financial ledger. No exchange rate is implied.
+    void phase_g_pay_foreign(const std::string& from,const std::string& to,
+                             const std::string& currency,Money amount) {
+        require_stage({3,5,7,8});
+        ensure(from!=to && !from.empty() && !to.empty() &&
+               !currency.empty() && currency!="TEST" && amount>0 &&
+               foreign_holders_.contains({from,currency}) &&
+               fx_balance(from,currency)>=amount,
+               "G_ERR_UNFUNDED_FOREIGN_PAYMENT");
+        ensure_fx_account(to,currency);
+        auto& ledger=foreign_ledgers_.at(currency);
+        ledger.post({unique("gh-fx-pay"),"actual foreign-currency transfer",{
+            {fx_acc(from,currency,"capital"),amount,0},
+            {fx_acc(from,currency,"cash"),0,amount},
+            {fx_acc(to,currency,"cash"),amount,0},
+            {fx_acc(to,currency,"capital"),0,amount}}});
+        events_.push_back("GH:foreign-currency-payment:"+currency);
+    }
+    // Customs tax is paid into a real government account in C's FinancialLedger.
+    // G's customs record must reference an actual event, not become money itself.
+    void phase_g_pay_customs(const std::string& importer,
+                              const std::string& treasury,Money amount) {
+        require_stage({7});
+        ensure(!importer.empty() && !treasury.empty() &&
+               importer!=treasury && amount>0,
+               "G_ERR_INVALID_CUSTOMS_ACCOUNT");
+        pay(importer,treasury,amount);
+        events_.push_back("GH:customs-duty-paid");
+    }
+    [[nodiscard]] const Shipment& phase_g_shipment(const std::string& id) const {
+        return shipments_.at(id);
+    }
     void seed_market(const std::string& region,const std::string& good,
                      Money price, Money floor, Money ceiling, Quantity target_stock=0) {
         ensure(stage_==-1 && commit_id_==0 && !region.empty() && !good.empty() &&
