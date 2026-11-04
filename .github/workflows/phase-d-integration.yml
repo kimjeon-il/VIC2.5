@@ -1,12 +1,13 @@
 name: Phase D C++ integration (bounded)
 on:
-  push:
-    branches:
-      - work/phase-d-cpp-integration
   pull_request:
     branches:
       - work/phase-c-engine-integration
   workflow_dispatch:
+
+concurrency:
+  group: phase-d-pr-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
