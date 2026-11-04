@@ -2,7 +2,7 @@
 
 - 설계 계약: phase-e-common/1.0 (E-D0)
 - 통합 개발 브랜치: work/phase-e-cpp-integration
-- 현재 구현: PARTIAL_IMPLEMENTATION, 실제 E-V 41 bounded PASS / 19 BLOCKED (Linux 2026-11-04)
+- 현재 구현: PARTIAL_IMPLEMENTATION, 실제 E-V 47 bounded PASS / 13 BLOCKED (Linux/GCC 및 Windows/MSVC 2026-11-04)
 - 전체 인수 60/60 / 실제 GPU 3D 지구본: NOT_IMPLEMENTED
 
 ## 정본 설계
@@ -17,6 +17,7 @@
 
 ## 실제 C++
 - include/vic25/phase_e.hpp
+- include/vic25/phase_e_raster.hpp
 - include/vic25/phase_e_snapshot.hpp
 - include/vic25/phase_c.hpp (stage0 sovereignty adapter)
 - tests/test_phase_e.cpp
