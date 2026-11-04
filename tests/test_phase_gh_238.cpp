@@ -603,7 +603,7 @@ static void t_hv66(){
     auto corrupt=bytes;corrupt[corrupt.size()/2]^=0x04;
     ok(throws_with([&]{(void)SnapshotCodec::decode(corrupt);}),
        "HV-T66 incompatible/corrupted save must reject");
-    auto eonly=phasee::SnapshotCodec::encode(w.base());
+    auto eonly=vic25::phasee::SnapshotCodec::encode(w.base());
     ok(throws_with([&]{(void)SnapshotCodec::decode(eonly);}),
        "HV-T66 E-only save must not be treated as valid G/H composite");
 }
