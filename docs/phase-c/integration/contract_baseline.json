@@ -2,7 +2,7 @@
   "schema_version": "d4-contract-baseline/1.0",
   "scope": "source-and-version-registration-gate-only",
   "note": "Passing D4-T48 confirms this reproducible prototype's registered design contracts, baseline source compatibility and preceding 47 synthetic D4 checks. It does not certify full CE/CP/CM historical game functionality or D4-DONE.",
-  "source_branch": "work/phase-c-engine-integration",
+  "source_branch": "work/merge-all-to-main",
   "contract_versions": {
     "pop": "pop-design/1.1",
     "common": "phase-c-common/1.0",
@@ -28,8 +28,8 @@
     "docs/phase-c/politics/POLITICAL_ADRS.md": "a7b01ead2009e80a9098326c93d948c9dba8f74f",
     "docs/phase-c/politics/POLITICAL_ACCEPTANCE_TESTS.md": "8dc5d810df370287a84780746c09638dd56386d5",
     "docs/phase-c/politics/C-P1_STATE_GOVERNMENT_INSTITUTIONS.md": "0691afe1fe535f139e2ab1c6eae62325fa06e22f",
-    "docs/phase-c/politics/C-P2_LAW_POLICY_ENFORCEMENT.md": "50c8c807c416ea07ff4f585840abbd36d081a96c",
-    "docs/phase-c/politics/C-P3_POP_INTEREST_GROUPS_MOVEMENTS.md": "fb77b4541642fdb87e549dc785a611019962c128",
+    "docs/phase-c/politics/C-P2_LAW_POLICY_ENFORCEMENT.md": "f2f30641f78d63fb209c327b16f6261dfaefabca",
+    "docs/phase-c/politics/C-P3_POP_INTEREST_GROUPS_MOVEMENTS.md": "ef4afb3b90de446b43f49c5e10a87f909c8016f8",
     "docs/phase-c/politics/C-P4_PARTIES_ELECTIONS_GOVERNMENT_FORMATION.md": "cf8fca179b182524ff538f2061c7c5733bba7698",
     "docs/phase-c/politics/C-P5_UNREST_REBELLION_CIVIL_WAR.md": "fe22a4005430d97f40a7896b4367bb2831c5126c",
     "docs/phase-c/politics/examples/election_three_seats.json": "aa69e04bc7b0cad66cbdd2d0cebc4c003e544692",
@@ -74,5 +74,16 @@
     "bench/phase_c_scaling.cpp",
     "CMakeLists.txt"
   ],
-  "runtime_status": "PARTIAL_IMPLEMENTATION_WITH_SYNTHETIC_INTEGRATION_ACCEPTANCE"
+  "runtime_status": "PARTIAL_IMPLEMENTATION_WITH_SYNTHETIC_INTEGRATION_ACCEPTANCE",
+  "source_lock_revision": "d4-source-lock/1.1",
+  "source_lock_history": [
+    {
+      "date": "2026-11-05",
+      "change": "C-P2/C-P3 law and organization documentation extended to conditional religious societal impacts under I-C1/1.1; no changes to Phase C binary ABI or 48 numbered C++ acceptance tests",
+      "modified": [
+        "docs/phase-c/politics/C-P2_LAW_POLICY_ENFORCEMENT.md",
+        "docs/phase-c/politics/C-P3_POP_INTEREST_GROUPS_MOVEMENTS.md"
+      ]
+    }
+  ]
 }
