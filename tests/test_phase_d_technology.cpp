@@ -113,6 +113,7 @@ static void test_commercial_adoption_requires_paid_license(){
     r.inputs={{"ore",1}};r.outputs={{"bars",2}};r.workers_per_batch=1;
     w.seed_recipe(r);
     w.seed_license({"LICENSE","STEAM","A","B",10,5400,-1,false});
+    const auto operator_worker=worker(w,1,115);
     World::Plan bad;
     bad[9].push_back([](Stage& s){s.propose_adoption("MILL","STEAM");});
     need(rejects([&]{w.advance(bad);})&&w.month()==5400,
@@ -123,8 +124,19 @@ static void test_commercial_adoption_requires_paid_license(){
     w.advance(lawful);
     need(!w.state().active_site_tech.contains("MILL") &&
          w.core().cash("B")==30,"license cash settlement/current month adoption");
-    auto op=worker(w,1,115); // population seeding after first month is forbidden
-    (void)op;
+    World::Plan next;
+    next[2].push_back([operator_worker](Stage& s){
+        s.phase_c().hire(operator_worker,1,"B",1);
+    });
+    next[4].push_back([](Stage& s){s.manufacture("STEAM_PROCESS",1);});
+    w.advance(next);
+    need(w.state().active_site_tech.at("MILL")=="STEAM" &&
+         w.core().stock("B","R","ore")==0 &&
+         w.core().stock("B","R","bars")==2 &&
+         w.core().cash("A")==10 &&
+         w.core().cash("B")==30,
+         "real site adoption requires correct next-month license and inputs");
+    w.validate();
 }
 int main(){
     try{
