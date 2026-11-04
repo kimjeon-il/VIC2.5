@@ -24,6 +24,15 @@ template<class A,class X> void construction(A& a,X& p) {
     F(workers_per_work);F(cash_price_per_work);F(accepted_work);F(paid_work);
     F(capitalized_work);F(planned_work);F(capitalized_value);
     F(ready);F(commissioned);F(ready_month);
+    F(permit_required);F(permit_valid);F(inspection_required);F(inspected);
+    F(allow_accrued_invoice_commission);
+#undef F
+}
+template<class A,class X>void work_package(A& a,X& p){
+#define F(v) a(p.v)
+    F(id);F(project);F(material_good);F(required_work);F(accepted_work);
+    F(rejected_work);F(planned_work);F(material_per_work);F(workers_per_work);
+    F(earliest_month);F(curing_months);F(finished_month);F(predecessors);
 #undef F
 }
 template<class A,class X,class Fn> void vec(A& a,X& container,Fn each) {
@@ -84,6 +93,7 @@ template<class A,class X> void evidence(A& a,X& x) {
 }
 template<class A,class X> void state(A& a,X& d) {
     map(a,d.constructions,[](auto& ar,auto& v){construction(ar,v);});
+    map(a,d.work_packages,[](auto& ar,auto& v){work_package(ar,v);});
     map(a,d.recipes,[](auto& ar,auto& v){industry(ar,v);});
     map(a,d.researches,[](auto& ar,auto& v){research(ar,v);});
     a(d.knowledge);a(d.active_site_tech);
@@ -99,8 +109,8 @@ template<class A,class X> void state(A& a,X& d) {
 } // namespace detail
 
 struct SnapshotCodec {
-    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_2";
-    static constexpr const char* contract_version="phase-d-cpp/0.2";
+    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_3";
+    static constexpr const char* contract_version="phase-d-cpp/0.3";
     static std::string encode(const World& w) {
         w.validate();
         const auto core_payload=phasec::SnapshotCodec::encode(w.core_);
