@@ -1,0 +1,33 @@
+{
+  "schema": "vic25-design-fixture/phase-h-1.0",
+  "status": "NOT_EXECUTED",
+  "tests": [
+    "HD4-T01",
+    "HD4-T03",
+    "HD4-T11"
+  ],
+  "scenario": "B delegates foreign policy to A, retains taxation/education and needs A consent for a defense treaty with C.",
+  "input": {
+    "principal": "A",
+    "dependent": "B",
+    "rights": {
+      "foreign_policy": "A",
+      "external_defense_treaty": "A_consent",
+      "taxation": "B",
+      "education": "B"
+    },
+    "action": {
+      "issuer": "B",
+      "kind": "defense_treaty",
+      "target": "C",
+      "consent": false
+    }
+  },
+  "expected": {
+    "action_rejected": "ILLEGAL_TREATY_CAPACITY",
+    "sovereignty_transferred": false,
+    "taxation_owner_changed": false,
+    "citizenship_changed": false,
+    "new_money_or_goods": 0
+  }
+}

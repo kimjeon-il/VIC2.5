@@ -1,0 +1,183 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "phase-d-integration/1.0",
+  "fixture_type": "fictional_test_value",
+  "fixture_id": "DV-X3",
+  "name": "Research result and almost-completed bridge under new legislation and stage10 wartime damage",
+  "calendar": {
+    "month_index": 650,
+    "next_month": 651
+  },
+  "world": {
+    "regions": [
+      "B",
+      "C"
+    ],
+    "government": "GOV_X",
+    "military_unit": "UNIT_X",
+    "total_pop": 6,
+    "workers": {
+      "researchers": 2,
+      "builders": 2,
+      "soldiers": 2
+    }
+  },
+  "opening": {
+    "cash": {
+      "government": 100,
+      "research_lab": 0,
+      "researchers": 0,
+      "contractor": 20,
+      "builders": 0,
+      "bridge_owner": 0
+    },
+    "total_world_cash": 120,
+    "inventory": {
+      "lab_reagents": 2,
+      "bridge_bricks": 2,
+      "government_ammunition": 1
+    },
+    "bridge_project": {
+      "required_work": 2,
+      "accepted_work": 0,
+      "wip": 0,
+      "nominal_operating_capacity": 1,
+      "commissioned": false
+    },
+    "knowledge": {
+      "lab": "observed",
+      "offsite_document_repository": {
+        "valid_verified_evidence": false,
+        "backups_present": true
+      }
+    },
+    "lab_equipment_condition": "active",
+    "effective_safety_law": "old_regulation"
+  },
+  "events": [
+    {
+      "month_index": 650,
+      "stage1": {
+        "government_research_grant_executed": 30,
+        "lab_research_payroll_reserved": 20,
+        "contractor_payroll_reserved": 10,
+        "bridge_owner_cash_required_immediately": 0,
+        "owner_payable_by_certification_allowed": true
+      },
+      "stage2": {
+        "lab_researchers": 2,
+        "builder_workers": 2,
+        "active_soldiers": 2,
+        "duplicate_person_count": 0
+      },
+      "stage3": {
+        "reagents_delivered": 2,
+        "bricks_delivered": 2
+      },
+      "stage4": {
+        "research_work_evidence": 2,
+        "reagents_consumed": 2,
+        "bridge_work_attempted": 2,
+        "bridge_work_accepted": 2,
+        "bricks_consumed": 2,
+        "research_document_verified_offsite_before_war": true
+      },
+      "stage5": {
+        "lab_researcher_wages_paid": 20,
+        "construction_worker_wages_paid": 10
+      },
+      "stage8": {
+        "lab_cash": 10,
+        "government_cash": 70,
+        "contractor_cash": 10,
+        "builders_cash": 10,
+        "researchers_cash": 20,
+        "bridge_owner_payable": 30,
+        "contractor_receivable": 30,
+        "bridge_WIP_before_damage": 30,
+        "government_research_subsidy_spent": 30,
+        "total_world_cash": 120
+      },
+      "stage9a": {
+        "research_knowledge_validated": true,
+        "lab_usable_from_month": 651,
+        "new_tech_granted_to_other_sites": false,
+        "offsite_research_evidence_retained": true
+      },
+      "stage9d": {
+        "new_bridge_safety_law_adopted": true,
+        "effective_month": 651,
+        "requires_new_inspection": true
+      },
+      "stage10": {
+        "combat_event_ref": "COMBAT_X_650",
+        "ammo_consumed": 1,
+        "lab_capital_asset_damaged": true,
+        "lab_founding_research_evidence_destroyed": false,
+        "bridge_accepted_work_lost": 1,
+        "bridge_WIP_impairment": 15,
+        "bridge_payable_writeoff": 0,
+        "pop_casualties": 0
+      },
+      "stage11": {
+        "bridge_accepted_work": 1,
+        "bridge_remaining_work": 1,
+        "bridge_WIP_after_damage": 15,
+        "bridge_ready_for_commission": false,
+        "lab_current_operational_capacity_for_next_month": 0,
+        "lab_knowledge_current_month": "observed",
+        "next_month_knowledge_validated": "usable",
+        "total_world_cash": 120,
+        "gov_ammo_remaining": 0,
+        "owner_payable_to_contractor": 30
+      }
+    },
+    {
+      "month_index": 651,
+      "stage0": {
+        "effective_safety_law": "new_regulation",
+        "bridge_commissioned": false,
+        "bridge_work_remaining": 1,
+        "bridge_wip_remaining": 15,
+        "lab_knowledge_state": "usable",
+        "lab_site_operational": false,
+        "offsite_research_evidence_still_available": true
+      },
+      "stage2": {
+        "researchers_employed_but_no_safe_lab_capacity": 2
+      },
+      "stage4": {
+        "research_work_without_lab_and_necessary_repair": 0,
+        "bridge_repair_without_valid_parts_and_work": 0
+      },
+      "stage11": {
+        "bridge_commissioned": false,
+        "research_knowledge_unreduced": true,
+        "world_total_cash": 120,
+        "world_total_pop": 6,
+        "unpaid_payable_to_contractor": 30
+      }
+    }
+  ],
+  "oracles": {
+    "month650_prior_law_applies_to_executed_work": true,
+    "month651_new_law_only": true,
+    "knowledge_usable_first_month": 651,
+    "knowledge_can_remain_known_when_evidence_offsite": true,
+    "war_does_not_undo_prior_lab_wages_or_research_actual_work": true,
+    "war_does_not_cancel_legitimately_accrued_contractor_payable": true,
+    "bridge_damage_impairment": 15,
+    "bridge_remaining_required_work": 1,
+    "bridge_month651_commissioned": false,
+    "lab_month651_operational": false,
+    "world_cash_conservation": 120,
+    "world_people_conservation": 6,
+    "ammunition_consumption": 1
+  },
+  "notes": [
+    "Synthetic law, research outcome, project valuation and combat are not historical calibration.",
+    "An independently validated offsite evidence copy survives the attack; knowing a technique and being able to work in a destroyed lab remain distinct.",
+    "The 30 contractor claim remains due despite bridge WIP impairment 15; economic liability and damaged asset are separate ledgers.",
+    "A real executable test must attach C-M valid military orders and all financial, equipment and event journal counterpart postings."
+  ]
+}

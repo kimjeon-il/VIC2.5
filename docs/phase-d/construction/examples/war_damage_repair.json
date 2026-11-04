@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0",
+  "fixture_type": "fictional_test_value",
+  "contract_version": "phase-d-construction/1.0",
+  "title": "Work-complete asset damaged at stage10, repair and later commissioning",
+  "units": {
+    "currency": "VIC_TEST_CURRENCY",
+    "work_unit": "civil_work_unit",
+    "money_unit": "minor_unit",
+    "calendar": "month"
+  },
+  "ruleset": {
+    "version": "dc-damage-example/1.0",
+    "seed": 15151,
+    "work_required": 4,
+    "loss_value_rule": "fictional 30 per accepted work unit",
+    "repair_contract_price_per_work_unit": 30,
+    "commissioning_effective_month": "next_month_stage0"
+  },
+  "project": {
+    "id": "project_bridge",
+    "target_asset_spec_id": "bridge_segment_1",
+    "region_id": "region_B",
+    "owner": "GOV_X",
+    "work_package_id": "bridge_structural",
+    "required_work": 4
+  },
+  "months": [
+    {
+      "month_index": 200,
+      "stage4": {
+        "work_attempted": 4,
+        "work_accepted": 4,
+        "cumulative_accepted_work_before_damage": 4,
+        "contractor_certified_work_value": 120
+      },
+      "stage8": {
+        "wip_book_value_before_damage": 120,
+        "client_payable_from_prior_certified_work": 120
+      },
+      "stage10": {
+        "event": "war_damage_bridge",
+        "actual_accepted_work_lost": 2,
+        "wip_impairment": 60,
+        "insurance_payment": 0,
+        "prior_payable_changed": 0
+      },
+      "stage11": {
+        "accepted_work": 2,
+        "remaining_work": 2,
+        "wip_book_value": 60,
+        "ready_for_commission": false,
+        "new_installed_asset_capacity": 0
+      }
+    },
+    {
+      "month_index": 201,
+      "stage0": {
+        "new_asset_capacity": 0,
+        "reason": "work not complete after damage"
+      },
+      "stage4": {
+        "repair_work_attempted": 2,
+        "repair_work_accepted": 2,
+        "remaining_work": 0,
+        "repair_material_and_labor_represented_in_existing_ledgers": true
+      },
+      "stage8": {
+        "new_certified_repair_value": 60,
+        "wip_book_value_after_repair": 120,
+        "additional_payable": 60,
+        "original_payable_still_outstanding": 120,
+        "combined_payables": 180
+      },
+      "stage11": {
+        "accepted_work": 4,
+        "ready_for_commission": true,
+        "new_installed_asset_capacity": 0
+      }
+    },
+    {
+      "month_index": 202,
+      "stage0": {
+        "commissioning_event": "bridge_segment_1_commissioned",
+        "wip_reclassification": -120,
+        "installed_asset_book_value": 120,
+        "bridge_segment_operational": true
+      },
+      "stage11": {
+        "new_installed_asset_count": 1,
+        "wip_book_value": 0,
+        "loss_expensed_in_month_200": 60,
+        "combined_certified_payables_before_payment": 180
+      }
+    }
+  ],
+  "oracles": {
+    "no_commission_month_200": true,
+    "no_commission_month_201": true,
+    "commission_only_month_202_stage0": true,
+    "original_contractor_receivable_not_cancelled_by_damage": true,
+    "repair_without_actual_replacement_inputs_must_fail": true,
+    "wip_net_end_before_reclassification": 120,
+    "explicit_impairment_loss": 60,
+    "completed_work_never_exceeds_required_work": 4
+  },
+  "notes": [
+    "Fictional test amounts only; no warfare probability or historical loss coefficient is implied.",
+    "The damage is a stage10 event and cannot retroactively undo earlier stage4 production or stage8 certified debt.",
+    "Original certified work of 120 remains payable; a loss of 60 is separately recognized and repair value of 60 is newly accrued.",
+    "Actual repair material, labor and finance references must be provided in the executable fixture implementation before acceptance passes."
+  ]
+}

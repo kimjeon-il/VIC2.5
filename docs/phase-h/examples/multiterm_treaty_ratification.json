@@ -1,0 +1,34 @@
+{
+  "schema": "vic25-design-fixture/phase-h-1.0",
+  "status": "NOT_EXECUTED",
+  "tests": [
+    "HD3-T01",
+    "HD3-T02"
+  ],
+  "scenario": "A/B sign at month100; B ratifies in stage9; tariff provision active101 while troop withdrawal effective103 requires C-M event.",
+  "input": {
+    "signed_month": 100,
+    "ratified_months": {
+      "A": 100,
+      "B": 100
+    },
+    "B_ratification_stage": 9,
+    "terms": [
+      {
+        "id": "TARIFF_IRON",
+        "effective_month": 101
+      },
+      {
+        "id": "TROOP_WITHDRAWAL",
+        "effective_month": 103
+      }
+    ]
+  },
+  "expected": {
+    "m100_tariff_exemption_applied": false,
+    "m101_tariff_exemption_eligible": true,
+    "m101_withdrawal_executed": false,
+    "m103_withdrawal_requires_actual_C_M_event": true,
+    "goods_or_money_created_by_signature": 0
+  }
+}

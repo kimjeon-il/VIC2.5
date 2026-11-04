@@ -1,0 +1,24 @@
+name: Phase GH fast unit integration
+on:
+  push:
+    branches: [work/phase-g-h-d0]
+  workflow_dispatch:
+
+concurrency:
+  group: phase-gh-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: CMake configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DVIC25_GH_STRESS=ON
+      - name: Build only G/H test binaries
+        run: cmake --build build --parallel 2 --target vic25_phase_gh_tests vic25_phase_gh_commerce_tests vic25_phase_gh_diplomacy_tests vic25_phase_gh_snapshot_tests vic25_phase_gh_longrun_tests vic25_phase_gh_scaling
+      - name: Synthetic G/H 30000 province benchmark
+        run: ./build/vic25_phase_gh_scaling 30000 100 3
+      - name: Run isolated G/H integration tests
+        run: ctest --test-dir build -C Debug -R "^vic25_phase_gh_(tests|commerce_tests|diplomacy_tests|snapshot_tests|longrun_tests)$" --output-on-failure -V

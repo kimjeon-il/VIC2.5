@@ -1,0 +1,48 @@
+{
+  "schema": "vic25.hv.fixture/1.0",
+  "case_id": "HV-X3",
+  "status": "NOT_EXECUTED",
+  "test_ids": [
+    "HV-T25",
+    "HV-T31",
+    "HV-T36"
+  ],
+  "depends_on": [
+    "G-T2 market/Shipment actual supply",
+    "C-E2 price and orders",
+    "D industry actual input",
+    "H-D6 derived influence",
+    "H-D7 conditional crisis"
+  ],
+  "assumptions": [
+    "B essential monthly iron use 100",
+    "Before cutoff B has 40 non-A supplies and 60 supplies from A",
+    "After effective A cutoff there are 35 additional usable substitutes or reserves, on top of initial non-A 40",
+    "All access/finance/quality/timing conditions for replacement supplies satisfied, no other adjustments",
+    "A baseline export sale to B 60 units at unit price 10; no alternative A sales in benchmark",
+    "Cutoff adopted at m100 stage9 effective m101 stage0"
+  ],
+  "input": {
+    "month_policy_adopted": 100,
+    "month_effective": 101,
+    "required_iron_qty": 100,
+    "baseline_non_A_supply_qty": 40,
+    "baseline_A_supply_qty": 60,
+    "incremental_substitution_qty": 35,
+    "baseline_unit_price_minor": 10
+  },
+  "expected": {
+    "pre_shock_supply_qty": 100,
+    "post_shock_A_to_B_qty": 0,
+    "post_shock_non_A_supply_qty": 40,
+    "post_shock_substitution_qty": 35,
+    "post_shock_total_supply_qty": 75,
+    "maximum_unmet_qty": 25,
+    "baseline_A_to_B_revenue_minor": 600,
+    "after_A_to_B_revenue_minor": 0,
+    "forced_treaty_acceptance": false,
+    "automatic_war_events": 0,
+    "direct_influence_points_added": 0,
+    "month100_prior_trades_reversed": false
+  }
+}

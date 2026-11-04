@@ -1,0 +1,29 @@
+{
+  "schema": "vic25-design-fixture/phase-h-1.0",
+  "status": "NOT_EXECUTED",
+  "tests": [
+    "HD5-T06"
+  ],
+  "scenario": "Three member countries owe 100 each and pay 40 each to an existing organization financial account.",
+  "input": {
+    "members": [
+      "A",
+      "B",
+      "C"
+    ],
+    "dues_per_member": 100,
+    "paid_per_member": 40,
+    "account_exists": true
+  },
+  "expected": {
+    "total_assessed": 300,
+    "total_cash_received": 120,
+    "total_outstanding": 180,
+    "outstanding_by_member": {
+      "A": 60,
+      "B": 60,
+      "C": 60
+    },
+    "new_cash_created_without_financial_entry": 0
+  }
+}

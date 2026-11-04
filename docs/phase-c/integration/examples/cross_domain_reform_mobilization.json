@@ -181,7 +181,7 @@
     "old_month_transaction_retrospectively_modified": false
   },
   "expected_month241_without_other_events": {
-    "eligible_voters": 650,
+    "eligible_voters": 610,
     "remaining_preexisting_civilian_primary_employment": 260,
     "actual_active_service": 130,
     "actual_reserve": 60,
@@ -196,7 +196,7 @@
     "420=400+20",
     "400=220+130+50",
     "D'Hondt A2 B1 C0",
-    "650=600+50",
+    "610=600+50-40",
     "260=300-40",
     "New 40 mobilized at stage10 did not participate in prior stage10 battle"
   ]

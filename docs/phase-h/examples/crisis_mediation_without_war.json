@@ -1,0 +1,32 @@
+{
+  "schema": "vic25-design-fixture/phase-h-1.0",
+  "status": "NOT_EXECUTED",
+  "tests": [
+    "HD7-T01",
+    "HD7-T04",
+    "HD7-T06",
+    "HD7-T08"
+  ],
+  "scenario": "A/B dispute Province P and C mediates without automatic war; negotiated compensation 100 pays 20.",
+  "input": {
+    "province_id": "P",
+    "claimant": "A",
+    "respondent": "B",
+    "mediator": "C",
+    "claim_event_present": true,
+    "m100_war_declaration": null,
+    "settlement": {
+      "compensation_due": 100,
+      "compensation_paid": 20,
+      "joint_authority_proposed": true
+    }
+  },
+  "expected": {
+    "crisis_eligible": true,
+    "mediator_is_neutral": true,
+    "automatic_war_created": false,
+    "payment_outstanding": 80,
+    "joint_authority_requires_E_contract": true,
+    "population_created": 0
+  }
+}

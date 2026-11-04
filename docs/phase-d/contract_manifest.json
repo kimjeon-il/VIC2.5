@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0",
+  "contract_id": "D-D0",
+  "contract_version": "phase-d-common/1.0",
+  "finalized_date": "2026-11-04",
+  "source_branch": "work/merge-all-to-main",
+  "status": {
+    "design": "CONFIRMED",
+    "implementation": "PARTIAL_CPP_RESOURCE_FLOW",
+    "acceptance": "NOT_RUN",
+    "d4_regression": "NOT_RUN"
+  },
+  "upstream": [
+    "pop-design/1.1",
+    "phase-c-common/1.0",
+    "phase-c-economy/1.0",
+    "phase-c-politics/1.0",
+    "phase-c-military/1.0",
+    "phase-c-integration/1.0"
+  ],
+  "upstream_contracts_precedence": "POP-D0..D3 -> C-D0/C-D4 time and source-of-truth -> CE/CP/CM -> D-D0 additive",
+  "documents": [
+    {
+      "path": "docs/phase-d/D-D0_COMMON_CONTRACT.md",
+      "git_blob_sha": "cefe38afa1480e9d247d443b101b8eda338c3f3f"
+    },
+    {
+      "path": "docs/phase-d/D-D0_ACCEPTANCE_TESTS.md",
+      "git_blob_sha": "087e834ecfabc1c07c0c93544dc74b481d5c6934"
+    }
+  ],
+  "invariant_ids": [
+    "DD0-INV-01",
+    "DD0-INV-02",
+    "DD0-INV-03",
+    "DD0-INV-04",
+    "DD0-INV-05",
+    "DD0-INV-06",
+    "DD0-INV-07",
+    "DD0-INV-08",
+    "DD0-INV-09",
+    "DD0-INV-10",
+    "DD0-INV-11",
+    "DD0-INV-12",
+    "DD0-INV-13",
+    "DD0-INV-14"
+  ],
+  "acceptance_test_ids": [
+    "DD0-G01",
+    "DD0-G02",
+    "DD0-G03",
+    "DD0-G04",
+    "DD0-G05",
+    "DD0-G06",
+    "DD0-G07",
+    "DD0-G08",
+    "DD0-G09",
+    "DD0-G10",
+    "DD0-G11",
+    "DD0-G12",
+    "DD0-G13",
+    "DD0-G14",
+    "DD0-G15",
+    "DD0-G16",
+    "DD0-G17",
+    "DD0-G18",
+    "DD0-G19",
+    "DD0-G20",
+    "DD0-G21",
+    "DD0-G22",
+    "DD0-G23",
+    "DD0-G24"
+  ],
+  "adr_ids": [
+    "DD0-ADR-001",
+    "DD0-ADR-002",
+    "DD0-ADR-003",
+    "DD0-ADR-004",
+    "DD0-ADR-005",
+    "DD0-ADR-006",
+    "DD0-ADR-007",
+    "DD0-ADR-008",
+    "DD0-ADR-009",
+    "DD0-ADR-010",
+    "DD0-ADR-011",
+    "DD0-ADR-012",
+    "DD0-ADR-013",
+    "DD0-ADR-014",
+    "DD0-ADR-015",
+    "DD0-ADR-016",
+    "DD0-ADR-017",
+    "DD0-ADR-018",
+    "DD0-ADR-019",
+    "DD0-ADR-020"
+  ],
+  "temporal_contract": {
+    "monthly_stages": 12,
+    "completion_to_operation": "not_before_next_month_stage0",
+    "knowledge_to_application": "not_before_next_month_stage0",
+    "stage7_inputs_not_usable_in_stage4": true
+  },
+  "invariant_gate": "all hard errors abort the entire StagingWorld; stage11 commits once",
+  "implementation_scope": "source contract and acceptance definitions only; no C++ runtime or passed tests implied",
+  "integrated_resource_contract": "phase-j-resource-flow/1.0",
+  "resource_contract_note": "Historical underground remaining/depletion clauses superseded by J-R1. Other D-V tests remain not fully accepted."
+}

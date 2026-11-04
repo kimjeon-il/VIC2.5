@@ -1,0 +1,47 @@
+{
+  "schema": "vic25.hv.fixture/1.0",
+  "case_id": "HV-X5",
+  "status": "NOT_EXECUTED",
+  "test_ids": [
+    "HV-T40",
+    "HV-T43"
+  ],
+  "depends_on": [
+    "H-D3 defense term",
+    "C-P legal authorization",
+    "C-M5 actual EntryToWar/Combat and military stock",
+    "POP-D2 casualty transition",
+    "E sovereignty and military_control",
+    "C-E5 or F valid transfer of supplies"
+  ],
+  "assumptions": [
+    "A/B existing conflict",
+    "D and B defense treaty effective; D executes legally authorized EntryToWar",
+    "D existing service assignment 100, equipment stock 20 and transfers 10 without shipment loss",
+    "Combat losses are an injected authoritative C-M5 result ONLY for conservation testing (not an invented combat formula)",
+    "Of 100 participating people 12 die and 8 sustain nonfatal injury, no overlaps with other death events",
+    "B takes military control of P whose sovereignty remains A"
+  ],
+  "input": {
+    "D_service_people_before": 100,
+    "D_equipment_before_qty": 20,
+    "equipment_dispatch_qty": 10,
+    "war_death_count": 12,
+    "nonfatal_injury_count": 8,
+    "province_id": "P",
+    "P_sovereign": "A",
+    "P_military_control_after": "B"
+  },
+  "expected": {
+    "D_equipment_available_after": 10,
+    "equipment_in_transit_or_received_qty": 10,
+    "war_death_population_change": -12,
+    "injury_additional_population_change": 0,
+    "D_original_participants_alive_after": 88,
+    "injured_survivors_count": 8,
+    "P_sovereignty_after": "A",
+    "P_military_control_after": "B",
+    "D_is_war_party_only_after_entry_event": true,
+    "auto_generated_troops": 0
+  }
+}
