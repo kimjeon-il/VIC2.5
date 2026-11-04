@@ -75,6 +75,10 @@ struct ChangeLog {
 };
 // This is a frozen GEOGRAPHIC district snapshot, not a second vote ledger.
 // Ballot totals and anchor eligibility remain owned by Phase C.
+struct PhysicalLink {
+    Id from{},to{};
+    std::string mode;
+};
 struct ElectoralBoundary {
     Month opened_month{};
     std::uint64_t boundary_revision{};
@@ -93,6 +97,7 @@ struct SpatialState {
     std::map<Id,std::set<std::string>> claims;
     std::map<Id,std::string> civil,fiscal;
     std::map<std::string,ElectoralBoundary> elections;
+    std::map<std::string,PhysicalLink> geographic_links;
     std::map<Month,std::vector<Operation>> pending;
     std::set<std::string> commands;
     std::vector<ChangeLog> journal;
@@ -163,6 +168,11 @@ inline void validate_spatial(const SpatialState& s,const phasec::IntegratedWorld
             for(Id p:sc.provinces)
                 require(s.provinces.contains(p),"ED0_ERR_INVALID_SCOPE");
         }
+    }
+    for(const auto& [id,link]:s.geographic_links) {
+        require(!id.empty()&&link.from!=link.to&&
+                s.provinces.contains(link.from)&&s.provinces.contains(link.to)&&
+                !link.mode.empty(),"ED0_ERR_INVALID_PROVINCE");
     }
     for(const auto& [contest,boundary]:s.elections) {
         require(!contest.empty()&&!boundary.provinces_by_district.empty(),
@@ -520,6 +530,19 @@ public:
                     core_.core().sovereignty(spatial_.provinces.at(province).region) &&
                 !spatial_.membership.contains(province),"ED0_ERR_ADMIN_ASSIGNMENT");
         spatial_.membership.emplace(province,leaf);
+    }
+    // A geographic connection is not a shipment or transport-capacity ledger.
+    // Phase F will own actual transport capacity, tolls and routing.
+    void seed_geographic_link(std::string link_id,Id from,Id to,std::string mode) {
+        require(core_.commit_id()==0&&!link_id.empty()&&
+                !spatial_.geographic_links.contains(link_id)&&
+                spatial_.provinces.contains(from)&&spatial_.provinces.contains(to)&&
+                from!=to&&!mode.empty(),"ED0_ERR_INVALID_PROVINCE");
+        spatial_.geographic_links.emplace(std::move(link_id),
+                                            PhysicalLink{from,to,std::move(mode)});
+    }
+    [[nodiscard]] const PhysicalLink& geographic_link(const std::string& id)const {
+        return spatial_.geographic_links.at(id);
     }
     void seed_scope(TerritorialScope scope) {
         require(core_.commit_id()==0&&scope.id>0&&

@@ -1178,6 +1178,9 @@ public:
                     quantity, loss, month() + travel_months, false});
         events_.push_back("dispatch");
     }
+    [[nodiscard]] const Shipment& phase_e_shipment(const std::string& id)const {
+        return shipments_.at(id);
+    }
     [[nodiscard]] bool conscription_enabled() const { return conscription_enabled_; }
     [[nodiscard]] int income_tax_ppm() const { return income_tax_ppm_; }
     void enact_conscription(bool enabled) {

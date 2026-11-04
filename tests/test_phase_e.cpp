@@ -289,6 +289,42 @@ static void test_52(){auto w=fixture();w.seed_core().seed_core().seed_actor("BUY
     const auto funds=w.core().core().cash("BUYER");
     plan(w,[](SpatialStage& s){s.queue_transfer("ceded",{1},"B",201);});apply(w);
     check(w.core().core().cash("BUYER")==funds,"money not autotransferred");}
+
+static void test_53() {
+    auto w=fixture();
+    auto& core=w.seed_core().seed_core();
+    core.seed_actor("EXPORTER",0);
+    core.seed_actor("IMPORTER",0);
+    core.seed_stock("EXPORTER","R1","steel",10);
+    core.seed_market("R1","steel",5,1,20);
+    w.seed_geographic_link("ROAD-R1-R7",1,7,"road");
+    World::Plan first;
+    first[7].push_back([](SpatialStage& s) {
+        s.phase_c().ship("SHIPMENT-1","EXPORTER","IMPORTER",
+                         "R1","R7","steel",5,3);
+    });
+    first[9].push_back([](SpatialStage& s) {
+        s.queue_transfer("LAND-CESSION",{1},"B",201);
+    });
+    w.advance(first);
+    const auto originalMarket=w.core().core().market("R1","steel").price;
+    check(w.core().core().stock("TRANSIT:SHIPMENT-1","in_transit","steel")==5 &&
+          !w.core().core().phase_e_shipment("SHIPMENT-1").delivered &&
+          w.sovereign(1)=="A","shipment in transit before treaty");
+    w.advance();
+    check(w.sovereign(1)=="B"&&
+          w.core().core().market("R1","steel").price==originalMarket &&
+          w.geographic_link("ROAD-R1-R7").from==1 &&
+          w.geographic_link("ROAD-R1-R7").to==7 &&
+          w.core().core().stock("TRANSIT:SHIPMENT-1","in_transit","steel")==5,
+          "sovereignty may not mint, seize or reroute cargo automatically");
+    w.advance();
+    w.advance();
+    check(w.core().core().phase_e_shipment("SHIPMENT-1").delivered &&
+          w.core().core().stock("IMPORTER","R7","steel")==5,
+          "shipment still settles through Phase C inventory");
+}
+
 static void test_54(){auto w=fixture();
     plan(w,[](SpatialStage& s){s.occupy(1,"B");},10);
     check(w.month()==1001&&w.sovereign(1)=="A"&&w.military_control(1)=="B",
@@ -382,7 +418,7 @@ int main(){
       {26,test_26},{27,test_27},{28,test_28},{29,test_29},{30,test_30},
       {31,test_31},{32,test_32},{33,test_33},{34,test_34},{35,test_35},{36,test_36},{37,test_37},
       {38,test_38},{39,test_39},{40,test_40},{41,test_41},{42,test_42},{44,test_44},
-      {46,test_46},{47,test_47},{48,test_48},{50,test_50},{51,test_51},{52,test_52},
+      {46,test_46},{47,test_47},{48,test_48},{50,test_50},{51,test_51},{52,test_52},{53,test_53},
       {54,test_54},{55,test_55},{56,test_56},{58,test_58}
     };
     int pass=0,blocked=0;

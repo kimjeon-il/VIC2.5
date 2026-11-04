@@ -53,6 +53,9 @@ void checked_map(A& ar,X& map,Fn each) {
         }
     }
 }
+template<class A>void physical_link(A& ar,PhysicalLink& link) {
+    ar(link.from);ar(link.to);ar(link.mode);
+}
 template<class A>void election(A& ar,ElectoralBoundary& b) {
     ar(b.opened_month);ar(b.boundary_revision);ar(b.provinces_by_district);
     ar(b.allocated);ar(b.named_districts);ar(b.split_without_geometry);
@@ -66,6 +69,7 @@ template<class A>void state(A& ar,SpatialState& s) {
     checked_map(ar,s.scopes,[](A& a,auto& x){scope(a,x);});
     ar(s.claims);ar(s.civil);ar(s.fiscal);
     checked_map(ar,s.elections,[](A& a,auto& b){election(a,b);});
+    checked_map(ar,s.geographic_links,[](A& a,auto& link){physical_link(a,link);});
     checked_map(ar,s.pending,[](A& a,auto& xs) {
         std::uint64_t count=0;
         if constexpr(std::is_same_v<A,Writer>)count=xs.size();
@@ -93,7 +97,7 @@ template<class A>void state(A& ar,SpatialState& s) {
 
 struct SnapshotCodec {
     static constexpr const char* magic="VIC25_PHASEE_SNAPSHOT_1";
-    static constexpr const char* version="phase-e-cpp/0.3";
+    static constexpr const char* version="phase-e-cpp/0.4";
     static std::string encode(const World& w) {
         w.validate();
         std::ostringstream out(std::ios::binary|std::ios::out);
