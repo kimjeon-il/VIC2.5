@@ -97,6 +97,28 @@ template<class A,class X> void research(A& a,X& x) {
     F(workers_per_work);F(cash_cost_per_work);F(paid_work);F(reviewed);
 #undef F
 }
+template<class A,class X>void technology(A& a,X& x){
+    a(x.id);a(x.prerequisites);a(x.licensed_for_commercial_use);
+}
+template<class A,class X>void license(A& a,X& x){
+    a(x.id);a(x.tech);a(x.grantor);a(x.grantee);
+    a(x.actual_fee);a(x.valid_from);a(x.valid_until);a(x.paid);
+}
+template<class A,class X>void contact(A& a,X& x){
+#define F(v) a(x.v)
+    F(id);F(source);F(target);F(tech);F(required_instruction);
+    F(verified_instruction);F(paid_instruction);
+    F(teachers_per_work);F(tuition_per_work);F(planned_instruction);F(reviewed);
+#undef F
+}
+template<class A,class X>void training(A& a,X& x){
+#define F(v) a(x.v)
+    F(id);F(trainer);F(sponsor);F(trainee_slice);F(trainee_count);
+    F(target_occupational_skill);F(required_service);F(verified_service);
+    F(paid_service);F(planned_service);F(fee_per_service);
+    F(certified);F(resulting_slice);
+#undef F
+}
 template<class A,class X> void promotion(A& a,X& x) {
     a(x.holder);a(x.tech);a(x.next);
 }
@@ -115,6 +137,10 @@ template<class A,class X> void state(A& a,X& d) {
     map(a,d.recipes,[](auto& ar,auto& v){industry(ar,v);});
     vec(a,d.actual_production_runs,[](auto& ar,auto& v){production_run(ar,v);});
     map(a,d.researches,[](auto& ar,auto& v){research(ar,v);});
+    map(a,d.technologies,[](auto& ar,auto& v){technology(ar,v);});
+    map(a,d.licenses,[](auto& ar,auto& v){license(ar,v);});
+    map(a,d.contacts,[](auto& ar,auto& v){contact(ar,v);});
+    map(a,d.training,[](auto& ar,auto& v){training(ar,v);});
     a(d.knowledge);a(d.active_site_tech);
     map(a,d.promotions,[](auto& ar,auto& vec_value) {
         vec(ar,vec_value,[](auto& a1,auto& e){promotion(a1,e);});
@@ -128,8 +154,8 @@ template<class A,class X> void state(A& a,X& d) {
 } // namespace detail
 
 struct SnapshotCodec {
-    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_4";
-    static constexpr const char* contract_version="phase-d-cpp/0.4";
+    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_5";
+    static constexpr const char* contract_version="phase-d-cpp/0.5";
     static std::string encode(const World& w) {
         w.validate();
         const auto core_payload=phasec::SnapshotCodec::encode(w.core_);
