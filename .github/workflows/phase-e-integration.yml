@@ -4,6 +4,7 @@ on:
     branches:
       - work/phase-e-cpp-integration
       - work/phase-e-v-remaining
+      - work/phase-e-ev10-30k
   workflow_dispatch:
 
 concurrency:
@@ -23,9 +24,14 @@ jobs:
       - name: Install Mesa OpenGL test dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libglfw3-dev libglew-dev libgl1-mesa-dev xvfb
+      - name: Install EV-T10 offline GIS test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          python3 -m venv .venv-ev10
+          .venv-ev10/bin/python -m pip install --disable-pip-version-check --quiet shapely==2.1.2 pyproj==3.7.2
       - name: Configure C++20 with GL backend (Linux)
         if: runner.os == 'Linux'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=ON -DVIC25_ENABLE_EV10_GIS=ON -DPython3_EXECUTABLE=$(pwd)/.venv-ev10/bin/python
       - name: Configure C++20 headless core (Windows)
         if: runner.os == 'Windows'
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF

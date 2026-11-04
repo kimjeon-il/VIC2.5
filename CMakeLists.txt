@@ -176,3 +176,20 @@ if (BUILD_TESTING)
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_phase_e_gate.py" --phase-e-test $<TARGET_FILE:vic25_phase_e_tests>
         DEPENDS vic25_phase_e_tests)
 endif()
+
+# EV-T10 historical geometry auditing runs OFFLINE. Shapely/PROJ are
+# build-time QA dependencies only and never loaded into the C++ game runtime.
+option(VIC25_ENABLE_EV10_GIS "Enable Python historical border source tests" OFF)
+if (BUILD_TESTING)
+    add_executable(vic25_phase_e_compact_bench bench/phase_e_30k.cpp)
+    target_link_libraries(vic25_phase_e_compact_bench PRIVATE vic25_core)
+    foreach(COUNT IN ITEMS 10000 20000 30000)
+        add_test(NAME vic25_ev10_compact_${COUNT} COMMAND vic25_phase_e_compact_bench ${COUNT})
+        set_tests_properties(vic25_ev10_compact_${COUNT} PROPERTIES TIMEOUT 240)
+    endforeach()
+    if (VIC25_ENABLE_EV10_GIS)
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        add_test(NAME vic25_ev10_history_overlay COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_phase_e_ev10_overlay.py")
+        set_tests_properties(vic25_ev10_history_overlay PROPERTIES TIMEOUT 240)
+    endif()
+endif()
