@@ -243,9 +243,68 @@ public:
                                  product(units,p.cash_price_per_work));
         p.planned_work=phaseb::add_checked(p.planned_work,units);
     }
+    void plan_package(const std::string& id,Quantity attempt_units) {
+        must(1);
+        auto& wp=d_.work_packages.at(id);
+        auto& p=d_.constructions.at(wp.project);
+        require(attempt_units>0 &&
+                wp.accepted_work+wp.planned_work+attempt_units<=wp.required_work &&
+                d_.opening_month>=wp.earliest_month &&
+                (!p.permit_required||p.permit_valid),
+                "cannot schedule unauthorized or overfilled work package");
+        for(const auto& pred:wp.predecessors){
+            const auto& other=d_.work_packages.at(pred);
+            require(other.accepted_work==other.required_work &&
+                    other.finished_month>=0 &&
+                    other.finished_month+other.curing_months<=d_.opening_month,
+                    "work-package predecessor not complete or cured");
+        }
+        plan_work(wp.project,attempt_units);
+        wp.planned_work=phaseb::add_checked(wp.planned_work,attempt_units);
+    }
+    void perform_package(const std::string& id,Quantity attempted,Quantity rejected=0) {
+        must(4);
+        auto& wp=d_.work_packages.at(id);
+        auto& p=d_.constructions.at(wp.project);
+        require(attempted>0 && rejected>=0 && rejected<=attempted &&
+                attempted<=wp.planned_work && attempted<=p.planned_work &&
+                wp.accepted_work+attempted-rejected<=wp.required_work,
+                "invalid construction work-package attempt");
+        for(const auto& pred:wp.predecessors){
+            const auto& other=d_.work_packages.at(pred);
+            require(other.accepted_work==other.required_work &&
+                    other.finished_month+other.curing_months<=d_.opening_month,
+                    "physical predecessor/cure not complete");
+        }
+        const auto required_material=product(attempted,wp.material_per_work);
+        require(c_.phase_d_material_available(p.contractor,p.region,wp.material_good)>=required_material,
+                "undelivered work-package material");
+        occupy_labor(p.contractor,product(attempted,wp.workers_per_work));
+        c_.phase_d_use_material(p.contractor,p.region,wp.material_good,required_material);
+        wp.planned_work-=attempted; p.planned_work-=attempted;
+        wp.rejected_work=phaseb::add_checked(wp.rejected_work,rejected);
+        const auto accepted=attempted-rejected;
+        wp.accepted_work=phaseb::add_checked(wp.accepted_work,accepted);
+        p.accepted_work=phaseb::add_checked(p.accepted_work,accepted);
+        if(wp.accepted_work==wp.required_work)wp.finished_month=d_.opening_month;
+        d_.append(d_.opening_month,rejected?"construction-quality-rework":"construction-package-accepted",id);
+    }
+    void approve_inspection(const std::string& project){
+        must(7);
+        auto& p=d_.constructions.at(project);
+        require(p.accepted_work==p.work_required &&
+                (!p.permit_required||p.permit_valid) &&
+                !p.commissioned,"cannot inspect unfinished or unauthorized project");
+        p.inspected=true;
+        d_.append(d_.opening_month,"construction-inspection",project);
+    }
     void perform_work(const std::string& project,Quantity units) {
         must(4);
         auto& p=d_.constructions.at(project);
+        for(const auto& [id,wp]:d_.work_packages) {
+            (void)id;
+            require(wp.project!=project,"packaged projects must use actual WorkPackage work");
+        }
         require(units>0 && p.planned_work>=units &&
                 p.accepted_work+units<=p.work_required,"construction plan exhausted");
         const auto real_stock=product(units,p.material_per_work);
@@ -268,6 +327,28 @@ public:
         c_.pay(p.client,p.contractor,amount);
         p.paid_work=phaseb::add_checked(p.paid_work,units);
         d_.append(c_.month(),"work-paid",project);
+    }
+    void accrue_work_invoice(const std::string& project,Quantity units) {
+        must(8);
+        auto& p=d_.constructions.at(project);
+        require(p.allow_accrued_invoice_commission && units>0 &&
+                p.capitalized_work+units<=p.accepted_work,
+                "unpaid invoicing requires explicit credit and certified work");
+        const auto amount=product(units,p.cash_price_per_work);
+        c_.phase_d_accrue_certified_work(p.client,p.contractor,amount);
+        p.capitalized_work=phaseb::add_checked(p.capitalized_work,units);
+        p.capitalized_value=phaseb::add_checked(p.capitalized_value,amount);
+        d_.append(d_.opening_month,"contractor-claim-accrued",project);
+    }
+    void settle_work_invoice(const std::string& project,Quantity units) {
+        must(8);
+        auto& p=d_.constructions.at(project);
+        require(units>0 && p.paid_work+units<=p.capitalized_work,
+                "unbacked contractor invoice settlement");
+        const auto amount=product(units,p.cash_price_per_work);
+        c_.phase_d_settle_certified_work(p.client,p.contractor,amount);
+        p.paid_work=phaseb::add_checked(p.paid_work,units);
+        d_.append(d_.opening_month,"contractor-claim-settled",project);
     }
     void capitalize_work(const std::string& project,Quantity units) {
         must(8);
