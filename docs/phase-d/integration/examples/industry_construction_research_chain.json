@@ -1,0 +1,276 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "phase-d-integration/1.0",
+  "fixture_id": "DV-X1",
+  "fixture_type": "fictional_test_value",
+  "calendar": {
+    "start_month_index": 550,
+    "month_count": 3
+  },
+  "ruleset": {
+    "version": "dv-x1-1.0",
+    "world_seed": 55031,
+    "numeric_policy": "integer_test_exact",
+    "currency": "TEST_CURRENCY",
+    "lot_scale": "1",
+    "research_evidence_requirement": 3
+  },
+  "world": {
+    "regions": [
+      "A",
+      "B",
+      "C"
+    ],
+    "governments": [
+      "GOV_A",
+      "GOV_B"
+    ],
+    "market_ids": [
+      "M_A",
+      "M_B",
+      "M_C"
+    ]
+  },
+  "actors": {
+    "government": "gov_A",
+    "client": "firm_owner",
+    "steel_firm": "firm_steel",
+    "research_lab": "institution_lab",
+    "research_workers": "pop_researchers",
+    "steel_workers": "pop_steel_workers",
+    "contractor": "firm_builder",
+    "construction_workers": "pop_builders"
+  },
+  "opening": {
+    "cash": {
+      "government": 40,
+      "client": 100,
+      "steel_firm": 10,
+      "lab": 0,
+      "research_workers": 0,
+      "steel_workers": 0,
+      "contractor": 0,
+      "construction_workers": 0
+    },
+    "world_cash_total": 150,
+    "resource_inventory": {
+      "steel_firm_ore": 4,
+      "steel_firm_coal": 2,
+      "research_lab_reagents": 3,
+      "client_steel": 0
+    },
+    "construction": {
+      "work_required": 4,
+      "accepted_work": 0,
+      "client_WIP": 0,
+      "nominal_capacity": 2,
+      "site_commissioned": false
+    },
+    "knowledge": {
+      "lab": "observed",
+      "client": "unknown"
+    },
+    "pop": {
+      "research_workers": 1,
+      "steel_workers": 1,
+      "construction_workers": 2,
+      "total_represented_workers": 4
+    }
+  },
+  "months": [
+    {
+      "month_index": 550,
+      "stage1": {
+        "government_grant_cash_transfer_to_lab": 20,
+        "lab_funded_research_payroll": 10,
+        "steel_firm_funded_payroll": 10
+      },
+      "stage2": {
+        "lab_workers": 1,
+        "steel_workers": 1,
+        "builders": 0
+      },
+      "stage3": {
+        "steel_firm_ore_consumable": 4,
+        "steel_firm_coal_consumable": 2,
+        "research_reagents_consumable": 3
+      },
+      "stage4": {
+        "steel_produced": 4,
+        "steel_waste_nonmarket": 2,
+        "ore_consumed": 4,
+        "coal_consumed": 2,
+        "research_work_verified": 3,
+        "reagents_consumed": 3,
+        "construction_work": 0
+      },
+      "stage5": {
+        "lab_research_wage_paid": 10,
+        "steel_wage_paid": 10
+      },
+      "stage7": {
+        "client_steel_purchased": 4,
+        "client_paid_steel_firm": 20
+      },
+      "stage8": {
+        "recognized_RnD_cash_outlays": 10,
+        "steel_firm_sales_revenue": 20
+      },
+      "stage9a": {
+        "lab_knowledge_state_next_month": "usable",
+        "effective_month": 551,
+        "client_knowledge_change": false
+      },
+      "stage11": {
+        "cash": {
+          "government": 20,
+          "client": 80,
+          "steel_firm": 20,
+          "lab": 10,
+          "research_workers": 10,
+          "steel_workers": 10,
+          "contractor": 0,
+          "construction_workers": 0
+        },
+        "world_cash_total": 150,
+        "client_steel_inventory": 4,
+        "steel_firm_finished_steel_inventory": 0,
+        "client_WIP": 0,
+        "site_commissioned": false,
+        "knowledge": {
+          "lab": "observed",
+          "client": "unknown"
+        }
+      }
+    },
+    {
+      "month_index": 551,
+      "stage0": {
+        "lab_knowledge_state": "usable",
+        "client_steel_inventory_arrived_and_held": 4
+      },
+      "stage1": {
+        "client_prepays_builder": 40,
+        "contractor_payroll_reserved": 20,
+        "lab_teaching_payroll_reserved": 10
+      },
+      "stage2": {
+        "builder_workers": 2,
+        "lab_knowledge_instructor_workers": 1
+      },
+      "stage3": {
+        "client_steel_transferred_to_worksite_and_consumable": 4
+      },
+      "stage4": {
+        "construction_work_attempted": 4,
+        "construction_work_accepted": 4,
+        "steel_consumed_by_construction": 4,
+        "construction_service_output_value_at_certification": 40,
+        "lab_teaching_work": 2,
+        "client_knowledge_as_of_stage4": "unknown"
+      },
+      "stage5": {
+        "builder_worker_wages_paid": 20,
+        "lab_researcher_teacher_wages_paid": 10
+      },
+      "stage8": {
+        "client_material_cost_in_capital_asset": 20,
+        "builder_certified_construction_service": 40,
+        "client_WIP_addition": 60,
+        "builder_revenue_recognized": 40,
+        "builder_service_labor_cost": 20,
+        "prepayment_recognized_against_contract": 40
+      },
+      "stage9a": {
+        "client_knowledge_observed_event_effective_month": 552,
+        "lab_knowledge_unreduced": "usable"
+      },
+      "stage11": {
+        "cash": {
+          "government": 20,
+          "client": 40,
+          "steel_firm": 20,
+          "lab": 0,
+          "research_workers": 20,
+          "steel_workers": 10,
+          "contractor": 20,
+          "construction_workers": 20
+        },
+        "world_cash_total": 150,
+        "client_steel_inventory": 0,
+        "client_WIP": 60,
+        "site_ready_for_commission": true,
+        "site_commissioned": false,
+        "lab_knowledge": "usable",
+        "client_knowledge": "unknown"
+      }
+    },
+    {
+      "month_index": 552,
+      "stage0": {
+        "commissioned_asset_count": 1,
+        "asset_owner": "firm_owner",
+        "site_nominal_capacity": 2,
+        "client_WIP_reclassified_to_installed_asset": 60,
+        "lab_knowledge": "usable",
+        "client_knowledge": "observed",
+        "client_technique_active": false
+      },
+      "stage4": {
+        "factory_goods_produced_without_any_production_inputs": 0
+      },
+      "stage8": {
+        "new_funds_created_by_commissioning": 0,
+        "new_GDP_from_WIP_reclassification": 0
+      },
+      "stage11": {
+        "cash": {
+          "government": 20,
+          "client": 40,
+          "steel_firm": 20,
+          "lab": 0,
+          "research_workers": 20,
+          "steel_workers": 10,
+          "contractor": 20,
+          "construction_workers": 20
+        },
+        "world_cash_total": 150,
+        "client_WIP": 0,
+        "installed_asset_book_value": 60,
+        "site_nominal_capacity": 2,
+        "client_knowledge": "observed",
+        "client_technique_active": false
+      }
+    }
+  ],
+  "oracles": {
+    "cash_world_each_month": 150,
+    "material_balance_steel": "steel output 4 in month550; client bought and held4; consumed4 in month551; none retained",
+    "resource_balance": "ore4+coal2 consumed, steel4+nonmarket_waste2 produced per fictional recipe",
+    "research_work": 3,
+    "researchers_cannot_be_double_employed": true,
+    "lab_first_usable_month": 551,
+    "client_first_observed_month": 552,
+    "client_usable_by_552": false,
+    "construction_accepted_work_total": 4,
+    "construction_ready_month": 551,
+    "commission_first_month": 552,
+    "final_WIP": 0,
+    "asset_book_value": 60,
+    "m552_automatic_goods_output": 0,
+    "m552_automatic_cash_or_GDP": 0
+  },
+  "journal_requirements": [
+    "Government/lab grant and actual worker payroll postings",
+    "C-E1 ProductionEvent / Inventory ore+coal consumption and steel creation+waste",
+    "Stage7 actual Inventory steel delivery and payment",
+    "Construction WorkEvent/steel consumption and WIP capitalization, advance payment clearing",
+    "Stage9a KnowledgeValidationEvent and KnowledgeTransferEvent with distinct effective months",
+    "Stage0 commissioning moves WIP to installed CapitalAsset and preserves Ownership"
+  ],
+  "notes": [
+    "All quantities and money are fictional, no historical coefficients.",
+    "All goods, cash and employment events require complete counterpart journal entries in executable tests.",
+    "The plant is physically commissioned in month552 but lacks the recipient's usable technology and production inputs, so no automatic output."
+  ]
+}
