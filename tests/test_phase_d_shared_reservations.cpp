@@ -83,9 +83,9 @@ static void test_legacy_production_competes_for_d_labor(){
          "legacy C and D duplicated the same POP labor service");
 }
 static void test_shared_site_capacity(){
-    auto w=base();const auto staff=people(w,2);
+    auto w=base();const auto staff=people(w,3);
     World::Plan p;
-    p[2].push_back([staff](Stage& s){s.phase_c().hire(staff,2,"BUILDER",1);});
+    p[2].push_back([staff](Stage& s){s.phase_c().hire(staff,3,"BUILDER",1);});
     p[4].push_back([](Stage& s){
         s.manufacture("INDUSTRY",2);
         s.manufacture("INDUSTRY",1);
