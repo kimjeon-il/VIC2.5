@@ -1,0 +1,26 @@
+{
+  "$schema": "vic25-design-fixture/phase-g-1.0",
+  "status": "NOT_EXECUTED",
+  "tests": [
+    "GT4-T01"
+  ],
+  "assumptions": [
+    "single-currency",
+    "customs law assesses ad valorem 10 percent",
+    "no exemptions or rounding remainder",
+    "customs clearance decision depends on separate lawful payment/guarantee terms"
+  ],
+  "input": {
+    "taxable_base_minor": 1000,
+    "tariff_rate_ppm": 100000,
+    "actual_payment_minor": 40
+  },
+  "expected": {
+    "customs_assessed_minor": 100,
+    "fiscal_receivable_remaining_minor": 60,
+    "government_cash_received_minor": 40,
+    "taxpayer_liability_remaining_minor": 60,
+    "total_tax_cash_without_payment": 0,
+    "fiscal_funding_not_auto_created": true
+  }
+}
