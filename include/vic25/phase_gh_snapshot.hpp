@@ -211,7 +211,8 @@ struct SnapshotCodec {
         a(std::string(h_version));
         const std::string existing=phasee::SnapshotCodec::encode(w.core_);
         a(existing);
-        auto g=w.trade_,h=w.diplomacy_;
+        auto g=w.trade_;
+        auto h=w.diplomacy_;
         persisted::g_state(a,g);persisted::h_state(a,h);
         const std::string payload=out.str();
         std::ostringstream end(std::ios::binary|std::ios::out);
