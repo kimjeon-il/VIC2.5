@@ -355,6 +355,7 @@ public:
 };
 
 class World {
+    friend struct SnapshotCodec;
 public:
     using Task=std::function<void(Stage&)>;
     using Plan=std::array<std::vector<Task>,12>;
