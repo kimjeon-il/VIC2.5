@@ -39,7 +39,7 @@ void checked_map(A& ar,X& map,Fn each) {
     if(count>500'000)throw std::runtime_error("Phase E invalid container length");
     if constexpr(std::is_same_v<A,Writer>) {
         for(const auto& [k,v]:map) {
-            auto key=k, obj=v;
+            auto key=k; auto obj=v;
             ar(key);each(ar,obj);
         }
     } else {
