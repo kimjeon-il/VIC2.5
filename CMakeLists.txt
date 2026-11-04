@@ -305,3 +305,12 @@ if (BUILD_TESTING)
         set_tests_properties(vic25_ev10_history_overlay PROPERTIES TIMEOUT 240)
     endif()
 endif()
+
+# Daily tick v2 transitional C/D/E/G/H real-ledger adapter and migration.
+# Explicitly separates daily commits from once-per-calendar-month settlement.
+if (BUILD_TESTING)
+    add_executable(vic25_daily_time_tests tests/test_daily_time.cpp)
+    target_link_libraries(vic25_daily_time_tests PRIVATE vic25_core)
+    add_test(NAME vic25_daily_time_tests COMMAND vic25_daily_time_tests)
+    set_tests_properties(vic25_daily_time_tests PROPERTIES TIMEOUT 240)
+endif()
