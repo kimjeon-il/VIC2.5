@@ -133,3 +133,12 @@ if (BUILD_TESTING)
     add_test(NAME vic25_phase_e_tests COMMAND vic25_phase_e_tests)
     set_tests_properties(vic25_phase_e_tests PROPERTIES TIMEOUT 240)
 endif()
+
+# Phase G/H bounded integration on the existing Phase C/D/E staged world.
+# Distinct from the unimplemented G 62 / H 176 full contract acceptance tests.
+if (BUILD_TESTING)
+    add_executable(vic25_phase_gh_tests tests/test_phase_gh.cpp)
+    target_link_libraries(vic25_phase_gh_tests PRIVATE vic25_core)
+    add_test(NAME vic25_phase_gh_tests COMMAND vic25_phase_gh_tests)
+    set_tests_properties(vic25_phase_gh_tests PROPERTIES TIMEOUT 120)
+endif()
