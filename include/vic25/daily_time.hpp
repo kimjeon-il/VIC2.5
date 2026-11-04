@@ -349,8 +349,9 @@ public:
                     gh.phase_d().capitalize_work(command.from,command.amount);
                 });
             } else if(command.kind==Kind::manufacture) {
-                real_actions[4].push_back([command](phasegh::Stage& gh) {
-                    gh.phase_d().manufacture(command.from,command.amount);
+                real_actions[4].push_back([command,current](phasegh::Stage& gh) {
+                    gh.phase_d().manufacture_daily(command.from,command.amount,
+                          current.day,days_in_month(current.year,current.month));
                 });
             } else if(command.kind==Kind::cargo_dispatch) {
                 require(command.amount>0&&command.unit_price>0&&

@@ -48,7 +48,7 @@ struct Fixture {
         c.seed_stock("MILL","R1","ore",4);
         c.seed_stock("MILL","R1","coal",4);
         c.seed_stock("SELLER","R1","iron",10);
-        c.seed_production_facility("MILL_SITE","MILL","R1",5);
+        c.seed_production_facility("MILL_SITE","MILL","R1",31);
         auto& p=c.seed_population();
         const auto h=p.household_profile({"R1","shared","shared",100});
         const auto worker=p.economic_profile({"R1","worker","wage","employee",p.default_education()});
@@ -176,6 +176,15 @@ static void cross_domain_daily_events_and_replay(){
          "exact day arrival and explicit cargo loss mismatch");
 }
 static void daily_rollback_due_to_resource_constraints() {
+    Fixture production;
+    auto prod=World::adopt(std::move(production.gh));
+    auto overproduction=cmd("OVER-DAY-CAPACITY",Kind::manufacture);
+    overproduction.from="REC";overproduction.amount=2;
+    prod.enqueue({2000,1,1},overproduction);
+    const auto prod_before=SnapshotCodec::encode(prod);
+    need(reject([&]{prod.advance_day();}) &&
+         prod_before==SnapshotCodec::encode(prod),
+         "D monthly installed capacity must not be granted anew each day");
     Fixture f;auto w=World::adopt(std::move(f.gh));
     auto fail=cmd("BAD-CONSTRUCTION",Kind::construction);
     fail.from="PROJECT";fail.amount=100;
@@ -196,6 +205,35 @@ static void daily_rollback_due_to_resource_constraints() {
          before_fail==SnapshotCodec::encode(t),
          "G capacity/stock failure must rollback day");
 }
+static void daily_diplomacy_changes_real_trade_tariff() {
+    const auto seed=[] {
+        Fixture f;
+        auto& c=f.gh.seed_geography().seed_core().seed_core();
+        c.seed_market("R1","iron",10,1,15);
+        c.seed_market("R2","iron",20,1,30);
+        f.gh.seed_tariff("B","iron",100000);
+        f.gh.seed_route({"TRADE-IRON","SELLER","BUYER","iron",1,2,3,1,0});
+        return World::adopt(std::move(f.gh));
+    };
+    auto exempt=seed(),taxed=seed();
+    auto proposal=cmd("T-DUTY",Kind::treaty_offer);
+    proposal.from="A";proposal.to="B";proposal.region="TAX-TREATY";
+    proposal.good="iron";proposal.destination="PM_A";proposal.auxiliary=3;
+    exempt.enqueue({2000,1,1},proposal);
+    auto approval=cmd("R-DUTY",Kind::treaty_ratify);
+    approval.from="B";approval.region="TAX-TREATY";approval.destination="PM_B";
+    exempt.enqueue({2000,1,2},approval);
+    while(exempt.date()<Date{2000,2,1})exempt.advance_day();
+    while(taxed.date()<Date{2000,2,1})taxed.advance_day();
+    need(exempt.engine().diplomacy().daily_treaties.at("TAX-TREATY").active,
+         "H signed treaty not day-effective");
+    const auto& x=exempt.engine().commerce().fills;
+    const auto& y=taxed.engine().commerce().fills;
+    need(x.size()==1&&y.size()==1 &&
+         x[0].duty_paid==0&&y[0].duty_paid>0,
+         "H daily effective treaty did not alter actual G tariff settlement");
+}
+
 static void migrates_old_daily_v1_without_inventing_actions() {
     Fixture f;
     const auto gh=vic25::phasegh::SnapshotCodec::encode(f.gh);
@@ -228,6 +266,7 @@ int main(){
         cross_domain_daily_events_and_replay();
         daily_rollback_due_to_resource_constraints();
         migrates_old_daily_v1_without_inventing_actions();
+        daily_diplomacy_changes_real_trade_tariff();
         std::cout<<"NATIVE_DAILY_BCDGH: 3 domains groups PASS\n";
         return 0;
     }catch(const std::exception& e) {

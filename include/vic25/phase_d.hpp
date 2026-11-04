@@ -575,6 +575,38 @@ public:
         d_.actual_production_runs.push_back({recipe,d_.opening_month,batches});
         d_.append(d_.opening_month,"industry-production",recipe);
     }
+    // A legacy ProductionFacility.capacity is month-scoped. Native daily
+    // manufacturing must not silently grant that capacity every single day.
+    // Unused quota is carried inside the same month by comparing cumulative
+    // real completed batches against the proportional day-of-month budget.
+    void manufacture_daily(const std::string& recipe,Quantity batches,
+                           std::int32_t day,std::int32_t days_in_month) {
+        must(4);
+        require(day>0&&days_in_month>=28&&days_in_month<=31 &&
+                day<=days_in_month&&batches>0,
+                "D_DAILY_INVALID_PRODUCTION_DATE");
+        const auto& spec=d_.recipes.at(recipe);
+        const auto& asset=c_.facility(spec.site);
+        require(asset.capacity>=asset.damaged,"D_DAILY_DAMAGED_CAPACITY");
+        const Quantity monthly=asset.capacity-asset.damaged;
+        const Quantity allowed=phaseb::add_checked(
+            phaseb::mul_checked(monthly/days_in_month,static_cast<Quantity>(day)),
+            phaseb::mul_checked(monthly%days_in_month,
+                                static_cast<Quantity>(day))/days_in_month);
+        Quantity used=0;
+        for(const auto& run:d_.actual_production_runs) {
+            if(run.month!=d_.opening_month)continue;
+            const auto& previous=d_.recipes.at(run.recipe);
+            if(previous.site==spec.site)
+                used=phaseb::add_checked(used,
+                    phaseb::mul_checked(run.batches,previous.capacity_per_batch));
+        }
+        const Quantity required=phaseb::mul_checked(batches,spec.capacity_per_batch);
+        require(used<=allowed&&required<=allowed-used,
+                "D_DAILY_MONTHLY_FACILITY_BUDGET_EXCEEDED");
+        manufacture(recipe,batches);
+    }
+
     void plan_research(const std::string& project,Quantity units) {
         must(1);
         auto& p=d_.researches.at(project);
