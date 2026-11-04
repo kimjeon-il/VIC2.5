@@ -117,7 +117,7 @@ struct Command {
 };
 struct DailyCargo {
     std::string id,sender,recipient,origin,destination,good,edge_id;
-    phasec::Quantity quantity{},loss{};
+    vic25::Quantity quantity{},loss{};
     DayIndex dispatched{},arrival{};
     bool arrived{};
 };
@@ -192,10 +192,10 @@ inline void execute(const Command& command,phasec::IntegratedWorld& c) {
 }
 
 class World;
-namespace detail { template<class A,class W> void metadata(A&,W&); }
+namespace detail { template<class A,class W> void metadata(A&,W&,bool modern=true); }
 class World {
     friend struct SnapshotCodec;
-    template<class A,class W> friend void detail::metadata(A&,W&);
+    template<class A,class W> friend void detail::metadata(A&,W&,bool);
     phasegh::World engine_;
     DayIndex day_{};
     std::uint64_t day_commit_{};

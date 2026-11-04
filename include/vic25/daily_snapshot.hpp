@@ -24,7 +24,7 @@ template<class A>void command(A& a,Command& c,bool modern=true){
 template<class A>void entry(A& a,Entry& e) {
     a(e.effective_day);a(e.command_id);a(e.kind);a(e.c_commit_id);
 }
-template<class A,class W>void metadata(A& a,W& world,bool modern=true) {
+template<class A,class W>void metadata(A& a,W& world,bool modern) {
     a(world.day_);
     a(world.day_commit_);
     a(world.world_seed_);
