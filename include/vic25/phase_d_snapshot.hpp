@@ -68,10 +68,25 @@ template<class A,class X,class Fn> void map(A& a,X& container,Fn each) {
         }
     }
 }
+template<class A,class X>void industry_class(A& a,X& x){
+    a(x.id);a(x.parent);a(x.description);
+}
+template<class A,class X>void deposit(A& a,X& x){
+#define F(v) a(x.v)
+    F(id);F(site);F(owner);F(region);F(good);
+    F(remaining);F(renewal_per_month);F(carrying_capacity);
+    F(workers_per_unit);F(site_service_per_unit);F(renewable);
+#undef F
+}
+template<class A,class X>void production_run(A& a,X& x){
+    a(x.recipe);a(x.month);a(x.batches);
+}
 template<class A,class X> void industry(A& a,X& x) {
-    a(x.id);a(x.site);a(x.tech_id);
+    a(x.id);a(x.site);a(x.tech_id);a(x.industry_class);
     vec(a,x.inputs,[](auto& ar,auto& v){input(ar,v);});
     vec(a,x.outputs,[](auto& ar,auto& v){input(ar,v);});
+    vec(a,x.byproducts,[](auto& ar,auto& v){input(ar,v);});
+    a(x.nonmarket_waste_per_batch);
     a(x.workers_per_batch);a(x.capacity_per_batch);a(x.needs_retrofit);
     a(x.requires_same_stage_nonstorable_energy);
 }
@@ -94,7 +109,11 @@ template<class A,class X> void evidence(A& a,X& x) {
 template<class A,class X> void state(A& a,X& d) {
     map(a,d.constructions,[](auto& ar,auto& v){construction(ar,v);});
     map(a,d.work_packages,[](auto& ar,auto& v){work_package(ar,v);});
+    map(a,d.industry_classes,[](auto& ar,auto& v){industry_class(ar,v);});
+    map(a,d.deposits,[](auto& ar,auto& v){deposit(ar,v);});
+    a(d.cumulative_nonmarket_waste);
     map(a,d.recipes,[](auto& ar,auto& v){industry(ar,v);});
+    vec(a,d.actual_production_runs,[](auto& ar,auto& v){production_run(ar,v);});
     map(a,d.researches,[](auto& ar,auto& v){research(ar,v);});
     a(d.knowledge);a(d.active_site_tech);
     map(a,d.promotions,[](auto& ar,auto& vec_value) {
@@ -109,8 +128,8 @@ template<class A,class X> void state(A& a,X& d) {
 } // namespace detail
 
 struct SnapshotCodec {
-    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_3";
-    static constexpr const char* contract_version="phase-d-cpp/0.3";
+    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_4";
+    static constexpr const char* contract_version="phase-d-cpp/0.4";
     static std::string encode(const World& w) {
         w.validate();
         const auto core_payload=phasec::SnapshotCodec::encode(w.core_);
