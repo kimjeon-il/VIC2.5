@@ -1,4 +1,6 @@
 #include "vic25/phase_d.hpp"
+#include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -111,14 +113,23 @@ int main(int argc,char** argv){
         }
         need(w.core().people().population()==cells&&
              w.core().stock("FACTORY","R","bar")==5*months&&
-             w.construction("BRIDGE").ready== (months==2) &&
+             w.construction("BRIDGE").commissioned &&
+             w.core().facility("BRIDGE_SITE").capacity==2 &&
              w.research("RESEARCH").verified_work==10,
              "large POP benchmark world changed economic or population invariants");
+        std::sort(times.begin(),times.end());
+        const auto pct=[&](double p){
+            const auto rank=static_cast<std::size_t>(std::ceil(p*times.size()));
+            return times.at(std::max<std::size_t>(1,rank)-1);
+        };
         std::cout<<"Phase D real sparse POP count="<<cells
                  <<" months="<<months
                  <<" seed_ms="<<std::chrono::duration<double,std::milli>(seeded-initial).count()
                  <<" avg_month_ms="<<std::accumulate(times.begin(),times.end(),0.0)/times.size()
-                 <<" max_month_ms="<<*std::max_element(times.begin(),times.end())
+                 <<" p50_month_ms="<<pct(0.50)
+                 <<" p95_month_ms="<<pct(0.95)
+                 <<" p99_month_ms="<<pct(0.99)
+                 <<" max_month_ms="<<times.back()
                  <<" "<<peak_rss()<<"\n";
         return 0;
     }catch(const std::exception& e){
