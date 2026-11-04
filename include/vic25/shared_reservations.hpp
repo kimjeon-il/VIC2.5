@@ -19,6 +19,8 @@ class SharedResourceReservations {
     std::map<Ticket,Amount> cash_tickets_;
     std::map<InventoryKey,Quantity> goods_held_;
     std::map<GoodsTicket,Quantity> goods_tickets_;
+    // Stage4 outputs may be sold at stage7, but cannot feed past stage3 inputs.
+    std::map<InventoryKey,Quantity> stage4_new_outputs_;
     std::map<std::string,std::int64_t> labor_used_;
     std::map<std::string,std::int64_t> site_services_used_;
     static void check(bool okay,const char* error) {
@@ -27,7 +29,7 @@ class SharedResourceReservations {
 public:
     void clear_month() {
         cash_held_.clear();cash_tickets_.clear();
-        goods_held_.clear();goods_tickets_.clear();
+        goods_held_.clear();goods_tickets_.clear();stage4_new_outputs_.clear();
         labor_used_.clear();site_services_used_.clear();
     }
     [[nodiscard]] Amount cash_held(const std::string& who) const {
@@ -72,6 +74,23 @@ public:
         check(amount>0&&actual_stock>=0&&goods_held(key)<=actual_stock &&
               amount<=actual_stock-goods_held(key),
               "shared goods reservation excludes attempted consumption/transfer");
+    }
+    void record_stage4_output(const InventoryKey& key,Quantity amount) {
+        check(amount>0,"invalid Stage4 output lot");
+        stage4_new_outputs_[key]=phaseb::add_checked(stage4_new_outputs_[key],amount);
+    }
+    [[nodiscard]] Quantity available_for_stage4(const InventoryKey& key,
+                                                  Quantity actual_stock) const {
+        auto it=stage4_new_outputs_.find(key);
+        const auto future=it==stage4_new_outputs_.end()?0:it->second;
+        check(actual_stock>=future&&actual_stock>=goods_held(key)+future,
+              "Stage4 materials cannot consume today's newly produced output");
+        return actual_stock-future-goods_held(key);
+    }
+    void assert_stage4_available(const InventoryKey& key,Quantity units,
+                                 Quantity actual_stock)const {
+        check(units>0&&units<=available_for_stage4(key,actual_stock),
+              "newly manufactured Stage4 good cannot be used as old intermediate");
     }
     void reserve_goods(const InventoryKey& key,const std::string& purpose,
                        Quantity amount, Quantity actual_stock) {
@@ -126,6 +145,7 @@ public:
         if(cash!=cash_held_||goods!=goods_held_)return false;
         for(const auto& [_,v]:labor_used_)if(v<0)return false;
         for(const auto& [_,v]:site_services_used_)if(v<0)return false;
+        for(const auto& [_,v]:stage4_new_outputs_)if(v<0)return false;
         return true;
     }
 };
