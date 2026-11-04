@@ -64,6 +64,7 @@ template<class A,class X> void industry(A& a,X& x) {
     vec(a,x.inputs,[](auto& ar,auto& v){input(ar,v);});
     vec(a,x.outputs,[](auto& ar,auto& v){input(ar,v);});
     a(x.workers_per_batch);a(x.capacity_per_batch);a(x.needs_retrofit);
+    a(x.requires_same_stage_nonstorable_energy);
 }
 template<class A,class X> void research(A& a,X& x) {
 #define F(v) a(x.v)
