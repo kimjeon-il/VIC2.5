@@ -1,0 +1,198 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "phase-d-industry/1.0",
+  "fixture_type": "fictional_test_value",
+  "name": "Craft flour mill converts to machine-assisted process after funded retrofit",
+  "month_indices": [
+    399,
+    400,
+    401,
+    402
+  ],
+  "units": {
+    "people": "person",
+    "wages": "minor TEST_CURRENCY",
+    "goods": "synthetic_lot",
+    "work_unit": "retrofit_work_unit",
+    "asset": "installed_machine_unit"
+  },
+  "actors": {
+    "firm": "firm_mill",
+    "site": "site_mill",
+    "owner": "household_owners",
+    "constructor": "firm_constructor",
+    "machine_supplier": "firm_machine_maker",
+    "lender": "bank_Z",
+    "workforce_partition": "pop_workforce_10"
+  },
+  "initial": {
+    "total_workers_in_pop": 10,
+    "site_workers_month_400": 10,
+    "site_machine_units": 0,
+    "site_technology_access": "usable_knowledge_valid",
+    "manual_recipe_valid": true,
+    "mechanized_recipe_licensed": true,
+    "site_operating_method": "manual",
+    "site_cash_before_loan": 100,
+    "loan_principal": 0,
+    "capital_improvement_wip": 0
+  },
+  "recipes": {
+    "manual": {
+      "id": "manual_flour",
+      "per_cycle": {
+        "grain": 10,
+        "labor_service": 10,
+        "machine_service": 0,
+        "coal_fuel": 0,
+        "flour_output": 10
+      }
+    },
+    "machine_assisted": {
+      "id": "mechanized_flour",
+      "per_cycle": {
+        "grain": 10,
+        "labor_service": 4,
+        "machine_service": 1,
+        "coal_fuel": 2,
+        "flour_output": 10,
+        "combustion_waste_or_emission": 2
+      }
+    }
+  },
+  "events": [
+    {
+      "month_index": 399,
+      "stage9a": {
+        "proposal": "retrofit_line_1",
+        "loan_request": 80,
+        "new_method_target": "machine_assisted",
+        "earliest_new_method_month": 402
+      },
+      "stage11": {
+        "site_operating_method": "manual",
+        "new_machine_service": 0
+      }
+    },
+    {
+      "month_index": 400,
+      "stage1": {
+        "loan_drawdown_actual": 80,
+        "loan_claim_bank": 80,
+        "firm_deposit_created": 80,
+        "repair_funding_reserved": 20,
+        "machine_purchase_funding_reserved": 60
+      },
+      "stage2": {
+        "manual_workers": 10
+      },
+      "stage3": {
+        "manual_grain_consumable": 10
+      },
+      "stage4": {
+        "manual_flour_output": 10
+      },
+      "stage5": {
+        "manual_workers_wages_paid": 20
+      },
+      "stage7": {
+        "machine_goods_purchased": 1,
+        "machine_purchase_cash_paid": 60,
+        "installed_machine_service_created": 0
+      },
+      "stage8": {
+        "machine_goods_in_warehouse": 1,
+        "firm_loan_principal_outstanding": 80
+      },
+      "stage11": {
+        "site_operating_method": "manual",
+        "installed_machine_service": 0
+      }
+    },
+    {
+      "month_index": 401,
+      "stage1": {
+        "construction_funding_reserved": 20
+      },
+      "stage2": {
+        "contractor_retrofit_workers": 2,
+        "mill_production_workers": 0,
+        "preexisting_mill_workers_not_copied_to_contractor": false
+      },
+      "stage4": {
+        "construction_retrofit_work_actual": 1,
+        "installed_machine_service_immediately_active": 0,
+        "mill_flour_output": 0
+      },
+      "stage5": {
+        "construction_service_wages_paid": 20
+      },
+      "stage8": {
+        "owner_retrofit_WIP_cumulative": 80,
+        "machine_equipment_capitalization_component": 60,
+        "construction_services_component": 20
+      },
+      "stage11": {
+        "ready_for_commission": true,
+        "mill_production_capacity_from_machine": 0,
+        "old_site_workforce_reassignment_pending": true
+      }
+    },
+    {
+      "month_index": 402,
+      "stage0": {
+        "site_technique_assignment": "machine_assisted",
+        "machine_installation_state": "active",
+        "wip_reclassification": -80,
+        "installed_asset_book_value": 80
+      },
+      "stage2": {
+        "machine_assisted_workers": 4,
+        "remaining_pop_workers_without_mill_assignment": 6,
+        "pop_total_workers": 10
+      },
+      "stage3": {
+        "grain_consumed": 10,
+        "coal_fuel_consumed": 2
+      },
+      "stage4": {
+        "flour_output": 10,
+        "recorded_fuel_waste_or_emissions": 2,
+        "machine_service_used": 1
+      },
+      "stage5": {
+        "machine_assisted_wages_paid": 8
+      },
+      "stage11": {
+        "site_method": "machine_assisted",
+        "extra_people_created": 0,
+        "machine_units_installed": 1,
+        "construction_WIP_remaining": 0
+      }
+    }
+  ],
+  "oracles": {
+    "loan_not_firm_profit": true,
+    "bank_loan_asset_plus_deposit_liability": 80,
+    "firm_deposit_asset_plus_loan_liability": 80,
+    "new_method_month_400_forbidden": true,
+    "new_method_month_401_forbidden": true,
+    "new_method_first_effective_month": 402,
+    "pop_total_after_mechanization": 10,
+    "active_mill_worker_count_after": 4,
+    "workers_unassigned_or_reallocated": 6,
+    "old_workforce_spontaneous_deletion": 0,
+    "book_value_of_new_installed_machine_and_retrofit": 80,
+    "capitalization_as_cash_income_for_owner": 0,
+    "manual_labor_per_cycle": 10,
+    "new_labor_per_cycle": 4,
+    "new_energy_requirement": 2,
+    "uncertified_technique_without_knowledge_or_retrofit": "REJECT"
+  },
+  "notes": [
+    "Only a fixed example demonstrating physical/time prerequisites; 399-402 are synthetic month indices not calendar years.",
+    "The independent contractor's two workers are additional eligible persons from a different POP partition, not duplicates of the mill's 10-person partition.",
+    "Actual money, machine goods, materials, labor and construction services must have complete counterpart journals in C++ fixtures. No claim is made that the design-stage fixture is executable.",
+    "The six mill workers no longer assigned to the mechanized line remain in population and are unemployed or reassigned through EmploymentLedger rather than deleted."
+  ]
+}
