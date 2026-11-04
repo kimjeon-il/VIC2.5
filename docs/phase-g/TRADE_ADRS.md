@@ -41,7 +41,7 @@
 ## 참고 자료(아이디어 참고, 코드/수치 불복제)
 
 - Paradox 공식 1.9 소개: https://www.paradoxinteractive.com/games/victoria-3/news
-- Victoria 3 Dev Diary #143(세계시장/무역센터/자율화): https://forum.paradoxplaza.com/forum/developer-diary/victoria-3-dev-diary-143-trade-rework-the-world-market.1676327/
+- Victoria 3 Dev Diary #143(세계시장/무역센터/자율화): https://forum.paradoxplaza.com/forum/developer-diary/victoria-3-dev-diary-143-trade-rework-the-world-market.1733205/
 - Victoria 3 Dev Diary #54(과거 무역로 개편: 버전 차이 유의): https://www.paradoxinteractive.com/games/victoria-3/news/dev-diary-54-trade-revisions
 - C-E5 운송·무역: ../phase-c/economy/C-E5_TRANSPORT_INTERNATIONAL_TRADE.md
 - G-D0 공통 계약: G-D0_COMMON_CONTRACT.md
