@@ -97,8 +97,14 @@ struct Recognition {
     std::string recognizer, recognized;
     Month effective_month{};
 };
+struct PendingTariff {
+    Month effective{};
+    std::string importer, good;
+    std::int64_t ppm{};
+};
 struct DiplomacyState {
     std::map<std::pair<std::string,std::string>,Tariff> tariffs;
+    std::vector<PendingTariff> scheduled_tariffs;
     std::map<std::string,Treaty> treaties;
     std::map<std::string,Organization> organizations;
     std::map<std::string,Protectorate> protectorates;
@@ -182,18 +188,9 @@ public:
         // A tariff adopted now has no effect on earlier trades. Pilot policies
         // are carried as next-month schedule by the pending tariff table.
         diplomacy_.commands.insert(command);
-        pending_tariffs().push_back({phase_c().month()+1, importer, good, ppm});
+        diplomacy_.scheduled_tariffs.push_back({phase_c().month()+1, importer, good, ppm});
         ++diplomacy_.revision;
     }
-    struct PendingTariff {
-        Month effective{};
-        std::string importer, good;
-        std::int64_t ppm{};
-    };
-    // Store deferred policy changes in the shared diplomacy sidecar.
-    // Implemented through the accessor below, with the owner World injecting
-    // one month-bound application event during stage 0.
-    std::vector<PendingTariff>& pending_tariffs();
 
     void propose_tariff_treaty(const std::string& id,
                                const std::string& a, const std::string& b,
@@ -351,6 +348,16 @@ public:
     void execute_autonomous_trade();
     void advance_legal_state() {
         at(0);
+        for(const auto& rule:diplomacy_.scheduled_tariffs) {
+            if(rule.effective<=phase_c().month()) {
+                diplomacy_.tariffs[{rule.importer,rule.good}] =
+                    {rule.importer,rule.good,rule.ppm};
+                ++diplomacy_.revision;
+            }
+        }
+        std::erase_if(diplomacy_.scheduled_tariffs,[&](const PendingTariff& rule){
+            return rule.effective<=phase_c().month();
+        });
         for(auto& [id,t]:diplomacy_.treaties) {
             (void)id;
             if(!t.active && t.ratified_a && t.ratified_b &&
@@ -433,7 +440,7 @@ public:
                      std::int64_t ppm) {
         require(core_.commit_id()==0 && !importer.empty() && !good.empty() &&
                 ppm>=0 && ppm<=1'000'000,"H_ERR_INVALID_TARIFF");
-        diplomacy_.tariffs[{importer,good}]={std::move(importer),std::move(good),ppm};
+        diplomacy_.tariffs[{importer,good}]={importer,good,ppm};
     }
     [[nodiscard]] const phasee::World& base() const {return core_;}
     [[nodiscard]] Month month() const{return core_.month();}
@@ -496,5 +503,84 @@ public:
         return report;
     }
 };
+
+
+inline void Stage::plan_autonomous_trade() {
+    at(1);
+    auto& core=phase_c();
+    trade_.pending.clear();
+    const auto& geo=spatial_.spatial();
+    for(const auto& [id,route]:trade_.routes) {
+        (void)id;
+        const auto& origin=geo.provinces.at(route.origin).region;
+        const auto& dest=geo.provinces.at(route.destination).region;
+        const auto& from=core.sovereignty(origin);
+        const auto& to=core.sovereignty(dest);
+        const auto& source_quote=core.market(origin,route.good);
+        const auto& target_quote=core.market(dest,route.good);
+        const auto ppm=duty_rate(from,to,route.good);
+        const Money price=source_quote.price;
+        require(price>0 && ppm>=0 && ppm<=1'000'000,
+                "G_ERR_INVALID_MARKET_QUOTE");
+        const Money unit_duty_ceiling=
+            (phaseb::mul_checked(price,ppm)+999'999)/1'000'000;
+        const Money landed_unit=phaseb::add_checked(price,unit_duty_ceiling);
+        // No compulsory country-wide export quotas: the merchant buys only
+        // when its destination reference price covers landed cost.
+        if(target_quote.price<=landed_unit)continue;
+        const auto available_stock=core.phase_d_material_available(
+                                 route.seller,origin,route.good);
+        const auto available_cash=core.phase_d_cash_available(route.buyer);
+        const Quantity qty=std::min({
+            route.maximum_quantity,available_stock,
+            available_cash/landed_unit
+        });
+        if(qty<=0)continue;
+        const Money goods_cost=phaseb::mul_checked(qty,price);
+        const Money duty=phaseb::mul_checked(goods_cost,ppm)/1'000'000;
+        const Money total=phaseb::add_checked(goods_cost,duty);
+        const std::string eid="G:"+route.id+":"+std::to_string(core.month());
+        require(!trade_.executed.contains(eid),"G_ERR_DUPLICATE_EXECUTION");
+        if(duty>0)(void)core.cash(to); // An actual importing treasury is needed.
+        core.phase_d_reserve_cash(route.buyer,eid,total);
+        core.phase_d_reserve_material(route.seller,origin,route.good,eid,qty);
+        trade_.pending.push_back({eid,route.id,route.seller,route.buyer,route.good,
+                         origin,dest,from,to,qty,route.travel_months,
+                         price,total,duty});
+    }
+}
+inline void Stage::execute_autonomous_trade() {
+    at(7);
+    auto& core=phase_c();
+    for(const auto& order:trade_.pending) {
+        require(trade_.executed.insert(order.execution_id).second,
+                "G_ERR_DUPLICATE_EXECUTION");
+        core.phase_d_release_cash(order.buyer,order.execution_id,
+                                  order.total_cost);
+        core.phase_g_release_reserved_goods(order.seller,order.origin_region,
+                      order.good,order.execution_id,order.quantity);
+        if(order.origin_region==order.destination_region) {
+            core.trade(order.seller,order.buyer,order.origin_region,
+                       order.good,order.quantity,order.unit_price);
+        } else {
+            require(order.travel_months>0,"G_ERR_UNSUPPORTED_TRANSPORT");
+            core.ship(order.execution_id,order.seller,order.buyer,
+                      order.origin_region,order.destination_region,
+                      order.good,order.quantity,order.travel_months);
+            core.pay(order.buyer,order.seller,
+                     phaseb::mul_checked(order.unit_price,order.quantity));
+        }
+        if(order.duty>0)
+            core.pay(order.buyer,order.buyer_country,order.duty);
+        trade_.fills.push_back({order.execution_id,order.route_id,
+            order.seller_country,order.buyer_country,core.month(),
+            order.quantity,phaseb::mul_checked(order.unit_price,
+                                               order.quantity),
+            order.duty,
+            order.origin_region!=order.destination_region});
+        ++trade_.revision;
+    }
+    trade_.pending.clear();
+}
 
 } // namespace vic25::phasegh
