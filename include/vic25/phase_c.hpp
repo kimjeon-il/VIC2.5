@@ -367,6 +367,91 @@ public:
     [[nodiscard]] const ProductionFacility& facility(const std::string& id) const {
         return facilities_.at(id);
     }
+    // Phase D additive bridge: material/production share C's real inventory
+    // and Phase B's real employment, not an independent Phase D stock.
+    [[nodiscard]] People phase_d_workforce(const std::string& owner) const {
+        ensure(actors_.contains(owner), "unknown phase D employer");
+        return employed_by(owner);
+    }
+    void phase_d_use_material(const std::string& actor,const std::string& region,
+                              const std::string& good,Quantity qty) {
+        require_stage({4});
+        ensure(actors_.contains(actor) && qty>0 &&
+               stock(actor,region,good)>=qty, "unbacked phase D material");
+        goods_.consume({actor,region,good},qty);
+        events_.push_back("phase-d-actual-material-used");
+    }
+    void phase_d_transform(const std::string& actor,const std::string& region,
+                           const std::vector<std::pair<std::string,Quantity>>& inputs,
+                           const std::vector<std::pair<std::string,Quantity>>& outputs,
+                           People workers_required) {
+        require_stage({4});
+        ensure(actors_.contains(actor) && sovereignty_.contains(region) &&
+               workers_required>0 && workers_required<=employed_by(actor) &&
+               !inputs.empty() && !outputs.empty(),
+               "phase D production missing actor, worker, inputs or outputs");
+        std::map<std::string,Quantity> grouped;
+        for(const auto& [good,qty]:inputs) {
+            ensure(!good.empty() && qty>0,"invalid phase D production material");
+            grouped[good]=phaseb::add_checked(grouped[good],qty);
+        }
+        for(const auto& [good,qty]:grouped)
+            ensure(stock(actor,region,good)>=qty,"missing phase D production input");
+        for(const auto& [good,qty]:outputs)
+            ensure(!good.empty() && qty>0,"invalid phase D output");
+        for(const auto& [good,qty]:grouped)
+            goods_.consume({actor,region,good},qty);
+        for(const auto& [good,qty]:outputs) {
+            goods_.produce({actor,region,good},qty);
+            tracked_goods_.insert(good);
+        }
+        events_.push_back("phase-d-input-output-production");
+    }
+    // Cash-settled pilot path only: a verified cost was already paid via
+    // pay(), hence the expense balance can be capitalized once into WIP.
+    // This is NOT unpaid-progress invoicing or full CE accrual accounting.
+    void phase_d_capitalize_paid_cost(const std::string& owner,Money amount) {
+        require_stage({8});
+        ensure(actors_.contains(owner) && amount>0 &&
+               money_.balance(account(owner,"expense"))>=amount,
+               "phase D WIP lacks matching paid cost");
+        const auto key=account(owner,"wip");
+        try { (void)money_.balance(key); }
+        catch(const std::out_of_range&) {
+            money_.add_account(key,owner,AccountType::asset);
+        }
+        money_.post({unique("phase-d-wip"),"paid construction expense capitalized",{
+            {key,amount,0},{account(owner,"expense"),0,amount}}});
+        events_.push_back("phase-d-capitalized-verified-paid-work");
+    }
+    [[nodiscard]] Money phase_d_wip(const std::string& owner) const {
+        ensure(actors_.contains(owner),"unknown phase D WIP owner");
+        try { return money_.balance(account(owner,"wip")); }
+        catch(const std::out_of_range&) { return 0; }
+    }
+    // Called at month m+1 stage0 only after Phase D work / finance /
+    // inspection gates have been validated against the same staged World.
+    void phase_d_commission_facility(const std::string& id,const std::string& owner,
+                                     const std::string& region,Quantity capacity,
+                                     Money book_value) {
+        require_stage({0});
+        ensure(!id.empty() && !facilities_.contains(id) && actors_.contains(owner) &&
+               sovereignty_.contains(region) && capacity>0 && book_value>0 &&
+               phase_d_wip(owner)>=book_value,"phase D commission prerequisites");
+        const auto fixed=account(owner,"fixed_asset");
+        try { (void)money_.balance(fixed); }
+        catch(const std::out_of_range&) {
+            money_.add_account(fixed,owner,AccountType::asset);
+        }
+        money_.post({unique("phase-d-commission"),"WIP becomes installed fixed capital",{
+            {fixed,book_value,0},{account(owner,"wip"),0,book_value}}});
+        facilities_.emplace(id,ProductionFacility{id,owner,region,capacity,0});
+        const std::string title="FACILITY:"+id;
+        ownership_.issue(title,owner,1);
+        tracked_assets_.insert(title);
+        register_typed(EntityKind::site,id);
+        events_.push_back("phase-d-commissioned-existing-paid-WIP");
+    }
     void war_damage_facility(const std::string& id,Quantity destroyed) {
         require_stage({10});
         auto& site=facilities_.at(id);
