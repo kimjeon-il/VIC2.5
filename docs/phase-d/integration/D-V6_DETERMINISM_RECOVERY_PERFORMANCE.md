@@ -20,7 +20,7 @@
 
 `save_schema_version, pop_contract_version, cross_domain_contract_version, phase_c_economy/politics/military/integration_contract_versions, phase_d_common_version, phase_d_construction_version, phase_d_industry_version, phase_d_technology_version, phase_d_integration_version, ruleset_version/hash, recipe_schema_hash, technology_schema_hash, asset_schema_hash, numeric_policy_version, RNG_version, world_seed, calendar_id, month_index, canonical_snapshot_digest, journal_commit_id, journal_cursor, source_provenance_hash`.
 
-- 세이브의 권리/인구·금전/상품·자본재·`ConstructionProject/WorkPackage/WIP`·`IndustryActivity/ResourceStock`·`ResearchProject/KnowledgeState/SiteTechniqueAssignment`와 C-P/C-M/경제 원장의 **한 월 커밋**이 일관된 체크포인트여야 한다.
+- 세이브의 권리/인구·금전/상품·자본재·`ConstructionProject/WorkPackage/WIP`·`IndustryActivity/ResourceSiteFlow/ExplorationState/RenewablePool` (지하 총량/잔량 제외)·`ResearchProject/KnowledgeState/SiteTechniqueAssignment`와 C-P/C-M/경제 원장의 **한 월 커밋**이 일관된 체크포인트여야 한다.
 - `BeginMonth` 시 원본 상태/저널/규칙 잠금을 확인하고, 성공한 stage11 `Commit` 이후에만 원자적 `snapshot+event journal+commit marker`를 가시화한다. 트랜잭션 중 장애가 나면 이전 완전한 커밋으로 복귀.
 - 동일 event/command 재전송은 `source_event_id`/`transaction_id`/revision·commit cursor 대조 후 거부/멱등 결과 조회하며 `KnowledgeEvent`·WIP 재분류·자산 추가/보조금·고용/재고 이동을 두 번 적용하지 않는다.
 - 이전 계약 버전·시장/상품 스케일/기술 DAG/보유자/신규 API incompatibility는 명시적 migration/정적 원본 대조 수행 아니면 **load Reject**. 다운그레이드·임의 1:1 FX/권리·계층 강제 변환 금지.

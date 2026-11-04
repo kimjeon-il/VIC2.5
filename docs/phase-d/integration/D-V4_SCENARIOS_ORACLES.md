@@ -8,7 +8,7 @@
 지도 없이 3개 가상 `Region`(A 자원지역, B 공업/주택, C 연구·교육), 2개 `Government`, 3개 상품시장/유효 `TransportEdge/Node`, 광산/제철/기계공장·시공사/미준공 시설·대학/연구소·가계/은행/정부/군부대를 포함한다.
 
 - `PopulationSlice` 원본에 노동자/연구원·군인·아동/고령자 등 실제 적격/비적격을 두고, `EmploymentLedger`에 근무·자가활동/부역·복무·역외 이동을 대조한다.
-- 실물: 광상/농지 `ResourceStock/HarvestYield`, 광석/철강·기계상품·연구시약·소모재/연료·군수품의 개별 `InventoryLedger` 로트/보유자·`in_transit`, 설치 `CapitalAsset`/WIP.
+- 실물: 유효 광산의 `ResourceSite` 월 생산능력/실제 채굴 이력, 농지·산림/어족 `RenewablePool/HarvestYield` (지하 총량/잔량 없음), 광석/철강·기계상품·연구시약·소모재/연료·군수품의 개별 `InventoryLedger` 로트/보유자·`in_transit`, 설치 `CapitalAsset`/WIP.
 - 금융: 기업·가계/정부/은행의 동일 통화 `FinancialLedger`, 승인/실행 대출·지출예약·무역/임금/원천징수·보험/보증/배상/특허료의 채권·채무/현금 이동.
 - 권리: `OwnershipLedger`의 부지/기계·지분/특허, `PoliticalRegistry`의 법·주권/군사통제·법률 발효, `MilitaryRegistry`의 군수·포로/부대 등.
 - 기술: `TechnologyDefinition`/선행관계·보유자별 `KnowledgeState`/실제 연구·교육/기술자·`SiteTechniqueAssignment`, 실제 사용가능 시설/레시피.

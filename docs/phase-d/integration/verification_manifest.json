@@ -38,7 +38,7 @@
     },
     {
       "path": "docs/phase-d/integration/D-V1_ARCHITECTURE_SCOPE.md",
-      "git_blob_sha": "92b2455d9855a1f6b479e5375ba8fdea53d4639e"
+      "git_blob_sha": "6b66cb206e835cf757108ec3a68f3947959218fc"
     },
     {
       "path": "docs/phase-d/integration/D-V2_EXECUTION_DAG.md",
@@ -50,7 +50,7 @@
     },
     {
       "path": "docs/phase-d/integration/D-V4_SCENARIOS_ORACLES.md",
-      "git_blob_sha": "6c1d412cfb1f84db3e81f26ef14517770459eb13"
+      "git_blob_sha": "898b946e5dd6d1b27c8f4227c9c539fc492c9af9"
     },
     {
       "path": "docs/phase-d/integration/D-V5_TEST_MATRIX.md",
@@ -58,11 +58,11 @@
     },
     {
       "path": "docs/phase-d/integration/D-V6_DETERMINISM_RECOVERY_PERFORMANCE.md",
-      "git_blob_sha": "d4862676c80987b95f5840d3d5fc2b0de7a2fd98"
+      "git_blob_sha": "9f586ab3a96103e4917babfc6553b468ecc837b3"
     },
     {
       "path": "docs/phase-d/integration/D-V7_GATES_ADRS.md",
-      "git_blob_sha": "aa3c246c2cd79a7475475dbb60156647997751eb"
+      "git_blob_sha": "e1997a679416da06ee0f09a2afd3edf5d619a126"
     },
     {
       "path": "docs/phase-d/integration/examples/industry_construction_research_chain.json",
@@ -572,5 +572,6 @@
   ],
   "merged_resource_contract": "phase-j-resource-flow/1.0",
   "merge_audit_date": "2026-11-05",
-  "historical_source_sha_policy": "Modified design and test entries repointed to integrated blob SHA; this does not imply tests PASS."
+  "historical_source_sha_policy": "Modified design and test entries repointed to integrated blob SHA; this does not imply tests PASS.",
+  "integrated_resource_contract": "phase-j-resource-flow/1.0"
 }

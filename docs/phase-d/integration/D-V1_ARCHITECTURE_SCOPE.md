@@ -41,7 +41,7 @@
 | 실제 공사·검수/미완공 상태 | D-C `ConstructionProjectRegistry` | 돈·상품·설비/사람 원본 복제 금지 |
 | 산업 분류·기술/레시피 정의 | D-I `IndustryCatalog`, D-D0 `TechniqueCatalog`/C-E1 `ProductionRecipe` | 규칙/관계이지 별도의 경제 잔액 아님 |
 | 기관별 지식/연구 수행 증빙·도입 관계 | D-T `KnowledgeRegistry`/`ResearchProject`/`SiteTechniqueAssignment` | 지식은 Inventory 자산·사람·설비/즉시 전국 생산성 아님 |
-| 자원 매장·재생/채굴 | C-E1 `ResourceStock/HarvestYield` | 채굴 전 광상≠Inventory 상품, 채굴 사건 연동 |
+| 지질 탐사·채굴 현장의 월 유량·재생 생물량 | J-R1 `ResourceSite/ExplorationState/RenewablePool`, C-E1 생산/재고 | 지하 총매장량·잔량 저장 금지, 생산된 상품은 실제 Inventory 원장 |
 
 ## V1-4. 한 월의 공통 실행·원자성
 
@@ -68,7 +68,7 @@ WorldSnapshot(m opening)
 
 `DVJournalEnvelope`: `event_id, source_command_id?, world/month/stage/subphase, type, subject_refs, depends_on_event_ids, resource_reservations, postings[], effective_month, ruleset_hash, rng_draw_ids?, provenance, expected_revisions`.
 
-검증은 특정 구현 클래스명/메모리 주소에 의존하지 않고 다음 정본 조회를 사용: `PopulationSlice.count`, C-E1 `EmploymentLedger/CapitalAsset/ProductionRecipe`, `InventoryLedger`, `FinancialLedger`, `OwnershipLedger`, `FiscalLedger`, E5 `Shipment/TransportEdge`, C-P/M 상태, D-C `ProjectWork/Commission`, D-I `IndustryActivity/ResourceStock`, D-T `KnowledgeState/ResearchWork/Adoption`.
+검증은 특정 구현 클래스명/메모리 주소에 의존하지 않고 다음 정본 조회를 사용: `PopulationSlice.count`, C-E1 `EmploymentLedger/CapitalAsset/ProductionRecipe`, `InventoryLedger`, `FinancialLedger`, `OwnershipLedger`, `FiscalLedger`, E5 `Shipment/TransportEdge`, C-P/M 상태, D-C `ProjectWork/Commission`, D-I/J-R1 `IndustryActivity/ResourceSiteFlow/RenewablePool`, D-T `KnowledgeState/ResearchWork/Adoption`.
 
 상태 조회 캐시는 revision/hash/효력월의 정합성이 입증되지 않으면 버리고 정본에서 재구축한다. 플랫폼별 허용되는 난수·정수/고정소수점 수치정책도 저장 헤더에 포함한다.
 
