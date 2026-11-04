@@ -1424,6 +1424,38 @@ public:
         events_.push_back("military-control");
     }
 
+    // Daily real-ledger transaction, deliberately separate from legacy
+    // monthly settlement. No open_month(), no autonomous market clearing,
+    // no monthly POP mortality/aging/production, and no finish_month().
+    // Call only whitelisted stage-valid C commands from the day coordinator.
+    AdvanceReport advance_daily(const Plan& plan) {
+        IntegratedWorld staged = *this;
+        const auto opening_month = month();
+        for (int n=0; n<12; ++n) {
+            staged.stage_=n;
+            for (const auto& command:plan[static_cast<std::size_t>(n)])
+                command(staged);
+            staged.validate();
+        }
+        staged.stage_=-1;
+        ensure(staged.month()==opening_month,
+               "daily action attempted to advance legacy monthly clock");
+        ensure(staged.commit_id_<std::numeric_limits<std::uint64_t>::max(),
+               "daily commit id exhausted");
+        ++staged.commit_id_;
+        *this=std::move(staged);
+        return {opening_month,month(),people_.population(),commit_id_};
+    }
+
+    // Promote a canonical Phase B population registry in memory without
+    // synthesizing extra people, money, employers or economic assets.
+    static IntegratedWorld from_legacy_phase_b(phaseb::World pop) {
+        IntegratedWorld result(pop.month());
+        result.people_=std::move(pop);
+        result.validate();
+        return result;
+    }
+
     AdvanceReport advance(const Plan& plan = {}) {
         IntegratedWorld stage = *this;
         const auto start = month();

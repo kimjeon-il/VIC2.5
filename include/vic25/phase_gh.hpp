@@ -661,6 +661,22 @@ private:
     }
 public:
     explicit World(Month starting_month=24000):core_(starting_month){}
+    static World from_legacy_phase_e(phasee::World legacy) {
+        World result(legacy.month());
+        result.core_=std::move(legacy);
+        result.validate();
+        return result;
+    }
+    // Real daily Phase C events go through the same authoritative C ledger.
+    // G/H autonomous trade, monthly capacity, treaty schedules and Phase B/D
+    // background calculations are executed ONLY in advance() at MonthClose.
+    phasec::AdvanceReport advance_daily(const phasec::IntegratedWorld::Plan& commands) {
+        World staged=*this;
+        const auto report=staged.core_.advance_daily(commands);
+        staged.validate();
+        *this=std::move(staged);
+        return report;
+    }
     phasee::World& seed_geography() {
         require(core_.commit_id()==0, "GH_ERR_SEED_AFTER_COMMIT");
         return core_;

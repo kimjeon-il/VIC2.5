@@ -770,6 +770,19 @@ private:
     DomainState domain_;
 public:
     explicit World(std::int64_t starting_month=24000):core_(starting_month){}
+    static World from_legacy_phase_c(phasec::IntegratedWorld legacy) {
+        World result(legacy.month());
+        result.core_=std::move(legacy);
+        result.validate();
+        return result;
+    }
+    phasec::AdvanceReport advance_daily(const phasec::IntegratedWorld::Plan& commands) {
+        World staged=*this;
+        const auto report=staged.core_.advance_daily(commands);
+        staged.validate();
+        *this=std::move(staged);
+        return report;
+    }
     [[nodiscard]] const phasec::IntegratedWorld& core() const {return core_;}
     phasec::IntegratedWorld& seed_core() {
         require(core_.commit_id()==0,"cannot seed Phase C after first committed month");

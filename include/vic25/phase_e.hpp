@@ -483,6 +483,19 @@ private:
     }
 public:
     explicit World(Month start=24000):core_(start){}
+    static World from_legacy_phase_d(phased::World legacy) {
+        World result(legacy.month());
+        result.core_=std::move(legacy);
+        result.validate();
+        return result;
+    }
+    phasec::AdvanceReport advance_daily(const phasec::IntegratedWorld::Plan& commands) {
+        World staged=*this;
+        const auto report=staged.core_.advance_daily(commands);
+        staged.validate();
+        *this=std::move(staged);
+        return report;
+    }
     phased::World& seed_core() {
         require(core_.commit_id()==0,"ED0_ERR_TIME_CONFLICT");
         return core_;
