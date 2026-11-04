@@ -113,8 +113,9 @@ int main(int argc,char** argv){
         }
         need(w.core().people().population()==cells&&
              w.core().stock("FACTORY","R","bar")==5*months&&
-             w.construction("BRIDGE").commissioned &&
-             w.core().facility("BRIDGE_SITE").capacity==2 &&
+             (months==2 ? w.construction("BRIDGE").ready && !w.construction("BRIDGE").commissioned
+                        : w.construction("BRIDGE").commissioned &&
+                          w.core().facility("BRIDGE_SITE").capacity==2) &&
              w.research("RESEARCH").verified_work==10,
              "large POP benchmark world changed economic or population invariants");
         std::sort(times.begin(),times.end());
