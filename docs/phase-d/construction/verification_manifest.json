@@ -32,19 +32,19 @@
     },
     {
       "path": "docs/phase-d/construction/D-C2_LABOR_MATERIALS_CAPACITY.md",
-      "git_blob_sha": "a134c73584bc6182f90f7a05d300078ef5484457"
+      "git_blob_sha": "61554bf4e00cf3b52122b6109ba7a725b5bf81c5"
     },
     {
       "path": "docs/phase-d/construction/D-C3_WORKFLOW_TIME_QUALITY.md",
-      "git_blob_sha": "2b351853d0493be81bd59824e654598f7b2afb30"
+      "git_blob_sha": "9663ab0d892bddc443460d258519af707fa9a6c8"
     },
     {
       "path": "docs/phase-d/construction/D-C4_FINANCE_INVESTMENT_WIP.md",
-      "git_blob_sha": "c080766ea4495baa716a0303868c7aff9cc6c081"
+      "git_blob_sha": "252ec45669273b2a5e0bbc8a3cbbfa3f190bcda2"
     },
     {
       "path": "docs/phase-d/construction/D-C5_COMMISSION_MAINTENANCE_RETIREMENT.md",
-      "git_blob_sha": "5d15df2045e1287b83d819ff3c9d25d6732e66f7"
+      "git_blob_sha": "3daf2823349362bce7c04da74603fe78eacd1204"
     },
     {
       "path": "docs/phase-d/construction/CONSTRUCTION_ACCEPTANCE_TESTS.md",
@@ -191,7 +191,9 @@
     "fixture_oracles": "STATIC_ARITHMETIC_CHECKED",
     "cxx_tests": "NOT_RUN",
     "d4_regression": "NOT_RUN",
-    "links_checked": "INTRA_INDEX_PATHS_AUDITED"
+    "links_checked": "INTRA_INDEX_PATHS_AUDITED",
+    "markdown_inline_backticks_balanced": true,
+    "source_blob_hashes_updated": true
   },
   "acceptance_note": "These are design-stage acceptance criteria only. The 45 C++ tests have not been executed."
 }
