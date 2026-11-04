@@ -1,0 +1,24 @@
+{
+  "schema": "vic25-design-fixture/phase-h-1.0",
+  "status": "NOT_EXECUTED",
+  "tests": [
+    "HD6-T02",
+    "HD6-T11"
+  ],
+  "scenario": "A supplies 60 of B's 100 monthly iron needs. B can replace 35 if A fully cuts supply; this is exposure, not control.",
+  "input": {
+    "subject": "A",
+    "target": "B",
+    "good": "IRON",
+    "required_quantity": 100,
+    "supplied_by_a": 60,
+    "replaceable_quantity": 35,
+    "scenario": "full_cutoff"
+  },
+  "expected": {
+    "maximum_unmet_quantity": 25,
+    "direct_influence_points_added": 0,
+    "automatic_treaty_acceptance": false,
+    "a_export_revenue_loss_requires_own_model": true
+  }
+}
