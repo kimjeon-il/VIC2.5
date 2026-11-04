@@ -74,7 +74,7 @@ realized_research_work = round_down_to_research_lot(research_work_feasible)
 - 연구주체(`performer`)와 출자자(`sponsor`), 연구결과의 저작/특허권자·기술 사용권자는 서로 다를 수 있다. `ResearchContract`는 공동 연구·위탁 연구·군사 비밀 연구, 공개·성과귀속/로열티·지식 이전 조건을 유효 정치법/소유권과 참조한다.
 - 정부 `R&D` 지출은 실제 인력·시설/연구용 물품·서비스 공급에 쓰이며, 예산 승인/연구지원계획만으로 `KnowledgeValidationEvent`가 확정되지 않는다. `FiscalLedger`의 보조금 의무와 `FinancialLedger` 실지급은 별개.
 - 연구원 고용/급여·공공 대학·연구비 인건비는 생산/가계소득/정부 예산에서 **한 번만** 인식. 자금 조달로 은행 신용/예금이 생길 수 있으나 근거 없는 `innovation_money`라는 독립 화폐 원본은 없음.
-- 연구성과의 회계 처리는 적격 비용과 자본화된 무형자산을 회계 정책/법적 권리에 따라 구분. `R&D expenditure`, `KnowledgeState`, `OwnershipLedger.`intangible_right`는 별개이며 연구비가 무조건 특허가격/현금을 창출하지 않는다.
+- 연구성과의 회계 처리는 적격 비용과 자본화된 무형자산을 회계 정책/법적 권리에 따라 구분. `R&D expenditure`, `KnowledgeState`, `OwnershipLedger.intangible_right`는 별개이며 연구비가 무조건 특허가격/현금을 창출하지 않는다.
 
 ## T2-6. 인수 검증
 
