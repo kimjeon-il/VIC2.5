@@ -1,0 +1,155 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "phase-d-technology/1.0",
+  "fixture_type": "fictional_test_value",
+  "name": "Licensed technology crosses documented contact A to B, not isolated C",
+  "units": {
+    "calendar": "month_index",
+    "money": "TEST_CURRENCY_minor_unit",
+    "learning": "instruction_work_unit",
+    "people": "person"
+  },
+  "holders": {
+    "origin_A": {
+      "knowledge_state": "usable",
+      "lawfully_owns_patent": true,
+      "opening_cash": 0,
+      "knowledge_tech_id": "tech_synthetic_pump"
+    },
+    "recipient_B": {
+      "knowledge_state": "unknown",
+      "opening_cash": 30,
+      "licensed_site": "site_B_works",
+      "installed_required_machine_count": 0
+    },
+    "isolated_C": {
+      "knowledge_state": "unknown",
+      "opening_cash": 0,
+      "contact_with_A": false
+    }
+  },
+  "channel": {
+    "from": "origin_A",
+    "to": "recipient_B",
+    "type": "paid_instruction_and_document_transfer",
+    "valid_from_month": 600,
+    "legal_right_ref": "patent_A_registered",
+    "teacher_count": 1,
+    "instruction_work_per_month": 2,
+    "recipient_qualification": "eligible_to_learn",
+    "effective_route": true
+  },
+  "license": {
+    "id": "license_A_B",
+    "royalty_or_lump_sum": 12,
+    "currency": "TEST_CURRENCY",
+    "valid_from_month": 600,
+    "scope": "recipient_B_industrial_pump_use",
+    "grants_knowledge_automatically": false
+  },
+  "months": [
+    {
+      "month_index": 600,
+      "stage1": {
+        "license_fee_executed": 12,
+        "license_payment_B_to_A": 12,
+        "instruction_service_funded": true
+      },
+      "stage2": {
+        "teacher_valid_employment": true,
+        "recipient_instruction_capacity": 2
+      },
+      "stage4": {
+        "verified_instruction_work": 2,
+        "recipient_reproduced_explanation": false
+      },
+      "stage8": {
+        "A_cash": 12,
+        "B_cash": 18,
+        "C_cash": 0
+      },
+      "stage9a": {
+        "new_knowledge_candidate": "observed",
+        "effective_month": 601,
+        "source": "actual_instruction_contact_and_validation"
+      },
+      "stage11": {
+        "A_knowledge": "usable",
+        "B_knowledge": "unknown",
+        "C_knowledge": "unknown",
+        "B_license_right": true,
+        "B_site_active_technique": false,
+        "world_total_cash": 30
+      }
+    },
+    {
+      "month_index": 601,
+      "stage0": {
+        "A_knowledge": "usable",
+        "B_knowledge": "observed",
+        "C_knowledge": "unknown"
+      },
+      "stage1": {
+        "second_instruction_fee_paid": 4
+      },
+      "stage4": {
+        "additional_verified_instruction_work": 2,
+        "actual_practical_reproduction": true
+      },
+      "stage8": {
+        "A_cash": 16,
+        "B_cash": 14,
+        "C_cash": 0
+      },
+      "stage9a": {
+        "new_knowledge_candidate": "understood",
+        "effective_month": 602
+      },
+      "stage11": {
+        "A_knowledge": "usable",
+        "B_knowledge": "observed",
+        "C_knowledge": "unknown",
+        "B_site_active_technique": false,
+        "world_total_cash": 30
+      }
+    },
+    {
+      "month_index": 602,
+      "stage0": {
+        "A_knowledge": "usable",
+        "B_knowledge": "understood",
+        "C_knowledge": "unknown"
+      },
+      "stage2": {
+        "B_qualified_machine_operators": 0
+      },
+      "stage4": {
+        "B_new_technique_output": 0
+      },
+      "stage11": {
+        "world_total_cash": 30,
+        "B_license_valid": true,
+        "B_site_active_technique": false,
+        "C_knowledge": "unknown"
+      }
+    }
+  ],
+  "oracles": {
+    "A_knowledge_unreduced": true,
+    "B_first_observed_month": 601,
+    "B_first_understood_month": 602,
+    "B_usable_automatically": false,
+    "C_remains_unknown": true,
+    "license_payment_actual": 12,
+    "total_instruction_payment": 4,
+    "world_cash_total": 30,
+    "patent_ownership_transfer": false,
+    "license_not_knowledge": true,
+    "import_or_license_not_automatic_factory_adoption": true
+  },
+  "notes": [
+    "The invented technology and all money/work coefficients are synthetic.",
+    "The B license is a legal use right while B still lacks full production skill, installed machinery and validated usable knowledge. It creates no automatic goods or factory capacity.",
+    "C has no credible route/contact and receives no automatic free global diffusion; future observation could occur via a separately recorded public information channel."
+  ]
+}
