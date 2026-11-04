@@ -85,6 +85,9 @@ struct DomainState {
     std::map<std::string,Quantity> site_capacity_used;
     std::map<std::string,Money> funds_reserved;
     std::uint64_t event_sequence{};
+    // Phase C's stage10 increments people_.month() before stage11 validation.
+    // Keep the original opening month for Phase D stage11 effective dates.
+    std::int64_t opening_month{-1};
 
     [[nodiscard]] KnowledgeLevel level(const std::string& holder,
                                          const std::string& tech) const {
@@ -96,6 +99,7 @@ struct DomainState {
                           std::to_string(++event_sequence)+":"+kind+":"+entity);
     }
     void begin_month(phasec::IntegratedWorld& c) {
+        opening_month=c.month();
         labor_used.clear();site_capacity_used.clear();funds_reserved.clear();
         for(auto& [id,p]:constructions){(void)id;p.planned_work=0;}
         for(auto& [id,p]:researches){(void)id;p.planned_work=0;}
@@ -143,8 +147,8 @@ struct DomainState {
             if(!p.commissioned && !p.ready && p.accepted_work==p.work_required &&
                p.paid_work==p.accepted_work && p.capitalized_work==p.paid_work) {
                 p.ready=true;
-                p.ready_month=c.month();
-                append(c.month(),"construction-ready",id);
+                p.ready_month=opening_month;
+                append(opening_month,"construction-ready",id);
             }
             if(p.commissioned) {
                 const auto& facility=c.facility(p.target_site);
@@ -204,7 +208,7 @@ public:
     Stage(phasec::IntegratedWorld& c,DomainState& d,int stage)
         :c_(c),d_(d),phase_(stage){}
     [[nodiscard]] int phase() const {return phase_;}
-    [[nodiscard]] std::int64_t month() const {return c_.month();}
+    [[nodiscard]] std::int64_t month() const {return d_.opening_month;}
     [[nodiscard]] phasec::IntegratedWorld& phase_c() {return c_;}
     [[nodiscard]] const DomainState& state() const {return d_;}
 
@@ -264,8 +268,8 @@ public:
         const auto& f=c_.facility(r.site);
         require(batches>0 && f.owner.size()>0 &&
                 (r.tech_id.empty() ||
-                 d_.active_site_tech.contains(r.site) &&
-                 d_.active_site_tech.at(r.site)==r.tech_id),
+                 (d_.active_site_tech.contains(r.site) &&
+                  d_.active_site_tech.at(r.site)==r.tech_id)),
                 "manufacture requires installed and adopted technique");
         require(!r.needs_retrofit,"phase D recipe retrofit not commissioned");
         const auto capacity=product(batches,r.capacity_per_batch);
