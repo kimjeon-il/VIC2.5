@@ -774,6 +774,20 @@ public:
             {fx_acc(a,bought_currency,"capital"),0,bought_amount}}});
         events_.push_back("bilateral-foreign-exchange-settled");
     }
+    // Foreign-denominated barter/merchandise transfer still uses the same
+    // physical inventory owner, but is settled by the foreign currency ledger.
+    void phase_g_transfer_goods(const std::string& seller,const std::string& buyer,
+                                const std::string& region,const std::string& good,
+                                Quantity amount) {
+        require_stage({3,7});
+        ensure(seller!=buyer && amount>0 && stock(seller,region,good)>=amount,
+               "G_ERR_UNFUNDED_GOODS");
+        if(phase_d_reservation_mode_)
+            resources_.assert_goods_available({seller,region,good},amount,
+                                                stock(seller,region,good));
+        goods_.transfer({seller,region,good},{buyer,region,good},amount);
+        events_.push_back("GH:foreign-settlement-physical-title-transfer");
+    }
     // Phase G/ H must settle foreign-denominated obligations through C's
     // actual per-currency financial ledger. No exchange rate is implied.
     void phase_g_pay_foreign(const std::string& from,const std::string& to,
