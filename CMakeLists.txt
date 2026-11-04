@@ -212,3 +212,11 @@ if (BUILD_TESTING)
     add_test(NAME vic25_phase_gh_longrun_tests COMMAND vic25_phase_gh_longrun_tests)
     set_tests_properties(vic25_phase_gh_longrun_tests PROPERTIES TIMEOUT 300)
 endif()
+
+# Optional real G/H 30k-province synthetic scaling benchmark. Separate from
+# historical GIS accuracy, GPU framerate and Phase E 1m-POP scaling tests.
+option(VIC25_GH_STRESS "Build GH synthetic scaling benchmark" OFF)
+if (VIC25_GH_STRESS)
+    add_executable(vic25_phase_gh_scaling bench/phase_gh_scaling.cpp)
+    target_link_libraries(vic25_phase_gh_scaling PRIVATE vic25_core)
+endif()
