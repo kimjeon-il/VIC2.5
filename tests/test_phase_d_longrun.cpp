@@ -13,7 +13,7 @@ static Id cohort(World& w,People n){
     auto e=p.economic_profile({"R","worker","wage","employee",p.default_education()});
     auto d=p.demographic_profile({"R",w.month()-300,Sex::male,"culture","faith",
                                    "citizen","free",p.default_health(),Service::civilian});
-    return p.seed_population(d,e,h,n);
+    return p.seed_population(d,e,h,n,static_cast<Id>(p.slices().size()+1));
 }
 static World initial() {
     World w{1800};
