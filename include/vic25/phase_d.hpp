@@ -51,9 +51,20 @@ struct WorkPackage {
     std::int64_t earliest_month{}, curing_months{}, finished_month{-1};
     std::vector<std::string> predecessors;
 };
+struct IndustryClass {
+    std::string id, parent, description;
+};
+struct ResourceDeposit {
+    std::string id,site,owner,region,good;
+    Quantity remaining{}, renewal_per_month{}, carrying_capacity{};
+    People workers_per_unit{1};
+    Quantity site_service_per_unit{1};
+    bool renewable{};
+};
 struct IndustryRecipe {
-    std::string id, site, tech_id;
-    std::vector<Input> inputs, outputs;
+    std::string id, site, tech_id, industry_class;
+    std::vector<Input> inputs, outputs, byproducts;
+    Quantity nonmarket_waste_per_batch{};
     People workers_per_batch{};
     Quantity capacity_per_batch{1};
     bool needs_retrofit{}; // retrofit pipeline remains unsupported by this slice
@@ -86,6 +97,9 @@ class Stage;
 struct DomainState {
     std::map<std::string,ConstructionProject> constructions;
     std::map<std::string,WorkPackage> work_packages;
+    std::map<std::string,IndustryClass> industry_classes;
+    std::map<std::string,ResourceDeposit> deposits;
+    std::map<std::string,Quantity> cumulative_nonmarket_waste;
     std::map<std::string,IndustryRecipe> recipes;
     std::map<std::string,ResearchProject> researches;
     std::map<std::pair<std::string,std::string>,KnowledgeLevel> knowledge;
@@ -111,6 +125,17 @@ struct DomainState {
     void begin_month(phasec::IntegratedWorld& c) {
         opening_month=c.month();
         c.phase_d_enable_shared_resources();
+        for(auto& [id,deposit]:deposits) {
+            if(!deposit.renewable)continue;
+            require(deposit.carrying_capacity>=deposit.remaining &&
+                    deposit.renewal_per_month>=0,"invalid renewable pool");
+            const auto grown=std::min(deposit.renewal_per_month,
+                                      deposit.carrying_capacity-deposit.remaining);
+            if(grown>0){
+                deposit.remaining=phaseb::add_checked(deposit.remaining,grown);
+                append(opening_month,"natural-resource-regeneration",id);
+            }
+        }
         for(auto& [id,p]:constructions){(void)id;p.planned_work=0;}
         for(auto& [id,p]:work_packages){(void)id;p.planned_work=0;}
         for(auto& [id,p]:researches){(void)id;p.planned_work=0;}
@@ -201,6 +226,21 @@ struct DomainState {
         }
         for(const auto& [owner,amount]:outstanding)
             require(c.phase_d_wip(owner)>=amount,"unbacked project WIP");
+        for(const auto& [id,deposit]:deposits) {
+            require(id==deposit.id && deposit.remaining>=0 &&
+                    deposit.workers_per_unit>0 && deposit.site_service_per_unit>0 &&
+                    (!deposit.renewable || (deposit.carrying_capacity>=deposit.remaining &&
+                     deposit.carrying_capacity>0&&deposit.renewal_per_month>=0)),
+                    "invalid physical resource conservation");
+        }
+        for(const auto& [id,cl]:industry_classes) {
+            require(id==cl.id && (cl.parent.empty()||
+                    industry_classes.contains(cl.parent)),
+                    "unknown industrial taxonomy ancestry");
+        }
+        for(const auto& [id,v]:cumulative_nonmarket_waste){
+            (void)id;require(v>=0,"negative accumulated nonmarket waste");
+        }
         for(const auto& [id,p]:researches) {
             require(p.verified_work>=0&&p.paid_work<=p.verified_work,
                     "unpaid or negative research evidence");
@@ -494,6 +534,28 @@ public:
                     "work-package predecessors must be seeded in DAG order");
         domain_.work_packages.emplace(wp.id,std::move(wp));
     }
+    void seed_industry_class(IndustryClass cl){
+        require(core_.commit_id()==0 && !cl.id.empty() &&
+                !domain_.industry_classes.contains(cl.id) &&
+                (cl.parent.empty()||domain_.industry_classes.contains(cl.parent)),
+                "invalid industry taxonomy parent or ID");
+        domain_.industry_classes.emplace(cl.id,std::move(cl));
+    }
+    void seed_resource_deposit(ResourceDeposit deposit){
+        require(core_.commit_id()==0&&!deposit.id.empty() &&
+                !domain_.deposits.contains(deposit.id) &&
+                !deposit.owner.empty()&&!deposit.region.empty()&&!deposit.good.empty() &&
+                deposit.remaining>=0 && deposit.workers_per_unit>0 &&
+                deposit.site_service_per_unit>0 &&
+                (!deposit.renewable ||
+                 (deposit.carrying_capacity>=deposit.remaining &&
+                  deposit.carrying_capacity>0 && deposit.renewal_per_month>=0)),
+                "invalid resource deposit seed");
+        const auto& facility=core_.facility(deposit.site);
+        require(facility.owner==deposit.owner && facility.region==deposit.region,
+                "resource deposit not served by owned physical extraction site");
+        domain_.deposits.emplace(deposit.id,std::move(deposit));
+    }
     void seed_recipe(IndustryRecipe r) {
         require(core_.commit_id()==0&&!r.id.empty()&&!r.site.empty()&&
                 !domain_.recipes.contains(r.id) && r.workers_per_batch>0 &&
@@ -503,6 +565,11 @@ public:
             require(!x.good.empty()&&x.per_unit>0,"invalid production input");
         for(const auto& x:r.outputs)
             require(!x.good.empty()&&x.per_unit>0,"invalid production output");
+        for(const auto& x:r.byproducts)
+            require(!x.good.empty()&&x.per_unit>0,"invalid co-product");
+        require(r.nonmarket_waste_per_batch>=0 &&
+                (r.industry_class.empty()||domain_.industry_classes.contains(r.industry_class)),
+                "invalid industry taxonomy or waste coefficient");
         domain_.recipes.emplace(r.id,std::move(r));
     }
     void seed_research(ResearchProject p) {
@@ -528,6 +595,13 @@ public:
     }
     [[nodiscard]] const ConstructionProject& construction(const std::string& id)const {
         return domain_.constructions.at(id);
+    }
+    [[nodiscard]] const ResourceDeposit& resource(const std::string& id)const{
+        return domain_.deposits.at(id);
+    }
+    [[nodiscard]] Quantity nonmarket_waste(const std::string& recipe)const{
+        auto it=domain_.cumulative_nonmarket_waste.find(recipe);
+        return it==domain_.cumulative_nonmarket_waste.end()?0:it->second;
     }
     [[nodiscard]] const WorkPackage& work_package(const std::string& id) const {
         return domain_.work_packages.at(id);
