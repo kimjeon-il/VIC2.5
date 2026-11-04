@@ -1,11 +1,12 @@
 # Phase I — 사회·문화·교육
 
-**계약:** phase-i-common/1.0 · 2026-11-04 · 설계 확정 / 엔진 미구현.
+> 공통: [I-D0](I-D0_COMMON_CONTRACT.md) · phase-i-common/1.0 · SPECIFIED / NOT IMPLEMENTED (2026-11-04)
 
-- [I-D0 공통 계약](I-D0_COMMON_CONTRACT.md)
-- 예정 I-S1: 사회구조·불평등·사회이동. 사회계층/격차는 기존 소득·자산·고용·법적 지위 기반 파생.
-- 예정 I-C1: 문화·언어·종교. POP 정체성, 언어 능력·접촉/이주/교육과의 관계.
-- 예정 I-E1: 교육. 학교/교원/교육서비스와 실제 학력·문해·숙련의 POP 전이.
-- 예정 I-V: 인구/교원/시간/재정 보존, 결정론, 저장·복구, 장기/성능, 타 Phase 통합.
+| 단계 | 상세 계약 | 상태 |
+|---|---|---|
+| I-S1 사회계층/불평등/사회이동 | [I-S1](I-S1_SOCIAL_STRUCTURE_MOBILITY.md) | 설계 확정 |
+| I-C1 문화·언어·종교 | [I-C1](I-C1_CULTURE_LANGUAGE_RELIGION.md) | 설계 확정 |
+| I-E1 학교·취학·교육서비스/학력 | [I-E1](I-E1_EDUCATION_SERVICES_ATTAINMENT.md) | 설계 확정 |
+| I-V 통합 인수 | 후속 검증 | 미실행 |
 
-상위 POP/C/D/E/G/H의 단일 원장·월별 12단계·동월 소급금지 계약을 준수한다. 문서의 수락 게이트는 계획으로, PASS 결과가 아니다.
+POP 인구·EducationProfile 단일 원본, 기존 C-E/P·D-T·E 및 12단계 월별 원자커밋 준수. 사회지표는 파생, 교육은 실제 서비스, 문화·종교/언어 자격은 구분한다. 설계된 테스트는 아직 PASS로 간주하지 않는다.
