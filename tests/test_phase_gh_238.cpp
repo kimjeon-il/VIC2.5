@@ -356,7 +356,8 @@ static void t_hd004(){
 }
 static void t_hd008(){
     auto w=route_trade(5);
-    const auto c0=w.commit_id(), v=w.assess_influence("A","B");
+    const auto c0=w.commit_id();
+    const auto v=w.assess_influence("A","B");
     ok(v.observed&&v.bilateral_imports==500,
        "HD0-T08 confirmed trade creates observational influence");
     ok(w.commit_id()==c0,"HD0-T08 no direct influence resource allocation");
