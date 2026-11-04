@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - work/daily-tick-b-j
+      - work/daily-native-b-h
   workflow_dispatch:
 
 concurrency:
