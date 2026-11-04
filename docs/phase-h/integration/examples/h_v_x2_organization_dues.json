@@ -1,0 +1,47 @@
+{
+  "schema": "vic25.hv.fixture/1.0",
+  "case_id": "HV-X2",
+  "status": "NOT_EXECUTED",
+  "test_ids": [
+    "HV-T13",
+    "HV-T14",
+    "HV-T15"
+  ],
+  "depends_on": [
+    "H-D5 InternationalOrganization/Charter",
+    "H-D3 effective treaty",
+    "C-E3 Financial OwnerRef organization support",
+    "C-E4 FiscalLedger",
+    "G-T4 customs and market rules"
+  ],
+  "assumptions": [
+    "A/B/C are three legally eligible founding countries",
+    "Charter becomes effective by formal ratification",
+    "C-E3 supports organization as an actual account owner (otherwise BLOCKED)",
+    "All dues in one currency, no interest or overdue fees"
+  ],
+  "input": {
+    "members": [
+      "A",
+      "B",
+      "C"
+    ],
+    "assessed_dues_per_member_minor": 100,
+    "cash_paid_per_member_minor": 40,
+    "other_military_organization_membership_of_B": true
+  },
+  "expected": {
+    "total_assessed_minor": 300,
+    "organization_cash_received_minor": 120,
+    "unpaid_dues_minor": 180,
+    "unpaid_per_member_minor": {
+      "A": 60,
+      "B": 60,
+      "C": 60
+    },
+    "legal_member_count": 3,
+    "automatic_war_entries": 0,
+    "sovereignty_changes": 0,
+    "money_created_without_entries": 0
+  }
+}
