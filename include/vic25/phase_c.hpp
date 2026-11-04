@@ -135,6 +135,8 @@ public:
     [[nodiscard]] Quantity phase_d_material_available(const std::string& actor,
              const std::string& region,const std::string& good)const{
         const InventoryKey key{actor,region,good};
+        if(stage_==4&&phase_d_reservation_mode_)
+            return resources_.available_for_stage4(key,stock(actor,region,good));
         return stock(actor,region,good)-resources_.goods_held(key);
     }
     void phase_d_reserve_cash(const std::string& owner,const std::string& purpose,
@@ -451,7 +453,7 @@ public:
         require_stage({4});
         ensure(actors_.contains(actor) && qty>0 &&
                stock(actor,region,good)>=qty, "unbacked phase D material");
-        resources_.assert_goods_available({actor,region,good},qty,stock(actor,region,good));
+        resources_.assert_stage4_available({actor,region,good},qty,stock(actor,region,good));
         goods_.consume({actor,region,good},qty);
         events_.push_back("phase-d-actual-material-used");
     }
@@ -470,16 +472,33 @@ public:
             grouped[good]=phaseb::add_checked(grouped[good],qty);
         }
         for(const auto& [good,qty]:grouped)
-            resources_.assert_goods_available({actor,region,good},qty,stock(actor,region,good));
+            resources_.assert_stage4_available({actor,region,good},qty,stock(actor,region,good));
         for(const auto& [good,qty]:outputs)
             ensure(!good.empty() && qty>0,"invalid phase D output");
         for(const auto& [good,qty]:grouped)
             goods_.consume({actor,region,good},qty);
         for(const auto& [good,qty]:outputs) {
             goods_.produce({actor,region,good},qty);
+            resources_.record_stage4_output({actor,region,good},qty);
             tracked_goods_.insert(good);
         }
         events_.push_back("phase-d-input-output-production");
+    }
+    // A nonrenewable/renewable resource lot is emitted only after Phase D
+    // has validated an actual deposit, extraction workers and facility.
+    // Unlike manufacturing, verified extraction has an external in-situ
+    // resource debit in the Phase D domain journal.
+    void phase_d_emit_extraction(const std::string& holder,const std::string& region,
+                                 const std::string& good,Quantity qty,
+                                 const std::string& deposit_id) {
+        require_stage({4});
+        ensure(phase_d_reservation_mode_&&actors_.contains(holder) &&
+               sovereignty_.contains(region)&&!good.empty() &&
+               !deposit_id.empty()&&qty>0,"invalid geological extraction");
+        goods_.produce({holder,region,good},qty);
+        resources_.record_stage4_output({holder,region,good},qty);
+        tracked_goods_.insert(good);
+        events_.push_back("phase-d-verified-extraction:"+deposit_id);
     }
     // Cash-settled pilot path only: a verified cost was already paid via
     // pay(), hence the expense balance can be capitalized once into WIP.
@@ -1063,11 +1082,13 @@ public:
                "insufficient production labor");
         if(phase_d_reservation_mode_) {
             resources_.use_labor(firm,workers_required,employed_by(firm));
-            resources_.assert_goods_available({firm,region,input},qty,stock(firm,region,input));
+            resources_.assert_stage4_available({firm,region,input},qty,stock(firm,region,input));
         }
         ensure(stock(firm, region, input) >= qty, "missing production input");
         goods_.consume({firm, region, input}, qty);
         goods_.produce({firm, region, output}, qty);
+        if(phase_d_reservation_mode_)
+            resources_.record_stage4_output({firm,region,output},qty);
         tracked_goods_.insert(output);
         events_.push_back("production");
     }
