@@ -3,6 +3,9 @@ on:
   push:
     branches: [work/phase-i-j-detail]
   workflow_dispatch:
+concurrency:
+  group: phase-i-j-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   resource-regression:
     strategy:

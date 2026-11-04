@@ -88,13 +88,21 @@ static void test_no_mineral_total_and_activity_decline(){
          w.resource_site("ORE").monthly_capacity==4 &&
          w.core().stock("MINE","R","ore")==9,
          "nonrenewable output must not be capped by any legacy total");
+    // Fractional ppm remainder is accumulated, not rounded up prematurely.
+    World::Plan third;
+    third[4].push_back([](Stage& s){s.extract_resource("ORE",4);});
+    w.advance(third);
+    need(w.resource_site("ORE").monthly_capacity==4 &&
+         w.resource_site("ORE").decline_remainder==800'000,
+         "sub-unit decline must be kept as fractional remainder");
     w.advance();
-    need(w.resource_site("ORE").monthly_capacity==3,
+    need(w.resource_site("ORE").monthly_capacity==3 &&
+         w.resource_site("ORE").cumulative_output==13,
          "activity-based monthly flow decline missing");
     const auto bytes=SnapshotCodec::encode(w);
     auto restored=SnapshotCodec::decode(bytes);
     need(SnapshotCodec::encode(restored)==bytes &&
-         restored.resource_site("ORE").cumulative_output==9,
+         restored.resource_site("ORE").cumulative_output==13,
          "flow-only source snapshot roundtrip failed");
 }
 static void test_renewable_carrying_capacity(){
