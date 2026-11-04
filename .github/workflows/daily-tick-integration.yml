@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: daily-tick-${{ github.ref }}
-  cancel-in-progress: true
+  group: daily-tick-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   daily-core:
