@@ -1,3 +1,5 @@
+> **Phase D-T1~T5 기술 세부 설계 확정 (`phase-d-technology/1.0`, 2026-11-04):** [docs/phase-d/technology/README.md](docs/phase-d/technology/README.md)에서 기술·지식 분류/연구·실험/지식확산·특허·라이선스/현장 도입·직업훈련/경제·정치·군사 연동, 25개 불변조건·45개 인수시험·35개 ADR와 수치 예제 3개를 확인할 수 있습니다. **설계 완료이며 Phase D C++ 기술 엔진·45개 자동시험 및 장기 실행은 미실행**입니다. `I2-DISPATCH`는 상위 C-E1/C-D4 개정과 회귀 전 미지원입니다. 작업은 `work/phase-d-design`에만 있고 `main` 미병합입니다.
+
 > **Phase D-I1~I5 산업 세부 설계 확정 (`phase-d-industry/1.0`, 2026-11-04):** [docs/phase-d/industry/README.md](docs/phase-d/industry/README.md)에서 산업분류·기업/자원/생산공정·기계화·입지/집적·산업화/정책, 25개 불변조건·45개 인수시험·35개 ADR와 수치 예제를 확인할 수 있습니다. **설계 완료이며 Phase D C++ 구현·인수시험 실행 전**입니다. `I2-DISPATCH`는 상위 CE/D4 계약 확장 전 미지원입니다. 작업은 `work/phase-d-design`에만 있고 `main`에는 아직 반영되지 않았습니다.
 
 > **Phase D-D0 건설·산업·기술 공통 설계 확정 (`phase-d-common/1.0`, 2026-11-04):** [docs/phase-d/README.md](docs/phase-d/README.md)에서 공사·산업·기술의 단일 원본, 월별 12단계, 14개 불변조건, 20개 ADR, 24개 인수시험을 확인할 수 있습니다. **설계 문서 확정이며 Phase D C++ 구현 및 24개 인수시험 실행 전**입니다. 이 설계는 `work/phase-d-design` 브랜치에 있으며 `main`에 아직 반영되지 않았습니다.
