@@ -39,6 +39,7 @@ struct Route {
     Id origin{}, destination{};
     Quantity maximum_quantity{};
     Month travel_months{}; // cross-province shipment must be > 0
+    Quantity arrival_loss{}; // confirmed physical accident input, not a risk forecast
 };
 
 struct TradeFill {
@@ -84,7 +85,7 @@ struct CargoInsurance {
     std::string id, shipment_id, insurer, beneficiary;
     Money premium{}, maximum_claim{}, claim_due{}, claim_paid{};
     Quantity insured_quantity{};
-    bool premium_paid{};
+    bool premium_paid{}, claim_registered{};
 };
 
 struct PlannedTrade {
@@ -97,6 +98,12 @@ struct PlannedTrade {
     std::vector<std::string> path_edges;
 };
 
+struct PathQuote {
+    Money freight_per_unit{};
+    Month travel_months{};
+    Quantity capacity{};
+    std::vector<std::string> edges;
+};
 struct TradeState {
     std::map<std::string, Route> routes;
     std::map<std::string, TransportEdge> transport_edges;
@@ -190,6 +197,13 @@ class Stage {
                 c.government(country).prime_minister == person,
                 "H_ERR_UNAUTHORIZED_GOVERNMENT");
     }
+    [[nodiscard]] std::optional<PathQuote> quote_path(
+        Id from, Id to, Month month) const;
+    void plan_contracts();
+    void reserve_collateral();
+    void register_arrived_losses();
+    void pay_insurance_premiums();
+    void settle_insurance_claims();
     void allow_foreign_policy(const std::string& country) const {
         for (const auto& [id, link] : diplomacy_.protectorates) {
             (void)id;
@@ -398,6 +412,14 @@ public:
 
     void plan_autonomous_trade();
     void execute_autonomous_trade();
+    void create_trade_contract(TradeContract c);
+    void offer_trade_credit(CreditFacility credit);
+    void draw_trade_credit(const std::string& id, Money amount);
+    void repay_trade_credit(const std::string& id, Money amount);
+    void insure_cargo(CargoInsurance policy);
+    void exchange_currencies(const std::string& a, const std::string& b,
+                             const std::string& sold, Money sold_amount,
+                             const std::string& bought, Money bought_amount);
     void advance_legal_state() {
         at(0);
         for(const auto& rule:diplomacy_.scheduled_tariffs) {
@@ -444,6 +466,7 @@ public:
 };
 
 class World {
+    friend struct SnapshotCodec;
 public:
     using Task=std::function<void(Stage&)>;
     using Plan=std::array<std::vector<Task>,12>;
@@ -488,6 +511,25 @@ public:
                 !trade_.routes.contains(r.id),"G_ERR_INVALID_ROUTE");
         trade_.routes.emplace(r.id,std::move(r));
     }
+    void seed_transport_edge(TransportEdge edge) {
+        require(core_.commit_id()==0 && !edge.id.empty() &&
+                edge.from>0 && edge.to>0 && edge.from!=edge.to &&
+                edge.monthly_capacity>0 && edge.freight_per_unit>=0 &&
+                edge.transit_months>0 && !edge.carrier.empty() &&
+                core_.spatial().provinces.contains(edge.from) &&
+                core_.spatial().provinces.contains(edge.to) &&
+                !trade_.transport_edges.contains(edge.id),
+                "G_ERR_INVALID_LOGISTICS_EDGE");
+        const auto& a=core_.spatial().provinces.at(edge.from);
+        const auto& b=core_.spatial().provinces.at(edge.to);
+        bool coastal=false;
+        for(Id sea:a.coastal_seas)if(b.coastal_seas.contains(sea))coastal=true;
+        require(a.neighbors.contains(edge.to)||coastal,
+                "G_ERR_UNCONNECTED_LOGISTICS_EDGE");
+        (void)core_.core().core().cash(edge.carrier);
+        trade_.transport_adjacency[edge.from].push_back(edge.id);
+        trade_.transport_edges.emplace(edge.id,std::move(edge));
+    }
     void seed_tariff(std::string importer, std::string good,
                      std::int64_t ppm) {
         require(core_.commit_id()==0 && !importer.empty() && !good.empty() &&
@@ -498,7 +540,16 @@ public:
     [[nodiscard]] Month month() const{return core_.month();}
     [[nodiscard]] std::uint64_t commit_id()const{return core_.commit_id();}
     [[nodiscard]] const TradeState& commerce() const{return trade_;}
-    [[nodiscard]] const DiplomacyState& diplomacy()const{return diplomacy_;}
+    [[nodiscard]] const DiplomacyState& diplomacy()const{return diplomacy_}
+    [[nodiscard]] const TradeContract& contract(const std::string& id)const{
+        return trade_.contracts.at(id);
+    }
+    [[nodiscard]] const CargoInsurance& insurance(const std::string& id)const{
+        return trade_.insurance.at(id);
+    }
+    [[nodiscard]] const CreditFacility& trade_credit(const std::string& id)const{
+        return trade_.credit.at(id);
+    }
     [[nodiscard]] InfluenceView trade_influence(const std::string& source,
                                                   const std::string& target) const {
         InfluenceView view;
@@ -537,11 +588,22 @@ public:
             bridge[static_cast<std::size_t>(n)].push_back(
                 [&,n](phasee::SpatialStage& spatial){
                     Stage stage{spatial,next_trade,next_diplomacy,n};
-                    if(n==0)stage.advance_legal_state();
+                    if(n==0){
+                        stage.advance_legal_state();
+                        stage.register_arrived_losses();
+                    }
                     for(const auto& callback:plan[static_cast<std::size_t>(n)])
                         callback(stage);
-                    if(n==1)stage.plan_autonomous_trade();
-                    if(n==7)stage.execute_autonomous_trade();
+                    if(n==1){
+                        stage.reserve_collateral();
+                        stage.plan_contracts();
+                        stage.plan_autonomous_trade();
+                    }
+                    if(n==5)stage.settle_insurance_claims();
+                    if(n==7){
+                        stage.execute_autonomous_trade();
+                        stage.pay_insurance_premiums();
+                    }
                     if(n==11)check(next_trade,next_diplomacy,spatial);
                 });
         }
