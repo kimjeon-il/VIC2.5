@@ -88,6 +88,35 @@ struct Evidence {
     std::int64_t month{};
     Quantity units{};
 };
+struct TechnologyDefinition {
+    std::string id;
+    std::vector<std::string> prerequisites;
+    bool licensed_for_commercial_use{};
+};
+struct TechnologyLicense {
+    std::string id,tech,grantor,grantee;
+    Money actual_fee{};
+    std::int64_t valid_from{},valid_until{-1};
+    bool paid{};
+};
+struct KnowledgeContact {
+    std::string id,source,target,tech;
+    Quantity required_instruction{},verified_instruction{},paid_instruction{};
+    People teachers_per_work{1};
+    Money tuition_per_work{};
+    Quantity planned_instruction{};
+    bool reviewed{};
+};
+struct TrainingProgram {
+    std::string id,trainer,sponsor;
+    Id trainee_slice{};
+    People trainee_count{};
+    std::uint8_t target_occupational_skill{};
+    Quantity required_service{},verified_service{},paid_service{},planned_service{};
+    Money fee_per_service{};
+    bool certified{};
+    Id resulting_slice{};
+};
 struct KnowledgePromotion {
     std::string holder, tech;
     KnowledgeLevel next{KnowledgeLevel::usable};
@@ -108,6 +137,10 @@ struct DomainState {
     std::map<std::string,IndustryRecipe> recipes;
     std::vector<ProductionRun> actual_production_runs;
     std::map<std::string,ResearchProject> researches;
+    std::map<std::string,TechnologyDefinition> technologies;
+    std::map<std::string,TechnologyLicense> licenses;
+    std::map<std::string,KnowledgeContact> contacts;
+    std::map<std::string,TrainingProgram> training;
     std::map<std::pair<std::string,std::string>,KnowledgeLevel> knowledge;
     std::map<std::string,std::string> active_site_tech;
     std::map<std::int64_t,std::vector<KnowledgePromotion>> promotions;
@@ -145,6 +178,8 @@ struct DomainState {
         for(auto& [id,p]:constructions){(void)id;p.planned_work=0;}
         for(auto& [id,p]:work_packages){(void)id;p.planned_work=0;}
         for(auto& [id,p]:researches){(void)id;p.planned_work=0;}
+        for(auto& [id,p]:contacts){(void)id;p.planned_instruction=0;}
+        for(auto& [id,p]:training){(void)id;p.planned_service=0;}
         if(auto it=promotions.find(c.month());it!=promotions.end()) {
             for(const auto& u:it->second) {
                 require(!u.holder.empty()&&!u.tech.empty(),"bad knowledge promotion");
@@ -246,6 +281,29 @@ struct DomainState {
         }
         for(const auto& [id,v]:cumulative_nonmarket_waste){
             (void)id;require(v>=0,"negative accumulated nonmarket waste");
+        }
+        for(const auto& [id,tech]:technologies) {
+            require(tech.id==id,"technical knowledge identity mismatch");
+            for(const auto& prior:tech.prerequisites)
+                require(technologies.contains(prior)&&prior!=id,
+                        "unknown technology prerequisite");
+        }
+        for(const auto& [id,license]:licenses) {
+            require(license.id==id&&!license.tech.empty() &&
+                    license.actual_fee>=0&&
+                    (license.valid_until<0||license.valid_until>=license.valid_from),
+                    "invalid technology license/term");
+        }
+        for(const auto& [id,contact]:contacts) {
+            require(id==contact.id && contact.required_instruction>0 &&
+                    contact.verified_instruction>=0 &&
+                    contact.paid_instruction<=contact.verified_instruction,
+                    "invalid contact training evidence");
+        }
+        for(const auto& [id,p]:training) {
+            require(id==p.id&&p.required_service>0 && p.verified_service>=0 &&
+                    p.paid_service<=p.verified_service,
+                    "invalid POP occupational training evidence");
         }
         for(const auto& [id,p]:researches) {
             require(p.verified_work>=0&&p.paid_work<=p.verified_work,
@@ -606,6 +664,46 @@ public:
                 !domain_.researches.contains(p.id),"invalid research seed");
         domain_.researches.emplace(p.id,std::move(p));
     }
+    void seed_technology(TechnologyDefinition t){
+        require(core_.commit_id()==0&&!t.id.empty()&&
+                !domain_.technologies.contains(t.id),"invalid technology definition");
+        for(const auto& prior:t.prerequisites)
+            require(domain_.technologies.contains(prior)&&prior!=t.id,
+                    "technical prerequisites must be seeded in topological order");
+        domain_.technologies.emplace(t.id,std::move(t));
+    }
+    void seed_license(TechnologyLicense license){
+        require(core_.commit_id()==0&&!license.id.empty() &&
+                !domain_.licenses.contains(license.id) &&
+                !license.tech.empty() && license.actual_fee>=0 &&
+                !license.grantor.empty()&&!license.grantee.empty() &&
+                license.grantor!=license.grantee &&
+                (license.valid_until<0||license.valid_until>=license.valid_from),
+                "invalid historical/license seed");
+        domain_.licenses.emplace(license.id,std::move(license));
+    }
+    void seed_contact(KnowledgeContact contact){
+        require(core_.commit_id()==0 && !contact.id.empty() &&
+                !domain_.contacts.contains(contact.id) &&
+                !contact.source.empty()&&!contact.target.empty() &&
+                contact.source!=contact.target && !contact.tech.empty() &&
+                contact.required_instruction>0&&contact.teachers_per_work>0 &&
+                contact.tuition_per_work>=0,
+                "invalid knowledge contact");
+        domain_.contacts.emplace(contact.id,std::move(contact));
+    }
+    void seed_training(TrainingProgram p){
+        require(core_.commit_id()==0&&!p.id.empty() &&
+                !domain_.training.contains(p.id) &&
+                !p.trainer.empty()&&!p.sponsor.empty()&&
+                p.trainee_count>0 && p.trainee_slice>0 &&
+                p.required_service>0 && p.fee_per_service>=0 &&
+                p.target_occupational_skill<=100 &&
+                core_.people().has_slice(p.trainee_slice) &&
+                core_.people().slice(p.trainee_slice).count>=p.trainee_count,
+                "invalid occupational training program");
+        domain_.training.emplace(p.id,std::move(p));
+    }
     void seed_knowledge(std::string holder,std::string tech,KnowledgeLevel level) {
         require(core_.commit_id()==0&&!holder.empty()&&!tech.empty() &&
                 level!=KnowledgeLevel::unknown &&
@@ -642,6 +740,15 @@ public:
     }
     [[nodiscard]] const WorkPackage& work_package(const std::string& id) const {
         return domain_.work_packages.at(id);
+    }
+    [[nodiscard]] const KnowledgeContact& contact(const std::string& id)const{
+        return domain_.contacts.at(id);
+    }
+    [[nodiscard]] const TrainingProgram& training(const std::string& id)const{
+        return domain_.training.at(id);
+    }
+    [[nodiscard]] const TechnologyLicense& license(const std::string& id)const{
+        return domain_.licenses.at(id);
     }
     [[nodiscard]] const ResearchProject& research(const std::string& id)const {
         return domain_.researches.at(id);
