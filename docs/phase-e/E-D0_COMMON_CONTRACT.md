@@ -1,4 +1,6 @@
 # E-D0 — 공간·영토·행정구역 공통 설계 계약
+> **2026-11-05 시간 계약 변경 — [ADR-TIME-001](../adr/ADR-TIME-001_DAILY_TICK_B-J.md) 및 [ADR-TIME-002](../adr/ADR-TIME-002_LEGACY_SAVE_MIGRATION.md):** 게임의 기본 진행 단위는 `1일`, 외부 커밋은 `CommitDay`, 정기 월별 정산은 달력상 월말에 정확히 한 번이다. 아래의 `월별 12단계` 및 `effective_month` 문구는 신규 게임의 일별 실행 규범이 아니라 **구형 MonthClose 엔진의 호환 사양**으로 한정한다. 인구·금융·재고·주권의 유일한 정본과 기존 계산의 보존식은 유지한다. 현재 C/D/E/G/H 부분 구현을 전체 B~J 일별 엔진 완료라고 판단하지 않으며, I/J는 설계 상태다.
+
 
 > 계약 version = phase-e-common/1.0 / 2026-11-04 / SPECIFIED, NOT IMPLEMENTED.
 > 상위: POP-D0~D3; C-D0 + C-D4; D-D0 + D-V. 충돌 시 상위 POP → C 시간/원장 → D 자원 → E 공통 → E-G 상세 순서를 적용. 상위 변경은 ADR, 버전, 마이그레이션 필수.

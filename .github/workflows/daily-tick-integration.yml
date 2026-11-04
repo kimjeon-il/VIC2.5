@@ -25,3 +25,7 @@ jobs:
         run: cmake --build build --config Release --parallel 2 --target vic25_daily_time_tests
       - name: Daily real-ledger / Gregorian / restore / rollback
         run: ctest --test-dir build -C Release -R '^vic25_daily_time_tests$' -V --output-on-failure
+      - name: Build existing B/C/D/E/GH regression targets
+        run: cmake --build build --config Release --parallel 2 --target vic25_phase_b_tests vic25_phase_c_tests vic25_phase_d_tests vic25_phase_e_tests vic25_phase_gh_tests vic25_phase_gh_snapshot_tests
+      - name: Execute existing B/C/D/E/GH regressions
+        run: ctest --test-dir build -C Release -R '^(vic25_phase_b_tests|vic25_phase_c_tests|vic25_phase_d_tests|vic25_phase_e_tests|vic25_phase_gh_tests|vic25_phase_gh_snapshot_tests)$' --output-on-failure
