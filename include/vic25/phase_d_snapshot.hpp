@@ -94,14 +94,13 @@ template<class A,class X> void state(A& a,X& d) {
         vec(ar,vec_value,[](auto& a1,auto& e){adoption(a1,e);});
     });
     vec(a,d.research_evidence,[](auto& ar,auto& e){evidence(ar,e);});
-    a(d.journal);a(d.labor_used);a(d.site_capacity_used);
-    a(d.funds_reserved);a(d.event_sequence);a(d.opening_month);
+    a(d.journal);a(d.event_sequence);a(d.opening_month);
 }
 } // namespace detail
 
 struct SnapshotCodec {
-    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_1";
-    static constexpr const char* contract_version="phase-d-cpp/0.1";
+    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_2";
+    static constexpr const char* contract_version="phase-d-cpp/0.2";
     static std::string encode(const World& w) {
         w.validate();
         const auto core_payload=phasec::SnapshotCodec::encode(w.core_);
