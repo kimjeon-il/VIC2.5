@@ -71,11 +71,13 @@ template<class A,class X,class Fn> void map(A& a,X& container,Fn each) {
 template<class A,class X>void industry_class(A& a,X& x){
     a(x.id);a(x.parent);a(x.description);
 }
-template<class A,class X>void deposit(A& a,X& x){
+template<class A,class X>void resource_site(A& a,X& x){
 #define F(v) a(x.v)
     F(id);F(site);F(owner);F(region);F(good);
-    F(remaining);F(renewal_per_month);F(carrying_capacity);
-    F(workers_per_unit);F(site_service_per_unit);F(renewable);
+    F(monthly_capacity);F(produced_this_month);F(cumulative_output);
+    F(standing_biomass);F(renewal_per_month);F(carrying_capacity);
+    F(workers_per_unit);F(site_service_per_unit);
+    F(decline_ppm_active_month);F(decline_remainder);F(renewable);
 #undef F
 }
 template<class A,class X>void production_run(A& a,X& x){
@@ -132,7 +134,7 @@ template<class A,class X> void state(A& a,X& d) {
     map(a,d.constructions,[](auto& ar,auto& v){construction(ar,v);});
     map(a,d.work_packages,[](auto& ar,auto& v){work_package(ar,v);});
     map(a,d.industry_classes,[](auto& ar,auto& v){industry_class(ar,v);});
-    map(a,d.deposits,[](auto& ar,auto& v){deposit(ar,v);});
+    map(a,d.resource_sites,[](auto& ar,auto& v){resource_site(ar,v);});
     a(d.cumulative_nonmarket_waste);
     map(a,d.recipes,[](auto& ar,auto& v){industry(ar,v);});
     vec(a,d.actual_production_runs,[](auto& ar,auto& v){production_run(ar,v);});
@@ -154,8 +156,8 @@ template<class A,class X> void state(A& a,X& d) {
 } // namespace detail
 
 struct SnapshotCodec {
-    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_5";
-    static constexpr const char* contract_version="phase-d-cpp/0.5";
+    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_6";
+    static constexpr const char* contract_version="phase-d-cpp/0.6";
     static std::string encode(const World& w) {
         w.validate();
         const auto core_payload=phasec::SnapshotCodec::encode(w.core_);
@@ -164,6 +166,7 @@ struct SnapshotCodec {
         ar(std::string(magic));
         ar(std::string(contract_version));
         ar(std::string("phase-d-common/1.0"));
+        ar(std::string("phase-j-resource-flow/1.0"));
         ar(std::string("checked-int64/1"));
         ar(core_payload);
         detail::state(ar,w.domain_);
@@ -178,10 +181,12 @@ struct SnapshotCodec {
             throw std::runtime_error("Phase D unsupported snapshot length");
         std::istringstream stream(bytes,std::ios::binary|std::ios::in);
         phasec::persistence_detail::BinaryReader rd{stream};
-        std::string file_magic,ver,design_ver,numeric_ver,core_payload;
-        rd(file_magic);rd(ver);rd(design_ver);rd(numeric_ver);
+        std::string file_magic,ver,design_ver,resource_ver,numeric_ver,core_payload;
+        rd(file_magic);rd(ver);rd(design_ver);rd(resource_ver);rd(numeric_ver);
         if(file_magic!=magic || ver!=contract_version ||
-           design_ver!="phase-d-common/1.0" || numeric_ver!="checked-int64/1")
+           design_ver!="phase-d-common/1.0" ||
+           resource_ver!="phase-j-resource-flow/1.0" ||
+           numeric_ver!="checked-int64/1")
             throw std::runtime_error("Phase D snapshot schema or contract mismatch");
         rd(core_payload);
         World candidate;

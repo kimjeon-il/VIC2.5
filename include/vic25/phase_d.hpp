@@ -5,6 +5,7 @@
 // This deliberately does not claim all D-C/I/T acceptance cases are implemented.
 
 #include "vic25/phase_c.hpp"
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -55,11 +56,16 @@ struct WorkPackage {
 struct IndustryClass {
     std::string id, parent, description;
 };
-struct ResourceDeposit {
+// An active extraction/harvest site. Underground reserve totals never exist here.
+struct ResourceSite {
     std::string id,site,owner,region,good;
-    Quantity remaining{}, renewal_per_month{}, carrying_capacity{};
+    Quantity monthly_capacity{};          // operational flow, NOT an underground stock
+    Quantity produced_this_month{}, cumulative_output{}; // actual produced goods
+    Quantity standing_biomass{}, renewal_per_month{}, carrying_capacity{}; // renewable ONLY
     People workers_per_unit{1};
     Quantity site_service_per_unit{1};
+    std::uint32_t decline_ppm_active_month{}; // activity-based next-month throughput decline
+    Quantity decline_remainder{};        // fractional ppm remainder, NOT reserve quantity
     bool renewable{};
 };
 struct IndustryRecipe {
@@ -133,7 +139,7 @@ struct DomainState {
     std::map<std::string,ConstructionProject> constructions;
     std::map<std::string,WorkPackage> work_packages;
     std::map<std::string,IndustryClass> industry_classes;
-    std::map<std::string,ResourceDeposit> deposits;
+    std::map<std::string,ResourceSite> resource_sites;
     std::map<std::string,Quantity> cumulative_nonmarket_waste;
     std::map<std::string,IndustryRecipe> recipes;
     std::vector<ProductionRun> actual_production_runs;
@@ -180,16 +186,33 @@ struct DomainState {
     void begin_month(phasec::IntegratedWorld& c) {
         opening_month=c.month();
         c.phase_d_enable_shared_resources();
-        for(auto& [id,deposit]:deposits) {
-            if(!deposit.renewable)continue;
-            require(deposit.carrying_capacity>=deposit.remaining &&
-                    deposit.renewal_per_month>=0,"invalid renewable pool");
-            const auto grown=std::min(deposit.renewal_per_month,
-                                      deposit.carrying_capacity-deposit.remaining);
-            if(grown>0){
-                deposit.remaining=phaseb::add_checked(deposit.remaining,grown);
-                append(opening_month,"natural-resource-regeneration",id);
+        for(auto& [id,source]:resource_sites) {
+            if(source.renewable) {
+                require(source.carrying_capacity>=source.standing_biomass &&
+                        source.renewal_per_month>=0,"invalid renewable pool");
+                const auto grown=std::min(source.renewal_per_month,
+                     source.carrying_capacity-source.standing_biomass);
+                if(grown>0) {
+                    source.standing_biomass=phaseb::add_checked(source.standing_biomass,grown);
+                    append(opening_month,"natural-resource-regeneration",id);
+                }
+            } else if(source.produced_this_month>0 &&
+                      source.decline_ppm_active_month>0) {
+                // Throughput decline does not refer to a hidden finite reserve.
+                constexpr Quantity scale=1'000'000;
+                const auto whole=phaseb::mul_checked(source.monthly_capacity/scale,
+                         static_cast<Quantity>(source.decline_ppm_active_month));
+                const auto partial=phaseb::add_checked(
+                     phaseb::mul_checked(source.monthly_capacity%scale,
+                         static_cast<Quantity>(source.decline_ppm_active_month)),
+                     source.decline_remainder);
+                const auto decrease=phaseb::add_checked(whole,partial/scale);
+                require(decrease<=source.monthly_capacity,"invalid resource flow decline");
+                source.monthly_capacity-=decrease;
+                source.decline_remainder=partial%scale;
+                if(decrease>0)append(opening_month,"resource-flow-declined",id);
             }
+            source.produced_this_month=0;
         }
         for(auto& [id,p]:constructions){(void)id;p.planned_work=0;}
         for(auto& [id,p]:work_packages){(void)id;p.planned_work=0;}
@@ -284,12 +307,22 @@ struct DomainState {
         }
         for(const auto& [owner,amount]:outstanding)
             require(c.phase_d_wip(owner)>=amount,"unbacked project WIP");
-        for(const auto& [id,deposit]:deposits) {
-            require(id==deposit.id && deposit.remaining>=0 &&
-                    deposit.workers_per_unit>0 && deposit.site_service_per_unit>0 &&
-                    (!deposit.renewable || (deposit.carrying_capacity>=deposit.remaining &&
-                     deposit.carrying_capacity>0&&deposit.renewal_per_month>=0)),
-                    "invalid physical resource conservation");
+        for(const auto& [id,source]:resource_sites) {
+            require(id==source.id && source.monthly_capacity>=0 &&
+                    source.produced_this_month>=0 &&
+                    source.produced_this_month<=source.monthly_capacity &&
+                    source.cumulative_output>=source.produced_this_month &&
+                    source.workers_per_unit>0 && source.site_service_per_unit>0 &&
+                    source.decline_ppm_active_month<=1'000'000 &&
+                    source.decline_remainder>=0 && source.decline_remainder<1'000'000 &&
+                    (source.renewable ?
+                       (source.carrying_capacity>0 && source.standing_biomass>=0 &&
+                        source.carrying_capacity>=source.standing_biomass &&
+                        source.renewal_per_month>=0 &&
+                        source.decline_ppm_active_month==0 && source.decline_remainder==0)
+                       : (source.standing_biomass==0 && source.renewal_per_month==0 &&
+                          source.carrying_capacity==0)),
+                    "invalid resource site flow/renewable conservation");
         }
         for(const auto& [id,cl]:industry_classes) {
             require(id==cl.id && (cl.parent.empty()||
@@ -494,15 +527,21 @@ public:
     }
     void extract_resource(const std::string& id,Quantity units){
         must(4);
-        auto& d=d_.deposits.at(id);
-        require(units>0&&d.remaining>=units,"extraction exceeds actual remaining stock");
-        const auto& site=c_.facility(d.site);
-        require(site.owner==d.owner&&site.region==d.region,
+        auto& source=d_.resource_sites.at(id);
+        require(units>0 && source.produced_this_month<=source.monthly_capacity &&
+                units<=source.monthly_capacity-source.produced_this_month,
+                "extraction exceeds current monthly operational flow");
+        require(!source.renewable || units<=source.standing_biomass,
+                "harvest exceeds current renewable biomass");
+        const auto& site=c_.facility(source.site);
+        require(site.owner==source.owner&&site.region==source.region,
                 "extraction has no effective owned extraction site");
-        occupy_labor(d.owner,product(units,d.workers_per_unit));
-        occupy_site(d.site,product(units,d.site_service_per_unit));
-        c_.phase_d_emit_extraction(d.owner,d.region,d.good,units,id);
-        d.remaining-=units;
+        occupy_labor(source.owner,product(units,source.workers_per_unit));
+        occupy_site(source.site,product(units,source.site_service_per_unit));
+        c_.phase_d_emit_extraction(source.owner,source.region,source.good,units,id);
+        source.produced_this_month=phaseb::add_checked(source.produced_this_month,units);
+        source.cumulative_output=phaseb::add_checked(source.cumulative_output,units);
+        if(source.renewable)source.standing_biomass-=units;
         d_.append(d_.opening_month,"resource-extracted",id);
     }
     void manufacture(const std::string& recipe,Quantity batches) {
@@ -765,20 +804,26 @@ public:
                 "invalid industry taxonomy parent or ID");
         domain_.industry_classes.emplace(cl.id,std::move(cl));
     }
-    void seed_resource_deposit(ResourceDeposit deposit){
-        require(core_.commit_id()==0&&!deposit.id.empty() &&
-                !domain_.deposits.contains(deposit.id) &&
-                !deposit.owner.empty()&&!deposit.region.empty()&&!deposit.good.empty() &&
-                deposit.remaining>=0 && deposit.workers_per_unit>0 &&
-                deposit.site_service_per_unit>0 &&
-                (!deposit.renewable ||
-                 (deposit.carrying_capacity>=deposit.remaining &&
-                  deposit.carrying_capacity>0 && deposit.renewal_per_month>=0)),
-                "invalid resource deposit seed");
-        const auto& facility=core_.facility(deposit.site);
-        require(facility.owner==deposit.owner && facility.region==deposit.region,
-                "resource deposit not served by owned physical extraction site");
-        domain_.deposits.emplace(deposit.id,std::move(deposit));
+    void seed_resource_site(ResourceSite source){
+        require(core_.commit_id()==0&&!source.id.empty() &&
+                !domain_.resource_sites.contains(source.id) &&
+                !source.owner.empty()&&!source.region.empty()&&!source.good.empty() &&
+                source.monthly_capacity>0 && source.produced_this_month==0 &&
+                source.cumulative_output==0 &&
+                source.workers_per_unit>0 && source.site_service_per_unit>0 &&
+                source.decline_ppm_active_month<=1'000'000 &&
+                source.decline_remainder==0 &&
+                (source.renewable ?
+                    (source.carrying_capacity>0 && source.standing_biomass>=0 &&
+                     source.carrying_capacity>=source.standing_biomass &&
+                     source.renewal_per_month>=0 && source.decline_ppm_active_month==0)
+                    : (source.standing_biomass==0 && source.renewal_per_month==0 &&
+                       source.carrying_capacity==0)),
+                "invalid operational resource site seed");
+        const auto& facility=core_.facility(source.site);
+        require(facility.owner==source.owner && facility.region==source.region,
+                "resource source not served by owned physical extraction site");
+        domain_.resource_sites.emplace(source.id,std::move(source));
     }
     void seed_recipe(IndustryRecipe r) {
         require(core_.commit_id()==0&&!r.id.empty()&&!r.site.empty()&&
@@ -872,8 +917,8 @@ public:
         }
         return total;
     }
-    [[nodiscard]] const ResourceDeposit& resource(const std::string& id)const{
-        return domain_.deposits.at(id);
+    [[nodiscard]] const ResourceSite& resource_site(const std::string& id)const{
+        return domain_.resource_sites.at(id);
     }
     [[nodiscard]] Quantity nonmarket_waste(const std::string& recipe)const{
         auto it=domain_.cumulative_nonmarket_waste.find(recipe);

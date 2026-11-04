@@ -23,8 +23,16 @@ static World world(){
     w.seed_industry_class({"PRIMARY","","raw materials"});
     w.seed_industry_class({"EXTR","PRIMARY","mining"});
     w.seed_industry_class({"MANU","","manufacture"});
-    w.seed_resource_deposit({"ORE","MINE_SITE","MINE","R","ore",5,0,0,1,1,false});
-    w.seed_resource_deposit({"FOREST","FOREST_SITE","FOREST","R","timber",2,1,4,1,1,true});
+    ResourceSite ore;
+    ore.id="ORE";ore.site="MINE_SITE";ore.owner="MINE";ore.region="R";
+    ore.good="ore";ore.monthly_capacity=5;ore.decline_ppm_active_month=200'000;
+    w.seed_resource_site(ore);
+    ResourceSite forest;
+    forest.id="FOREST";forest.site="FOREST_SITE";forest.owner="FOREST";
+    forest.region="R";forest.good="timber";forest.monthly_capacity=3;
+    forest.standing_biomass=2;forest.renewal_per_month=1;
+    forest.carrying_capacity=4;forest.renewable=true;
+    w.seed_resource_site(forest);
     IndustryRecipe r;
     r.id="SMELT";r.site="MILL_SITE";r.industry_class="MANU";
     r.inputs={{"ore",1},{"coal",1}};
@@ -42,7 +50,7 @@ static void test_mining_trade_joint_outputs(){
     p[4].push_back([](Stage& s){s.extract_resource("ORE",3);});
     p[7].push_back([](Stage& s){s.phase_c().trade("MINE","MILL","R","ore",3,2);});
     w.advance(p);
-    need(w.resource("ORE").remaining==2 && w.core().stock("MILL","R","ore")==3 &&
+    need(w.resource_site("ORE").cumulative_output==3 && w.core().stock("MILL","R","ore")==3 &&
          w.core().cash("MILL")==44 &&
          w.realized_batches("MANU",4000,4000)==0,"ore extraction, sales, industry timing");
     World::Plan next;
@@ -57,12 +65,37 @@ static void test_mining_trade_joint_outputs(){
          "joint outputs or industrial statistics");
     const auto saved=SnapshotCodec::encode(w);
     auto recovered=SnapshotCodec::decode(saved);
-    need(SnapshotCodec::encode(recovered)==saved&&recovered.resource("ORE").remaining==2,
+    need(SnapshotCodec::encode(recovered)==saved&&recovered.resource_site("ORE").cumulative_output==3,
          "resource and output records snapshot mismatch");
     World::Plan over;
-    over[4].push_back([](Stage& s){s.extract_resource("ORE",3);});
-    need(rejects([&]{w.advance(over);})&&w.resource("ORE").remaining==2 &&
-         w.core().stock("MINE","R","ore")==0,"overdepletion leaked through rollback");
+    over[4].push_back([](Stage& s){s.extract_resource("ORE",5);});
+    need(rejects([&]{w.advance(over);}) &&
+         w.resource_site("ORE").cumulative_output==3 &&
+         w.resource_site("ORE").monthly_capacity==4 &&
+         w.core().stock("MINE","R","ore")==0,
+         "flow-capacity violation leaked through rollback");
+}
+static void test_no_mineral_total_and_activity_decline(){
+    auto w=world();auto miner=worker(w,5,27);
+    World::Plan first;
+    first[2].push_back([miner](Stage& s){s.phase_c().hire(miner,5,"MINE",1);});
+    first[4].push_back([](Stage& s){s.extract_resource("ORE",5);});
+    w.advance(first);
+    World::Plan second;
+    second[4].push_back([](Stage& s){s.extract_resource("ORE",4);});
+    w.advance(second);
+    need(w.resource_site("ORE").cumulative_output==9 &&
+         w.resource_site("ORE").monthly_capacity==4 &&
+         w.core().stock("MINE","R","ore")==9,
+         "nonrenewable output must not be capped by any legacy total");
+    w.advance();
+    need(w.resource_site("ORE").monthly_capacity==3,
+         "activity-based monthly flow decline missing");
+    const auto bytes=SnapshotCodec::encode(w);
+    auto restored=SnapshotCodec::decode(bytes);
+    need(SnapshotCodec::encode(restored)==bytes &&
+         restored.resource_site("ORE").cumulative_output==9,
+         "flow-only source snapshot roundtrip failed");
 }
 static void test_renewable_carrying_capacity(){
     auto w=world();auto id=worker(w,3,13);
@@ -70,11 +103,11 @@ static void test_renewable_carrying_capacity(){
     first[2].push_back([id](Stage& s){s.phase_c().hire(id,3,"FOREST",1);});
     first[4].push_back([](Stage& s){s.extract_resource("FOREST",2);});
     w.advance(first);
-    need(w.resource("FOREST").remaining==1 &&
+    need(w.resource_site("FOREST").standing_biomass==1 &&
          w.core().stock("FOREST","R","timber")==2,"renewal and harvest balance");
-    w.advance();need(w.resource("FOREST").remaining==2,"renewal month2");
+    w.advance();need(w.resource_site("FOREST").standing_biomass==2,"renewal month2");
     w.advance();w.advance();
-    need(w.resource("FOREST").remaining==4,"renewal exceeded carrying capacity");
+    need(w.resource_site("FOREST").standing_biomass==4,"renewal exceeded carrying capacity");
 }
 static void test_same_month_factory_output_not_usable_as_past_input(){
     World w{4200};auto& c=w.seed_core();
@@ -96,6 +129,7 @@ static void test_same_month_factory_output_not_usable_as_past_input(){
 int main(){
     try{
         test_mining_trade_joint_outputs();
+        test_no_mineral_total_and_activity_decline();
         test_renewable_carrying_capacity();
         test_same_month_factory_output_not_usable_as_past_input();
         std::cout<<"Phase D industry extraction, coproduct and timing cases PASS\n";
