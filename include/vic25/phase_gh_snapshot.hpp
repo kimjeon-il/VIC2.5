@@ -39,7 +39,8 @@ void checked_map(A& a,std::map<K,V>& map,Fn fn) {
     if(count>5'000'000)throw std::runtime_error("G/H oversized state map");
     if constexpr(std::is_same_v<A,Writer>) {
         for(const auto& [key,val]:map) {
-            auto k=key,v=val;
+            auto k=key;
+            auto v=val;
             a(k);fn(a,v);
         }
     } else {
