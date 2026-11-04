@@ -164,6 +164,16 @@ public:
         resources_.release_goods(key,purpose,amount);
         phase_d_use_material(owner,region,good,amount);
     }
+    // Phase G shares Phase D's single inventory reservation authority.
+    // Releasing a planned lot is permitted only at a real market/dispatch
+    // stage; trade()/ship() then checks the same C inventory ledger again.
+    void phase_g_release_reserved_goods(const std::string& owner,
+                 const std::string& region,const std::string& good,
+                 const std::string& purpose,Quantity amount) {
+        require_stage({3,7});
+        ensure(phase_d_reservation_mode_,"phase G reservation mode disabled");
+        resources_.release_goods({owner,region,good},purpose,amount);
+    }
     Id phase_d_certify_occupational_training(Id source,People count,
                                              std::uint8_t new_skill){
         require_stage({10});
