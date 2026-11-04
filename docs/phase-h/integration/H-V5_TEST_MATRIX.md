@@ -112,7 +112,7 @@
 | HV-T69 | 서브틱 미지원 1일 긴급전쟁·외교 즉시효력 요구 | C-D0/C-M5 지원 없으면 Unsupported, 현재월 stage3/7/10/상위 정본 변경0 | H-D2/D7,C-M5,C-D0 |
 | HV-T70 | F 물류 미구현·국제기구 독립 FinancialOwner 불가 | 지원안되는 외교원조/공동기금·실물수송 케이스는 BLOCKED, fake stock/money/transport pass 금지 | H-D3/D5,G,F,C-E3 |
 | HV-T71 | 1,200개월·다국가/조약/조직/위기·경제/POP 통합 스트레스 | 매월 36 불변식/원장·메모리 성장/CPU P50/P95/P99/사건수 계측, 성능 예산 사전 확정 | H,C,D,E,G,POP |
-| HV-T72 | 104 기존 외교 + 71개 교차 케이스 실제 evidence/회귀·마지막 72번째 최종 게이트 | HV-T01..71, 기존 HD0/HD1..7 104, 필수 POP/C-D4/D-V/E-V/G 동등 코드 기준에서 PASS일 때만 HV-COMPLETE | H,CI,Release |
+| HV-T72 | 104 기존 외교 + 71개 교차 케이스 실제 evidence/회귀·마지막 72번째 최종 게이트 | HV-T01..71, 기존 HD0/HD1..7 104, 필수 POP/C-D4/D-V/E-V/G 동등 코드 기준에서 PASS일 때만 HV-T72 메타게이트 PASS | H,CI,Release |
 
 ## 7. 72개 시험의 독립 실행 요건
 
