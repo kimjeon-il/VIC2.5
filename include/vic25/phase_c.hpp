@@ -329,6 +329,8 @@ public:
     void sell_shares(const std::string& asset, const std::string& seller,
                      const std::string& buyer, Money units) {
         require_stage({7});
+        if(phase_d_reservation_mode_)
+            resources_.assert_cash_available(buyer,units,cash(buyer));
         ensure(tracked_assets_.contains(asset) && units > 0 &&
                actors_.contains(seller) && actors_.contains(buyer) &&
                buyer != seller && shares(asset, seller) >= units &&
@@ -358,6 +360,8 @@ public:
         const std::string id = asset + ":" + holder;
         ensure(dividends_.contains(id), "no dividend payable");
         const auto d = dividends_.at(id);
+        if(phase_d_reservation_mode_)
+            resources_.assert_cash_available(d.payer,d.amount,cash(d.payer));
         ensure(d.due <= month() && cash(d.payer) >= d.amount,
                "dividend not yet due or unfunded");
         money_.post({unique("dividend"), "dividend settles shareholder payable", {
@@ -371,6 +375,8 @@ public:
     void issue_bond(const std::string& bond_id, const std::string& government,
                     const std::string& buyer, Money face) {
         require_stage({1});
+        if(phase_d_reservation_mode_)
+            resources_.assert_cash_available(buyer,face,cash(buyer));
         ensure(!bond_id.empty() && face > 0 && actors_.contains(government) &&
                actors_.contains(buyer) && government != buyer && cash(buyer) >= face &&
                !tracked_assets_.contains("bond:" + bond_id), "unfunded bond issue");
@@ -414,6 +420,9 @@ public:
                paid_staff_this_month_[service.operator_id]>0 &&
                stock(service.operator_id,service.region,service.good)>=patients,
                "public service cannot exceed actual paid staff facility and supplies");
+        if(phase_d_reservation_mode_)
+            resources_.assert_goods_available({service.operator_id,service.region,service.good},
+                                              patients,stock(service.operator_id,service.region,service.good));
         goods_.consume({service.operator_id,service.region,service.good},patients);
         service.provided+=patients;
         events_.push_back("actual-public-medical-service");
@@ -442,6 +451,7 @@ public:
         require_stage({4});
         ensure(actors_.contains(actor) && qty>0 &&
                stock(actor,region,good)>=qty, "unbacked phase D material");
+        resources_.assert_goods_available({actor,region,good},qty,stock(actor,region,good));
         goods_.consume({actor,region,good},qty);
         events_.push_back("phase-d-actual-material-used");
     }
@@ -460,7 +470,7 @@ public:
             grouped[good]=phaseb::add_checked(grouped[good],qty);
         }
         for(const auto& [good,qty]:grouped)
-            ensure(stock(actor,region,good)>=qty,"missing phase D production input");
+            resources_.assert_goods_available({actor,region,good},qty,stock(actor,region,good));
         for(const auto& [good,qty]:outputs)
             ensure(!good.empty() && qty>0,"invalid phase D output");
         for(const auto& [good,qty]:grouped)
@@ -533,6 +543,11 @@ public:
                employed_by(site.owner)>=construction_workers &&
                scheduled_site_repairs_[month()+1][id]+restored<=site.damaged,
                "rebuild requires actual material labor and destroyed capacity");
+        if(phase_d_reservation_mode_) {
+            resources_.use_labor(site.owner,construction_workers,employed_by(site.owner));
+            resources_.assert_goods_available({site.owner,site.region,building_good},restored,
+                                               stock(site.owner,site.region,building_good));
+        }
         goods_.consume({site.owner,site.region,building_good},restored);
         scheduled_site_repairs_[month()+1][id]+=restored;
         events_.push_back("rebuild-work-physical-input");
@@ -550,6 +565,8 @@ public:
         require_stage({5});
         ensure(reparations_.contains(id),"unknown reparations");
         auto& t=reparations_.at(id);
+        if(phase_d_reservation_mode_)
+            resources_.assert_cash_available(t.payer,amount,cash(t.payer));
         ensure(t.recognized&&amount>0&&amount<=t.remaining &&
                cash(t.payer)>=amount,"unfunded/unrecognized reparation");
         money_.post({unique("reparation-paid"),"debt obligation settled by actual cash",{
@@ -900,6 +917,8 @@ public:
     }
     void pay(const std::string& from, const std::string& to, Money amount) {
         require_stage({3, 5, 7, 8});
+        if(phase_d_reservation_mode_)
+            resources_.assert_cash_available(from,amount,cash(from));
         ensure(amount > 0 && cash(from) >= amount && actors_.contains(to) && from != to,
                "unfunded payment");
         money_.post({unique("pay"), "confirmed transfer", {
@@ -910,6 +929,8 @@ public:
     void wages(const std::string& payer, const std::string& worker,
                const std::string& treasury, Money gross, Money withheld) {
         require_stage({5});
+        if(phase_d_reservation_mode_)
+            resources_.assert_cash_available(payer,gross,cash(payer));
         ensure(gross > 0 && withheld >= 0 && withheld <= gross && cash(payer) >= gross,
                "unfunded gross wage");
         ensure(actors_.contains(worker) && actors_.contains(treasury) &&
@@ -974,6 +995,8 @@ public:
     }
     void repay(const std::string& borrower, Money amount) {
         require_stage({8});
+        if(phase_d_reservation_mode_)
+            resources_.assert_cash_available(borrower,amount,cash(borrower));
         ensure(amount > 0 && actors_.contains(borrower) && cash(borrower) >= amount &&
                -money_.balance(account(borrower, "debt")) >= amount, "invalid loan repayment");
         money_.post({unique("repay"), "loan principal retirement", {
@@ -993,6 +1016,10 @@ public:
         require_stage({4});
         ensure(qty > 0 && workers_required > 0 && workers_required <= employed_by(firm),
                "insufficient production labor");
+        if(phase_d_reservation_mode_) {
+            resources_.use_labor(firm,workers_required,employed_by(firm));
+            resources_.assert_goods_available({firm,region,input},qty,stock(firm,region,input));
+        }
         ensure(stock(firm, region, input) >= qty, "missing production input");
         goods_.consume({firm, region, input}, qty);
         goods_.produce({firm, region, output}, qty);
@@ -1006,6 +1033,10 @@ public:
         ensure(qty > 0 && unit_price > 0 && stock(seller, region, good) >= qty,
                "insufficient sale stock");
         const Money cost = positive_product(qty, unit_price);
+        if(phase_d_reservation_mode_) {
+            resources_.assert_goods_available({seller,region,good},qty,stock(seller,region,good));
+            resources_.assert_cash_available(buyer,cost,cash(buyer));
+        }
         ensure(cash(buyer) >= cost, "buyer cannot pay");
         goods_.transfer({seller, region, good}, {buyer, region, good}, qty);
         pay(buyer, seller, cost);
@@ -1014,6 +1045,8 @@ public:
     void consume(const std::string& owner, const std::string& region,
                  const std::string& good, Quantity qty) {
         require_stage({7, 10});
+        if(phase_d_reservation_mode_)
+            resources_.assert_goods_available({owner,region,good},qty,stock(owner,region,good));
         goods_.consume({owner, region, good}, qty);
         events_.push_back("consumption");
     }
@@ -1024,6 +1057,8 @@ public:
         ensure(!id.empty() && !shipments_.contains(id) && quantity > 0 &&
                travel_months > 0 && loss >= 0 && loss <= quantity, "bad shipment");
         ensure(stock(seller, origin, good) >= quantity, "unfunded shipment stock");
+        if(phase_d_reservation_mode_)
+            resources_.assert_goods_available({seller,origin,good},quantity,stock(seller,origin,good));
         const auto key = InventoryKey{"TRANSIT:" + id, "in_transit", good};
         goods_.transfer({seller, origin, good}, key, quantity);
         shipments_.emplace(id, Shipment{id, std::move(seller), std::move(buyer),
