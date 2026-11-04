@@ -6,6 +6,16 @@
 > Phase D 상세 설계 정본: [`work/phase-d-design`](https://github.com/kimjeon-il/VIC2.5/tree/work/phase-d-design/docs/phase-d)  
 > 구현 PR: [#8 — Draft](https://github.com/kimjeon-il/VIC2.5/pull/8)
 
+## 0. 1~5단계 최신 점검 (2026-11-04)
+
+- **1단계 공통 예약:** `SharedResourceReservations`를 Phase C 원장에 배치하고 Phase D가 동일 현금·재고·노동·설비 용량을 참조한다. 기존 C 지급/생산과 D 예약의 충돌을 `tests/test_phase_d_shared_reservations.cpp`에서 실제 검증. **전체 금융·물류·정치·군사 계약의 예약 정본 완전 일원화가 증명된 것은 아니다.**
+- **2단계 건설:** `WorkPackage`·선행공정/양생·품질 재작업, 허가/검수, 현금지급/미지급 기성고와 준공을 확장. `tests/test_phase_d_construction.cpp` 실행. 토지·보험/재건·모든 도급계약 등 세부 계약은 아직 전수 미구현.
+- **3단계 산업:** `IndustryClass`, `ResourceDeposit` 채굴/재생, 생산 부산물·폐기/생산기록과 자원/설비·노동 경합. `tests/test_phase_d_industry.cpp` 실행. 전체 지역 물류·시장·환경·비저장 에너지망은 미완료.
+- **4단계 기술:** `TechnologyDefinition`, `TechnologyLicense`, `KnowledgeContact`, `TrainingProgram`과 기술자/현장·실제 연구증빙, `tests/test_phase_d_technology.cpp` 실행. 지식재산법·국가별 연구제도/발명 확률·기술확산 완전 모형은 미완료.
+- **5단계 저장·복구·상호작용/부하:** `tests/test_phase_d_cross_domain.cpp` 및 Phase D 스냅샷·장기회귀, `bench/phase_d_population_scale.cpp`의 10만/100만 활성 희소 POP 월 처리량 측정. [집중 CI #41771921359](https://github.com/kimjeon-il/VIC2.5/actions/runs/41771921359)에서 Phase D 9/9 PASS, 100k 2개월 평균 383.527ms/월·최대 RSS 73344kB, 1m 2개월 평균 4202.3ms/월·최대 RSS 699140kB. **이 측정은 극히 적은 사업장·연구/공사 사건을 처리한 희소 시나리오로, 대규모 동시 산업활동을 대표하지 않는다.**
+- **후속 벤치 강화:** `work/phase-d-cpp-integration`에서 P50/P95/P99 및 8개월·차월 준공 검사로 확장했다. 해당 신규 커밋의 CI 결과가 확인되기 전까지 이 확장분을 PASS로 표시하지 않는다.
+- **전체 인수 상태:** 설계상 279개 고유 인수 ID는 여전히 개별 실행 오라클/매핑 전수 PASS 미달. 1~5단계의 **부분 기능 구현·테스트 성공**과 `DV-COMPLETE`는 다르다.
+
 ## 1. 검증된 실행 결과
 
 [GitHub Actions #41762505400](https://github.com/kimjeon-il/VIC2.5/actions/runs/41762505400) — 구현 커밋 `d624f201...`에서 **Linux/GCC 및 Windows/MSVC 모두 CTest 12/12 PASS, 0 FAIL**, C++ 빌드 PASS.
