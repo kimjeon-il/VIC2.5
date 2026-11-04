@@ -125,11 +125,68 @@ struct Tariff {
     std::string importer_country, good;
     std::int64_t ppm{};
 };
+enum class ClauseKind : std::uint8_t {
+    tariff_exemption, trade_embargo, trade_quota, military_access,
+    defense_guarantee, non_aggression, territorial_cession,
+    financial_aid, reparations, protectorate, research_cooperation,
+    cultural_exchange, ceasefire, military_withdrawal
+};
+struct TreatyClause {
+    std::string id, obligor, beneficiary, good;
+    ClauseKind kind{ClauseKind::tariff_exemption};
+    Id province{}, receiving_admin{};
+    Money amount{}, fulfilled{};
+    Month effective{}, expires{-1};
+    bool queued{};
+};
+enum class VoteChoice : std::uint8_t { yes, no, abstain };
+struct OrganizationRule {
+    std::size_t quorum{2}, yes_required{2};
+    std::set<std::string> veto_members;
+};
+struct OrganizationVote {
+    std::string decision_id, organization_id, subject;
+    std::map<std::string,VoteChoice> ballots;
+    bool adopted{};
+    Month effective{};
+};
+struct CulturalExchange {
+    std::string event_id, sponsor, beneficiary;
+    Money funded{};
+    Month month{};
+};
+struct MilitaryAssistance {
+    std::string event_id, provider, receiver, good, shipment_id;
+    Quantity quantity{};
+    Money market_value{};
+    Month month{};
+};
+struct CrisisPosition {
+    std::string country, stance;
+    bool conditional{};
+    Month month{};
+};
+struct CrisisProposal {
+    std::string id, proposer;
+    Money compensation{};
+    std::string payer, recipient;
+    bool freeze_claim{};
+    std::set<std::string> approvers;
+    Month month{};
+};
+struct CrisisAdvice {
+    bool can_mediate{}, has_underlying_dispute{};
+    bool lawful_war_entry_supported{};
+    Money observed_commercial_exposure{};
+    std::string recommendation;
+};
 struct Treaty {
     std::string id, country_a, country_b, good;
     Month agreed_month{}, effective_month{};
     bool ratified_a{}, ratified_b{}, active{};
-    // This bounded model only supports a bilateral tariff-exemption term.
+    std::set<std::string> parties, ratifications;
+    std::vector<TreatyClause> clauses;
+    bool pending_termination{};
 };
 struct Organization {
     std::string id;
@@ -138,6 +195,10 @@ struct Organization {
     Money dues_per_member{};
     bool active{};
     std::map<std::pair<Month,std::string>, Money> paid;
+    OrganizationRule governance;
+    std::map<std::string,OrganizationVote> decisions;
+    std::map<Month,std::set<std::string>> pending_admissions;
+    std::map<Month,std::set<std::string>> pending_exits;
 };
 struct Protectorate {
     std::string id, principal, dependent;
@@ -145,13 +206,17 @@ struct Protectorate {
     bool active{}, exclusive_foreign_policy{};
 };
 enum class CrisisStatus : std::uint8_t {
-    scheduled, active, mediation, settled
+    scheduled, active, mediation, settled, frozen,
+    partly_settled, escalated, withdrawn
 };
 struct Crisis {
     std::string id, claimant, respondent, mediator;
     Id province{};
     Month effective_month{};
     CrisisStatus status{CrisisStatus::scheduled};
+    std::map<std::string,CrisisPosition> positions;
+    std::map<std::string,CrisisProposal> proposals;
+    std::set<std::string> issues;
 };
 struct Recognition {
     std::string recognizer, recognized;
@@ -172,6 +237,9 @@ struct DiplomacyState {
     std::vector<Recognition> recognitions;
     std::set<std::string> reparation_links; // C is the monetary obligation owner.
     std::set<std::string> commands;
+    std::vector<CulturalExchange> funded_exchanges;
+    std::vector<MilitaryAssistance> military_assistance;
+    std::map<std::tuple<std::string,std::string,std::string,Month>,Quantity> quota_used;
     std::uint64_t revision{};
 };
 
@@ -182,6 +250,11 @@ struct InfluenceView {
     std::int64_t trade_dependency_ppm{};
     // Military/political/cultural dimensions remain unsupported, not zero.
     bool military_known{}, political_known{}, cultural_known{};
+    Quantity military_goods_delivered{};
+    Money military_material_value{}, cultural_funding{};
+    std::uint64_t political_cooperation_actions{};
+    std::string comparable_currency{"TEST"};
+    bool foreign_currency_excluded{};
 };
 
 class Stage {
