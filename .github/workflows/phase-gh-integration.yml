@@ -1,0 +1,32 @@
+name: Phase G-H bounded C-D-E integration
+on:
+  push:
+    branches:
+      - work/phase-g-h-d0
+  pull_request:
+    branches:
+      - work/phase-e-cpp-integration
+  workflow_dispatch:
+
+concurrency:
+  group: phase-gh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_and_test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure C++20
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Build C D E G H
+        run: cmake --build build --config Release --parallel 2
+      - name: Run full CTest regression suite
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Detailed G H checks
+        run: ctest --test-dir build -C Release -R "^vic25_phase_gh_tests$" -V

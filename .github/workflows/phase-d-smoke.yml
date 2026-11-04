@@ -1,0 +1,24 @@
+name: Phase D focused smoke (C++ L1-L5)
+on:
+  pull_request:
+    branches: [work/phase-c-engine-integration]
+  workflow_dispatch:
+concurrency:
+  group: phase-d-smoke-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux-focused:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure C++20
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Build Phase D C++ tests only
+        run: cmake --build build --config Release --parallel 2 --target vic25_phase_d_tests vic25_phase_d_snapshot_tests vic25_phase_d_longrun_tests vic25_phase_d_shared_reservations_tests vic25_phase_d_construction_tests vic25_phase_d_industry_tests vic25_phase_d_technology_tests vic25_phase_d_cross_domain_tests vic25_phase_d_population_scale
+      - name: Execute focused Phase D CTest
+        run: ctest --test-dir build -C Release -R '^vic25_phase_d_' --output-on-failure
+      - name: Measure 100k and 1m sparse POP + industrial event loads
+        run: |
+          ./build/vic25_phase_d_population_scale 100000 2
+          ./build/vic25_phase_d_population_scale 1000000 2

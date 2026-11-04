@@ -1,0 +1,72 @@
+{
+  "schema": "vic25.hv.fixture/1.0",
+  "case_id": "HV-X1",
+  "status": "NOT_EXECUTED",
+  "test_ids": [
+    "HV-T03",
+    "HV-T10"
+  ],
+  "depends_on": [
+    "H-D3 TreatyTerm/C-P ratification",
+    "G-T4 PolicyProjection",
+    "C-E5 CustomsAssessment",
+    "C-E4 Fiscal",
+    "C-E3 Financial"
+  ],
+  "assumptions": [
+    "Single same currency; comparable import transactions in month 100 and 101",
+    "No exemptions or rounding remainder except effective treaty",
+    "Separate valid goods lots, money and legal customs events for each month",
+    "Treaty ratified at m100 stage9; eligible tariff term effective m101 stage0"
+  ],
+  "timeline": [
+    {
+      "month": 100,
+      "stage": 0,
+      "kind": "tariff_rule",
+      "base_value_minor": 1000,
+      "ad_valorem_ppm": 100000
+    },
+    {
+      "month": 100,
+      "stage": 7,
+      "kind": "valid_import_clearance",
+      "tax_assessed_minor": 100,
+      "cash_paid_minor": 100
+    },
+    {
+      "month": 100,
+      "stage": 9,
+      "kind": "treaty_signed_ratified",
+      "term_id": "TERM_X1",
+      "effective_month": 101
+    },
+    {
+      "month": 101,
+      "stage": 0,
+      "kind": "treaty_term_effective",
+      "term_id": "TERM_X1",
+      "goods_scope": [
+        "IRON"
+      ]
+    },
+    {
+      "month": 101,
+      "stage": 7,
+      "kind": "separate_valid_import_clearance",
+      "base_value_minor": 1000,
+      "tax_assessed_minor": 0,
+      "cash_paid_minor": 0
+    }
+  ],
+  "expected": {
+    "month100_customs_assessed_minor": 100,
+    "month100_government_cash_minor": 100,
+    "month101_customs_assessed_minor": 0,
+    "total_cash_from_two_clearances_minor": 100,
+    "one_policy_application_per_shipment": true,
+    "automatic_trade_quantity_increase": false,
+    "automatic_influence_points": 0,
+    "goods_created_by_treaty": 0
+  }
+}

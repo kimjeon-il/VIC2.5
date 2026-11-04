@@ -27,8 +27,12 @@ S0-A(금융), S0-B(노동), S0-C(가격·생산), S0-D(장기검증)의 기존 �
 
 ## Phase C 군사 설계(설계 확정 · C++ 미구현)
 
-[군사 C-M1~M5 상세 설계](phase-c/military/README.md)에서 징병·예비군/제대, 부대/편제·장비/지휘, 군수·물류, 작전/전투·사상자/회복, 전쟁/점령·종전/복구를 [C-D0](phase-c/C-D0_COMMON_CONTRACT.md) 및 [C-E1~E5](phase-c/economy/README.md)와 호환되게 확정했습니다. [군사 인수시험](phase-c/military/MILITARY_ACCEPTANCE_TESTS.md)에는 인구·복무·군수품·재정·사상자·관할권 관련 불변식과 30개 시나리오가 포함됩니다. 실제 통합 엔진/실측 역사계수/장기 C-D4 검증은 미완료입니다. 정치 C-P1~P5는 별도 문서로 작성되었지만 GitHub 병합은 완료되지 않았습니다.
+[군사 C-M1~M5 상세 설계](phase-c/military/README.md)에서 징병·예비군/제대, 부대/편제·장비/지휘, 군수·물류, 작전/전투·사상자/회복, 전쟁/점령·종전/복구를 [C-D0](phase-c/C-D0_COMMON_CONTRACT.md) 및 [C-E1~E5](phase-c/economy/README.md)와 호환되게 확정했습니다. [군사 인수시험](phase-c/military/MILITARY_ACCEPTANCE_TESTS.md)에는 인구·복무·군수품·재정·사상자·관할권 관련 불변식과 30개 시나리오가 포함됩니다. 실제 통합 엔진/실측 역사계수/장기 C-D4 검증은 미완료입니다. 정치 C-P1~P5 설계 원본은 PR #7을 통해 GitHub main에 반영됐습니다.
 
 ## Phase C-D4 통합 검증 설계(문서 확정 · 구현 미실행)
 
-[C-D4 통합 검증 계약](phase-c/integration/README.md)은 C-D0 및 C-E1~E5·C-P1~P5·C-M1~M5의 공통 World/12단계·인구/금융·재고/선거·동원/전투·관할 원장 정합성, [30개 불변조건](phase-c/integration/D4-3_INVARIANTS.md), [48개 통합 시험](phase-c/integration/D4-5_TEST_MATRIX.md), 결정론/세이브·롤백/100년·대규모 성능 인수 기준을 문서로 확정했습니다. 실제 C++ 통합 테스트/1,200개월 실행은 하지 않았습니다. L0 선행조건인 `phase-c-politics/1.0` 정치 설계 GitHub 등록 및 `work/pop-phase-b`의 단일 World 통합이 미완료이므로 완료/배포 판정은 **BLOCKED**입니다.
+[C-D4 통합 검증 계약](phase-c/integration/README.md)은 C-D0 및 C-E1~E5·C-P1~P5·C-M1~M5의 공통 World/12단계·인구/금융·재고/선거·동원/전투·관할 원장 정합성, [30개 불변조건](phase-c/integration/D4-3_INVARIANTS.md), [48개 통합 시험](phase-c/integration/D4-5_TEST_MATRIX.md), 결정론/세이브·롤백/100년·대규모 성능 인수 기준을 문서로 확정했습니다. 실제 C++ 통합 테스트/1,200개월 실행은 하지 않았습니다. L0 선행조건인 `phase-c-politics/1.0` 정치 설계 등록과 Phase B 인구원장 통합은 작업 브랜치에서 수행했습니다. [실제 구현/시험 보고서](phase-c/ENGINE_IMPLEMENTATION_STATUS.md)에 따른 D4 48개 합성 인수시험은 Linux/Windows PASS이지만 L0~L7 전체 게임 인수는 아직 미완료입니다.
+
+## Phase C C++ 통합시험(2026-11-04)
+
+[Phase C 구현·D4 최종 테스트 보고서](phase-c/ENGINE_IMPLEMENTATION_STATUS.md)에서 `D4-T46/47/48`을 포함한 48개 합성 통합시험 48 PASS/0 BLOCKED/0 FAIL과 Linux/Windows CTest 9/9 결과를 확인할 수 있습니다. C++ 엔진은 `work/phase-c-engine-integration` Draft PR #6에 있으며 완성형 역사게임 엔진의 전체 C-E/P/M 기능 구현과 정식 장기 인수는 계속 별도 상태로 관리합니다.

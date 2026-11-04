@@ -1,0 +1,52 @@
+{
+  "$schema": "vic25-design-fixture/phase-g-1.0",
+  "status": "NOT_EXECUTED",
+  "tests": [
+    "GT3-T02",
+    "GT5-T01"
+  ],
+  "assumptions": [
+    "valid physical path",
+    "customs cleared for arrival",
+    "no additional production or sales",
+    "month m=100"
+  ],
+  "input": {
+    "good_id": "IRON",
+    "quantity": 10,
+    "origin_stock": 10,
+    "destination_stock": 0,
+    "travel_months": 2,
+    "dispatch_month": 100,
+    "damage_month": 101,
+    "damaged_quantity": 3
+  },
+  "expected_months": [
+    {
+      "month": 100,
+      "origin_available": 0,
+      "in_transit": 10,
+      "destination_available": 0,
+      "lost": 0
+    },
+    {
+      "month": 101,
+      "origin_available": 0,
+      "in_transit": 7,
+      "destination_available": 0,
+      "lost": 3
+    },
+    {
+      "month": 102,
+      "stage": 0,
+      "origin_available": 0,
+      "in_transit": 0,
+      "destination_available": 7,
+      "lost": 3
+    }
+  ],
+  "expected": {
+    "physical_invariant": "origin + in_transit + destination + cumulative_losses = 10",
+    "same_month_consumption_of_unarrived_goods": 0
+  }
+}

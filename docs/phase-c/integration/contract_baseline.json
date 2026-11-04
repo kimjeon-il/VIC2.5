@@ -1,0 +1,89 @@
+{
+  "schema_version": "d4-contract-baseline/1.0",
+  "scope": "source-and-version-registration-gate-only",
+  "note": "Passing D4-T48 confirms this reproducible prototype's registered design contracts, baseline source compatibility and preceding 47 synthetic D4 checks. It does not certify full CE/CP/CM historical game functionality or D4-DONE.",
+  "source_branch": "work/merge-all-to-main",
+  "contract_versions": {
+    "pop": "pop-design/1.1",
+    "common": "phase-c-common/1.0",
+    "economy": "phase-c-economy/1.0",
+    "politics": "phase-c-politics/1.0",
+    "military": "phase-c-military/1.0",
+    "integration": "phase-c-integration/1.0"
+  },
+  "checkpoint_schema": "VIC25_SNAPSHOT_PHASEC_2",
+  "numeric_policy": "checked-int64/1",
+  "quantity_policy": "integer-lot/1",
+  "ruleset_identity": "vertical-slice-ruleset/1",
+  "canonical_git_blobs": {
+    "docs/pop/D0_ARCHITECTURE.md": "d1ae7d9541696c8f42d0b949a0a5c6184bf141ab",
+    "docs/pop/D1_SCHEMA.md": "509569a2fdbce88c09ba28ed790d684746bc3fed",
+    "docs/pop/D2_TRANSITIONS.md": "b3917a48a320a48d66e7ca76e214de3e914aa154",
+    "docs/pop/D3_RUNTIME.md": "bd6c0816b77b004a172190beabbb6ebbe4d673ac",
+    "docs/phase-c/C-D0_COMMON_CONTRACT.md": "0cdfdb17de0905db36e0132adc755f4d5c598e14",
+    "docs/phase-c/economy/README.md": "bfb90326d09bd217a678bd2a3333176479e6e907",
+    "docs/phase-c/economy/ECONOMIC_ADRS.md": "3d9a7633b5f4856a2d42c205e7c4da9c4d15f843",
+    "docs/phase-c/economy/ECONOMIC_ACCEPTANCE_TESTS.md": "57c4906d384d6e670c0c5bca52e4f2e634d6b141",
+    "docs/phase-c/politics/README.md": "c0ea031faf256e79208cef45e2fa40ec98bbad8c",
+    "docs/phase-c/politics/POLITICAL_ADRS.md": "a7b01ead2009e80a9098326c93d948c9dba8f74f",
+    "docs/phase-c/politics/POLITICAL_ACCEPTANCE_TESTS.md": "8dc5d810df370287a84780746c09638dd56386d5",
+    "docs/phase-c/politics/C-P1_STATE_GOVERNMENT_INSTITUTIONS.md": "0691afe1fe535f139e2ab1c6eae62325fa06e22f",
+    "docs/phase-c/politics/C-P2_LAW_POLICY_ENFORCEMENT.md": "f2f30641f78d63fb209c327b16f6261dfaefabca",
+    "docs/phase-c/politics/C-P3_POP_INTEREST_GROUPS_MOVEMENTS.md": "ef4afb3b90de446b43f49c5e10a87f909c8016f8",
+    "docs/phase-c/politics/C-P4_PARTIES_ELECTIONS_GOVERNMENT_FORMATION.md": "cf8fca179b182524ff538f2061c7c5733bba7698",
+    "docs/phase-c/politics/C-P5_UNREST_REBELLION_CIVIL_WAR.md": "fe22a4005430d97f40a7896b4367bb2831c5126c",
+    "docs/phase-c/politics/examples/election_three_seats.json": "aa69e04bc7b0cad66cbdd2d0cebc4c003e544692",
+    "docs/phase-c/politics/examples/law_effective_next_month.json": "840d673258c654ffee58cd8d92f389475b2baad6",
+    "docs/phase-c/military/README.md": "57ba9282910cf9edba586b4597e6446a1f229da8",
+    "docs/phase-c/military/MILITARY_ADRS.md": "85df3d44ef52f4e099cba0b83597e82c75f28f9d",
+    "docs/phase-c/military/MILITARY_ACCEPTANCE_TESTS.md": "c576691f3e39a63c8271a417785f7e92e45a916f",
+    "docs/phase-c/integration/README.md": "870e7dce32d1fde48795546073d668ffc3450014",
+    "docs/phase-c/integration/D4-3_INVARIANTS.md": "ea92028db6f7b6846d25ed43875402afeac4763c",
+    "docs/phase-c/integration/D4-5_TEST_MATRIX.md": "4e3d704e0abf31075bb3d9856cc88342782d0839",
+    "docs/phase-c/integration/D4-7_RELEASE_GATES_AND_ADRS.md": "4e4d55edefba65187e418f60674672de7e1bd6ff",
+    "docs/phase-c/integration/examples/cross_domain_reform_mobilization.json": "8dda5e8fdae0550765cf1d25a9d2a372e4d003ce",
+    "docs/phase-c/integration/examples/logistics_war_occupation.json": "07085fcc5faaf5f3b75f0d9276dd232a9e0388a1"
+  },
+  "expected_ids": {
+    "D4_ADR": 20,
+    "D4_INV": 30,
+    "D4_T": 48,
+    "CE_ADR": 28,
+    "CE_INV": 12,
+    "CE_T": 24,
+    "CP_ADR": 30,
+    "CP_INV": 12,
+    "CP_T": 25,
+    "CM_ADR": 34,
+    "CM_INV": 16,
+    "CM_T": 30
+  },
+  "required_runtime_files": [
+    "include/vic25/phase_b.hpp",
+    "include/vic25/phase_b_types.hpp",
+    "include/vic25/phase_b_world.hpp",
+    "include/vic25/phase_b_dynamics.hpp",
+    "include/vic25/phase_c.hpp",
+    "include/vic25/phase_c_snapshot.hpp",
+    "tests/test_phase_c.cpp",
+    "tests/test_phase_c_longrun.cpp",
+    "tests/test_phase_c_combined_longrun.cpp",
+    "tests/test_phase_c_population_crisis.cpp",
+    "tests/phase_c_t46_crisis.hpp",
+    "tests/phase_c_t47_scaling.hpp",
+    "bench/phase_c_scaling.cpp",
+    "CMakeLists.txt"
+  ],
+  "runtime_status": "PARTIAL_IMPLEMENTATION_WITH_SYNTHETIC_INTEGRATION_ACCEPTANCE",
+  "source_lock_revision": "d4-source-lock/1.1",
+  "source_lock_history": [
+    {
+      "date": "2026-11-05",
+      "change": "C-P2/C-P3 law and organization documentation extended to conditional religious societal impacts under I-C1/1.1; no changes to Phase C binary ABI or 48 numbered C++ acceptance tests",
+      "modified": [
+        "docs/phase-c/politics/C-P2_LAW_POLICY_ENFORCEMENT.md",
+        "docs/phase-c/politics/C-P3_POP_INTEREST_GROUPS_MOVEMENTS.md"
+      ]
+    }
+  ]
+}

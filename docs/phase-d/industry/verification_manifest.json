@@ -1,0 +1,216 @@
+{
+  "schema_version": "1.0",
+  "contract_id": "D-I1-I5",
+  "contract_version": "phase-d-industry/1.0",
+  "date": "2026-11-04",
+  "source_branch": "work/merge-all-to-main",
+  "upstream_contracts": [
+    "phase-d-common/1.0",
+    "phase-d-construction/1.0",
+    "pop-design/1.1",
+    "phase-c-common/1.0",
+    "phase-c-economy/1.0",
+    "phase-c-politics/1.0",
+    "phase-c-military/1.0",
+    "phase-c-integration/1.0"
+  ],
+  "status": {
+    "design": "CONFIRMED",
+    "static_document_audit": "PASS",
+    "cpp_implementation": "NOT_RUN",
+    "industry_45_test_execution": "NOT_RUN",
+    "upstream_regressions": "NOT_RUN",
+    "cross_platform_determinism": "NOT_RUN",
+    "scale_and_1200_months": "NOT_RUN",
+    "nonstorable_energy_dispatch": "BLOCKED_UPSTREAM_COMPATIBILITY"
+  },
+  "source_documents": [
+    {
+      "path": "docs/phase-d/industry/README.md",
+      "git_blob_sha": "aeab496ad1e0b097145e70a3170e9c934a91153a"
+    },
+    {
+      "path": "docs/phase-d/industry/D-I1_CLASSIFICATION_FIRMS_SITES.md",
+      "git_blob_sha": "a375bae3540df195462eef873d2d88a7fce2cc90"
+    },
+    {
+      "path": "docs/phase-d/industry/D-I2_RESOURCES_ENERGY_RECIPES.md",
+      "git_blob_sha": "304b722d4480b2a82df413cf91a8e786bfb81f7c"
+    },
+    {
+      "path": "docs/phase-d/industry/D-I3_CAPITAL_AUTOMATION_PRODUCTIVITY.md",
+      "git_blob_sha": "577867e3a4f3d28ff092ef6e4350e2568b79e3b4"
+    },
+    {
+      "path": "docs/phase-d/industry/D-I4_LOCATION_CLUSTERS_LOGISTICS.md",
+      "git_blob_sha": "466e47e23a56b6e53340262f42f42fa699f98674"
+    },
+    {
+      "path": "docs/phase-d/industry/D-I5_INDUSTRIALIZATION_POLICY_TRANSITION.md",
+      "git_blob_sha": "cc2fb9aecfa4927ebbfd3a39ed1b90521304ec60"
+    },
+    {
+      "path": "docs/phase-d/industry/INDUSTRY_ACCEPTANCE_TESTS.md",
+      "git_blob_sha": "4d73a58d6522d2cc42f728ed1ac61ff2f2c00651"
+    },
+    {
+      "path": "docs/phase-d/industry/INDUSTRY_ADRS.md",
+      "git_blob_sha": "6a7bc28358ca5466b59ef28f577fb40b076c1140"
+    },
+    {
+      "path": "docs/phase-d/industry/examples/ore_steel_supply_chain.json",
+      "git_blob_sha": "1c816718db1391e3d260a051dee1d2ef0880575d"
+    },
+    {
+      "path": "docs/phase-d/industry/examples/mechanization_retrofit.json",
+      "git_blob_sha": "f78a0e6afd20418eeece8eaeb3b9f8cbd9ad9962"
+    },
+    {
+      "path": "docs/phase-d/industry/examples/tariff_war_industry_shock.json",
+      "git_blob_sha": "e0adeecefc05ca66a7168d725859111a6b3c5bc8"
+    }
+  ],
+  "invariant_ids": [
+    "DI-INV-01",
+    "DI-INV-02",
+    "DI-INV-03",
+    "DI-INV-04",
+    "DI-INV-05",
+    "DI-INV-06",
+    "DI-INV-07",
+    "DI-INV-08",
+    "DI-INV-09",
+    "DI-INV-10",
+    "DI-INV-11",
+    "DI-INV-12",
+    "DI-INV-13",
+    "DI-INV-14",
+    "DI-INV-15",
+    "DI-INV-16",
+    "DI-INV-17",
+    "DI-INV-18",
+    "DI-INV-19",
+    "DI-INV-20",
+    "DI-INV-21",
+    "DI-INV-22",
+    "DI-INV-23",
+    "DI-INV-24",
+    "DI-INV-25"
+  ],
+  "acceptance_test_ids": [
+    "DI-T01",
+    "DI-T02",
+    "DI-T03",
+    "DI-T04",
+    "DI-T05",
+    "DI-T06",
+    "DI-T07",
+    "DI-T08",
+    "DI-T09",
+    "DI-T10",
+    "DI-T11",
+    "DI-T12",
+    "DI-T13",
+    "DI-T14",
+    "DI-T15",
+    "DI-T16",
+    "DI-T17",
+    "DI-T18",
+    "DI-T19",
+    "DI-T20",
+    "DI-T21",
+    "DI-T22",
+    "DI-T23",
+    "DI-T24",
+    "DI-T25",
+    "DI-T26",
+    "DI-T27",
+    "DI-T28",
+    "DI-T29",
+    "DI-T30",
+    "DI-T31",
+    "DI-T32",
+    "DI-T33",
+    "DI-T34",
+    "DI-T35",
+    "DI-T36",
+    "DI-T37",
+    "DI-T38",
+    "DI-T39",
+    "DI-T40",
+    "DI-T41",
+    "DI-T42",
+    "DI-T43",
+    "DI-T44",
+    "DI-T45"
+  ],
+  "adr_ids": [
+    "DI-ADR-001",
+    "DI-ADR-002",
+    "DI-ADR-003",
+    "DI-ADR-004",
+    "DI-ADR-005",
+    "DI-ADR-006",
+    "DI-ADR-007",
+    "DI-ADR-008",
+    "DI-ADR-009",
+    "DI-ADR-010",
+    "DI-ADR-011",
+    "DI-ADR-012",
+    "DI-ADR-013",
+    "DI-ADR-014",
+    "DI-ADR-015",
+    "DI-ADR-016",
+    "DI-ADR-017",
+    "DI-ADR-018",
+    "DI-ADR-019",
+    "DI-ADR-020",
+    "DI-ADR-021",
+    "DI-ADR-022",
+    "DI-ADR-023",
+    "DI-ADR-024",
+    "DI-ADR-025",
+    "DI-ADR-026",
+    "DI-ADR-027",
+    "DI-ADR-028",
+    "DI-ADR-029",
+    "DI-ADR-030",
+    "DI-ADR-031",
+    "DI-ADR-032",
+    "DI-ADR-033",
+    "DI-ADR-034",
+    "DI-ADR-035"
+  ],
+  "execution_contract": {
+    "monthly_pipeline_stages": 12,
+    "prior_input_delivery": "stage3",
+    "realized_production": "stage4",
+    "finished_output_market": "stage7",
+    "investments": "stage9a_next_month",
+    "law_effect": "month_plus_one_by_default",
+    "commissioning": "following_month_stage0",
+    "world_commit": "stage11_once",
+    "nonstorable_same_stage_energy": "explicit_CE_D4_ADR_and_version_upgrade_required"
+  },
+  "static_audit": {
+    "test_ids": 45,
+    "invariants": 25,
+    "adrs": 35,
+    "markdown_docs": 8,
+    "fixture_files": 3,
+    "external_project_links_checked": 7,
+    "markdown_links": "ALL_RESOLVED_EXCEPT_MANIFEST_SELF_TO_BE_CREATED",
+    "fixture_oracles": {
+      "ore_steel_cash_and_stock": "PASS",
+      "mechanization_WIP_and_POP": "PASS",
+      "tariff_war_cash_and_law_timing": "PASS"
+    },
+    "cpp_execution": false
+  },
+  "note": "Design-stage audit only: no executable C++ industrial tests or historical calibration have been performed.",
+  "integrated_resource_contract": "phase-j-resource-flow/1.0",
+  "resource_contract_note": "D-I2 now uses operational monthly flow for geology and standing biomass for renewables; full industry 45 not fully accepted.",
+  "merged_resource_contract": "phase-j-resource-flow/1.0",
+  "merge_audit_date": "2026-11-05",
+  "historical_source_sha_policy": "Modified design and test entries repointed to integrated blob SHA; this does not imply tests PASS."
+}

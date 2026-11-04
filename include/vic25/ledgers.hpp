@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace vic25 {
+namespace vic25 { namespace phasec { struct SnapshotCodec; }
 using Amount = std::int64_t; // Smallest currency unit, never floating-point money.
 using Quantity = std::int64_t; // Fixed-point count of commodity micro-units.
 
@@ -32,6 +32,7 @@ struct JournalEntry {
 };
 
 class FinancialLedger {
+    friend struct phasec::SnapshotCodec;
 public:
     void add_account(std::string account_id, std::string owner_id, AccountType type) {
         if (account_id.empty() || owner_id.empty()) throw std::invalid_argument("empty account identifier");
@@ -92,6 +93,7 @@ struct InventoryKey {
 };
 
 class InventoryLedger {
+    friend struct phasec::SnapshotCodec;
 public:
     // Opening stock must be an explicit event, not silently inserted.
     void initialize(const InventoryKey& key, Quantity quantity) {
@@ -169,6 +171,7 @@ private:
 };
 
 class OwnershipLedger {
+    friend struct phasec::SnapshotCodec;
 public:
     void issue(const std::string& asset, const std::string& owner, std::int64_t units) {
         if (units <= 0 || issued_.contains(asset)) throw std::invalid_argument("invalid share issue");

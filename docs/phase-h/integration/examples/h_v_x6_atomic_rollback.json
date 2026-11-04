@@ -1,0 +1,46 @@
+{
+  "schema": "vic25.hv.fixture/1.0",
+  "case_id": "HV-X6",
+  "status": "NOT_EXECUTED",
+  "test_ids": [
+    "HV-T61",
+    "HV-T62"
+  ],
+  "depends_on": [
+    "C-D0 single StagingWorld",
+    "H-D3 all-or-nothing TreatyTerm group",
+    "C-E3 Financial reservation",
+    "E sovereignty update",
+    "H organization/crisis events and ID allocator",
+    "C/D/E/G/H global rollback"
+  ],
+  "assumptions": [
+    "B cash spendable exactly 60 and cannot draw lawful credit",
+    "Simultaneous settlement requires immediate 100 payment and P sovereignty transfer; no partial payment allowed",
+    "Precommit snapshot and all ledger hashes recorded",
+    "Case A rejects before reservation; case B injects orphan jurisdiction ref at stage11 after staging modifications"
+  ],
+  "input": {
+    "payer": "B",
+    "receiver": "A",
+    "payer_spendable_cash_minor": 60,
+    "simultaneous_payment_required_minor": 100,
+    "province_id": "P",
+    "allow_partial_payment": false,
+    "allow_credit": false,
+    "fault_stage_for_case_B": 11
+  },
+  "expected": {
+    "funding_shortfall_minor": 40,
+    "case_A_status": "REJECTED",
+    "case_B_status": "ABORTED",
+    "actual_cash_transfer_minor": 0,
+    "province_sovereignty_changed": false,
+    "month_index_changed": false,
+    "commit_id_changed": false,
+    "next_entity_id_changed": false,
+    "all_domain_ledgers_equal_precommit": true,
+    "all_h_treaty_org_crisis_states_equal_precommit": true,
+    "no_reservations_leaked": true
+  }
+}

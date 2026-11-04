@@ -1,0 +1,50 @@
+{
+  "schema": "vic25.hv.fixture/1.0",
+  "case_id": "HV-X4",
+  "status": "NOT_EXECUTED",
+  "test_ids": [
+    "HV-T37",
+    "HV-T39",
+    "HV-T44",
+    "HV-T45"
+  ],
+  "depends_on": [
+    "E Claim/Dispute and JointAuthority (if unsupported BLOCKED)",
+    "H-D2 diplomatic communications",
+    "H-D3 settlement terms",
+    "H-D7 crisis mediation",
+    "C-M5 no war",
+    "C-E3 Financial compensation"
+  ],
+  "assumptions": [
+    "Sovereign of P is B, A has a claim",
+    "C is a legally eligible mediator with actual communication capacity",
+    "A/B accept and ratify treaty at m100 stage9, relevant terms effective m101 stage0",
+    "B owes A compensation 100, pays only 20 at eligible stage",
+    "Military withdrawal obligation needs actual C-M5 event; none occurs automatically"
+  ],
+  "input": {
+    "province_id": "P",
+    "sovereign_before": "B",
+    "claimant": "A",
+    "respondent": "B",
+    "mediator": "C",
+    "month_agreement": 100,
+    "effective_month": 101,
+    "compensation_obligation_minor": 100,
+    "actual_cash_paid_minor": 20,
+    "war_declaration_present": false
+  },
+  "expected": {
+    "eligible_international_crisis": true,
+    "mediator_can_be_neutral": true,
+    "automatic_conflict_records": 0,
+    "total_compensation_liability_minor": 100,
+    "actual_payment_minor": 20,
+    "unpaid_compensation_minor": 80,
+    "automatic_population_change": 0,
+    "automatic_property_transfer": 0,
+    "legal_joint_authority_requires_E_event": true,
+    "all_participants_forced_into_two_sides": false
+  }
+}

@@ -1,0 +1,29 @@
+name: Phase I-J resource flow compatibility
+on:
+  push:
+    branches: [work/phase-i-j-detail]
+  workflow_dispatch:
+concurrency:
+  group: phase-i-j-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  resource-regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Audit no-underground-total source contract
+        run: python scripts/verify_resource_flow_contract.py
+      - name: Configure C++20 headless engine
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF
+      - name: Compile relevant C D E G H regression targets
+        run: cmake --build build --config Release --parallel 2 --target vic25_phase_d_industry_tests vic25_phase_d_snapshot_tests vic25_phase_d_longrun_tests vic25_phase_e_tests vic25_phase_gh_snapshot_tests vic25_phase_gh_commerce_tests vic25_phase_gh_tests
+      - name: Run focused cross-domain regression
+        run: ctest --test-dir build -C Release --output-on-failure -R "^(vic25_phase_d_industry_tests|vic25_phase_d_snapshot_tests|vic25_phase_d_longrun_tests|vic25_phase_e_tests|vic25_phase_gh_snapshot_tests|vic25_phase_gh_commerce_tests|vic25_phase_gh_tests)$"

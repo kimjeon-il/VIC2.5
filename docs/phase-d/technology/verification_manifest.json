@@ -1,0 +1,216 @@
+{
+  "schema_version": "1.0",
+  "contract_id": "D-T1-T5",
+  "contract_version": "phase-d-technology/1.0",
+  "date": "2026-11-04",
+  "source_branch": "work/phase-d-design",
+  "upstream_contracts": [
+    "phase-d-common/1.0",
+    "phase-d-construction/1.0",
+    "phase-d-industry/1.0",
+    "pop-design/1.1",
+    "phase-c-common/1.0",
+    "phase-c-economy/1.0",
+    "phase-c-politics/1.0",
+    "phase-c-military/1.0",
+    "phase-c-integration/1.0"
+  ],
+  "status": {
+    "design": "CONFIRMED",
+    "static_document_audit": "PASS",
+    "cxx_implementation": "NOT_RUN",
+    "technology_45_test_execution": "NOT_RUN",
+    "upstream_regressions": "NOT_RUN",
+    "longrun_1200_months": "NOT_RUN",
+    "large_pop_scaling": "NOT_RUN",
+    "nonstorable_same_stage_energy": "BLOCKED_UPSTREAM_CE_D4_CONTRACT_CHANGE"
+  },
+  "source_documents": [
+    {
+      "path": "docs/phase-d/technology/README.md",
+      "git_blob_sha": "bbc4391e39758f58850eb9af3c7817060e8cd442"
+    },
+    {
+      "path": "docs/phase-d/technology/D-T1_KNOWLEDGE_TAXONOMY_PREREQUISITES.md",
+      "git_blob_sha": "a7cf0b6d0a83b45213bce31ed14c293f4e6edef4"
+    },
+    {
+      "path": "docs/phase-d/technology/D-T2_RESEARCH_INSTITUTIONS_EXPERIMENTS.md",
+      "git_blob_sha": "fd77ef2eb293dbf38c19b9a42024d9e3eee90ada"
+    },
+    {
+      "path": "docs/phase-d/technology/D-T3_INVENTION_DIFFUSION_IP.md",
+      "git_blob_sha": "e20e87ab5836b694ed4325a0edb23c2455237310"
+    },
+    {
+      "path": "docs/phase-d/technology/D-T4_ADOPTION_TRAINING_IMPLEMENTATION.md",
+      "git_blob_sha": "3e45900628c0491c9a090bb209cb50f1d79ceb74"
+    },
+    {
+      "path": "docs/phase-d/technology/D-T5_CROSS_DOMAIN_IMPACTS.md",
+      "git_blob_sha": "e567b18936a037c6b7a77132b8a4282681ce6470"
+    },
+    {
+      "path": "docs/phase-d/technology/TECHNOLOGY_ACCEPTANCE_TESTS.md",
+      "git_blob_sha": "a600422f5bb020416880e0a4d2d5415507505fad"
+    },
+    {
+      "path": "docs/phase-d/technology/TECHNOLOGY_ADRS.md",
+      "git_blob_sha": "828467551da5db76373dd89e968a368c7a617417"
+    },
+    {
+      "path": "docs/phase-d/technology/examples/two_month_research.json",
+      "git_blob_sha": "797326ed49d0a92bd8de7fd7b71c284b0c6a090f"
+    },
+    {
+      "path": "docs/phase-d/technology/examples/licensed_diffusion_three_holders.json",
+      "git_blob_sha": "ee008462ad9b916db0b42439fb3d2c645fe3d33a"
+    },
+    {
+      "path": "docs/phase-d/technology/examples/site_retrofit_training.json",
+      "git_blob_sha": "d48c27f0940628a759abbf5f4ade09d68b67b3f0"
+    }
+  ],
+  "invariant_ids": [
+    "DT-INV-01",
+    "DT-INV-02",
+    "DT-INV-03",
+    "DT-INV-04",
+    "DT-INV-05",
+    "DT-INV-06",
+    "DT-INV-07",
+    "DT-INV-08",
+    "DT-INV-09",
+    "DT-INV-10",
+    "DT-INV-11",
+    "DT-INV-12",
+    "DT-INV-13",
+    "DT-INV-14",
+    "DT-INV-15",
+    "DT-INV-16",
+    "DT-INV-17",
+    "DT-INV-18",
+    "DT-INV-19",
+    "DT-INV-20",
+    "DT-INV-21",
+    "DT-INV-22",
+    "DT-INV-23",
+    "DT-INV-24",
+    "DT-INV-25"
+  ],
+  "acceptance_test_ids": [
+    "DT-T01",
+    "DT-T02",
+    "DT-T03",
+    "DT-T04",
+    "DT-T05",
+    "DT-T06",
+    "DT-T07",
+    "DT-T08",
+    "DT-T09",
+    "DT-T10",
+    "DT-T11",
+    "DT-T12",
+    "DT-T13",
+    "DT-T14",
+    "DT-T15",
+    "DT-T16",
+    "DT-T17",
+    "DT-T18",
+    "DT-T19",
+    "DT-T20",
+    "DT-T21",
+    "DT-T22",
+    "DT-T23",
+    "DT-T24",
+    "DT-T25",
+    "DT-T26",
+    "DT-T27",
+    "DT-T28",
+    "DT-T29",
+    "DT-T30",
+    "DT-T31",
+    "DT-T32",
+    "DT-T33",
+    "DT-T34",
+    "DT-T35",
+    "DT-T36",
+    "DT-T37",
+    "DT-T38",
+    "DT-T39",
+    "DT-T40",
+    "DT-T41",
+    "DT-T42",
+    "DT-T43",
+    "DT-T44",
+    "DT-T45"
+  ],
+  "adr_ids": [
+    "DT-ADR-001",
+    "DT-ADR-002",
+    "DT-ADR-003",
+    "DT-ADR-004",
+    "DT-ADR-005",
+    "DT-ADR-006",
+    "DT-ADR-007",
+    "DT-ADR-008",
+    "DT-ADR-009",
+    "DT-ADR-010",
+    "DT-ADR-011",
+    "DT-ADR-012",
+    "DT-ADR-013",
+    "DT-ADR-014",
+    "DT-ADR-015",
+    "DT-ADR-016",
+    "DT-ADR-017",
+    "DT-ADR-018",
+    "DT-ADR-019",
+    "DT-ADR-020",
+    "DT-ADR-021",
+    "DT-ADR-022",
+    "DT-ADR-023",
+    "DT-ADR-024",
+    "DT-ADR-025",
+    "DT-ADR-026",
+    "DT-ADR-027",
+    "DT-ADR-028",
+    "DT-ADR-029",
+    "DT-ADR-030",
+    "DT-ADR-031",
+    "DT-ADR-032",
+    "DT-ADR-033",
+    "DT-ADR-034",
+    "DT-ADR-035"
+  ],
+  "execution_contract": {
+    "monthly_pipeline_stages": 12,
+    "research_production": "stage4",
+    "research_expense_and_receivables": "stage8",
+    "knowledge_validation": "stage9a",
+    "knowledge_effect": "next_month_stage0",
+    "pop_skill_change": "stage10",
+    "pop_skill_in_labor_market": "next_month_stage2",
+    "site_commissioning": "following_month_stage0",
+    "world_commit": "stage11_once",
+    "staging_world_full_rollback": true,
+    "unapproved_I2_DISPATCH": "UNSUPPORTED"
+  },
+  "static_audit": {
+    "markdown_documents": 8,
+    "fixtures": 3,
+    "ids_consecutive": true,
+    "invariants": 25,
+    "tests": 45,
+    "adrs": 35,
+    "markdown_links_validated": 40,
+    "cross_contract_file_links": 5,
+    "source_blob_hashes_verified": true,
+    "fixture_oracles": {
+      "funded_research_cash_and_materials": "STATIC_PASS",
+      "diffusion_license_cash_and_recipient_timing": "STATIC_PASS",
+      "site_retrofit_cash_POP_WIP_and_machine": "STATIC_PASS"
+    },
+    "non_executable_test_cases": 45
+  },
+  "note": "These are design and static fixture oracles only. No C++ technology integration, 45 acceptance runs, Phase C/D integration regression or long-duration performance runs have been executed."
+}

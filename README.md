@@ -1,3 +1,7 @@
+> **작업 브랜치 통합(2026-11-05):** [전체 브랜치 병합 감사](docs/BRANCH_MERGE_AUDIT_2026-11-05.md) — Phase B~H C++ 최신 구현, Phase D/E 전체 설계, Phase E 30k·역사지리 시험, G/H 238개 개별 게이트, 최신 Phase I/J 및 지하자원 매장량 없는 J-R1. *완성형 전체 인수 통과를 의미하지 않으며* BLOCKED는 PASS가 아니다.
+
+> **Phase C 통합 프로토타입 C-D4 인수 현황(2026-11-04):** [실제 구현 상태·48개 시험 결과](docs/phase-c/ENGINE_IMPLEMENTATION_STATUS.md) — T46·T47·T48 포함 **48개 합성시험 PASS**, Linux/Windows CTest 9개 PASS. **통합 코드는 `work/phase-c-engine-integration` Draft PR #6에 있고 main 미병합**, CE/CP/CM 전체 기능 구현·역사적 보정 및 D4-DONE은 미완료입니다.
+
 > **Phase C-D4 통합 검증 설계 (phase-c-integration/1.0)**: [docs/phase-c/integration/README.md](docs/phase-c/integration/README.md)에서 POP·경제·정치·군사 통합 World, 30개 불변조건·48개 교차 시험·월별 12단계·저장/복구/100년 장기 시험과 실제 구현 게이트를 확인할 수 있습니다. **설계 문서 확정이며 C++ 통합 엔진/장기 회귀는 미실행**입니다. 정치 C-P 설계 GitHub 정본 등록·Phase B 원장 통합이 선행조건입니다.
 
 > **Phase C-M1~M5 군사 상세 설계 (phase-c-military/1.0)**: [docs/phase-c/military/README.md](docs/phase-c/military/README.md)에서 병역·동원·예비군, 부대·장비·훈련, 군수·보급, 작전·사상자, 전쟁·점령·종전 및 [군사 인수시험](docs/phase-c/military/MILITARY_ACCEPTANCE_TESTS.md)을 확인할 수 있습니다. **설계 완료이며 전체 C++ 통합 구현·전쟁 시뮬레이션 회귀 전**입니다.

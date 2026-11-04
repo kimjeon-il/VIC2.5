@@ -1,0 +1,218 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "phase-d-integration/1.0",
+  "fixture_type": "fictional_test_value",
+  "fixture_id": "DV-X4",
+  "name": "Stage11 ownership failure rejects full month after commissioning manufacturing research and combat",
+  "world_seed": 800505,
+  "ruleset_version": "dv-rollback-test/1.0",
+  "failure_injection": {
+    "stage": 11,
+    "subphase": "11b",
+    "operation": "apply_facility_ownership",
+    "fault": "orphan_owner_ref_after_staged_unrelated_events",
+    "expected_domain_error": "DV_ERR_OWNERSHIP",
+    "expected_upstream_error": "D4_ERR_OWNERSHIP_ORPHAN",
+    "expected_result": "REJECT_AND_ABORT",
+    "must_not_be_silent_fallback": true
+  },
+  "opening_world_snapshot": {
+    "month_index": 800,
+    "next_entity_id": 5000,
+    "last_committed_event_id": "commit_799",
+    "cash": {
+      "government": 30,
+      "firm": 20,
+      "households": 0
+    },
+    "inventory": {
+      "ore_in_transit": 3,
+      "ore_at_site": 0,
+      "finished_plates": 0
+    },
+    "assets": {
+      "construction_WIP": 20,
+      "commissioned_asset_count": 0,
+      "active_capacity": 0
+    },
+    "knowledge": {
+      "holder_lab": "observed",
+      "site_technique": "inactive",
+      "pending_knowledge_events": 0
+    },
+    "population": {
+      "total": 4,
+      "employed": 0
+    },
+    "politics": {
+      "law_revision": 4
+    },
+    "military": {
+      "damage_events_committed": 0
+    }
+  },
+  "staged_proposals": [
+    {
+      "stage": 0,
+      "events": [
+        "actual incoming ore shipment +3 to site (in_transit -3)",
+        "commission existing WIP 20 to installed CapitalAsset and increase nominal capacity by 2"
+      ],
+      "tentative": {
+        "ore_at_site": 3,
+        "ore_in_transit": 0,
+        "construction_WIP": 0,
+        "commissioned_asset_count": 1,
+        "capacity": 2
+      }
+    },
+    {
+      "stage": 1,
+      "events": [
+        "funding reservation from firm cash for payroll and construction contract"
+      ],
+      "tentative": {
+        "wage_reservation": 5
+      }
+    },
+    {
+      "stage": 2,
+      "events": [
+        "assign 1 actual worker to manufacturing"
+      ],
+      "tentative": {
+        "employed": 1
+      }
+    },
+    {
+      "stage": 3,
+      "events": [
+        "deliver and consume ore 2 into production input pool"
+      ],
+      "tentative": {
+        "ore_at_site": 1
+      }
+    },
+    {
+      "stage": 4,
+      "events": [
+        "manufacture plates 2 from actual inputs and installed asset",
+        "real research service and validated construction work propose future WIP accounting"
+      ],
+      "tentative": {
+        "finished_plates": 2,
+        "validated_research_work": 1,
+        "construction_work": 1
+      }
+    },
+    {
+      "stage": 5,
+      "events": [
+        "pay worker wage 5 from firm account"
+      ],
+      "tentative": {
+        "firm_cash": 15,
+        "households_cash": 5
+      }
+    },
+    {
+      "stage": 8,
+      "events": [
+        "recognize 10 of construction WIP with valid payable/receivable"
+      ],
+      "tentative": {
+        "construction_WIP": 10,
+        "new_construction_receivable": 10
+      }
+    },
+    {
+      "stage": "9a",
+      "events": [
+        "validate research evidence; propose lab knowledge usable in month801"
+      ],
+      "tentative": {
+        "pending_knowledge_events": 1
+      }
+    },
+    {
+      "stage": 10,
+      "events": [
+        "record military damage condition reduction on commissioned site with related asset and inventory references"
+      ],
+      "tentative": {
+        "asset_damage_events": 1
+      }
+    },
+    {
+      "stage": 11,
+      "events": [
+        "inject facility ownership transfer with nonexistent target owner"
+      ],
+      "tentative": {
+        "ownership_orphan": true
+      }
+    }
+  ],
+  "oracle": {
+    "expected_error_code": "D4_ERR_OWNERSHIP_ORPHAN",
+    "no_stage11_commit": true,
+    "opening_world_snapshot_unchanged": {
+      "month_index": 800,
+      "next_entity_id": 5000,
+      "last_committed_event_id": "commit_799",
+      "cash": {
+        "government": 30,
+        "firm": 20,
+        "households": 0
+      },
+      "inventory": {
+        "ore_in_transit": 3,
+        "ore_at_site": 0,
+        "finished_plates": 0
+      },
+      "assets": {
+        "construction_WIP": 20,
+        "commissioned_asset_count": 0,
+        "active_capacity": 0
+      },
+      "knowledge": {
+        "holder_lab": "observed",
+        "site_technique": "inactive",
+        "pending_knowledge_events": 0
+      },
+      "population": {
+        "total": 4,
+        "employed": 0
+      },
+      "politics": {
+        "law_revision": 4
+      },
+      "military": {
+        "damage_events_committed": 0
+      }
+    },
+    "after_abort_world_snapshot_exactly_equal_to_opening": true,
+    "month_index_after_abort": 800,
+    "next_entity_id_after_abort": 5000,
+    "last_committed_event_id_after_abort": "commit_799",
+    "goods_rollback_in_transit": 3,
+    "goods_rollback_at_site": 0,
+    "goods_rollback_plates": 0,
+    "WIP_rollback": 20,
+    "commissioned_asset_rollback": 0,
+    "knowledge_promotion_rollback": "observed",
+    "research_knowledge_event_queue_rollback": 0,
+    "worker_contract_rollback": 0,
+    "firm_cash_rollback": 20,
+    "households_cash_rollback": 0,
+    "law_revision_rollback": 4,
+    "military_damage_rollback": 0,
+    "all_reservations_released": true,
+    "world_digest_after_abort_equals_before": true
+  },
+  "notes": [
+    "This fixture defines an expected failing month, not a successfully committed month.",
+    "Actual C++ test must implement deterministic fault injection at ownership posting and verify byte/semantic snapshot equality, journal cursor and global ID allocator state.",
+    "Every intermediate proposal is deliberately plausible; one failed ownership action must abort all previous staged work and changes."
+  ]
+}

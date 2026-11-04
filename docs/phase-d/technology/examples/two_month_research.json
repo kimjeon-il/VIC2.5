@@ -1,0 +1,169 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "phase-d-technology/1.0",
+  "fixture_type": "fictional_test_value",
+  "name": "Research work and validation require two funded months before knowledge usable",
+  "units": {
+    "calendar": "month_index",
+    "research": "evidence_work_unit",
+    "money": "TEST_CURRENCY_minor_unit",
+    "material": "reagent_lot",
+    "people": "person"
+  },
+  "actors": {
+    "sponsor": "gov_G",
+    "research_performer": "institution_R",
+    "lab_site": "site_R_lab",
+    "researcher_population_partition": "pop_researchers_2",
+    "knowledge_holder": "institution_R",
+    "tech_id": "tech_synthetic_chemistry",
+    "currency": "TEST_CURRENCY"
+  },
+  "opening": {
+    "month_index": 500,
+    "government_cash": 60,
+    "research_institution_cash": 0,
+    "researcher_household_cash": 0,
+    "initial_reagents": 6,
+    "initial_equipment_lab_work_capacity_per_month": 3,
+    "researcher_count": 2,
+    "monthly_labor_work_capacity": 4,
+    "initial_knowledge_state": "observed",
+    "initial_verified_research_work": 0,
+    "world_total_cash": 60
+  },
+  "ruleset": {
+    "version": "dt-research-example/1.0",
+    "seed": 15005,
+    "work_required_for_validation": 6,
+    "evidence_threshold_units": 6,
+    "experimental_material_per_research_work_unit": 1,
+    "lab_equipment_per_research_work_unit": 1,
+    "monthly_wage_cost_for_two_researchers": 8,
+    "monthly_executed_grant": 20,
+    "verification_outcome": "fixture_forced_pass_after_evidence_and_review",
+    "knowledge_effective_offset_months": 1
+  },
+  "months": [
+    {
+      "month_index": 500,
+      "stage1": {
+        "government_grant_paid_actual": 20,
+        "research_institution_grant_received": 20,
+        "wages_reserved": 8
+      },
+      "stage2": {
+        "active_qualified_researchers": 2,
+        "actual_labor_work_capacity": 4
+      },
+      "stage3": {
+        "verified_reagents_available": 3
+      },
+      "stage4": {
+        "realized_research_work": 3,
+        "reagents_consumed": 3,
+        "lab_equipment_work_used": 3,
+        "cumulative_work_evidence": 3
+      },
+      "stage5": {
+        "paid_researcher_wages": 8
+      },
+      "stage8": {
+        "research_labor_cost_accrued": 8,
+        "government_cash": 40,
+        "institution_cash": 12,
+        "researcher_cash": 8
+      },
+      "stage9a": {
+        "knowledge_validation": "not_yet_sufficient_evidence",
+        "usable_transition_scheduled": false
+      },
+      "stage11": {
+        "committed_research_work_total": 3,
+        "remaining_material_reagents": 3,
+        "knowledge_state": "observed",
+        "world_total_cash": 60
+      }
+    },
+    {
+      "month_index": 501,
+      "stage1": {
+        "government_grant_paid_actual": 20,
+        "research_institution_grant_received": 20,
+        "wages_reserved": 8
+      },
+      "stage2": {
+        "active_qualified_researchers": 2,
+        "actual_labor_work_capacity": 4
+      },
+      "stage3": {
+        "verified_reagents_available": 3
+      },
+      "stage4": {
+        "realized_research_work": 3,
+        "reagents_consumed": 3,
+        "lab_equipment_work_used": 3,
+        "cumulative_work_evidence": 6
+      },
+      "stage5": {
+        "paid_researcher_wages": 8
+      },
+      "stage8": {
+        "research_labor_cost_accrued": 8,
+        "government_cash": 20,
+        "institution_cash": 24,
+        "researcher_cash": 16
+      },
+      "stage9a": {
+        "knowledge_validation": "validated_usable",
+        "knowledge_event_proposed": true,
+        "knowledge_event_effective_month": 502
+      },
+      "stage11": {
+        "committed_research_work_total": 6,
+        "remaining_material_reagents": 0,
+        "knowledge_state": "observed",
+        "next_month_knowledge_state_pending": "usable",
+        "world_total_cash": 60
+      }
+    },
+    {
+      "month_index": 502,
+      "stage0": {
+        "knowledge_state": "usable",
+        "origin_event_month": 501,
+        "grant_cash_automatically_created": 0,
+        "production_asset_automatically_created": 0
+      },
+      "stage4": {
+        "additional_research_without_new_inputs": 0
+      },
+      "stage11": {
+        "world_total_cash": 60,
+        "researcher_count": 2,
+        "knowledge_state": "usable",
+        "installed_factory_capacity_created_by_knowledge": 0
+      }
+    }
+  ],
+  "oracles": {
+    "research_month_500": 3,
+    "research_month_501": 3,
+    "cumulative_validated_work": 6,
+    "material_used_total": 6,
+    "material_end": 0,
+    "knowledge_usable_month_500": false,
+    "knowledge_usable_month_501": false,
+    "first_usable_month": 502,
+    "total_cash_conserved": 60,
+    "grant_expense_government_total": 40,
+    "actual_researcher_wage_total": 16,
+    "institution_cash_end_month_501": 24,
+    "no_spontaneous_pop_or_goods": true
+  },
+  "notes": [
+    "All values synthetic and research success is an explicit controlled oracle, not a claim of deterministic real-world discovery.",
+    "In a real engine, grant and wages are balanced financial postings among government, institution and researcher accounts; each research event links actual inventory and capital services.",
+    "Research activity and genuine R&D accounting are separate from training/adoption; real-world coefficients must be calibrated externally."
+  ]
+}

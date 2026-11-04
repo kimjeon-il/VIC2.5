@@ -1,0 +1,201 @@
+{
+  "schema_version": "1.0",
+  "fixture_type": "fictional_test_value",
+  "contract_version": "phase-d-construction/1.0",
+  "title": "Three-month factory construction and next-month commissioning",
+  "units": {
+    "calendar": "month",
+    "currency": "VIC_TEST_CURRENCY",
+    "material_good": "building_material",
+    "material_quantity_unit": "lot",
+    "work_unit": "structural_work_unit",
+    "asset_capacity_unit": "nominal_site_capacity",
+    "amount_unit": "minor_unit"
+  },
+  "ruleset": {
+    "version": "dc-example/1.0",
+    "seed": 271828,
+    "rounding": "integer_exact",
+    "minimum_calendar_months": 2,
+    "material_per_work_unit": {
+      "numerator": 3,
+      "denominator": 2
+    },
+    "crew_service_per_work_unit": 1,
+    "equipment_service_per_work_unit": 1,
+    "material_cost_per_lot": 10,
+    "wage_cost_per_work_unit": 10,
+    "contract_price_per_accepted_work_unit": 30,
+    "asset_capacity_on_commission": 10,
+    "allow_unpaid_certified_work_to_be_commissioned": true
+  },
+  "actors": {
+    "client_and_asset_owner": "A",
+    "contractor": "B",
+    "future_operator": "E"
+  },
+  "project": {
+    "id": "project_A_new_factory",
+    "region_id": "region_R",
+    "output_asset_spec_id": "building_shell_1",
+    "required_work": 4,
+    "work_unit": "structural_work_unit",
+    "work_package_id": "work_structural_1",
+    "initial_accepted_work": 0,
+    "contractor_ownership_transition": "no_automatic_ownership_change",
+    "asset_owner": "A"
+  },
+  "opening": {
+    "month_index": 100,
+    "contractor_material_inventory": 6,
+    "contractor_material_book_value": 60,
+    "contractor_cash": 40,
+    "client_cash": 120,
+    "client_wip_book_value": 0,
+    "client_payable_to_B": 0,
+    "contractor_receivable_from_A": 0,
+    "installed_target_asset_count": 0
+  },
+  "months": [
+    {
+      "month_index": 100,
+      "stage1": {
+        "funded_wages_reserved": 20,
+        "expected_project_work": 2
+      },
+      "stage2": {
+        "crew_count": 2,
+        "contractor_site": "site_B_construction",
+        "crew_service_capacity": 2
+      },
+      "stage3": {
+        "delivered_and_consumable_material": 3
+      },
+      "stage4": {
+        "work_attempted": 2,
+        "work_accepted": 2,
+        "work_rejected": 0,
+        "material_consumed": 3,
+        "equipment_service_used": 2,
+        "crew_service_used": 2,
+        "cumulative_accepted_work": 2
+      },
+      "stage5": {
+        "wages_paid": 20
+      },
+      "stage8": {
+        "new_certified_claim": 60,
+        "contractor_recognized_revenue": 60,
+        "contractor_material_cost": 30,
+        "contractor_wage_cost": 20,
+        "contractor_profit": 10,
+        "client_wip_delta": 60,
+        "client_payable_delta": 60,
+        "contractor_receivable_delta": 60
+      },
+      "stage11": {
+        "ready_for_commission": false,
+        "client_wip_book_value": 60,
+        "client_payable_to_B": 60,
+        "contractor_material_inventory": 3,
+        "contractor_cash": 20,
+        "installed_target_asset_count": 0
+      }
+    },
+    {
+      "month_index": 101,
+      "stage1": {
+        "funded_wages_reserved": 20,
+        "expected_project_work": 2
+      },
+      "stage2": {
+        "crew_count": 2,
+        "crew_service_capacity": 2
+      },
+      "stage3": {
+        "delivered_and_consumable_material": 3
+      },
+      "stage4": {
+        "work_attempted": 2,
+        "work_accepted": 2,
+        "work_rejected": 0,
+        "material_consumed": 3,
+        "equipment_service_used": 2,
+        "crew_service_used": 2,
+        "cumulative_accepted_work": 4
+      },
+      "stage5": {
+        "wages_paid": 20
+      },
+      "stage8": {
+        "new_certified_claim": 60,
+        "contractor_recognized_revenue": 60,
+        "contractor_material_cost": 30,
+        "contractor_wage_cost": 20,
+        "contractor_profit": 10,
+        "client_wip_delta": 60,
+        "client_payable_delta": 60,
+        "contractor_receivable_delta": 60
+      },
+      "stage11": {
+        "ready_for_commission": true,
+        "condition": "physical_inspection_authority_ownership_ready",
+        "client_wip_book_value": 120,
+        "client_payable_to_B": 120,
+        "contractor_receivable_from_A": 120,
+        "contractor_material_inventory": 0,
+        "contractor_cash": 0,
+        "installed_target_asset_count": 0
+      }
+    },
+    {
+      "month_index": 102,
+      "stage0": {
+        "commissioning_event": "commission_building_shell_1",
+        "asset_owner": "A",
+        "asset_operator": "E",
+        "wip_reclassification": -120,
+        "installed_asset_book_value": 120,
+        "installed_target_asset_count": 1,
+        "nominal_site_capacity_created": 10
+      },
+      "stage8": {
+        "client_payment_to_B": 120,
+        "client_payable_delta": -120,
+        "contractor_receivable_delta": -120,
+        "client_cash_delta": -120,
+        "contractor_cash_delta": 120
+      },
+      "stage11": {
+        "client_wip_book_value": 0,
+        "client_payable_to_B": 0,
+        "contractor_receivable_from_A": 0,
+        "client_cash": 0,
+        "contractor_cash": 120,
+        "installed_target_asset_count": 1
+      }
+    }
+  ],
+  "oracles": {
+    "stage4_month_100_new_asset_production_capacity": 0,
+    "stage4_month_101_new_asset_production_capacity": 0,
+    "stage0_month_102_nominal_site_capacity": 10,
+    "each_month_contractor_value_added": 30,
+    "contract_total_revenue": 120,
+    "contract_total_material_cost": 60,
+    "contract_total_wage_cost": 40,
+    "contract_total_profit": 20,
+    "client_total_capitalized_wip_before_commission": 120,
+    "goods_consumed_total": 6,
+    "workers_counted_once_per_month": 2,
+    "no_new_cash_from_wip": true,
+    "no_new_gdp_from_asset_reclassification": true,
+    "operator_actual_production_requires_independent_C_E1_inputs": true
+  },
+  "notes": [
+    "All values are fictional test values, not historical observations or Victoria 3 data.",
+    "Existing opening material inventory and contractor cash are prior-period assets; this example does not model their original financing.",
+    "The construction service was certified and accrued by each stage8; payment is scheduled in month 102 after commissioning.",
+    "The target asset is a building shell with nominal site capacity, not a machine or any automatically staffed operating production line."
+  ]
+}

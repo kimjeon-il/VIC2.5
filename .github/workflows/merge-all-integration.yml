@@ -1,0 +1,49 @@
+name: VIC2.5 consolidated integration Linux Windows
+on:
+  push:
+    branches: [work/merge-all-to-main, main]
+  workflow_dispatch:
+concurrency:
+  group: vic25-unified-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Resource flow contract static audit
+        run: python scripts/verify_resource_flow_contract.py
+      - name: Audit G/H 238 IDs and distinction of BLOCKED versus PASS
+        run: python scripts/verify_phase_gh_238.py --root . --audit
+      - name: Install OpenGL test dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libglfw3-dev libglew-dev libgl1-mesa-dev xvfb
+      - name: Configure Linux with OpenGL
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=ON
+      - name: Configure Windows headless
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF
+      - name: Compile all C++ targets
+        run: cmake --build build --config Release --parallel 2
+      - name: Full CTest (includes EV-T10 compact 10k to 30k and 238 explicit G/H IDs)
+        run: ctest --test-dir build -C Release --parallel 2 --output-on-failure
+      - name: G/H 238 status report (Linux)
+        if: runner.os == 'Linux'
+        run: python scripts/verify_phase_gh_238.py --root . --binary build/vic25_phase_gh_acceptance --report build/gh-238-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unified-${{ matrix.os }}-test-results
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/gh-238-report.json
+          if-no-files-found: ignore
