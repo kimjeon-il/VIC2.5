@@ -583,6 +583,115 @@ public:
         d_.promotions[d_.opening_month+1].push_back({p.holder,p.tech_id,KnowledgeLevel::usable});
         d_.append(c_.month(),"knowledge-review-next-month",project);
     }
+    void purchase_license(const std::string& id) {
+        must(7);
+        auto& license=d_.licenses.at(id);
+        require(!license.paid && license.valid_from<=d_.opening_month+1 &&
+                (license.valid_until<0||license.valid_until>=d_.opening_month+1),
+                "invalid license availability or repeated payment");
+        require(c_.shares("PATENT:"+license.tech,license.grantor)>0,
+                "technology licensor has no documented patent right");
+        if(license.actual_fee)
+            c_.pay(license.grantee,license.grantor,license.actual_fee);
+        license.paid=true;
+        d_.append(d_.opening_month,"lawful-tech-license-purchased",id);
+    }
+    void plan_contact(const std::string& id,Quantity units){
+        must(1);
+        auto& contact=d_.contacts.at(id);
+        require(!contact.reviewed&&units>0&&
+                contact.verified_instruction+contact.planned_instruction+units<=
+                    contact.required_instruction,
+                "invalid knowledge transfer plan");
+        if(contact.tuition_per_work)
+            c_.phase_d_reserve_cash(contact.target,"contact:"+id,
+                                    product(units,contact.tuition_per_work));
+        contact.planned_instruction=phaseb::add_checked(contact.planned_instruction,units);
+    }
+    void instruct_contact(const std::string& id,Quantity units){
+        must(4);
+        auto& contact=d_.contacts.at(id);
+        require(units>0&&units<=contact.planned_instruction &&
+                d_.level(contact.source,contact.tech)==KnowledgeLevel::usable,
+                "knowledge transfer requires actual knowledgeable teacher/contact");
+        occupy_labor(contact.source,product(units,contact.teachers_per_work));
+        contact.verified_instruction=phaseb::add_checked(contact.verified_instruction,units);
+        contact.planned_instruction-=units;
+        d_.append(d_.opening_month,"actual-knowledge-instruction",id);
+    }
+    void pay_contact(const std::string& id,Quantity units){
+        must(5);
+        auto& contact=d_.contacts.at(id);
+        require(units>0&&contact.paid_instruction+units<=contact.verified_instruction,
+                "unverified knowledge instruction cannot be paid");
+        const Money fee=product(units,contact.tuition_per_work);
+        if(fee){
+            c_.phase_d_release_cash(contact.target,"contact:"+id,fee);
+            c_.pay(contact.target,contact.source,fee);
+        }
+        contact.paid_instruction=phaseb::add_checked(contact.paid_instruction,units);
+        d_.append(d_.opening_month,"actual-knowledge-instruction-paid",id);
+    }
+    void review_contact(const std::string& id){
+        must(9);
+        auto& contact=d_.contacts.at(id);
+        require(!contact.reviewed&&contact.verified_instruction>=
+                contact.required_instruction&&
+                contact.paid_instruction>=contact.required_instruction,
+                "knowledge transfer lacks real instruction or legitimate payment");
+        contact.reviewed=true;
+        d_.promotions[d_.opening_month+1].push_back({
+            contact.target,contact.tech,KnowledgeLevel::understood});
+        d_.append(d_.opening_month,"verified-knowledge-transfer-next-month",id);
+    }
+    void plan_training(const std::string& id,Quantity units){
+        must(1);
+        auto& p=d_.training.at(id);
+        require(!p.certified&&units>0 &&
+                p.verified_service+p.planned_service+units<=p.required_service,
+                "invalid POP occupational training plan");
+        if(p.fee_per_service)
+            c_.phase_d_reserve_cash(p.sponsor,"training:"+id,
+                                    product(units,p.fee_per_service));
+        p.planned_service=phaseb::add_checked(p.planned_service,units);
+    }
+    void deliver_training(const std::string& id,Quantity units){
+        must(4);
+        auto& p=d_.training.at(id);
+        require(!p.certified&&units>0&&units<=p.planned_service &&
+                c_.people().has_slice(p.trainee_slice) &&
+                c_.people().slice(p.trainee_slice).count>=p.trainee_count &&
+                c_.people().employed(p.trainee_slice)==0,
+                "training would duplicate employed trainees");
+        occupy_labor(p.trainer,units);
+        p.verified_service=phaseb::add_checked(p.verified_service,units);
+        p.planned_service-=units;
+        d_.append(d_.opening_month,"real-POP-occupational-training",id);
+    }
+    void pay_training(const std::string& id,Quantity units){
+        must(5);
+        auto& p=d_.training.at(id);
+        require(units>0&&p.paid_service+units<=p.verified_service,
+                "training fee lacks actual instructional service");
+        const Money fee=product(units,p.fee_per_service);
+        if(fee){
+            c_.phase_d_release_cash(p.sponsor,"training:"+id,fee);
+            c_.pay(p.sponsor,p.trainer,fee);
+        }
+        p.paid_service=phaseb::add_checked(p.paid_service,units);
+        d_.append(d_.opening_month,"training-service-financially-settled",id);
+    }
+    void certify_training(const std::string& id){
+        must(10);
+        auto& p=d_.training.at(id);
+        require(!p.certified&&p.verified_service>=p.required_service &&
+                p.paid_service>=p.required_service,
+                "new POP qualification lacks verified training input");
+        p.resulting_slice=c_.phase_d_certify_occupational_training(
+            p.trainee_slice,p.trainee_count,p.target_occupational_skill);
+        p.certified=true;
+        d_.append(d_.opening_month,"next-month-valid-POP-skill",id);
+    }
     void propose_adoption(const std::string& site,const std::string& tech) {
         must(9);
         const auto& f=c_.facility(site);
