@@ -1,0 +1,157 @@
+{
+  "schema_version": "1.0",
+  "contract_version": "phase-d-industry/1.0",
+  "fixture_type": "fictional_test_value",
+  "name": "Tariff becomes effective next month, imported parts delivery and war-damaged factory",
+  "units": {
+    "calendar": "month_index",
+    "parts": "lot",
+    "steel": "lot",
+    "machine": "unit",
+    "currency": "TEST_CURRENCY",
+    "money": "minor_unit",
+    "people": "person"
+  },
+  "ruleset": {
+    "version": "di-policy-shock/1.0",
+    "seed": 11987,
+    "tariff_per_part": 2,
+    "parts_unit_price": 10,
+    "freight_total": 8,
+    "parts_quantity": 4,
+    "shipment_travel_months": 1
+  },
+  "actors": {
+    "government": "GOV_B",
+    "foreign_seller": "firm_parts_A",
+    "carrier": "firm_carrier",
+    "domestic_buyer": "firm_machine_B",
+    "domestic_worker_partition": "workers_B_2"
+  },
+  "opening": {
+    "month_index": 701,
+    "buyer_cash": 100,
+    "seller_cash": 0,
+    "carrier_cash": 0,
+    "government_cash": 0,
+    "worker_cash": 0,
+    "buyer_steel_stock": 6,
+    "buyer_imported_parts_stock": 0,
+    "buyer_active_machine_factory_capacity": 2,
+    "imported_parts_in_transit": 0
+  },
+  "events": [
+    {
+      "month_index": 701,
+      "stage0": {
+        "valid_tariff_rate_per_part": 0
+      },
+      "stage7": {
+        "foreign_parts_sold": 4,
+        "parts_in_transit": 4,
+        "shipment_origin": "A",
+        "shipment_destination": "B",
+        "seller_cash_received": 40,
+        "freight_cash_received": 8,
+        "buyer_cash_paid": 48
+      },
+      "stage9d": {
+        "new_tariff_law_adopted": true,
+        "effective_month": 702,
+        "rate_per_imported_part": 2
+      },
+      "stage11": {
+        "buyer_cash": 52,
+        "seller_cash": 40,
+        "carrier_cash": 8,
+        "government_cash": 0,
+        "transit_parts": 4,
+        "buyer_parts_inventory": 0,
+        "taxes_from_shipment": 0
+      }
+    },
+    {
+      "month_index": 702,
+      "stage0": {
+        "shipment_arrives": 4,
+        "customs_tariff_assessment": 8,
+        "buyer_tariff_cash_paid": 8,
+        "government_tariff_cash_received": 8,
+        "buyer_parts_inventory_after_clearance": 4
+      },
+      "stage2": {
+        "factory_workers": 2
+      },
+      "stage3": {
+        "parts_consumed": 4,
+        "steel_consumed": 6
+      },
+      "stage4": {
+        "machine_output": 2
+      },
+      "stage5": {
+        "wages_paid": 10
+      },
+      "stage8": {
+        "revenue_only_if_actually_sold": false,
+        "inventory_machine_units_unsold": 2
+      },
+      "stage10": {
+        "event": "war_damaged_factory_asset",
+        "rated_capacity_before": 2,
+        "rated_capacity_after_effective_next_month": 1,
+        "capacity_lost": 1
+      },
+      "stage11": {
+        "buyer_cash": 34,
+        "seller_cash": 40,
+        "carrier_cash": 8,
+        "government_cash": 8,
+        "worker_cash": 10,
+        "parts_in_transit": 0,
+        "buyer_parts_inventory": 0,
+        "unsold_machine_inventory": 2,
+        "new_factory_asset_capacity_for_next_month": 1
+      }
+    },
+    {
+      "month_index": 703,
+      "stage0": {
+        "active_factory_capacity": 1
+      },
+      "stage1": {
+        "planned_machine_output": 2
+      },
+      "stage3": {
+        "imported_parts_delivered": 0,
+        "steel_delivered": 0
+      },
+      "stage4": {
+        "actual_machine_output": 0,
+        "reason": "lack_of_raw_materials",
+        "production_not_restored_from_war_damage": true
+      },
+      "stage11": {
+        "war_repair_project_requires_real_construction": true
+      }
+    }
+  ],
+  "oracles": {
+    "cash_start_world": 100,
+    "cash_end_month_702": 100,
+    "tariff_in_month_701": 0,
+    "tariff_due_in_month_702": 8,
+    "parts_ore_in_transit_month_701": 4,
+    "actual_buyer_parts_received_month_702": 4,
+    "stage4_machine_output_month_702": 2,
+    "unsold_output_is_inventory_not_cash": true,
+    "stage10_war_damage_not_retroactive_to_702_production": true,
+    "active_factory_capacity_next_month": 1,
+    "month_703_free_restoration": 0
+  },
+  "notes": [
+    "All values synthetic; law becomes effective in month 702 only; customs clearance and goods availability depend on actual arrival/rights.",
+    "The machinery product made in stage4 month 702 is inventory, distinct from the producing factory's own CapitalAsset damaged at stage10.",
+    "Worker salaries, import price, freight, tariff are mirrored cash transfers with no extra issuance; real executable implementation requires matching bank/account and accrued-cost journal entries."
+  ]
+}
