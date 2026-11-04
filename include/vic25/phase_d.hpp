@@ -82,9 +82,6 @@ struct DomainState {
     std::map<std::int64_t,std::vector<Adoption>> pending_adoptions;
     std::vector<Evidence> research_evidence;
     std::vector<std::string> journal;
-    std::map<std::string,People> labor_used;
-    std::map<std::string,Quantity> site_capacity_used;
-    std::map<std::string,Money> funds_reserved;
     std::uint64_t event_sequence{};
     // Phase C's stage10 increments people_.month() before stage11 validation.
     // Keep the original opening month for Phase D stage11 effective dates.
@@ -101,7 +98,7 @@ struct DomainState {
     }
     void begin_month(phasec::IntegratedWorld& c) {
         opening_month=c.month();
-        labor_used.clear();site_capacity_used.clear();funds_reserved.clear();
+        c.phase_d_enable_shared_resources();
         for(auto& [id,p]:constructions){(void)id;p.planned_work=0;}
         for(auto& [id,p]:researches){(void)id;p.planned_work=0;}
         if(auto it=promotions.find(c.month());it!=promotions.end()) {
@@ -184,26 +181,10 @@ class Stage {
     int phase_;
     void must(int n) const {require(phase_==n,"phase D event in wrong stage");}
     void occupy_labor(const std::string& owner,People people) {
-        require(people>0 && c_.phase_d_workforce(owner)>=people,
-                "phase D labor lacks actual Phase B employment");
-        const auto next=phaseb::add_checked(d_.labor_used[owner],people);
-        require(next<=c_.phase_d_workforce(owner),
-                "phase D double-used worker service");
-        d_.labor_used[owner]=next;
+        c_.phase_d_use_labor(owner,people);
     }
     void occupy_site(const std::string& site,Quantity units) {
-        require(units>0,"nonpositive site usage");
-        const auto& f=c_.facility(site);
-        require(f.capacity>=f.damaged,"invalid facility damage");
-        const auto next=phaseb::add_checked(d_.site_capacity_used[site],units);
-        require(next<=f.capacity-f.damaged,"facility capacity exceeded");
-        d_.site_capacity_used[site]=next;
-    }
-    void reserve_cash(const std::string& owner, Money amount) {
-        require(amount>0,"zero budget reservation");
-        const auto next=phaseb::add_checked(d_.funds_reserved[owner],amount);
-        require(next<=c_.cash(owner),"phase D unfunded or double-reserved budget");
-        d_.funds_reserved[owner]=next;
+        c_.phase_d_use_facility(site,units);
     }
 public:
     Stage(phasec::IntegratedWorld& c,DomainState& d,int stage)
@@ -213,15 +194,16 @@ public:
     [[nodiscard]] phasec::IntegratedWorld& phase_c() {return c_;}
     [[nodiscard]] const DomainState& state() const {return d_;}
 
-    // Stage1 promises are bounded by real existing cash. A full Phase C
-    // reservation ledger is a future L1 requirement; Stage5 actual pay is
-    // mandatory before WIP / Knowledge changes.
+    // Cash reservation is now owned by the SAME Phase C authority used by
+    // legacy payments, wages, transactions and Phase D activity planning.
+    // Payments must actually settle before capitalisation or validation.
     void plan_work(const std::string& project,Quantity units) {
         must(1);
         auto& p=d_.constructions.at(project);
         require(units>0 && p.accepted_work+units<=p.work_required &&
                 !p.ready&&!p.commissioned,"invalid construction plan");
-        reserve_cash(p.client,product(units,p.cash_price_per_work));
+        c_.phase_d_reserve_cash(p.client,"construction:"+project,
+                                 product(units,p.cash_price_per_work));
         p.planned_work=phaseb::add_checked(p.planned_work,units);
     }
     void perform_work(const std::string& project,Quantity units) {
@@ -245,10 +227,8 @@ public:
         require(units>0&&p.paid_work+units<=p.accepted_work,
                 "cannot pay uncertified construction units");
         const auto amount=product(units,p.cash_price_per_work);
-        require(d_.funds_reserved[p.client]>=amount,
-                "construction lacks authorized budget reservation");
+        c_.phase_d_release_cash(p.client,"construction:"+project,amount);
         c_.pay(p.client,p.contractor,amount);
-        d_.funds_reserved[p.client]-=amount;
         p.paid_work=phaseb::add_checked(p.paid_work,units);
         d_.append(c_.month(),"work-paid",project);
     }
@@ -292,7 +272,8 @@ public:
         must(1);
         auto& p=d_.researches.at(project);
         require(units>0 && !p.reviewed,"invalid research plan");
-        reserve_cash(p.sponsor,product(units,p.cash_cost_per_work));
+        c_.phase_d_reserve_cash(p.sponsor,"research:"+project,
+                                 product(units,p.cash_cost_per_work));
         p.planned_work=phaseb::add_checked(p.planned_work,units);
     }
     void perform_research(const std::string& project,Quantity units) {
@@ -320,10 +301,8 @@ public:
         require(units>0 && p.paid_work+units<=p.verified_work,
                 "cannot finance nonexistent research");
         const auto amount=product(units,p.cash_cost_per_work);
-        require(d_.funds_reserved[p.sponsor]>=amount,
-                "research amount was not cash-reserved");
+        c_.phase_d_release_cash(p.sponsor,"research:"+project,amount);
         c_.pay(p.sponsor,p.holder,amount);
-        d_.funds_reserved[p.sponsor]-=amount;
         p.paid_work=phaseb::add_checked(p.paid_work,units);
         d_.append(c_.month(),"paid-research",project);
     }
