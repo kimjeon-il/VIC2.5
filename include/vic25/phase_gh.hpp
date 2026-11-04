@@ -278,7 +278,7 @@ class Stage {
     void plan_contracts();
     [[nodiscard]] Quantity lawful_trade_quantity(
         const std::string& seller_country,const std::string& buyer_country,
-        const std::string& good,Quantity requested) const;
+        const std::string& good,Quantity requested);
     void reserve_trade_quota(const std::string& seller_country,
                             const std::string& buyer_country,
                             const std::string& good,Quantity amount);
@@ -297,7 +297,7 @@ class Stage {
     }
     [[nodiscard]] bool exempt(const std::string& seller,
                               const std::string& buyer,
-                              const std::string& good) const {
+                              const std::string& good) {
         for (const auto& [id, treaty] : diplomacy_.treaties) {
             (void)id;
             if (!treaty.active) continue;
@@ -317,7 +317,7 @@ class Stage {
     }
     [[nodiscard]] std::int64_t duty_rate(const std::string& seller,
                                           const std::string& buyer,
-                                          const std::string& good) const {
+                                          const std::string& good) {
         if (seller == buyer || exempt(seller, buyer, good)) return 0;
         auto it = diplomacy_.tariffs.find({buyer, good});
         return it == diplomacy_.tariffs.end() ? 0 : it->second.ppm;
@@ -520,7 +520,8 @@ public:
              const std::map<std::string,VoteChoice>& ballots,
              const std::string& proposer,const std::string& prime);
     void admit_organization_member(const std::string& org,
-             const std::string& member,const std::string& decision);
+             const std::string& member,const std::string& decision,
+             const std::string& applicant_prime);
     void leave_organization(const std::string& org,
              const std::string& member,const std::string& prime);
     void fund_cultural_exchange(const std::string& id,
@@ -703,7 +704,7 @@ public:
     [[nodiscard]] Month month() const{return core_.month();}
     [[nodiscard]] std::uint64_t commit_id()const{return core_.commit_id();}
     [[nodiscard]] const TradeState& commerce() const{return trade_;}
-    [[nodiscard]] const DiplomacyState& diplomacy()const{return diplomacy_}
+    [[nodiscard]] const DiplomacyState& diplomacy()const{return diplomacy_;}
     [[nodiscard]] const TradeContract& contract(const std::string& id)const{
         return trade_.contracts.at(id);
     }
