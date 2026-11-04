@@ -20,7 +20,7 @@ static Id people(World& w,const std::string& region,People n) {
     auto& p=w.seed_core().seed_population();
     const auto h=p.household_profile({region,"mixed","shared",n});
     const auto e=p.economic_profile({region,"worker","wage","employee",p.default_education()});
-    const auto d=p.demographic_profile({region,700,Sex::female,"culture","faith",
+    const auto d=p.demographic_profile({region,w.month()-300,Sex::female,"culture","faith",
                                         "citizen","free",p.default_health(),Service::civilian});
     return p.seed_population(d,e,h,n);
 }
