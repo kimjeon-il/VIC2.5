@@ -1,0 +1,29 @@
+name: Phase E C-D-E integration and bounded E-V gates
+on:
+  push:
+    branches:
+      - work/phase-e-cpp-integration
+  workflow_dispatch:
+
+concurrency:
+  group: phase-e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_and_test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure C++20
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Build C/D/E regression targets
+        run: cmake --build build --config Release --parallel 2
+      - name: Execute CTest suite
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Phase E granular output
+        run: ctest --test-dir build -C Release -R "^vic25_phase_e_tests$" -V
