@@ -27,3 +27,9 @@ jobs:
         run: cmake --build build --config Release --parallel 2 --target vic25_phase_b_tests vic25_phase_c_tests vic25_phase_d_tests vic25_phase_e_tests vic25_phase_gh_tests vic25_phase_gh_snapshot_tests
       - name: Existing world regression
         run: ctest --test-dir build -C Release -R "^(vic25_phase_b_tests|vic25_phase_c_tests|vic25_phase_d_tests|vic25_phase_e_tests|vic25_phase_gh_tests|vic25_phase_gh_snapshot_tests)$" --output-on-failure
+      - name: Synthetic native day scaling (Linux 30k Province and 100k POP)
+        if: runner.os == 'Linux'
+        run: cmake --build build --config Release --parallel 2 --target vic25_daily_30k
+      - name: Execute synthetic native day scaling
+        if: runner.os == 'Linux'
+        run: ctest --test-dir build -C Release -R "^vic25_daily_30k$" -V --output-on-failure

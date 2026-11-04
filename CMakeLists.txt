@@ -328,3 +328,12 @@ if (BUILD_TESTING)
     add_test(NAME vic25_daily_native_tests COMMAND vic25_daily_native_tests)
     set_tests_properties(vic25_daily_native_tests PROPERTIES TIMEOUT 240)
 endif()
+
+# Synthetic 30k-Province / 100k-POP day benchmark is Linux-only,
+# not a proof of full low-end GPU frametime or autonomous daily demographics.
+if (BUILD_TESTING AND UNIX AND NOT APPLE)
+    add_executable(vic25_daily_30k bench/daily_30k.cpp)
+    target_link_libraries(vic25_daily_30k PRIVATE vic25_core)
+    add_test(NAME vic25_daily_30k COMMAND vic25_daily_30k)
+    set_tests_properties(vic25_daily_30k PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
+endif()
