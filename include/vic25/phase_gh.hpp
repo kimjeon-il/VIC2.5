@@ -275,6 +275,13 @@ class Stage {
     [[nodiscard]] std::optional<PathQuote> quote_path(
         Id from, Id to, Month month) const;
     void plan_contracts();
+    [[nodiscard]] Quantity lawful_trade_quantity(
+        const std::string& seller_country,const std::string& buyer_country,
+        const std::string& good,Quantity requested) const;
+    void reserve_trade_quota(const std::string& seller_country,
+                            const std::string& buyer_country,
+                            const std::string& good,Quantity amount);
+    void queue_package_effects_if_ratified(Treaty& treaty);
     void reserve_collateral();
     void register_arrived_losses();
     void pay_insurance_premiums();
@@ -292,10 +299,18 @@ class Stage {
                               const std::string& good) const {
         for (const auto& [id, treaty] : diplomacy_.treaties) {
             (void)id;
-            if (!treaty.active || treaty.good != good) continue;
-            if ((treaty.country_a == seller && treaty.country_b == buyer) ||
-                (treaty.country_b == seller && treaty.country_a == buyer))
-                return true;
+            if (!treaty.active) continue;
+            const bool in_parties=(treaty.country_a==seller&&treaty.country_b==buyer)||
+                                  (treaty.country_b==seller&&treaty.country_a==buyer);
+            if(in_parties&&treaty.good==good)return true;
+            for(const auto& clause:treaty.clauses)
+                if(clause.kind==ClauseKind::tariff_exemption &&
+                   clause.good==good &&
+                   clause.effective<=phase_c().month() &&
+                   (clause.expires<0||phase_c().month()<=clause.expires) &&
+                   ((clause.obligor==seller&&clause.beneficiary==buyer)||
+                    (clause.beneficiary==seller&&clause.obligor==buyer)))
+                    return true;
         }
         return false;
     }
@@ -359,8 +374,10 @@ public:
                          treaty.ratified_a : treaty.ratified_b;
         require(!approved, "H_ERR_DUPLICATE_RATIFICATION");
         approved = true;
+        treaty.ratifications.insert(country);
         treaty.effective_month = std::max(treaty.effective_month,
                                          phase_c().month()+1);
+        queue_package_effects_if_ratified(treaty);
         ++diplomacy_.revision;
     }
     void establish_protectorate(const std::string& id,
@@ -487,6 +504,40 @@ public:
 
     void plan_autonomous_trade();
     void execute_autonomous_trade();
+    void propose_treaty_package(const std::string& id,
+             const std::set<std::string>& parties,
+             std::vector<TreatyClause> clauses,
+             const std::string& proposer,const std::string& prime);
+    void configure_organization(const std::string& id,
+             OrganizationRule rule,const std::string& proposing_prime);
+    void hold_organization_vote(const std::string& org,const std::string& id,
+             const std::string& subject,
+             const std::map<std::string,VoteChoice>& ballots,
+             const std::string& proposer,const std::string& prime);
+    void admit_organization_member(const std::string& org,
+             const std::string& member,const std::string& decision);
+    void leave_organization(const std::string& org,
+             const std::string& member,const std::string& prime);
+    void fund_cultural_exchange(const std::string& id,
+             const std::string& sponsor,const std::string& recipient,
+             Money amount,const std::string& sponsor_prime);
+    void dispatch_military_assistance(const std::string& id,
+             const std::string& donor,const std::string& recipient,
+             const std::string& good,Id origin,Id destination,
+             Quantity amount,Money reference_unit_value,Month duration,
+             const std::string& donor_prime);
+    void submit_crisis_position(const std::string& crisis,
+             const std::string& actor,const std::string& stance,
+             bool conditional,const std::string& prime);
+    void offer_crisis_compromise(const std::string& crisis,
+             CrisisProposal proposal,const std::string& prime);
+    void respond_crisis_offer(const std::string& crisis,
+             const std::string& proposal,const std::string& actor,
+             bool accept,const std::string& prime);
+    void freeze_crisis(const std::string& crisis,
+             const std::string& claimant_prime,const std::string& respondent_prime);
+    void disburse_treaty_aid(const std::string& treaty,
+             const std::string& term,Money amount);
     void create_trade_contract(TradeContract c);
     void offer_trade_credit(CreditFacility credit);
     void draw_trade_credit(const std::string& id, Money amount);
@@ -509,7 +560,13 @@ public:
         });
         for(auto& [id,t]:diplomacy_.treaties) {
             (void)id;
-            if(!t.active && t.ratified_a && t.ratified_b &&
+            const bool fully_ratified=t.parties.empty()?
+                               (t.ratified_a&&t.ratified_b):
+                               std::all_of(t.parties.begin(),t.parties.end(),
+                                 [&](const std::string& p){
+                                     return t.ratifications.contains(p);
+                                 });
+            if(!t.active && fully_ratified &&
                t.effective_month<=phase_c().month()){
                 t.active=true;
                 ++diplomacy_.revision;
@@ -517,8 +574,22 @@ public:
         }
         for(auto& [id,o]:diplomacy_.organizations) {
             (void)id;
-            if(!o.active && o.effective_month<=phase_c().month()){
+            if(!o.active && o.effective_month<=phase_c().month() &&
+               o.members.size()>=2) {
                 o.active=true;
+                ++diplomacy_.revision;
+            }
+            if(auto pending=o.pending_admissions.find(phase_c().month());
+               pending!=o.pending_admissions.end()) {
+                o.members.insert(pending->second.begin(),pending->second.end());
+                o.pending_admissions.erase(pending);
+                ++diplomacy_.revision;
+            }
+            if(auto pending=o.pending_exits.find(phase_c().month());
+               pending!=o.pending_exits.end()) {
+                for(const auto& member:pending->second)o.members.erase(member);
+                o.pending_exits.erase(pending);
+                if(o.members.size()<2)o.active=false;
                 ++diplomacy_.revision;
             }
         }
@@ -563,7 +634,7 @@ private:
                     (!t.active || (t.ratified_a&&t.ratified_b)),
                     "H_ERR_TREATY_INVARIANT");
         for(const auto& [id,o]:h.organizations)
-            require(id==o.id && o.members.size()>=2 &&
+            require(id==o.id && (!o.active||o.members.size()>=2) &&
                     o.dues_per_member>=0,"H_ERR_ORGANIZATION_INVARIANT");
         for(const auto& [id,c]:h.crises)
             require(id==c.id && s.spatial().provinces.contains(c.province),
@@ -625,6 +696,10 @@ public:
     [[nodiscard]] const CreditFacility& trade_credit(const std::string& id)const{
         return trade_.credit.at(id);
     }
+    [[nodiscard]] InfluenceView assess_influence(const std::string& source,
+                                                  const std::string& target) const;
+    [[nodiscard]] CrisisAdvice advise_crisis(const std::string& id,
+                                              const std::string& actor) const;
     [[nodiscard]] InfluenceView trade_influence(const std::string& source,
                                                   const std::string& target) const {
         InfluenceView view;
@@ -647,7 +722,10 @@ public:
     void validate()const{
         core_.validate();
         for(const auto& [id,t]:diplomacy_.treaties)
-            require(id==t.id && (!t.active||(t.ratified_a&&t.ratified_b)),
+            require(id==t.id && (!t.active||
+              (t.parties.empty()?(t.ratified_a&&t.ratified_b):
+                std::all_of(t.parties.begin(),t.parties.end(),
+                  [&](const std::string& p){return t.ratifications.contains(p);}))),
                     "H_ERR_TREATY_INVARIANT");
         for(const auto& [id,r]:trade_.routes)
             require(id==r.id && core_.spatial().provinces.contains(r.origin)&&
