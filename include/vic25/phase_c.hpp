@@ -443,6 +443,10 @@ public:
         if(phase_d_reservation_mode_)
             resources_.assert_goods_available({service.operator_id,service.region,service.good},
                                               patients,stock(service.operator_id,service.region,service.good));
+        if(phase_d_reservation_mode_)
+            resources_.use_labor(service.operator_id,
+                                 (patients+service.patients_per_worker-1)/service.patients_per_worker,
+                                 employed_by(service.operator_id));
         goods_.consume({service.operator_id,service.region,service.good},patients);
         service.provided+=patients;
         events_.push_back("actual-public-medical-service");
@@ -677,6 +681,8 @@ public:
                "invalid explicit migration and ownership allocation");
         const Id arrived=people_.migrate(source,count,destination_region,destination_household,0);
         if(moving_cash) {
+            if(phase_d_reservation_mode_)
+                resources_.assert_cash_available(old_owner,moving_cash,cash(old_owner));
             money_.post({unique("migration-cash"),"explicit household capital reallocation",{
                 {account(old_owner,"capital"),moving_cash,0},
                 {account(old_owner,"cash"),0,moving_cash},
@@ -804,6 +810,8 @@ public:
         household_output_[slice]+=output;
         tracked_goods_.insert(good);
         goods_.produce({"HH:"+std::to_string(row.key.household),demo.region,good},output);
+        if(phase_d_reservation_mode_)
+            resources_.record_stage4_output({"HH:"+std::to_string(row.key.household),demo.region,good},output);
         events_.push_back("household-actual-in-kind-output");
     }
     void household_consume(Id slice,const std::string& good,Quantity qty) {
@@ -811,6 +819,9 @@ public:
         ensure(people_.has_slice(slice)&&qty>0,"invalid household consumption");
         const auto& row=people_.slice(slice);
         const auto& demo=people_.demographic(row.key.demographic);
+        if(phase_d_reservation_mode_)
+            resources_.assert_goods_available({"HH:"+std::to_string(row.key.household),demo.region,good},qty,
+                stock("HH:"+std::to_string(row.key.household),demo.region,good));
         goods_.consume({"HH:"+std::to_string(row.key.household),demo.region,good},qty);
         household_consumed_[{row.key.household,good}] =
             phaseb::add_checked(household_consumed_[{row.key.household,good}],qty);
@@ -1274,6 +1285,9 @@ public:
         ensure(casualties >= 0 && casualties <= count && loss.ammunition >= 0 &&
                stock(unit, region, "ammunition") >= loss.ammunition,
                "combat exceeds people or ammunition");
+        if(loss.ammunition && phase_d_reservation_mode_)
+            resources_.assert_goods_available({unit,region,"ammunition"},loss.ammunition,
+                                              stock(unit,region,"ammunition"));
         if (loss.ammunition) goods_.consume({unit, region, "ammunition"}, loss.ammunition);
         const auto before = people_.events().size();
         people_.battle_losses(source, loss.killed, loss.acute, loss.long_term,
