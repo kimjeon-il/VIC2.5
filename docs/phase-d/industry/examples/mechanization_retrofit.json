@@ -80,7 +80,6 @@
         "loan_drawdown_actual": 80,
         "loan_claim_bank": 80,
         "firm_deposit_created": 80,
-        "repair_funding_reserved": 20,
         "machine_purchase_funding_reserved": 60
       },
       "stage2": {
@@ -193,6 +192,7 @@
     "Only a fixed example demonstrating physical/time prerequisites; 399-402 are synthetic month indices not calendar years.",
     "The independent contractor's two workers are additional eligible persons from a different POP partition, not duplicates of the mill's 10-person partition.",
     "Actual money, machine goods, materials, labor and construction services must have complete counterpart journals in C++ fixtures. No claim is made that the design-stage fixture is executable.",
-    "The six mill workers no longer assigned to the mechanized line remain in population and are unemployed or reassigned through EmploymentLedger rather than deleted."
+    "The six mill workers no longer assigned to the mechanized line remain in population and are unemployed or reassigned through EmploymentLedger rather than deleted.",
+    "The 20-unit construction payment is reserved from the actual firm deposit at month 401 stage1, not simultaneously reserved in month 400."
   ]
 }
