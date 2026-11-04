@@ -304,17 +304,23 @@ static void test_repeated_world_deterministic() {
 }
 int main() {
     try {
-        test_construction_accepted_wip_next_month();
-        test_funded_research_and_knowledge_lag();
-        test_industry_real_inputs_and_capacity();
-        test_adoption_not_national_bonus();
-        test_cross_domain_ore_to_construction();
-        test_research_vs_industry_worker_conflict_rollback();
-        test_funding_and_research_material_fail_closed();
-        test_late_failure_rolls_back_all_domains();
-        test_unsupported_retrofit_is_rejected();
-        test_unsupported_nonstorable_dispatch_rejected();
-        test_repeated_world_deterministic();
+        const auto run=[](const char* label,auto func){
+            try {func();}
+            catch(const std::exception& e) {
+                throw std::runtime_error(std::string(label)+": "+e.what());
+            }
+        };
+        run("construction_WIP",test_construction_accepted_wip_next_month);
+        run("funded_research",test_funded_research_and_knowledge_lag);
+        run("industry",test_industry_real_inputs_and_capacity);
+        run("adoption",test_adoption_not_national_bonus);
+        run("industry_to_construction",test_cross_domain_ore_to_construction);
+        run("labor_rollback",test_research_vs_industry_worker_conflict_rollback);
+        run("input_reject",test_funding_and_research_material_fail_closed);
+        run("late_rollback",test_late_failure_rolls_back_all_domains);
+        run("retrofit_reject",test_unsupported_retrofit_is_rejected);
+        run("energy_reject",test_unsupported_nonstorable_dispatch_rejected);
+        run("deterministic_replay",test_repeated_world_deterministic);
         std::cout<<"Phase D bounded integration: 11 scenario cases PASS. "
                     "This is not the D-V 72/279 acceptance suite.\n";
         return 0;
