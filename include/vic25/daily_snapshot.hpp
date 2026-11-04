@@ -177,11 +177,16 @@ struct Migrator {
     }
     static World phase_c_file(const std::filesystem::path& path,
                               std::uint64_t seed=0) {
+        std::ifstream file(path,std::ios::binary);
+        if(!file)throw std::runtime_error("TIME_ERR_MISSING_PHASE_C_SAVE");
+        const std::string original_bytes{std::istreambuf_iterator<char>{file},
+                                         std::istreambuf_iterator<char>{}};
         auto c=phasec::SnapshotCodec::load(path);
         auto d=phased::World::from_legacy_phase_c(std::move(c));
         auto e=phasee::World::from_legacy_phase_d(std::move(d));
         auto gh=phasegh::World::from_legacy_phase_e(std::move(e));
-        return World::adopt(std::move(gh),seed,"phase-c/checkpoint-file");
+        return World::adopt(std::move(gh),seed,"phase-c/checkpoint-file",
+                            phasec::persistence_detail::checksum(original_bytes));
     }
     static World phase_b_in_memory(phaseb::World legacy,std::uint64_t seed=0) {
         const auto digest=legacy.fingerprint();

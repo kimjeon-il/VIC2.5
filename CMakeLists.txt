@@ -314,3 +314,8 @@ if (BUILD_TESTING)
     add_test(NAME vic25_daily_time_tests COMMAND vic25_daily_time_tests)
     set_tests_properties(vic25_daily_time_tests PROPERTIES TIMEOUT 240)
 endif()
+
+# Offline legacy save -> daily v2 checkpoint CLI. Requires explicit source format
+# and seed; cannot silently manufacture sub-month historical events.
+add_executable(vic25_daily_migrate src/migrate_daily_save.cpp)
+target_link_libraries(vic25_daily_migrate PRIVATE vic25_core)

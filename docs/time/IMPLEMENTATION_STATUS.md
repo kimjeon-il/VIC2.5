@@ -35,3 +35,7 @@
 - [Daily Tick CI](https://github.com/kimjeon-il/VIC2.5/actions/workflows/daily-tick-integration.yml)
 - Linux/Windows 모두 일별 초기 6개 시험 그룹 빌드·실행 PASS (실제 CI run 41859929268).
 - 범분야 POP/C/D/E/G/H 연동 회귀는 별도 CTest와 실측 증거를 확인해 추가할 것.
+ 
+## 오프라인 마이그레이션 CLI
+
+`vic25_daily_migrate <phase-c|phase-d|phase-e|phase-gh> <legacy-input> <new-daily-output> <world-seed>` 명령을 제공한다. 구 파일은 덮어쓰지 않고 새 경로에만 `VIC25_DAILY_SNAPSHOT_1`로 저장하며 저장 직후 재읽기·체크섬·출처/날짜를 검증한다. 비지원 포맷 또는 손상 파일은 정확하게 거부한다.

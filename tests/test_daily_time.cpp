@@ -1,5 +1,7 @@
 #include "vic25/daily_snapshot.hpp"
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -153,6 +155,20 @@ static void exact_legacy_migration() {
     check(vic25::phasec::SnapshotCodec::encode(
               migrated_c.engine().base().core().core())==c_payload,
           "C true financial/population state not preserved");
+    const auto legacy_c_path=std::filesystem::temp_directory_path()/
+        "vic25-daily-legacy-phase-c-checkpoint.bin";
+    std::filesystem::remove(legacy_c_path);
+    vic25::phasec::SnapshotCodec::save(c,legacy_c_path);
+    std::ifstream legacy_input(legacy_c_path,std::ios::binary);
+    const std::string old_saved_bytes{std::istreambuf_iterator<char>{legacy_input},
+                                      std::istreambuf_iterator<char>{}};
+    auto migrated_c_file=Migrator::phase_c_file(legacy_c_path,54321);
+    check(migrated_c_file.migration_checksum()==
+              vic25::phasec::persistence_detail::checksum(old_saved_bytes) &&
+          vic25::phasec::SnapshotCodec::encode(
+              migrated_c_file.engine().base().core().core())==c_payload,
+          "C disk checkpoint migration must preserve payload and source checksum");
+    std::filesystem::remove(legacy_c_path);
     vic25::phaseb::World population(24000);
     auto from_b=Migrator::phase_b_in_memory(std::move(population));
     check(from_b.date()==Date{2000,1,1} &&
