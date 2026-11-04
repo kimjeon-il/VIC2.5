@@ -63,7 +63,7 @@ q_accepted  = q_performed - q_rejected_quality
 
 ## C3-4. 기간 제약
 
-- 모든 공사에 무조건 동일한 최소 1개월을 강제하지 않는다. 공법별 `minimum_calendar_months`, `earliest_start_month`, ``hold_months`(양생·안전검사 등)와 월별 달력/계절 규칙을 구분한다.
+- 모든 공사에 무조건 동일한 최소 1개월을 강제하지 않는다. 공법별 `minimum_calendar_months`, `earliest_start_month`, `hold_months`(양생·안전검사 등)와 월별 달력/계절 규칙을 구분한다.
 - 12단계 월 실행을 벗어난 매일 시뮬레이션을 추가하지 않는다. 월중 세부 순서가 필요한 공정은 승인된 `stage4` 하위 DAG 사건 순서로 기록하며 최소 경과월은 달력 게이트로 검사한다.
 - 선행공정은 `m` 이전 확정실적 또는 **stage4 내부에서 먼저 확정된 실적**을 읽을 수 있다. 이 경우 작업조·설비·재고 예약을 두 번 사용할 수 없고 공정 DAG/자원 예약 순으로 실행한다.
 - 작업이 1월에 시작해 3개월 이상 양생이 필요하다면 다른 공정이 선행 검사 조건을 만족해도 `hold_months` 이전 조기 가동 불가.
