@@ -39,6 +39,17 @@ struct ConstructionProject {
     Money capitalized_value{};
     bool ready{}, commissioned{};
     std::int64_t ready_month{-1};
+    bool permit_required{}, permit_valid{true};
+    bool inspection_required{}, inspected{true};
+    bool allow_accrued_invoice_commission{};
+};
+struct WorkPackage {
+    std::string id, project, material_good;
+    Quantity required_work{}, accepted_work{}, rejected_work{}, planned_work{};
+    Quantity material_per_work{};
+    People workers_per_work{};
+    std::int64_t earliest_month{}, curing_months{}, finished_month{-1};
+    std::vector<std::string> predecessors;
 };
 struct IndustryRecipe {
     std::string id, site, tech_id;
@@ -74,6 +85,7 @@ class Stage;
 
 struct DomainState {
     std::map<std::string,ConstructionProject> constructions;
+    std::map<std::string,WorkPackage> work_packages;
     std::map<std::string,IndustryRecipe> recipes;
     std::map<std::string,ResearchProject> researches;
     std::map<std::pair<std::string,std::string>,KnowledgeLevel> knowledge;
@@ -100,6 +112,7 @@ struct DomainState {
         opening_month=c.month();
         c.phase_d_enable_shared_resources();
         for(auto& [id,p]:constructions){(void)id;p.planned_work=0;}
+        for(auto& [id,p]:work_packages){(void)id;p.planned_work=0;}
         for(auto& [id,p]:researches){(void)id;p.planned_work=0;}
         if(auto it=promotions.find(c.month());it!=promotions.end()) {
             for(const auto& u:it->second) {
@@ -137,13 +150,37 @@ struct DomainState {
     void finalize(const phasec::IntegratedWorld& c) {
         for(auto& [id,p]:constructions) {
             require(p.work_required>0 && p.accepted_work>=0 &&
-                    p.accepted_work<=p.work_required && p.paid_work<=p.accepted_work &&
-                    p.capitalized_work<=p.paid_work,
+                    p.accepted_work<=p.work_required && p.paid_work<=p.capitalized_work &&
+                    p.capitalized_work<=p.accepted_work,
                     "construction work/finance over-allocation");
+            if(!p.allow_accrued_invoice_commission)
+                require(p.paid_work==p.capitalized_work,
+                        "unpaid construction requires an explicit title/credit policy");
+            Quantity package_work=0, package_required=0;
+            for(const auto& [package_id,wp]:work_packages) {
+                (void)package_id;
+                if(wp.project!=id)continue;
+                require(wp.required_work>0&&wp.material_per_work>0&&wp.workers_per_work>0&&
+                        wp.accepted_work>=0&&wp.accepted_work<=wp.required_work &&
+                        wp.rejected_work>=0,
+                        "invalid work-package quantities");
+                for(const auto& prerequisite:wp.predecessors)
+                    require(work_packages.contains(prerequisite) &&
+                            work_packages.at(prerequisite).project==id,
+                            "missing or cross-project predecessor");
+                package_work=phaseb::add_checked(package_work,wp.accepted_work);
+                package_required=phaseb::add_checked(package_required,wp.required_work);
+            }
+            if(package_required)
+                require(package_required==p.work_required &&
+                        package_work==p.accepted_work,
+                        "work-package sum disagrees with project");
             require(p.capitalized_value==product(p.capitalized_work,p.cash_price_per_work),
                     "WIP record does not match certified work");
             if(!p.commissioned && !p.ready && p.accepted_work==p.work_required &&
-               p.paid_work==p.accepted_work && p.capitalized_work==p.paid_work) {
+               p.capitalized_work==p.accepted_work &&
+               (!p.permit_required||p.permit_valid) &&
+               (!p.inspection_required||p.inspected)) {
                 p.ready=true;
                 p.ready_month=opening_month;
                 append(opening_month,"construction-ready",id);
@@ -360,6 +397,19 @@ public:
                 "invalid construction seed");
         domain_.constructions.emplace(p.id,std::move(p));
     }
+    void seed_work_package(WorkPackage wp) {
+        require(core_.commit_id()==0 && !wp.id.empty() &&
+                !domain_.work_packages.contains(wp.id) &&
+                domain_.constructions.contains(wp.project) &&
+                wp.required_work>0 && wp.material_per_work>0 && wp.workers_per_work>0 &&
+                !wp.material_good.empty() && wp.curing_months>=0,
+                "invalid work package seed");
+        for(const auto& pred:wp.predecessors)
+            require(domain_.work_packages.contains(pred) &&
+                    domain_.work_packages.at(pred).project==wp.project,
+                    "work-package predecessors must be seeded in DAG order");
+        domain_.work_packages.emplace(wp.id,std::move(wp));
+    }
     void seed_recipe(IndustryRecipe r) {
         require(core_.commit_id()==0&&!r.id.empty()&&!r.site.empty()&&
                 !domain_.recipes.contains(r.id) && r.workers_per_batch>0 &&
@@ -394,6 +444,9 @@ public:
     }
     [[nodiscard]] const ConstructionProject& construction(const std::string& id)const {
         return domain_.constructions.at(id);
+    }
+    [[nodiscard]] const WorkPackage& work_package(const std::string& id) const {
+        return domain_.work_packages.at(id);
     }
     [[nodiscard]] const ResearchProject& research(const std::string& id)const {
         return domain_.researches.at(id);
