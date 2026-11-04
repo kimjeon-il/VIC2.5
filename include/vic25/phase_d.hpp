@@ -152,6 +152,21 @@ struct DomainState {
     // Keep the original opening month for Phase D stage11 effective dates.
     std::int64_t opening_month{-1};
 
+    [[nodiscard]] bool licensed(const std::string& holder,
+                                 const std::string& tech,
+                                 std::int64_t effective_month)const {
+        auto t=technologies.find(tech);
+        if(t==technologies.end() || !t->second.licensed_for_commercial_use)
+            return true;
+        for(const auto& [id,license]:licenses){
+            (void)id;
+            if(license.tech==tech && license.grantee==holder&&license.paid &&
+               license.valid_from<=effective_month &&
+               (license.valid_until<0||license.valid_until>=effective_month))
+                return true;
+        }
+        return false;
+    }
     [[nodiscard]] KnowledgeLevel level(const std::string& holder,
                                          const std::string& tech) const {
         auto it=knowledge.find({holder,tech});
@@ -205,8 +220,9 @@ struct DomainState {
             for(const auto& a:it->second) {
                 const auto& facility=c.facility(a.site);
                 require(facility.owner==a.owner&&facility.capacity>facility.damaged &&
-                        level(a.owner,a.tech)==KnowledgeLevel::usable,
-                        "tech adoption missing knowledge or usable asset");
+                        level(a.owner,a.tech)==KnowledgeLevel::usable &&
+                        licensed(a.owner,a.tech,c.month()),
+                        "tech adoption missing knowledge, license or usable asset");
                 active_site_tech[a.site]=a.tech;
                 append(c.month(),"technique-effective",a.site);
             }
@@ -557,15 +573,23 @@ public:
                 p.verified_work>=p.required_evidence &&
                 p.paid_work>=p.required_evidence,
                 "research lacks paid validated evidence");
+        if(d_.technologies.contains(p.tech_id)){
+            for(const auto& prereq:d_.technologies.at(p.tech_id).prerequisites)
+                require(static_cast<int>(d_.level(p.holder,prereq))>=
+                        static_cast<int>(KnowledgeLevel::understood),
+                        "research lacks technical prerequisites");
+        }
         p.reviewed=true;
-        d_.promotions[c_.month()+1].push_back({p.holder,p.tech_id,KnowledgeLevel::usable});
+        d_.promotions[d_.opening_month+1].push_back({p.holder,p.tech_id,KnowledgeLevel::usable});
         d_.append(c_.month(),"knowledge-review-next-month",project);
     }
     void propose_adoption(const std::string& site,const std::string& tech) {
         must(9);
         const auto& f=c_.facility(site);
         require(d_.level(f.owner,tech)==KnowledgeLevel::usable &&
-                f.capacity>f.damaged,"facility lacks usable knowledge or assets");
+                d_.licensed(f.owner,tech,d_.opening_month+1) &&
+                f.capacity>f.damaged,
+                "facility lacks usable knowledge, lawful license or assets");
         bool compatible=false;
         for(const auto& [id,r]:d_.recipes) {
             (void)id;
