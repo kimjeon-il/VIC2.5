@@ -1,0 +1,35 @@
+name: Daily Tick v2 native simulation and legacy migration
+on:
+  push:
+    branches:
+      - work/daily-native-b-h
+  workflow_dispatch:
+concurrency:
+  group: daily-native-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  native-domains:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure CMake C++20
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF
+      - name: Build daily and migration executables
+        run: cmake --build build --config Release --parallel 2 --target vic25_daily_time_tests vic25_daily_native_tests vic25_daily_migrate
+      - name: Daily actual POP, production, construction, logistics, diplomacy and saves
+        run: ctest --test-dir build -C Release -R "^vic25_daily_(time|native)_tests$" -V --output-on-failure
+      - name: Build B C D E G H regression targets
+        run: cmake --build build --config Release --parallel 2 --target vic25_phase_b_tests vic25_phase_c_tests vic25_phase_d_tests vic25_phase_e_tests vic25_phase_gh_tests vic25_phase_gh_snapshot_tests
+      - name: Existing world regression
+        run: ctest --test-dir build -C Release -R "^(vic25_phase_b_tests|vic25_phase_c_tests|vic25_phase_d_tests|vic25_phase_e_tests|vic25_phase_gh_tests|vic25_phase_gh_snapshot_tests)$" --output-on-failure
+      - name: Synthetic native day scaling (Linux 30k Province and 100k POP)
+        if: runner.os == 'Linux'
+        run: cmake --build build --config Release --parallel 2 --target vic25_daily_30k
+      - name: Execute synthetic native day scaling
+        if: runner.os == 'Linux'
+        run: ctest --test-dir build -C Release -R "^vic25_daily_30k$" -V --output-on-failure

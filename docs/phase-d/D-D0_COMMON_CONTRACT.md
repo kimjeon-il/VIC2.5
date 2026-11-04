@@ -1,4 +1,6 @@
 # VIC2.5 Phase D-D0 — 건설·산업·기술 공통 설계 계약
+> **2026-11-05 시간 계약 변경 — [ADR-TIME-001](../adr/ADR-TIME-001_DAILY_TICK_B-J.md) 및 [ADR-TIME-002](../adr/ADR-TIME-002_LEGACY_SAVE_MIGRATION.md):** 게임의 기본 진행 단위는 `1일`, 외부 커밋은 `CommitDay`, 정기 월별 정산은 달력상 월말에 정확히 한 번이다. 아래의 `월별 12단계` 및 `effective_month` 문구는 신규 게임의 일별 실행 규범이 아니라 **구형 MonthClose 엔진의 호환 사양**으로 한정한다. 인구·금융·재고·주권의 유일한 정본과 기존 계산의 보존식은 유지한다. 현재 C/D/E/G/H 부분 구현을 전체 B~J 일별 엔진 완료라고 판단하지 않으며, I/J는 설계 상태다.
+
 
 > **2026-11-04 자원 모델 이관본:** 원 설계(`phase-d-common/1.0`)에서 지하 자원 총매장량/잔량 전제를 **폐기**하고 J-D0/J-R1(`phase-j-resource-flow/1.0`)을 우선 적용한 호환 문서. 다른 Phase D 상세 문서는 [이전 설계 브랜치](https://github.com/kimjeon-il/VIC2.5/tree/work/phase-d-design/docs/phase-d)를 참조. 이 이관이 Phase D 전체 구현/인수 합격을 뜻하지는 않음.
 

@@ -575,6 +575,38 @@ public:
         d_.actual_production_runs.push_back({recipe,d_.opening_month,batches});
         d_.append(d_.opening_month,"industry-production",recipe);
     }
+    // A legacy ProductionFacility.capacity is month-scoped. Native daily
+    // manufacturing must not silently grant that capacity every single day.
+    // Unused quota is carried inside the same month by comparing cumulative
+    // real completed batches against the proportional day-of-month budget.
+    void manufacture_daily(const std::string& recipe,Quantity batches,
+                           std::int32_t day,std::int32_t days_in_month) {
+        must(4);
+        require(day>0&&days_in_month>=28&&days_in_month<=31 &&
+                day<=days_in_month&&batches>0,
+                "D_DAILY_INVALID_PRODUCTION_DATE");
+        const auto& spec=d_.recipes.at(recipe);
+        const auto& asset=c_.facility(spec.site);
+        require(asset.capacity>=asset.damaged,"D_DAILY_DAMAGED_CAPACITY");
+        const Quantity monthly=asset.capacity-asset.damaged;
+        const Quantity allowed=phaseb::add_checked(
+            phaseb::mul_checked(monthly/days_in_month,static_cast<Quantity>(day)),
+            phaseb::mul_checked(monthly%days_in_month,
+                                static_cast<Quantity>(day))/days_in_month);
+        Quantity used=0;
+        for(const auto& run:d_.actual_production_runs) {
+            if(run.month!=d_.opening_month)continue;
+            const auto& previous=d_.recipes.at(run.recipe);
+            if(previous.site==spec.site)
+                used=phaseb::add_checked(used,
+                    phaseb::mul_checked(run.batches,previous.capacity_per_batch));
+        }
+        const Quantity required=phaseb::mul_checked(batches,spec.capacity_per_batch);
+        require(used<=allowed&&required<=allowed-used,
+                "D_DAILY_MONTHLY_FACILITY_BUDGET_EXCEEDED");
+        manufacture(recipe,batches);
+    }
+
     void plan_research(const std::string& project,Quantity units) {
         must(1);
         auto& p=d_.researches.at(project);
@@ -770,6 +802,64 @@ private:
     DomainState domain_;
 public:
     explicit World(std::int64_t starting_month=24000):core_(starting_month){}
+    static World from_legacy_phase_c(phasec::IntegratedWorld legacy) {
+        World result(legacy.month());
+        result.core_=std::move(legacy);
+        result.validate();
+        return result;
+    }
+    phasec::AdvanceReport advance_daily(const phasec::IntegratedWorld::Plan& commands) {
+        World staged=*this;
+        const auto report=staged.core_.advance_daily(commands);
+        staged.validate();
+        *this=std::move(staged);
+        return report;
+    }
+    // Run Phase D real construction and manufacturing tasks against the
+    // same stage-valid Phase C financial/inventory/POP world each day.
+    // begin_month() must NOT run here: it renews natural pools and resets
+    // monthly throughput. Those effects still happen only at MonthClose.
+    phasec::AdvanceReport advance_daily(const Plan& tasks) {
+        DomainState next=domain_;
+        phasec::IntegratedWorld::Plan bridge;
+        for(int i=0;i<12;++i) {
+            bridge[static_cast<std::size_t>(i)].push_back([&,i](phasec::IntegratedWorld& live) {
+                if(i==0) {
+                    next.opening_month=live.month();
+                    live.phase_d_enable_shared_resources();
+                    for(auto& [id,project]:next.constructions) {
+                        if(!project.ready || project.commissioned)continue;
+                        const auto cost=project.capitalized_value;
+                        require(cost>0,"daily commissioning lacks financial WIP");
+                        live.phase_d_commission_facility(project.target_site,
+                                project.client,project.region,
+                                project.target_capacity,cost);
+                        project.commissioned=true;
+                        project.ready=false;
+                        next.append(live.month(),"daily-facility-commissioned",id);
+                    }
+                }
+                Stage stage{live,next,i};
+                for(const auto& callback:tasks[static_cast<std::size_t>(i)])
+                    callback(stage);
+                if(i==11) {
+                    next.finalize(live);
+                    live.phase_d_daily_finish_resources();
+                }
+            });
+        }
+        static_assert(std::is_nothrow_move_assignable_v<DomainState>);
+        const auto report=core_.advance_daily(bridge);
+        domain_=std::move(next);
+        return report;
+    }
+    [[nodiscard]] bool has_ready_daily_commission()const {
+        for(const auto& [id,project]:domain_.constructions) {
+            (void)id;
+            if(project.ready&&!project.commissioned)return true;
+        }
+        return false;
+    }
     [[nodiscard]] const phasec::IntegratedWorld& core() const {return core_;}
     phasec::IntegratedWorld& seed_core() {
         require(core_.commit_id()==0,"cannot seed Phase C after first committed month");

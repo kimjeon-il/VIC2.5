@@ -305,3 +305,35 @@ if (BUILD_TESTING)
         set_tests_properties(vic25_ev10_history_overlay PROPERTIES TIMEOUT 240)
     endif()
 endif()
+
+# Daily tick v2 transitional C/D/E/G/H real-ledger adapter and migration.
+# Explicitly separates daily commits from once-per-calendar-month settlement.
+if (BUILD_TESTING)
+    add_executable(vic25_daily_time_tests tests/test_daily_time.cpp)
+    target_link_libraries(vic25_daily_time_tests PRIVATE vic25_core)
+    add_test(NAME vic25_daily_time_tests COMMAND vic25_daily_time_tests)
+    set_tests_properties(vic25_daily_time_tests PROPERTIES TIMEOUT 240)
+endif()
+
+# Offline legacy save -> daily v2 checkpoint CLI. Requires explicit source format
+# and seed; cannot silently manufacture sub-month historical events.
+add_executable(vic25_daily_migrate src/migrate_daily_save.cpp)
+target_link_libraries(vic25_daily_migrate PRIVATE vic25_core)
+
+# Native daily Domain B/C/D/G/H integration: real POP, production, work,
+# exact-day transit and legally effective day-dated treaties.
+if (BUILD_TESTING)
+    add_executable(vic25_daily_native_tests tests/test_daily_native.cpp)
+    target_link_libraries(vic25_daily_native_tests PRIVATE vic25_core Threads::Threads)
+    add_test(NAME vic25_daily_native_tests COMMAND vic25_daily_native_tests)
+    set_tests_properties(vic25_daily_native_tests PROPERTIES TIMEOUT 240)
+endif()
+
+# Synthetic 30k-Province / 100k-POP day benchmark is Linux-only,
+# not a proof of full low-end GPU frametime or autonomous daily demographics.
+if (BUILD_TESTING AND UNIX AND NOT APPLE)
+    add_executable(vic25_daily_30k bench/daily_30k.cpp)
+    target_link_libraries(vic25_daily_30k PRIVATE vic25_core)
+    add_test(NAME vic25_daily_30k COMMAND vic25_daily_30k)
+    set_tests_properties(vic25_daily_30k PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
+endif()

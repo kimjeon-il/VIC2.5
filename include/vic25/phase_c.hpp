@@ -1424,6 +1424,113 @@ public:
         events_.push_back("military-control");
     }
 
+    // Actual dated POP events enter the sole Phase B population ledger.
+    // Birth month remains the legacy cohort classification until the daily
+    // birth-date cohort contract is upgraded; event day is journaled outside.
+    void phase_time_birth(Id mother, People babies) {
+        require_stage({10});
+        ensure(babies>0&&people_.has_slice(mother),"TIME_POP_INVALID_MOTHER");
+        const auto& source=people_.slice(mother);
+        const auto demographic=people_.demographic(source.key.demographic);
+        const auto age=people_.age_months(source.key.demographic);
+        ensure(demographic.sex==phaseb::Sex::female &&
+               age>=18*12 && age<45*12 &&
+               demographic.service==phaseb::Service::civilian,
+               "TIME_POP_INELIGIBLE_MOTHER");
+        auto economic=people_.economic(source.key.economic);
+        economic.profession="not_assigned";
+        economic.livelihood="inactive";
+        economic.labor_class="ineligible";
+        economic.education=people_.default_education();
+        const auto baby_economic=people_.economic_profile(economic);
+        const People girls=babies/2;
+        if(girls)
+            people_.birth(source.key.household,demographic,baby_economic,
+                          phaseb::Sex::female,girls);
+        if(babies-girls)
+            people_.birth(source.key.household,demographic,baby_economic,
+                          phaseb::Sex::male,babies-girls);
+        events_.push_back("daily-pop-real-birth");
+    }
+    void phase_time_death(Id source, People count, People employed_affected=0) {
+        require_stage({10});
+        ensure(count>0&&employed_affected>=0&&people_.has_slice(source),
+               "TIME_POP_INVALID_DEATH");
+        const auto& row=people_.slice(source);
+        const auto service=people_.demographic(row.key.demographic).service;
+        ensure(service!=phaseb::Service::active &&
+               service!=phaseb::Service::pow,
+               "TIME_POP_ARMY_CASUALTY_REQUIRES_MILITARY_EVENT");
+        people_.death(source,count,employed_affected,"daily-natural-event");
+        events_.push_back("daily-pop-real-death");
+    }
+    void phase_time_dispatch(const std::string& id,const std::string& sender,
+                             const std::string& origin,const std::string& good,
+                             Quantity count) {
+        require_stage({7});
+        ensure(!id.empty()&&!sender.empty()&&!origin.empty()&&!good.empty()&&
+               count>0&&stock(sender,origin,good)>=count,
+               "TIME_LOGISTICS_UNFUNDED_DISPATCH");
+        if(phase_d_reservation_mode_)
+            resources_.assert_goods_available({sender,origin,good},count,
+                                               stock(sender,origin,good));
+        goods_.transfer({sender,origin,good},
+                        {"TRANSIT:DAY:"+id,"in_transit",good},count);
+        events_.push_back("daily-physical-cargo-dispatched");
+    }
+    void phase_time_arrive(const std::string& id,const std::string& recipient,
+                           const std::string& destination,
+                           const std::string& good,Quantity quantity,
+                           Quantity loss) {
+        require_stage({0});
+        ensure(!id.empty()&&!recipient.empty()&&!destination.empty()&&
+               !good.empty()&&quantity>0&&loss>=0&&loss<=quantity&&
+               stock("TRANSIT:DAY:"+id,"in_transit",good)==quantity,
+               "TIME_LOGISTICS_INVALID_ARRIVAL");
+        if(loss)goods_.consume({"TRANSIT:DAY:"+id,"in_transit",good},loss);
+        if(quantity>loss)
+            goods_.transfer({"TRANSIT:DAY:"+id,"in_transit",good},
+                            {recipient,destination,good},quantity-loss);
+        events_.push_back("daily-physical-cargo-arrived");
+    }
+    void phase_d_daily_finish_resources() {
+        require_stage({11});
+        resources_.clear_month();
+        phase_d_reservation_mode_=false;
+    }
+
+    // Daily real-ledger transaction, deliberately separate from legacy
+    // monthly settlement. No open_month(), no autonomous market clearing,
+    // no monthly POP mortality/aging/production, and no finish_month().
+    // Call only whitelisted stage-valid C commands from the day coordinator.
+    AdvanceReport advance_daily(const Plan& plan) {
+        IntegratedWorld staged = *this;
+        const auto opening_month = month();
+        for (int n=0; n<12; ++n) {
+            staged.stage_=n;
+            for (const auto& command:plan[static_cast<std::size_t>(n)])
+                command(staged);
+            staged.validate();
+        }
+        staged.stage_=-1;
+        ensure(staged.month()==opening_month,
+               "daily action attempted to advance legacy monthly clock");
+        ensure(staged.commit_id_<std::numeric_limits<std::uint64_t>::max(),
+               "daily commit id exhausted");
+        ++staged.commit_id_;
+        *this=std::move(staged);
+        return {opening_month,month(),people_.population(),commit_id_};
+    }
+
+    // Promote a canonical Phase B population registry in memory without
+    // synthesizing extra people, money, employers or economic assets.
+    static IntegratedWorld from_legacy_phase_b(phaseb::World pop) {
+        IntegratedWorld result(pop.month());
+        result.people_=std::move(pop);
+        result.validate();
+        return result;
+    }
+
     AdvanceReport advance(const Plan& plan = {}) {
         IntegratedWorld stage = *this;
         const auto start = month();

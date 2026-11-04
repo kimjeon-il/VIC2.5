@@ -1,4 +1,6 @@
 # POP-D3 — 월별 계산·동시성·분할/병합·성능 계약
+> **2026-11-05 시간 계약 변경 — [ADR-TIME-001](../adr/ADR-TIME-001_DAILY_TICK_B-J.md) 및 [ADR-TIME-002](../adr/ADR-TIME-002_LEGACY_SAVE_MIGRATION.md):** 게임의 기본 진행 단위는 `1일`, 외부 커밋은 `CommitDay`, 정기 월별 정산은 달력상 월말에 정확히 한 번이다. 아래의 `월별 12단계` 및 `effective_month` 문구는 신규 게임의 일별 실행 규범이 아니라 **구형 MonthClose 엔진의 호환 사양**으로 한정한다. 인구·금융·재고·주권의 유일한 정본과 기존 계산의 보존식은 유지한다. 현재 C/D/E/G/H 부분 구현을 전체 B~J 일별 엔진 완료라고 판단하지 않으며, I/J는 설계 상태다.
+
 
 상태: **설계 확정 (구현 전)** · 계약 버전: pop-design/1.1
 선행: [D0](D0_ARCHITECTURE.md) · [D1](D1_SCHEMA.md) · [D2](D2_TRANSITIONS.md)
