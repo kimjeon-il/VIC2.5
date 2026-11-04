@@ -1,6 +1,6 @@
 # VIC2.5 Phase D — 건설·산업·기술 설계 색인
 
-> **D-D0 공통 설계 확정 / 전체 Phase D C++ 구현·검증 전**  
+> **D-D0 공통 계약 및 D-C1~C5 건설 세부 설계 확정 / 전체 Phase D C++ 구현·검증 전**  
 > 2026-11-04 · 공통 계약 `phase-d-common/1.0` · 브랜치 `work/phase-d-design`
 
 ## 설계 정본
@@ -10,6 +10,13 @@
 | [D-D0 공통 설계 계약](D-D0_COMMON_CONTRACT.md) | **설계 확정** | 건설·산업·기술의 객체/원본 소유권, 이벤트, 월별 12단계, C-E/P/M/D4 호환성, 지식과 기술 채택 구분, 14개 불변조건/20 ADR |
 | [D-D0 인수시험](D-D0_ACCEPTANCE_TESTS.md) | **24개 시험 명세 확정/실행 전** | 공사 자재·자금/시공·WIP/준공, 산업·자원·연구/기술 도입, 법률·군사·결정론, 실패·롤백 |
 | [기계 판독 계약 매니페스트](contract_manifest.json) | **정적 번호·blob SHA 잠금** | 14개 불변조건, 24개 인수시험, 20개 ADR, 상위 계약 버전/구현 상태 |
+
+## Phase D-C1~C5 건설 상세 설계
+
+- [**건설 설계 색인**](construction/README.md): 프로젝트·자금·시공/재료·공정/품질·준공/보수·철거 및 시간계약.
+- [**건설 인수시험**](construction/CONSTRUCTION_ACCEPTANCE_TESTS.md): 25개 불변조건, 45개 개별 수락 시나리오(명세 확정/실제 C++ 실행 전).
+- [**건설 ADR**](construction/CONSTRUCTION_ADRS.md): 35개 결정. [검증 매니페스트](construction/verification_manifest.json)와 [3개월 공장 공사 fixture](construction/examples/three_month_factory.json), [전시피해 복구 fixture](construction/examples/war_damage_repair.json).
+- **상태:** `phase-d-construction/1.0` 설계 확정; `work/phase-d-design`에서만 문서 추가; C++ 건설 엔진/인수시험 `NOT_RUN`, `main` 미병합.
 
 ## D-D0 확정 원칙
 
@@ -24,11 +31,11 @@
 
 | 단계 | 분야 | 설계 범위 | 상태 |
 |---|---|---|---|
-| D-C1 | 건설 | 건설사업·주체·시공·토지/소유/계약 | 예정 |
-| D-C2 | 건설 | 건설인력·자재·건설업/시공장비·가용용량 | 예정 |
-| D-C3 | 건설 | 공정·공사기간·실제 작업·하자/재시공 | 예정 |
-| D-C4 | 건설 | 공사 금융·민간/공공투자·WIP/기성고 | 예정 |
-| D-C5 | 건설 | 준공·개축·보수·철거·노후·피해복구 | 예정 |
+| D-C1 | 건설 | 건설사업·주체·시공·토지/소유/계약 | **설계 확정** |
+| D-C2 | 건설 | 건설인력·자재·건설업/시공장비·가용용량 | **설계 확정** |
+| D-C3 | 건설 | 공정·공사기간·실제 작업·하자/재시공 | **설계 확정** |
+| D-C4 | 건설 | 공사 금융·민간/공공투자·WIP/기성고 | **설계 확정** |
+| D-C5 | 건설 | 준공·개축·보수·철거·노후·피해복구 | **설계 확정** |
 | D-I1 | 산업 | 산업분류·기업/사업장·산업구조 | 예정 |
 | D-I2 | 산업 | 자원/원료·에너지·중간재·공정/산출 | 예정 |
 | D-I3 | 산업 | 기계화·설비·생산방식·숙련/생산성 | 예정 |
@@ -51,4 +58,4 @@
 - [C-D4 통합](../phase-c/integration/README.md): 30개 불변조건·48개 프로토타입 시험.
 - [Phase C 구현 보고서](https://github.com/kimjeon-il/VIC2.5/blob/work/phase-c-engine-integration/docs/phase-c/ENGINE_IMPLEMENTATION_STATUS.md): 2026-11-04 기준 48개 프로토타입 회귀 PASS, 통합 C++ 코드는 별도 `work/phase-c-engine-integration`, `main` 미병합, 완성형 게임 구현 전.
 
-**현 단계에서 건설·산업·기술 C++ 코드를 구현하거나 검증했다고 주장하지 않는다.**
+**현재 건설 D-C1~C5 상세 설계만 추가로 확정됐으며, 건설·산업·기술 전체 C++ 구현·인수시험 수행을 주장하지 않는다.**
