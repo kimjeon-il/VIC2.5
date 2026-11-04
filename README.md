@@ -1,3 +1,5 @@
+> **Phase D-I1~I5 산업 세부 설계 확정 (`phase-d-industry/1.0`, 2026-11-04):** [docs/phase-d/industry/README.md](docs/phase-d/industry/README.md)에서 산업분류·기업/자원/생산공정·기계화·입지/집적·산업화/정책, 25개 불변조건·45개 인수시험·35개 ADR와 수치 예제를 확인할 수 있습니다. **설계 완료이며 Phase D C++ 구현·인수시험 실행 전**입니다. `I2-DISPATCH`는 상위 CE/D4 계약 확장 전 미지원입니다. 작업은 `work/phase-d-design`에만 있고 `main`에는 아직 반영되지 않았습니다.
+
 > **Phase D-D0 건설·산업·기술 공통 설계 확정 (`phase-d-common/1.0`, 2026-11-04):** [docs/phase-d/README.md](docs/phase-d/README.md)에서 공사·산업·기술의 단일 원본, 월별 12단계, 14개 불변조건, 20개 ADR, 24개 인수시험을 확인할 수 있습니다. **설계 문서 확정이며 Phase D C++ 구현 및 24개 인수시험 실행 전**입니다. 이 설계는 `work/phase-d-design` 브랜치에 있으며 `main`에 아직 반영되지 않았습니다.
 
 > **Phase C-D4 통합 검증 설계 (phase-c-integration/1.0)**: [docs/phase-c/integration/README.md](docs/phase-c/integration/README.md)에서 POP·경제·정치·군사 통합 World, 30개 불변조건·48개 교차 시험·월별 12단계·저장/복구/100년 장기 시험과 실제 구현 게이트를 확인할 수 있습니다. **설계 문서 확정이며 C++ 통합 엔진/장기 회귀는 미실행**입니다. 정치 C-P 설계 GitHub 정본 등록·Phase B 원장 통합이 선행조건입니다.
