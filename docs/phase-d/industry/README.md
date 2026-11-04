@@ -19,6 +19,7 @@
 | **매니페스트** | [계약 버전·정본 해시](verification_manifest.json) | 문서 blob SHA·정적 결과/릴리스 게이트 |
 | **fixture** | [광산→제철 공급망](examples/ore_steel_supply_chain.json) | 광석 매장량 감소/생산, 2개월 철광석 운송, 합법적 제조 투입/결합산출·돈·로트 보존 |
 | **fixture** | [공장 기계화·노동전환](examples/mechanization_retrofit.json) | 투자/실행신용·실제 장비 구매/개축/검수, 차월 기술·설비 효력, POP 고용 재배정 |
+| **fixture** | [관세·전쟁 산업 충격](examples/tariff_war_industry_shock.json) | 차월 법 효력/실제 통관세·기업 자재 공급과 생산, stage10 시설피해/차월 가동용량 |
 
 ## 핵심 산업 설계 결정
 
