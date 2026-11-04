@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - work/phase-e-cpp-integration
+      - work/phase-e-v-remaining
   workflow_dispatch:
 
 concurrency:
