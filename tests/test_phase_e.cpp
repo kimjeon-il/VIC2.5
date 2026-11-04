@@ -1,6 +1,7 @@
 #include "vic25/phase_e_snapshot.hpp"
 #include "vic25/phase_e_raster.hpp"
 #include "vic25/phase_e_view.hpp"
+#include "vic25/phase_e_parallel.hpp"
 #include <algorithm>
 #include <array>
 #include <filesystem>
@@ -369,6 +370,34 @@ static void test_56(){auto w=fixture();plan(w,[](SpatialStage& s){s.queue_reassi
     check(SnapshotCodec::encode(loaded)==data,"snapshot roundtrip");
     check(fails([&]{auto corrupt=data;corrupt[corrupt.size()/2]^=0x55;
                          (void)SnapshotCodec::decode(corrupt);}),"checksum mismatch");}
+
+static void test_57(){
+    auto one=fixture(),four=fixture();
+    seed_pop(one,1,100);seed_pop(four,1,100);
+    one.seed_core().seed_core().seed_actor("SHOP",150);
+    four.seed_core().seed_core().seed_actor("SHOP",150);
+    const std::vector<Operation> commands={
+        {"RENAME-A2",OpKind::rename,{},102,0,"NEW-A2"},
+        {"MOVE-P3",OpKind::reassign,{3},102},
+        {"MOVE-P2",OpKind::reassign,{2},102}
+    };
+    const auto run1=vic25::phasee::parallel::commit(one,commands,1);
+    const auto run4=vic25::phasee::parallel::commit(four,commands,4);
+    check(run1.actual_worker_count==1&&run4.actual_worker_count==3,
+          "must spawn actual independent immutable preflight workers");
+    one.advance();four.advance();
+    check(SnapshotCodec::encode(one)==SnapshotCodec::encode(four)&&
+          one.spatial().journal.size()==four.spatial().journal.size()&&
+          one.population({1})==four.population({1}) &&
+          one.core().core().cash("SHOP")==four.core().core().cash("SHOP"),
+          "world state and event order must be exactly deterministic");
+    check(fails([&]{
+        (void)vic25::phasee::parallel::prepare(one,{
+            {"BAD",OpKind::reassign,{1},201}
+        },4);
+    }),"parallel validators must reject invalid sovereign assignment");
+}
+
 static void test_58(){auto a=fixture(),b=fixture();
     for(int m=0;m<1200;++m){a.advance();b.advance();}
     check(a.month()==2200&&SnapshotCodec::encode(a)==SnapshotCodec::encode(b),
@@ -446,7 +475,7 @@ int main(){
       {31,test_31},{32,test_32},{33,test_33},{34,test_34},{35,test_35},{36,test_36},{37,test_37},
       {38,test_38},{39,test_39},{40,test_40},{41,test_41},{42,test_42},{43,test_43},{44,test_44},{45,test_45},
       {46,test_46},{47,test_47},{48,test_48},{50,test_50},{51,test_51},{52,test_52},{53,test_53},
-      {54,test_54},{55,test_55},{56,test_56},{58,test_58}
+      {54,test_54},{55,test_55},{56,test_56},{57,test_57},{58,test_58}
     };
     int pass=0,blocked=0;
     for(int i=1;i<=60;++i) {

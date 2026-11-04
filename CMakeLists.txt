@@ -128,8 +128,9 @@ endif()
 # Phase E real bounded C/D/E integration — EV-Txx tests report explicit BLOCKED
 # for GPU renderer, historic geometry and advanced voting cases not yet coded.
 if (BUILD_TESTING)
+    find_package(Threads REQUIRED)
     add_executable(vic25_phase_e_tests tests/test_phase_e.cpp)
-    target_link_libraries(vic25_phase_e_tests PRIVATE vic25_core)
+    target_link_libraries(vic25_phase_e_tests PRIVATE vic25_core Threads::Threads)
     add_test(NAME vic25_phase_e_tests COMMAND vic25_phase_e_tests)
     set_tests_properties(vic25_phase_e_tests PROPERTIES TIMEOUT 240)
 endif()
