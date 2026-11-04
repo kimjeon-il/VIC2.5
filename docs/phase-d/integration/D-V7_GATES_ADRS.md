@@ -11,7 +11,7 @@
 | **DV-L0 기준선/계약** | `work/phase-c-engine-integration` Draft PR #6과 `main`·`work/phase-d-design`의 실제 코드·Phase B/정치 정본/버전/ABI/source hash 감사; 단일 World/원장 owner/기능 프로파일 락·작동 C++ baseline 선택 | **BLOCKED_FOR_CPP** (현재 단일 코드 베이스가 병합/고정되지 않음) |
 | **DV-L1 원장/타입 통합** | D-C/D-I/D-T 객체/관계/JournalBatch가 Phase C World와 같은 staging/commit/abort·stable IDs/원장 참조로 연동. 강제 실패시 모든 수정 롤백 | NOT_RUN |
 | **DV-L2 기능 연동** | 실제 시공·WIP/준공 → 산업/채취·시장/기계화 → 지식연구/전파·시설도입/POP 자격·정치/군수·환경 순으로 교차 엔진 구현. 미지원 I2-SAFE 정확히 Reject | NOT_RUN |
-| **DV-L3 인수/오류 시험** | `DV-T01..72`(72), `DV-INV01..36`, 상위 `DD0-G01..24`, `DC-T01..45`, `DI-T01..45`, `DT-T01..45`, `D4-T01..48`, POP/CE/CP/CM 해당 회귀·모든 expected-failure 코드/rollback PASS | NOT_RUN |
+| **DV-L3 인수/오류 시험** | `DV-T01..71`(71개 기능·결정론/성능 게이트), `DV-INV01..36`, 상위 `DD0-G01..24`, `DC-T01..45`, `DI-T01..45`, `DT-T01..45`, `D4-T01..48`, POP/CE/CP/CM 해당 회귀·expected-failure 오류코드/rollback PASS. 최종 집계 `DV-T72`는 L4/L5 완료 후 실행 | NOT_RUN |
 | **DV-L4 재현성·세이브/복구** | worker1/N·동률/순회순서/RNG·Windows/Linux/가능 macOS, snapshot/journal/save/replay·실제 crash/부분 commit/계약 버전 거부 및 오류 추적 PASS | NOT_RUN |
 | **DV-L5 장기·성능** | baseline·흉작/금융/산업/전쟁·재건/기술유실·다국 제도 1,200개월, 10만/100만 활성 POP+복수 산업·연구/시공·국방 대표 실제 이벤트/메모리·실측 P50/P95/P99, 무 silent skip | NOT_RUN |
 | **DV-COMPLETE** | L0..L5와 DV-T01..72·상위 의무 테스트 전부 PASS, 코드 commit/ruleset/seed/OS/하드웨어/로그/성능·미지원 기능/알려진 제약 보고 | NOT_RUN |
@@ -23,7 +23,7 @@
 1. **L0 계약 기준선 고정:** C-D4 통합 소스/프로토타입 48 PASS 보고서의 실제 SHA/커밋·시나리오 범위를 확인하고 D-D0/DC/DI/DT 스키마·원장 owner/Phase B adapter 정합성 검수. 정치·군사 실제 미구현 부분을 목업/가짜 PASS로 덮지 않음.
 2. **L1 단일 원자성:** 새 타입/레지스트리/관계는 C-E1/POP/원장 소유자가 쓰는 실제 `JournalBatch`로 반영. ID allocator 포함 장애주입 롤백·중복 이벤트/파생 캐시 교차 검증.
 3. **L2 기능 세로슬라이스:** `철강→자재 인도→실제 시공/기성WIP→차월 시설가동→산업 생산`을 먼저 연결. `실제 연구/검증→지식 차월 효력→교육·면허→기계구입/개축→사업장 도입`과 결합. 이후 정치법/관세·교육/의료·군수/전시충격 순으로 확장.
-4. **L3 수락:** 4개 대표 fixture와 72개 DV-T를 실제 자동 테스트로 작성해 개별 예상 Journal/지갑·자재/자산·POP/지식/법/군수·rollback 검증. 기존 207개 정수 테스트 ID(DD0 24 + DC45 + DI45 + DT45 + D4 48) 외에도 해당 POP/CE/CP/CM 회귀 전부 유지. 전체 지정 ID는 **72+207=279**, 모두 실제 통과 전까지 PASS로 표시 불가.
+4. **L3 수락:** 4개 대표 fixture와 DV-T01..71을 실제 자동 테스트로 작성해 개별 예상 Journal/계좌·자재/자산·POP/지식/법/군수·rollback 검증. DV-T72는 구현하되 최종 L4/L5 증빙이 모이기 전엔 통과 처리하지 않는다. 기존 207개 정수 테스트 ID(DD0 24 + DC45 + DI45 + DT45 + D4 48) 외에도 해당 POP/CE/CP/CM 회귀 전부 유지. 전체 지정 ID는 **72+207=279**, 모두 실제 통과 전까지 PASS로 표시 불가.
 5. **L4 저장/병렬:** 동일 snapshot/명령/seed의 worker1/2/4/8·RNG/정렬 결과 fingerprint, save/load/checkpoint/replay·버전 거부·오류/중단 후 원자복구를 실제 플랫폼에서 반복.
 6. **L5 성능/장기:** 1,200개월 장기 여러 프로파일 + 10만/100만 실활성 POP와 공사·생산·지식이전·연구/정치/군사 복합 사건 성능. 성능 기준을 실측 하드웨어/feature coverage에 따라 문서로 정한다.
 
