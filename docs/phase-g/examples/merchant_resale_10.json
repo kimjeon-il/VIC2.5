@@ -2,8 +2,7 @@
   "$schema": "vic25-design-fixture/phase-g-1.0",
   "status": "NOT_EXECUTED",
   "tests": [
-    "GT1-T02",
-    "GT5-T06"
+    "GT1-T02"
   ],
   "assumptions": [
     "one currency",
