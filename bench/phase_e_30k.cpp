@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <thread>
+#include <atomic>
+#include <exception>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -79,6 +82,47 @@ int main(int argc,char** argv){
             checksum=checksum+sum;
         }
         const auto frameend=Clock::now();
+
+        // Actual concurrency test: only simulation worker mutates World/Index.
+        // The UI/render thread reads a stable immutable GPU palette snapshot.
+        // No frame is allowed to wait for a monthly transaction lock.
+        compact::FrameExchange frames(index);
+        const auto original=frames.acquire();
+        std::atomic<bool> completed{false};
+        std::exception_ptr background_error;
+        const auto concurrent_begin=Clock::now();
+        std::thread worker([&] {
+            try {
+                World::Plan another;
+                another[9].push_back([](SpatialStage& s) {
+                    s.queue_transfer("EV10-cession-second",
+                                     {11,12,13,14,15,16,17,18,19,20},"B",2);
+                });
+                w.advance(another);
+                w.advance();
+                constexpr std::array<Id,10> second={11,12,13,14,15,16,17,18,19,20};
+                index.apply(w,second);
+                frames.publish(index);
+            } catch(...) {background_error=std::current_exception();}
+            completed.store(true,std::memory_order_release);
+        });
+        std::uint64_t ui_reads=0;
+        for(int frame=0;frame<20000;++frame) {
+            const auto f=frames.acquire();
+            const auto dense=static_cast<std::size_t>((frame*37u)%size);
+            ui_reads+=f->country[dense]+f->admin[dense]+f->military[dense];
+        }
+        const auto concurrent_end=Clock::now();
+        worker.join();
+        if(background_error)std::rethrow_exception(background_error);
+        const auto latest=frames.acquire();
+        if(!completed.load(std::memory_order_acquire) ||
+           original->commit_id>=latest->commit_id ||
+           original->country[10]==latest->country[10] ||
+           original->country[10]==0 || ui_reads==0 ||
+           latest->estimated_bytes()>2*1024*1024 ||
+           latest->province_ids.size()!=size)
+            throw std::runtime_error("async immutable frame read or commit publish corrupted");
         std::cout<<std::fixed<<std::setprecision(3)
                  <<"EV10_30K_BENCH provinces="<<size
                  <<" seed_ms="<<ms(started,seeded)
@@ -89,6 +133,8 @@ int main(int argc,char** argv){
                  <<" dense_capacity_bytes="<<index.estimated_bytes()
                  <<" topology_directed_edges="<<index.edge_directed_count()
                  <<" patched_gpu_ids="<<index.changed_gpu_indices().size()
+                 <<" concurrent_ui_reads_ms="<<ms(concurrent_begin,concurrent_end)
+                 <<" committed_frame_bytes="<<latest->estimated_bytes()
                  <<" checksum="<<checksum<<"\n";
         std::cout<<"EV10_30K_COMPACT PASS\n";
     }catch(const std::exception& ex){

@@ -5,7 +5,9 @@
 // No per-frame traversal of the country/POP/administration registries.
 #include "vic25/phase_e.hpp"
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <map>
 #include <set>
 #include <span>
@@ -120,5 +122,45 @@ public:
     }
     [[nodiscard]] std::uint64_t source_commit_id()const{return committed_revision_;}
     [[nodiscard]] const std::string& dataset()const{return dataset_;}
+    [[nodiscard]] const std::vector<Id>& ids()const{return province_ids_;}
+    [[nodiscard]] const std::vector<std::uint32_t>& country_gpu()const{return country_;}
+    [[nodiscard]] const std::vector<std::uint32_t>& admin_gpu()const{return admin_;}
+    [[nodiscard]] const std::vector<std::uint32_t>& military_gpu()const{return military_;}
+};
+
+// A simulation worker can advance an entire C/D/E StagingWorld while the
+// renderer continues reading its PREVIOUS committed immutable frame. Replacing
+// the pointer is atomic; no per-frame POP/administration or map locks are held.
+struct FrameSnapshot {
+    std::uint64_t commit_id{};
+    std::string dataset;
+    std::vector<Id> province_ids;
+    std::vector<std::uint32_t> country,admin,military;
+    [[nodiscard]] std::size_t estimated_bytes()const {
+        return province_ids.size()*sizeof(Id)+
+               (country.size()+admin.size()+military.size())*sizeof(std::uint32_t);
+    }
+};
+class FrameExchange {
+    std::atomic<std::shared_ptr<const FrameSnapshot>> current_;
+public:
+    explicit FrameExchange(const ProvinceIndex& index) {publish(index);}
+    void publish(const ProvinceIndex& index) {
+        auto next=std::make_shared<FrameSnapshot>();
+        next->commit_id=index.source_commit_id();
+        next->dataset=index.dataset();
+        next->province_ids=index.ids();
+        next->country=index.country_gpu();
+        next->admin=index.admin_gpu();
+        next->military=index.military_gpu();
+        require(next->country.size()==next->province_ids.size()&&
+                next->admin.size()==next->province_ids.size()&&
+                next->military.size()==next->province_ids.size(),
+                "EV10_FRAME_SNAPSHOT_INTEGRITY");
+        current_.store(std::move(next),std::memory_order_release);
+    }
+    [[nodiscard]] std::shared_ptr<const FrameSnapshot> acquire()const {
+        return current_.load(std::memory_order_acquire);
+    }
 };
 } // namespace vic25::phasee::compact

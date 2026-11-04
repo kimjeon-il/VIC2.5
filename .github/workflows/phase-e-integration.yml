@@ -39,3 +39,7 @@ jobs:
         run: cmake --build build --config Release --parallel 2
       - name: Execute CTest suite
         run: ctest --test-dir build -C Release --output-on-failure -V
+      - name: Historical 1815 vs 1900 real-source sample (non-release-gate)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: .venv-ev10/bin/python scripts/ev10_real_history_smoke.py
