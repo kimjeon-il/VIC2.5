@@ -1,6 +1,6 @@
 # VIC2.5 Phase D — 건설·산업·기술 설계 색인
 
-> **D-D0 공통 계약 및 D-C1~C5 건설·D-I1~I5 산업·D-T1~T5 기술 세부 설계 확정 / 전체 Phase D C++ 구현·검증 전**  
+> **D-D0 공통·D-C1~C5 건설·D-I1~I5 산업·D-T1~T5 기술 및 D-V 통합 검증 설계 확정 / 전체 Phase D C++ 구현·검증 전**  
 > 2026-11-04 · 공통 계약 `phase-d-common/1.0` · 브랜치 `work/phase-d-design`
 
 ## 설계 정본
@@ -34,6 +34,14 @@
 - **중요:** `ResearchWorkEvent`(실제 연구실적)와 `KnowledgeState`(지식 보유) 및 `SiteTechniqueAssignment`(사업장 적용)을 분리하며, 기술 확보 즉시 전국의 생산성/군사/의료 능력이 상승하지 않음. `I2-DISPATCH` 미지원/상위계약 확장 대기.
 - **상태:** `phase-d-technology/1.0` 설계 확정, 실제 기술 C++ 엔진 및 45개 시험 `NOT_RUN`. 현재 작업 브랜치에 문서만 등록.
 
+## Phase D-V 건설·산업·기술 통합 검증 설계
+
+- [**D-V 통합 검증 색인**](integration/README.md): 단일 World/원장, 12단계·자원경합, 36개 불변식, 72개 교차시험, 30 ADR, 저장·장기/성능·구현 게이트.
+- [**D-V 72개 실제 검증 명세**](integration/D-V5_TEST_MATRIX.md)와 [**36개 불변조건**](integration/D-V3_INVARIANTS.md): 기존 DD0 24·건설45·산업45·기술45·C-D4 48에 추가되는 교차 수락 기준. **279개 정의된 ID, Phase D 단일 C++ 엔진 실행은 미실시**.
+- [**D-V 수락/구현 게이트**](integration/D-V7_GATES_ADRS.md): 30개 ADR, L0 공통 코드/브랜치 호환 → L1/L2 실제 기능 → L3 시험 → L4 저장/결정론 → L5 1,200개월/대표부하 실측.
+- [**D-V 검증 매니페스트**](integration/verification_manifest.json)와 [**4개 복합 시나리오/오라클**](integration/D-V4_SCENARIOS_ORACLES.md): 실제 금전·인구/자산·상품·지식·법률/군사 영향과 전역 Abort 수치정합.
+- **상태:** `phase-d-integration/1.0` 설계 확정. 실제 C++ 기반 L0는 `work/phase-c-engine-integration`/Phase D 브랜치 미결합으로 `BLOCKED_FOR_CPP`; L1~L5/72개 실행·정상 PASS `NOT_RUN`.
+
 ## D-D0 확정 원칙
 
 1. **인구/고용/재고/금융/소유권은 기존 원장을 재사용**한다. C-E1의 Firm/ProductionSite/CapitalAsset/Recipe를 다시 만들지 않는다.
@@ -62,7 +70,7 @@
 | D-T3 | 기술 | 발명·연구실패·기술이전·확산 | **설계 확정** |
 | D-T4 | 기술 | 기술/공정 채택·개축/훈련·현장 보급 | **설계 확정** |
 | D-T5 | 기술 | 경제·사회·정치·군사 피드백 | **설계 확정** |
-| D-V | 통합 | D-D0 24개 시험 + 기존 D4 회귀·100년/재현성/성능 | 예정 |
+| D-V | 통합 | 36 불변식·72 교차시험/30 ADR·279 상위 포함 ID + D4 회귀·100년/재현성/성능 | **설계 확정** |
 
 ## 상위 계약·현재 엔진의 정확한 상태
 
@@ -74,4 +82,4 @@
 - [C-D4 통합](../phase-c/integration/README.md): 30개 불변조건·48개 프로토타입 시험.
 - [Phase C 구현 보고서](https://github.com/kimjeon-il/VIC2.5/blob/work/phase-c-engine-integration/docs/phase-c/ENGINE_IMPLEMENTATION_STATUS.md): 2026-11-04 기준 48개 프로토타입 회귀 PASS, 통합 C++ 코드는 별도 `work/phase-c-engine-integration`, `main` 미병합, 완성형 게임 구현 전.
 
-**현재 건설 D-C1~C5·산업 D-I1~I5·기술 D-T1~T5 상세 설계를 확정했으며, 전체 Phase D C++ 구현·자동 인수시험 및 100년·대규모 검증은 수행하지 않았다.**
+**건설·산업·기술의 상세 설계와 D-V 통합 검증 설계까지 확정했으며, 실제 단일 Phase D C++ 구현·전체 인수시험·100년/대규모 검증은 수행하지 않았다.**
