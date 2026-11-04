@@ -259,7 +259,9 @@ public:
             if(p==op.effective)
                 for(const auto& old:queued)
                     if(old.kind==op.kind &&
-                       (old.unit==op.unit&&op.unit!=0 ||
+                       (old.unit==op.unit&&op.unit!=0 &&
+                        (op.kind==OpKind::rename||op.kind==OpKind::create_admin||
+                         op.kind==OpKind::merge_admin||op.kind==OpKind::reparent_admin) ||
                         (!old.provinces.empty()&&!op.provinces.empty()&&
                          std::any_of(old.provinces.begin(),old.provinces.end(),
                             [&](Id id){return std::find(op.provinces.begin(),op.provinces.end(),id)!=op.provinces.end();}))))

@@ -1,4 +1,5 @@
 #include "vic25/phase_e_snapshot.hpp"
+#include "vic25/phase_e_raster.hpp"
 #include <algorithm>
 #include <array>
 #include <filesystem>
@@ -191,16 +192,78 @@ static void test_58(){auto a=fixture(),b=fixture();
     check(a.month()==2200&&SnapshotCodec::encode(a)==SnapshotCodec::encode(b),
           "1200 months deterministic");}
 
+
+static void test_04(){
+    const auto seam=vic25::phasee::raster::direction_to_cube({-1,0,0});
+    const auto north=vic25::phasee::raster::direction_to_cube({0,0,1});
+    const auto south=vic25::phasee::raster::direction_to_cube({0,0,-1});
+    check(seam.face==1&&north.face==4&&south.face==5,"cube faces at seam/poles");
+    const auto position=vic25::phasee::raster::address({0,0,1},6);
+    check(position.face==4&&position.x<64&&position.y<64,"polar quadtree key");
+}
+static void test_05(){
+    const std::vector<bool> land={true,false,false,false,false,true};
+    const auto result=vic25::phasee::raster::compile_masks(
+        3,2,land,{{17,{0,5}}});
+    check(result.component_count.at(17)==2&&result.base.sample(2,1)==17&&
+          result.base.sample(1,0)==0,"multipart Province and NoData");
+}
+static void test_06(){
+    const std::vector<bool> land={true,true};
+    check(fails([&]{
+        (void)vic25::phasee::raster::compile_masks(2,1,land,{{1,{0}},{2,{0,1}}});
+    }),"overlapping source masks must fail");
+    check(fails([&]{
+        (void)vic25::phasee::raster::compile_masks(2,1,land,{{1,{0}}});
+    }),"land gap must fail");
+}
+static void test_30(){
+    World w(1000);
+    w.seed_unit(1,"A","large-original");
+    for(Id p=1;p<=3000;++p){
+        w.seed_province(p,"Q"+std::to_string(p),"A",1000);
+        w.seed_assignment(p,1);
+    }
+    World::Plan plan;
+    plan[9].push_back([](SpatialStage& s){
+        s.queue_create_admin("large-new",2,"large-target","A");
+        for(Id p=1;p<=1000;++p)
+            s.queue_reassign("large-reassign-"+std::to_string(p),p,2);
+    });
+    w.advance(plan);
+    w.advance();
+    check(w.provinces_in_unit(2).size()==1000&&
+          w.provinces_in_unit(1).size()==2000 &&
+          w.spatial().provinces.size()==3000,"3000-Province bulk administrative reorganization");
+}
+static void test_48(){
+    vic25::phasee::raster::TileCache c;
+    const vic25::phasee::raster::TileAddress id{1,2,0,1};
+    check(!c.sample(id,0,0).has_value(),"unloaded tile cannot return stale ID");
+    c.request(id);
+    check(c.pending(id)&&!c.sample(id,0,0).has_value(),"requested-but-pending tile");
+    c.arrive(id,{1,1,{101}});
+    check(!c.pending(id)&&c.sample(id,0,0)==101,"tile arrival");
+}
+static void test_50(){
+    auto w=fixture();
+    vic25::phasee::raster::DirtyProvinceSet dirt;
+    dirt.mark(1,w.spatial());
+    check(dirt.changed().size()==1&&dirt.edges().size()==2&&
+          dirt.edges().contains({1,2})&&dirt.edges().contains({1,5}),
+          "dirty only affected Province and its adjacent edges");
+}
+
 int main(){
     const std::map<int,std::function<void()>> implemented={
-      {1,test_01},{2,test_02},{3,test_03},{7,test_07},{8,test_08},
+      {1,test_01},{2,test_02},{3,test_03},{4,test_04},{5,test_05},{6,test_06},{7,test_07},{8,test_08},
       {9,test_09},{11,test_11},{12,test_12},{13,test_13},{14,test_14},
       {15,test_15},{16,test_16},{18,test_18},{19,test_19},{20,test_20},
       {21,test_21},{22,test_22},{23,test_23},{24,test_24},{25,test_25},
-      {26,test_26},{27,test_27},{28,test_28},{29,test_29},
+      {26,test_26},{27,test_27},{28,test_28},{29,test_29},{30,test_30},
       {31,test_31},{33,test_33},{34,test_34},{35,test_35},{36,test_36},
       {38,test_38},{41,test_41},{42,test_42},{44,test_44},
-      {46,test_46},{47,test_47},{51,test_51},{52,test_52},
+      {46,test_46},{47,test_47},{48,test_48},{50,test_50},{51,test_51},{52,test_52},
       {54,test_54},{55,test_55},{56,test_56},{58,test_58}
     };
     int pass=0,blocked=0;
