@@ -1,6 +1,6 @@
 # VIC2.5 Phase D — 건설·산업·기술 설계 색인
 
-> **D-D0 공통 계약 및 D-C1~C5 건설 세부 설계 확정 / 전체 Phase D C++ 구현·검증 전**  
+> **D-D0 공통 계약 및 D-C1~C5 건설·D-I1~I5 산업 세부 설계 확정 / 전체 Phase D C++ 구현·검증 전**  
 > 2026-11-04 · 공통 계약 `phase-d-common/1.0` · 브랜치 `work/phase-d-design`
 
 ## 설계 정본
@@ -17,6 +17,14 @@
 - [**건설 인수시험**](construction/CONSTRUCTION_ACCEPTANCE_TESTS.md): 25개 불변조건, 45개 개별 수락 시나리오(명세 확정/실제 C++ 실행 전).
 - [**건설 ADR**](construction/CONSTRUCTION_ADRS.md): 35개 결정. [검증 매니페스트](construction/verification_manifest.json)와 [3개월 공장 공사 fixture](construction/examples/three_month_factory.json), [전시피해 복구 fixture](construction/examples/war_damage_repair.json).
 - **상태:** `phase-d-construction/1.0` 설계 확정; `work/phase-d-design`에서만 문서 추가; C++ 건설 엔진/인수시험 `NOT_RUN`, `main` 미병합.
+
+## Phase D-I1~I5 산업 상세 설계
+
+- [**산업 설계 색인**](industry/README.md): 산업분류·기업/다업종 사업장, 자원·에너지/레시피·설비/기계화, 입지/공급망·산업화/기업생멸/산업정책.
+- [**산업 인수시험**](industry/INDUSTRY_ACCEPTANCE_TESTS.md): 25개 불변조건, 45개 검증 시나리오(명세 확정/실제 C++ 미실행).
+- [**산업 ADR**](industry/INDUSTRY_ADRS.md): 35개 결정. [수치 예제 — 광산→제철 공급망](industry/examples/ore_steel_supply_chain.json) 및 [기계화 개축](industry/examples/mechanization_retrofit.json).
+- **중요:** 비저장 실시간 전력의 동월 생산·사용 기능 `I2-DISPATCH`는 C-E1/C-D4의 명시적 상위계약 확장 전 `UNSUPPORTED`. 기존 공개 월별 12단계는 그대로.
+- **상태:** `phase-d-industry/1.0` 설계 확정, 산업 C++ 엔진 및 45개 시험 `NOT_RUN`. 작업 브랜치에 문서만 등록.
 
 ## D-D0 확정 원칙
 
@@ -36,11 +44,11 @@
 | D-C3 | 건설 | 공정·공사기간·실제 작업·하자/재시공 | **설계 확정** |
 | D-C4 | 건설 | 공사 금융·민간/공공투자·WIP/기성고 | **설계 확정** |
 | D-C5 | 건설 | 준공·개축·보수·철거·노후·피해복구 | **설계 확정** |
-| D-I1 | 산업 | 산업분류·기업/사업장·산업구조 | 예정 |
-| D-I2 | 산업 | 자원/원료·에너지·중간재·공정/산출 | 예정 |
-| D-I3 | 산업 | 기계화·설비·생산방식·숙련/생산성 | 예정 |
-| D-I4 | 산업 | 입지·집적·수송/시장·구조변화 | 예정 |
-| D-I5 | 산업 | 산업화·기업 성장/쇠퇴·정책 | 예정 |
+| D-I1 | 산업 | 산업분류·기업/사업장·산업구조 | **설계 확정** |
+| D-I2 | 산업 | 자원/원료·에너지·중간재·공정/산출 | **설계 확정** |
+| D-I3 | 산업 | 기계화·설비·생산방식·숙련/생산성 | **설계 확정** |
+| D-I4 | 산업 | 입지·집적·수송/시장·구조변화 | **설계 확정** |
+| D-I5 | 산업 | 산업화·기업 성장/쇠퇴·정책 | **설계 확정** |
 | D-T1 | 기술 | 기술/지식 분류·선행관계·이력 | 예정 |
 | D-T2 | 기술 | 연구주체·연구원·연구비·실험 | 예정 |
 | D-T3 | 기술 | 발명·연구실패·기술이전·확산 | 예정 |
@@ -58,4 +66,4 @@
 - [C-D4 통합](../phase-c/integration/README.md): 30개 불변조건·48개 프로토타입 시험.
 - [Phase C 구현 보고서](https://github.com/kimjeon-il/VIC2.5/blob/work/phase-c-engine-integration/docs/phase-c/ENGINE_IMPLEMENTATION_STATUS.md): 2026-11-04 기준 48개 프로토타입 회귀 PASS, 통합 C++ 코드는 별도 `work/phase-c-engine-integration`, `main` 미병합, 완성형 게임 구현 전.
 
-**현재 건설 D-C1~C5 상세 설계만 추가로 확정됐으며, 건설·산업·기술 전체 C++ 구현·인수시험 수행을 주장하지 않는다.**
+**현재 건설 D-C1~C5 및 산업 D-I1~I5 상세 설계를 확정했으며, 건설·산업·기술 전체 C++ 구현·인수시험 수행을 주장하지 않는다.**
