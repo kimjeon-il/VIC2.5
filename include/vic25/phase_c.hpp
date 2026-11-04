@@ -6,6 +6,7 @@
 // separate future modules (see docs/phase-c/integration/).
 #include "vic25/phase_b.hpp"
 #include "vic25/ledgers.hpp"
+#include "vic25/shared_reservations.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -118,6 +119,69 @@ public:
     [[nodiscard]] std::int64_t month() const { return people_.month(); }
     [[nodiscard]] std::uint64_t commit_id() const { return commit_id_; }
     [[nodiscard]] const FinancialLedger& financial() const { return money_; }
+    // C and D share the single transient month-local authority, while
+    // FinancialLedger / InventoryLedger / Population remain the only stocks.
+    void phase_d_enable_shared_resources() {
+        require_stage({0});
+        phase_d_reservation_mode_=true;
+    }
+    [[nodiscard]] bool phase_d_shared_resources_enabled() const {
+        return phase_d_reservation_mode_;
+    }
+    [[nodiscard]] Money phase_d_cash_available(const std::string& owner) const {
+        ensure(actors_.contains(owner),"unknown funds owner");
+        return cash(owner)-resources_.cash_held(owner);
+    }
+    [[nodiscard]] Quantity phase_d_material_available(const std::string& actor,
+             const std::string& region,const std::string& good)const{
+        const InventoryKey key{actor,region,good};
+        return stock(actor,region,good)-resources_.goods_held(key);
+    }
+    void phase_d_reserve_cash(const std::string& owner,const std::string& purpose,
+                              Money amount) {
+        require_stage({1});ensure(phase_d_reservation_mode_,"unbound resource phase");
+        resources_.reserve_cash(owner,purpose,amount,cash(owner));
+    }
+    void phase_d_release_cash(const std::string& owner,const std::string& purpose,
+                              Money amount) {
+        require_stage({3,5,7,8});
+        resources_.release_cash(owner,purpose,amount);
+    }
+    void phase_d_reserve_material(const std::string& owner,const std::string& region,
+          const std::string& good,const std::string& purpose,Quantity amount) {
+        require_stage({1,3});
+        ensure(phase_d_reservation_mode_,"unbound resource phase");
+        const InventoryKey key{owner,region,good};
+        resources_.reserve_goods(key,purpose,amount,stock(owner,region,good));
+    }
+    void phase_d_use_reserved_material(const std::string& owner,
+          const std::string& region,const std::string& good,
+          const std::string& purpose,Quantity amount){
+        require_stage({4});ensure(phase_d_reservation_mode_,"unbound resource phase");
+        const InventoryKey key{owner,region,good};
+        resources_.release_goods(key,purpose,amount);
+        phase_d_use_material(owner,region,good,amount);
+    }
+    void phase_d_use_labor(const std::string& owner,People required){
+        require_stage({4});
+        ensure(phase_d_reservation_mode_,"unbound resource phase");
+        resources_.use_labor(owner,required,employed_by(owner));
+    }
+    void phase_d_use_facility(const std::string& id,Quantity units){
+        require_stage({4});
+        ensure(phase_d_reservation_mode_,"unbound resource phase");
+        const auto& site=facilities_.at(id);
+        resources_.use_site(id,units,site.capacity-site.damaged);
+    }
+    [[nodiscard]] People phase_d_shared_labor_used(const std::string& owner)const{
+        return resources_.labor_used(owner);
+    }
+    [[nodiscard]] Quantity phase_d_shared_site_used(const std::string& site)const{
+        return resources_.site_used(site);
+    }
+    [[nodiscard]] Money phase_d_shared_cash_held(const std::string& owner)const{
+        return resources_.cash_held(owner);
+    }
     [[nodiscard]] const InventoryLedger& inventory() const { return goods_; }
     [[nodiscard]] const std::vector<std::string>& journal() const { return events_; }
     [[nodiscard]] const ElectionResult& election() const { return last_election_; }
@@ -1142,6 +1206,10 @@ public:
             }
             if (n == 11) stage.reprice_markets();
             stage.validate();
+            if (n == 11) {
+                stage.resources_.clear_month();
+                stage.phase_d_reservation_mode_=false;
+            }
         }
         stage.stage_ = -1;
         ++stage.commit_id_;
@@ -1188,6 +1256,12 @@ public:
             ensure(id==g.country && !g.head_of_state.empty() && !g.prime_minister.empty() &&
                    g.chamber_seats>0 && g.quorum>0 && g.quorum<=g.chamber_seats,
                    "invalid government institution");
+        }
+        ensure(resources_.valid(), "shared resource reservation journal inconsistent");
+        if(phase_d_reservation_mode_) {
+            for(const auto& actor:actors_)
+                ensure(resources_.cash_held(actor)<=cash(actor),
+                       "reserved cash exceeds realized available balance");
         }
         ensure(money_.balanced(), "unbalanced financial ledger");
         for(const auto& [currency,l]:foreign_ledgers_){
@@ -1248,6 +1322,9 @@ public:
 private:
     phaseb::World people_;
     FinancialLedger money_;
+    // Reservations are transient for one staged month; never another money/POP stock.
+    SharedResourceReservations resources_;
+    bool phase_d_reservation_mode_{};
     InventoryLedger goods_;
     OwnershipLedger ownership_;
     std::set<std::string> actors_;
@@ -1418,6 +1495,8 @@ private:
         return n;
     }
     void open_month() {
+        resources_.clear_month();
+        phase_d_reservation_mode_=false;
         paid_staff_this_month_.clear();
         for(auto& [key,svc]:public_institutions_) {(void)key;svc.provided=0;}
         if(auto law=scheduled_public_healthcare_.find(month());
