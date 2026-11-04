@@ -350,6 +350,13 @@ public:
     [[nodiscard]] std::int64_t month() const {return d_.opening_month;}
     [[nodiscard]] phasec::IntegratedWorld& phase_c() {return c_;}
     [[nodiscard]] const DomainState& state() const {return d_;}
+    void command_once(const std::string& external_id,
+                      const std::function<void(Stage&)>& operation) {
+        require(!external_id.empty() && static_cast<bool>(operation),
+                "invalid Phase D external command");
+        c_.command_once("PHASE_D:"+external_id,
+            [&](phasec::IntegratedWorld&){operation(*this);});
+    }
 
     // Cash reservation is now owned by the SAME Phase C authority used by
     // legacy payments, wages, transactions and Phase D activity planning.
