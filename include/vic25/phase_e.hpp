@@ -54,7 +54,8 @@ struct TerritorialScope {
 struct Claim {Id province{};std::string claimant;bool active{true};};
 enum class OpKind:std::uint8_t {
     transfer, reassign, rename, create_admin, merge_admin,
-    reparent_admin, add_claim, remove_claim, set_civil, set_fiscal
+    reparent_admin, add_claim, remove_claim, set_civil, set_fiscal,
+    found_country
 };
 struct Operation {
     std::string id;
@@ -63,12 +64,28 @@ struct Operation {
     Id unit{},other{};
     std::string value,other_value;
     Month effective{};
+    std::string leader,minister;
+    People chamber_seats{},quorum{};
 };
 struct ChangeLog {
     std::string event_id;
     OpKind kind{};
     Month effective{};
     std::vector<Id> provinces;
+};
+// This is a frozen GEOGRAPHIC district snapshot, not a second vote ledger.
+// Ballot totals and anchor eligibility remain owned by Phase C.
+struct PhysicalLink {
+    Id from{},to{};
+    std::string mode;
+};
+struct ElectoralBoundary {
+    Month opened_month{};
+    std::uint64_t boundary_revision{};
+    std::map<Id,std::set<Id>> provinces_by_district;
+    std::map<std::pair<Id,phaseb::Id>,People> allocated;
+    std::map<std::string,Id> named_districts;
+    std::set<Id> split_without_geometry; // POP partition only, no invented shapes
 };
 struct SpatialState {
     std::string dataset_hash{"synthetic-provinces/1"};
@@ -79,6 +96,8 @@ struct SpatialState {
     std::map<Id,TerritorialScope> scopes;
     std::map<Id,std::set<std::string>> claims;
     std::map<Id,std::string> civil,fiscal;
+    std::map<std::string,ElectoralBoundary> elections;
+    std::map<std::string,PhysicalLink> geographic_links;
     std::map<Month,std::vector<Operation>> pending;
     std::set<std::string> commands;
     std::vector<ChangeLog> journal;
@@ -150,6 +169,27 @@ inline void validate_spatial(const SpatialState& s,const phasec::IntegratedWorld
                 require(s.provinces.contains(p),"ED0_ERR_INVALID_SCOPE");
         }
     }
+    for(const auto& [id,link]:s.geographic_links) {
+        require(!id.empty()&&link.from!=link.to&&
+                s.provinces.contains(link.from)&&s.provinces.contains(link.to)&&
+                !link.mode.empty(),"ED0_ERR_INVALID_PROVINCE");
+    }
+    for(const auto& [contest,boundary]:s.elections) {
+        require(!contest.empty()&&!boundary.provinces_by_district.empty(),
+                "ED0_ERR_INVALID_SCOPE");
+        for(const auto& [district,ids]:boundary.provinces_by_district) {
+            require(s.scopes.contains(district)&&!ids.empty(),"ED0_ERR_INVALID_SCOPE");
+            for(Id p:ids)require(s.provinces.contains(p),"ED0_ERR_INVALID_SCOPE");
+        }
+        for(const auto& [key,count]:boundary.allocated) {
+            require(boundary.provinces_by_district.contains(key.first)&&count>0,
+                    "ED0_ERR_INVALID_SCOPE");
+        }
+        for(const auto& [anchor,district]:boundary.named_districts) {
+            require(!anchor.empty()&&boundary.provinces_by_district.contains(district),
+                    "ED0_ERR_INVALID_SCOPE");
+        }
+    }
     for(const auto& [p,claims]:s.claims) {
         require(s.provinces.contains(p),"ED0_ERR_INVALID_PROVINCE");
         for(const auto& country:claims)require(!country.empty(),"ED0_ERR_INVALID_AUTHORITY");
@@ -159,12 +199,41 @@ inline void validate_spatial(const SpatialState& s,const phasec::IntegratedWorld
             require(s.provinces.contains(p)&&!authority.empty(),
                     "ED0_ERR_INVALID_AUTHORITY");
 }
+inline std::set<Id> scope_members_of(const SpatialState& s,Id id) {
+    require(s.scopes.contains(id),"ED0_ERR_INVALID_SCOPE");
+    const auto& sc=s.scopes.at(id);
+    return sc.mode==ScopeMode::derived_administrative?
+           unit_provinces(s,sc.admin):sc.provinces;
+}
 inline void apply_operation(SpatialState& s,phasec::IntegratedWorld& c,const Operation& op) {
     require(!op.id.empty(),"ED0_ERR_DUPLICATE_EVENT");
     auto valid_province=[&](Id id) {
         require(s.provinces.contains(id),"ED0_ERR_INVALID_PROVINCE");
     };
     switch(op.kind) {
+    case OpKind::found_country: {
+        require(op.unit!=0&&!s.units.contains(op.unit)&&
+                !op.value.empty()&&!op.other_value.empty() &&
+                !op.provinces.empty()&&!op.leader.empty()&&!op.minister.empty()&&
+                op.chamber_seats>0&&op.quorum>0&&op.quorum<=op.chamber_seats,
+                "ED0_ERR_INVALID_AUTHORITY");
+        std::set<Id> unique(op.provinces.begin(),op.provinces.end());
+        require(unique.size()==op.provinces.size(),"ED0_ERR_INVALID_PROVINCE");
+        for(Id id:unique) {
+            valid_province(id);
+            require(c.sovereignty(s.provinces.at(id).region)!=op.value,
+                    "ED0_ERR_INVALID_AUTHORITY");
+        }
+        s.units.emplace(op.unit,AdministrativeUnit{
+            op.unit,op.other_value,op.value,0,true});
+        for(Id id:unique) {
+            c.phase_e_transfer_sovereignty(s.provinces.at(id).region,op.value);
+            s.membership[id]=op.unit;
+        }
+        c.phase_e_found_government(op.value,op.leader,op.minister,
+                                   op.chamber_seats,op.quorum);
+        break;
+    }
     case OpKind::transfer: {
         require(s.units.contains(op.unit)&&s.units.at(op.unit).active&&
                 s.units.at(op.unit).country==op.value && !op.provinces.empty(),
@@ -268,6 +337,18 @@ public:
                         require(false,"ED0_ERR_REVISION_CONFLICT");
         s_.pending[op.effective].push_back(std::move(op));
     }
+    // Atomic multi-province secession with an actual Phase C government.
+    void queue_independence(std::string event,std::vector<Id> ids,
+                            std::string country,Id new_admin,
+                            std::string admin_name,std::string head,
+                            std::string prime,People seats,People quorum) {
+        std::sort(ids.begin(),ids.end());
+        Operation op{std::move(event),OpKind::found_country,std::move(ids),
+                     new_admin,0,std::move(country),std::move(admin_name)};
+        op.leader=std::move(head);op.minister=std::move(prime);
+        op.chamber_seats=seats;op.quorum=quorum;
+        schedule(std::move(op));
+    }
     void queue_transfer(std::string event,std::vector<Id> ids,
                         std::string country,Id new_leaf) {
         std::sort(ids.begin(),ids.end());
@@ -301,6 +382,71 @@ public:
     void queue_fiscal(std::string event,Id p,std::string authority) {
         schedule({std::move(event),OpKind::set_fiscal,{p},0,0,std::move(authority)});
     }
+    void open_election(std::string contest,std::vector<Id> districts) {
+        require(stage_==9&&!contest.empty()&&!districts.empty()&&
+                !s_.elections.contains(contest),"ED0_ERR_INVALID_SCOPE");
+        ElectoralBoundary record;
+        record.opened_month=phase_c().month();
+        record.boundary_revision=s_.revision;
+        std::set<Id> all;
+        std::set<Id> shared;
+        for(Id district:districts) {
+            require(!record.provinces_by_district.contains(district),
+                    "ED0_ERR_INVALID_SCOPE");
+            const auto ids=scope_members_of(s_,district);
+            require(!ids.empty(),"ED0_ERR_INVALID_SCOPE");
+            for(Id id:ids)if(!all.insert(id).second)shared.insert(id);
+            record.provinces_by_district.emplace(district,ids);
+        }
+        record.split_without_geometry=std::move(shared);
+        s_.elections.emplace(std::move(contest),std::move(record));
+    }
+    // A cohort can be apportioned across districts only by explicit integer
+    // counts: no arbitrary geographic micro-polygons are ever manufactured.
+    void allocate_electors(const std::string& contest,Id district,
+                           phaseb::Id slice,People count) {
+        require(stage_==9&&s_.elections.contains(contest)&&count>0,
+                "ED0_ERR_INVALID_SCOPE");
+        auto& b=s_.elections.at(contest);
+        require(b.provinces_by_district.contains(district) &&
+                !b.allocated.contains({district,slice}),
+                "ED0_ERR_INVALID_SCOPE");
+        const auto& p=phase_c().people();
+        require(p.has_slice(slice),"ED0_ERR_INVALID_SCOPE");
+        const auto& region=p.demographic(p.slice(slice).key.demographic).region;
+        require(s_.regions.contains(region) &&
+                b.provinces_by_district.at(district).contains(s_.regions.at(region)),
+                "ED0_ERR_INVALID_SCOPE");
+        People sum=count;
+        for(const auto& [key,n]:b.allocated)
+            if(key.second==slice)sum=phaseb::add_checked(sum,n);
+        require(sum<=phase_c().phase_e_eligible_slice(slice),
+                "ED0_ERR_INVALID_SCOPE");
+        b.allocated[{district,slice}]=count;
+    }
+    void register_elector(const std::string& contest,Id district,
+                          const std::string& anchor) {
+        require(stage_==9&&s_.elections.contains(contest)&&!anchor.empty(),
+                "ED0_ERR_INVALID_SCOPE");
+        auto& b=s_.elections.at(contest);
+        require(!b.named_districts.contains(anchor),"ED0_ERR_INVALID_SCOPE");
+        const auto slice=phase_c().phase_e_anchor_slice(anchor);
+        const auto it=b.allocated.find({district,slice});
+        require(it!=b.allocated.end(),"ED0_ERR_INVALID_SCOPE");
+        People booked=0;
+        for(const auto& [name,d]:b.named_districts)
+            if(d==district&&phase_c().phase_e_anchor_slice(name)==slice)++booked;
+        require(booked<it->second,"ED0_ERR_INVALID_SCOPE");
+        b.named_districts.emplace(anchor,district);
+    }
+    void cast_elector_ballot(const std::string& contest,Id district,
+                            const std::string& anchor,const std::string& party) {
+        require(stage_==9&&s_.elections.contains(contest),"ED0_ERR_INVALID_SCOPE");
+        const auto& b=s_.elections.at(contest);
+        require(b.named_districts.contains(anchor)&&b.named_districts.at(anchor)==district,
+                "ED0_ERR_INVALID_SCOPE");
+        phase_c().cast_named_ballot(contest,std::to_string(district),anchor,party);
+    }
     void occupy(Id province,const std::string& army) {
         require(stage_==10&&s_.provinces.contains(province),"ED0_ERR_INVALID_PROVINCE");
         phase_c().occupy(s_.provinces.at(province).region,army);
@@ -323,6 +469,7 @@ private:
             // Create administrative structures first, then sovereignty/assignment
             const auto priority=[](OpKind k){
                 if(k==OpKind::create_admin)return 0;
+                if(k==OpKind::found_country)return 1;
                 if(k==OpKind::reparent_admin)return 1;
                 if(k==OpKind::transfer)return 2;
                 return 3;
@@ -384,6 +531,19 @@ public:
                 !spatial_.membership.contains(province),"ED0_ERR_ADMIN_ASSIGNMENT");
         spatial_.membership.emplace(province,leaf);
     }
+    // A geographic connection is not a shipment or transport-capacity ledger.
+    // Phase F will own actual transport capacity, tolls and routing.
+    void seed_geographic_link(std::string link_id,Id from,Id to,std::string mode) {
+        require(core_.commit_id()==0&&!link_id.empty()&&
+                !spatial_.geographic_links.contains(link_id)&&
+                spatial_.provinces.contains(from)&&spatial_.provinces.contains(to)&&
+                from!=to&&!mode.empty(),"ED0_ERR_INVALID_PROVINCE");
+        spatial_.geographic_links.emplace(std::move(link_id),
+                                            PhysicalLink{from,to,std::move(mode)});
+    }
+    [[nodiscard]] const PhysicalLink& geographic_link(const std::string& id)const {
+        return spatial_.geographic_links.at(id);
+    }
     void seed_scope(TerritorialScope scope) {
         require(core_.commit_id()==0&&scope.id>0&&
                 !spatial_.scopes.contains(scope.id),"ED0_ERR_INVALID_SCOPE");
@@ -409,6 +569,28 @@ public:
         require(spatial_.units.contains(unit)&&spatial_.units.at(unit).active,
                 "ED0_ERR_ADMIN_ASSIGNMENT");
         return unit_provinces(spatial_,unit);
+    }
+    [[nodiscard]] const ElectoralBoundary& election(const std::string& contest)const {
+        return spatial_.elections.at(contest);
+    }
+    // Exactly reproducible contracted-wage numerator and denominator.
+    // This does NOT claim to be realized wage payments from the financial ledger.
+    [[nodiscard]] std::pair<std::int64_t,People> contractual_wage_mean(
+                  const std::set<Id>& ids)const {
+        std::set<std::string> regions;
+        for(Id id:ids)regions.insert(province(id).region);
+        std::int64_t wage_sum=0;
+        People worker_sum=0;
+        const auto& pop=core_.core().people();
+        for(const auto& [id,job]:pop.jobs()) {
+            if(!pop.has_slice(id))continue;
+            const auto& region=pop.demographic(pop.slice(id).key.demographic).region;
+            if(!regions.contains(region))continue;
+            wage_sum=phaseb::add_checked(wage_sum,
+                       phaseb::mul_checked(job.wage_per_month,job.count));
+            worker_sum=phaseb::add_checked(worker_sum,job.count);
+        }
+        return {wage_sum,worker_sum};
     }
     [[nodiscard]] std::set<Id> scope_members(Id scope)const {
         const auto& sc=spatial_.scopes.at(scope);

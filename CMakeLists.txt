@@ -128,14 +128,57 @@ endif()
 # Phase E real bounded C/D/E integration — EV-Txx tests report explicit BLOCKED
 # for GPU renderer, historic geometry and advanced voting cases not yet coded.
 if (BUILD_TESTING)
+    find_package(Threads REQUIRED)
     add_executable(vic25_phase_e_tests tests/test_phase_e.cpp)
-    target_link_libraries(vic25_phase_e_tests PRIVATE vic25_core)
+    target_link_libraries(vic25_phase_e_tests PRIVATE vic25_core Threads::Threads)
     add_test(NAME vic25_phase_e_tests COMMAND vic25_phase_e_tests)
     set_tests_properties(vic25_phase_e_tests PROPERTIES TIMEOUT 240)
 endif()
 
-# Phase G/H bounded integration on the existing Phase C/D/E staged world.
-# Distinct from the unimplemented G 62 / H 176 full contract acceptance tests.
+# Optional OpenGL 3.3 raster globe. Keep headless C++ core independent.
+option(VIC25_ENABLE_GL "Enable real GL raster globe test" OFF)
+if (VIC25_ENABLE_GL)
+    find_package(OpenGL REQUIRED)
+    find_package(glfw3 REQUIRED)
+    find_package(GLEW REQUIRED)
+    add_executable(vic25_phase_e_gpu_tests tests/test_phase_e_gpu.cpp)
+    target_link_libraries(vic25_phase_e_gpu_tests PRIVATE vic25_core glfw GLEW::GLEW OpenGL::GL)
+    if (BUILD_TESTING)
+        if (UNIX AND NOT APPLE)
+            find_program(VIC25_XVFB_EXECUTABLE xvfb-run REQUIRED)
+            add_test(NAME vic25_phase_e_gpu_tests COMMAND "${VIC25_XVFB_EXECUTABLE}" -a $<TARGET_FILE:vic25_phase_e_gpu_tests>)
+            set_tests_properties(vic25_phase_e_gpu_tests PROPERTIES ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+        else()
+            add_test(NAME vic25_phase_e_gpu_tests COMMAND vic25_phase_e_gpu_tests)
+        endif()
+    endif()
+endif()
+
+# EV-T59: actual headless synthetic spatial/POP stress with peak RSS and
+# P50/P95/P99 month timings. Synthetic geography != completed world GIS.
+if (BUILD_TESTING)
+    add_executable(vic25_phase_e_scaling bench/phase_e_scaling.cpp)
+    target_link_libraries(vic25_phase_e_scaling PRIVATE vic25_core Threads::Threads)
+    if (WIN32)
+        target_link_libraries(vic25_phase_e_scaling PRIVATE Psapi)
+    endif()
+    add_test(NAME vic25_phase_e_scale_100k COMMAND vic25_phase_e_scaling 10000 100000 4)
+    set_tests_properties(vic25_phase_e_scale_100k PROPERTIES TIMEOUT 450)
+    if (UNIX AND NOT APPLE)
+        add_test(NAME vic25_phase_e_scale_1m COMMAND vic25_phase_e_scaling 100000 1000000 3)
+        set_tests_properties(vic25_phase_e_scale_1m PROPERTIES TIMEOUT 900 RUN_SERIAL TRUE)
+    endif()
+endif()
+
+# Strict EV-T60 final acceptance (intentionally not a success-oriented CTest).
+if (BUILD_TESTING)
+    add_custom_target(vic25_phase_e_release_gate
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_phase_e_gate.py" --phase-e-test $<TARGET_FILE:vic25_phase_e_tests>
+        DEPENDS vic25_phase_e_tests)
+endif()
+
+# Phase G/H bounded integration into the existing C/D/E staged World.
+# Does not represent the complete G(62) or H(176) acceptance engine.
 if (BUILD_TESTING)
     add_executable(vic25_phase_gh_tests tests/test_phase_gh.cpp)
     target_link_libraries(vic25_phase_gh_tests PRIVATE vic25_core)

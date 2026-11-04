@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - work/phase-e-cpp-integration
+      - work/phase-e-v-remaining
   workflow_dispatch:
 
 concurrency:
@@ -19,11 +20,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Configure C++20
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Install Mesa OpenGL test dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libglfw3-dev libglew-dev libgl1-mesa-dev xvfb
+      - name: Configure C++20 with GL backend (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=ON
+      - name: Configure C++20 headless core (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF
       - name: Build C/D/E regression targets
         run: cmake --build build --config Release --parallel 2
       - name: Execute CTest suite
-        run: ctest --test-dir build -C Release --output-on-failure
-      - name: Phase E granular output
-        run: ctest --test-dir build -C Release -R "^vic25_phase_e_tests$" -V
+        run: ctest --test-dir build -C Release --output-on-failure -V
