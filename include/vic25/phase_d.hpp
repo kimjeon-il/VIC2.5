@@ -70,6 +70,11 @@ struct IndustryRecipe {
     bool needs_retrofit{}; // retrofit pipeline remains unsupported by this slice
     bool requires_same_stage_nonstorable_energy{}; // I2-DISPATCH not yet contracted
 };
+struct ProductionRun {
+    std::string recipe;
+    std::int64_t month{};
+    Quantity batches{};
+};
 struct ResearchProject {
     std::string id, holder, sponsor, lab_site, region, material_good, tech_id;
     Quantity material_per_work{}, required_evidence{}, verified_work{}, planned_work{};
@@ -101,6 +106,7 @@ struct DomainState {
     std::map<std::string,ResourceDeposit> deposits;
     std::map<std::string,Quantity> cumulative_nonmarket_waste;
     std::map<std::string,IndustryRecipe> recipes;
+    std::vector<ProductionRun> actual_production_runs;
     std::map<std::string,ResearchProject> researches;
     std::map<std::pair<std::string,std::string>,KnowledgeLevel> knowledge;
     std::map<std::string,std::string> active_site_tech;
@@ -404,6 +410,19 @@ public:
         p.capitalized_value=phaseb::add_checked(p.capitalized_value,amount);
         d_.append(c_.month(),"capitalized-wip",project);
     }
+    void extract_resource(const std::string& id,Quantity units){
+        must(4);
+        auto& d=d_.deposits.at(id);
+        require(units>0&&d.remaining>=units,"extraction exceeds actual remaining stock");
+        const auto& site=c_.facility(d.site);
+        require(site.owner==d.owner&&site.region==d.region,
+                "extraction has no effective owned extraction site");
+        occupy_labor(d.owner,product(units,d.workers_per_unit));
+        occupy_site(d.site,product(units,d.site_service_per_unit));
+        c_.phase_d_emit_extraction(d.owner,d.region,d.good,units,id);
+        d.remaining-=units;
+        d_.append(d_.opening_month,"resource-extracted",id);
+    }
     void manufacture(const std::string& recipe,Quantity batches) {
         must(4);
         const auto& r=d_.recipes.at(recipe);
@@ -426,8 +445,14 @@ public:
         std::vector<std::pair<std::string,Quantity>> inputs,outputs;
         for(const auto& x:r.inputs)inputs.emplace_back(x.good,product(batches,x.per_unit));
         for(const auto& x:r.outputs)outputs.emplace_back(x.good,product(batches,x.per_unit));
+        for(const auto& x:r.byproducts)
+            outputs.emplace_back(x.good,product(batches,x.per_unit));
         c_.phase_d_transform(f.owner,f.region,inputs,outputs,workers);
-        d_.append(c_.month(),"industry-production",recipe);
+        d_.cumulative_nonmarket_waste[recipe]=phaseb::add_checked(
+            d_.cumulative_nonmarket_waste[recipe],
+            product(batches,r.nonmarket_waste_per_batch));
+        d_.actual_production_runs.push_back({recipe,d_.opening_month,batches});
+        d_.append(d_.opening_month,"industry-production",recipe);
     }
     void plan_research(const std::string& project,Quantity units) {
         must(1);
@@ -595,6 +620,18 @@ public:
     }
     [[nodiscard]] const ConstructionProject& construction(const std::string& id)const {
         return domain_.constructions.at(id);
+    }
+    [[nodiscard]] Quantity realized_batches(const std::string& industry_class,
+                                               std::int64_t from_month,
+                                               std::int64_t through_month)const{
+        require(from_month<=through_month,"invalid industry statistic period");
+        Quantity total=0;
+        for(const auto& event:domain_.actual_production_runs){
+            if(event.month<from_month||event.month>through_month)continue;
+            if(domain_.recipes.at(event.recipe).industry_class!=industry_class)continue;
+            total=phaseb::add_checked(total,event.batches);
+        }
+        return total;
     }
     [[nodiscard]] const ResourceDeposit& resource(const std::string& id)const{
         return domain_.deposits.at(id);
