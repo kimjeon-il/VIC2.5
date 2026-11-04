@@ -31,6 +31,8 @@
 - include/vic25/phase_e_compact.hpp: Phase E/Phase C의 실제 원본에서 정적 ProvinceId와 CSR adjacency, uint32 GPU country/admin/military LUT를 **한 번** 컴파일. 런타임 월간/전투 편제에 독립된 두 번째 쓰기 가능한 국가 소유권 원장을 만들지 않음.
 - 국경·행정변경이 일어난 ProvinceId 변경집합만 apply() 하고, 직접 연결된 접경 간선만 dirty 기록. 수만 개 프로빈스를 렌더 프레임마다 map 순회하거나 전세계 래스터 재작성하지 않음.
 - 30k 압축 조회 배열 수용량의 목표 <8MiB. 이는 index/CSR/LUT만의 제한이며 POP·기업·월별 StagingWorld·정적 래스터 타일·GPU VRAM을 포함한 시스템 총메모리가 아님.
+- TileCache는 기본 최대 128개 정수-ID 래스터 타일 / CPU 상주 메모리 96MiB로 제한하며, 오래 사용하지 않은 타일을 LRU 방식으로 퇴거시킨다. 마찬가지로 정적 타일은 CPU/ GPU 별도 예산이 있고 실제 렌더링 단계에서 256×256 R32UI tile x 128장만 적재하면 약 32MiB의 GPU 정수-ID 데이터다(지형·고도 등 추가 레이어 제외).
+- OpenGL 3.3 256×256 palette는 65,536개 32-bit dense index 슬롯을 가지므로 30,000번 GPU 인덱스의 실제 texture readback도 시험한다. 64-bit 영구 ProvinceId와 GPU index는 절대 혼동하지 않는다.
 - FrameExchange: C++20 atomic shared_ptr 기반 불변 GPU LUT 스냅샷을 월별 커밋 후 갱신. 실제 월별 시뮬레이션을 별도 worker에서 수행하는 동안 UI/렌더러는 이전 커밋의 배열을 lock 없이 조회하여 동기 월별 계산의 UI 스톨을 피하는 기반을 제공. 실제 전체 렌더/UI 작업자 통합은 이후 별도 검증해야 함.
 - bench/phase_e_30k.cpp: 10k/20k/30k 각각 seed와 CSR build, 두 달 실제 C/D/E 월별 staging, 10개 영토 변경과 border dirty, 600회 CPU 가상 프레임 조회/메모리 예산 계측.
 - 이는 FPS 60 보장이 아님. GPU VRAM/FPS·실제 저사양 PC 프레임 지연 및 10~100만 POP/군사/기업 장기부하는 별도 검증해야 함.

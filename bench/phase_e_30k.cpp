@@ -86,8 +86,8 @@ int main(int argc,char** argv){
         // Actual concurrency test: only simulation worker mutates World/Index.
         // The UI/render thread reads a stable immutable GPU palette snapshot.
         // No frame is allowed to wait for a monthly transaction lock.
-        compact::FrameExchange frames(index);
-        const auto original=frames.acquire();
+        compact::FrameExchange frame_exchange(index);
+        const auto original=frame_exchange.acquire();
         std::atomic<bool> completed{false};
         std::exception_ptr background_error;
         const auto concurrent_begin=Clock::now();
@@ -102,20 +102,20 @@ int main(int argc,char** argv){
                 w.advance();
                 constexpr std::array<Id,10> second={11,12,13,14,15,16,17,18,19,20};
                 index.apply(w,second);
-                frames.publish(index);
+                frame_exchange.publish(index);
             } catch(...) {background_error=std::current_exception();}
             completed.store(true,std::memory_order_release);
         });
         std::uint64_t ui_reads=0;
         for(int frame=0;frame<20000;++frame) {
-            const auto f=frames.acquire();
+            const auto f=frame_exchange.acquire();
             const auto dense=static_cast<std::size_t>((frame*37u)%size);
             ui_reads+=f->country[dense]+f->admin[dense]+f->military[dense];
         }
         const auto concurrent_end=Clock::now();
         worker.join();
         if(background_error)std::rethrow_exception(background_error);
-        const auto latest=frames.acquire();
+        const auto latest=frame_exchange.acquire();
         if(!completed.load(std::memory_order_acquire) ||
            original->commit_id>=latest->commit_id ||
            original->country[10]==latest->country[10] ||

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <set>
@@ -131,9 +132,34 @@ inline TileAddress address(Vector3 direction,std::uint8_t level) {
     return {cube.face,level,x,y};
 }
 class TileCache {
+    struct Entry {
+        RasterIdTile tile;
+        std::uint64_t last_use{};
+        std::size_t bytes{};
+    };
     std::set<TileAddress> pending_;
-    std::map<TileAddress,RasterIdTile> loaded_;
+    std::map<TileAddress,Entry> loaded_;
+    std::size_t resident_bytes_{};
+    std::size_t max_tiles_{128};
+    std::size_t byte_budget_{96u*1024u*1024u};
+    std::uint64_t clock_{};
+    std::uint64_t evictions_{};
+    void evict_one() {
+        require(!loaded_.empty(),"EV10_EMPTY_TILE_CACHE");
+        auto oldest=loaded_.begin();
+        for(auto it=std::next(loaded_.begin());it!=loaded_.end();++it)
+            if(it->second.last_use<oldest->second.last_use)
+                oldest=it; // TileAddress key ordering breaks exact ties.
+        resident_bytes_-=oldest->second.bytes;
+        loaded_.erase(oldest);
+        ++evictions_;
+    }
 public:
+    explicit TileCache(std::size_t max_tiles=128,
+                       std::size_t max_bytes=96u*1024u*1024u)
+        :max_tiles_(max_tiles),byte_budget_(max_bytes) {
+        require(max_tiles_>0&&byte_budget_>0,"EV10_INVALID_TILE_BUDGET");
+    }
     void request(TileAddress a) {
         if(!loaded_.contains(a))pending_.insert(a);
     }
@@ -141,16 +167,28 @@ public:
         require(pending_.contains(a)&&tile.width>0&&tile.height>0&&
                 tile.ids.size()==static_cast<std::size_t>(tile.width)*tile.height,
                 "ED0_ERR_DATASET_MISMATCH");
+        const auto bytes=tile.ids.size()*sizeof(Id);
+        require(bytes<=byte_budget_,"EV10_TILE_EXCEEDS_MEMORY_BUDGET");
+        while(!loaded_.empty()&&
+              (loaded_.size()>=max_tiles_ ||
+               resident_bytes_>byte_budget_-bytes))evict_one();
         pending_.erase(a);
-        loaded_[a]=std::move(tile);
+        resident_bytes_+=bytes;
+        loaded_.emplace(a,Entry{std::move(tile),++clock_,bytes});
+    }
+    void mark_visible(TileAddress a) {
+        if(auto it=loaded_.find(a);it!=loaded_.end())
+            it->second.last_use=++clock_;
     }
     [[nodiscard]] std::optional<Id> sample(TileAddress a,std::uint32_t x,std::uint32_t y)const {
         auto it=loaded_.find(a);
-        if(it==loaded_.end())return std::nullopt; // never a stale tile ID
-        return it->second.sample(x,y);
+        if(it==loaded_.end())return std::nullopt;
+        return it->second.tile.sample(x,y);
     }
     [[nodiscard]] bool pending(TileAddress a)const {return pending_.contains(a);}
     [[nodiscard]] std::size_t loaded_count()const{return loaded_.size();}
+    [[nodiscard]] std::size_t resident_bytes()const{return resident_bytes_;}
+    [[nodiscard]] std::uint64_t eviction_count()const{return evictions_;}
 };
 class DirtyProvinceSet {
     std::set<Id> changed_;

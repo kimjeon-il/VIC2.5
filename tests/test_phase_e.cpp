@@ -455,6 +455,17 @@ static void test_48(){
     check(c.pending(id)&&!c.sample(id,0,0).has_value(),"requested-but-pending tile");
     c.arrive(id,{1,1,{101}});
     check(!c.pending(id)&&c.sample(id,0,0)==101,"tile arrival");
+
+    vic25::phasee::raster::TileCache limited(2,16);
+    const vic25::phasee::raster::TileAddress x{1,2,0,0},y{1,2,1,0},z{1,2,2,0};
+    limited.request(x);limited.arrive(x,{1,1,{111}});
+    limited.request(y);limited.arrive(y,{1,1,{222}});
+    limited.mark_visible(x);
+    limited.request(z);limited.arrive(z,{1,1,{333}});
+    check(limited.loaded_count()==2 && limited.resident_bytes()==16 &&
+          limited.eviction_count()==1 && !limited.sample(y,0,0).has_value() &&
+          limited.sample(x,0,0)==111 && limited.sample(z,0,0)==333,
+          "bounded tile LRU prevents runaway CPU/GPU cache growth");
 }
 static void test_50(){
     auto w=fixture();

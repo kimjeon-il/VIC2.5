@@ -11,7 +11,7 @@ int main() {
         simulation.seed_assignment(1,100);
         const auto initial=SnapshotCodec::encode(simulation);
         gpu::RasterGlobe renderer;
-        renderer.initialize();
+        renderer.initialize(30000);
         const auto country=renderer.render(0);
         const auto administration=renderer.render(1);
         const auto military=renderer.render(2);
@@ -24,12 +24,13 @@ int main() {
         renderer.destroy();
         if(SnapshotCodec::encode(simulation)!=initial)
             throw std::runtime_error("GL context loss mutated world");
-        renderer.initialize();
+        renderer.initialize(30000);
         const auto restored=renderer.render(0);
         if(restored!=country||SnapshotCodec::encode(simulation)!=initial)
             throw std::runtime_error("GL resource rebuild inconsistency");
         std::cout<<"GPU_ACTUAL_GL33_RENDER PASS\n"
                  <<"EV-T45_GPU_LAYERS PASS\n"
+                 <<"EV10_GPU_DENSE_INDEX_30000 PASS\n"
                  <<"EV-T49_CONTEXT_RECREATE PASS (not OS TDR)\n";
     }catch(const std::exception& e) {
         std::cerr<<"GPU FAIL: "<<e.what()<<"\n";

@@ -34,6 +34,7 @@ struct Vertex {
 };
 class RasterGlobe {
     GLFWwindow* window_{};
+    std::uint32_t synthetic_gpu_index_{};
     GLuint program_{},vao_{},vbo_{},raster_id_{},palette_{};
     GLsizei vertices_{};
     bool initialized_glfw_{};
@@ -88,8 +89,10 @@ public:
     RasterGlobe(const RasterGlobe&)=delete;
     RasterGlobe& operator=(const RasterGlobe&)=delete;
     ~RasterGlobe(){destroy();}
-    void initialize() {
-        require_gl(!window_,"GL context already active");
+    void initialize(std::uint32_t diagnostic_gpu_index=0) {
+        require_gl(!window_&&diagnostic_gpu_index<65536u,
+                   "GL context already active or dense GPU ID out of palette");
+        synthetic_gpu_index_=diagnostic_gpu_index;
         require_gl(glfwInit()==GLFW_TRUE,"glfwInit failed");
         initialized_glfw_=true;
         glfwWindowHint(GLFW_VISIBLE,GLFW_FALSE);
@@ -128,7 +131,8 @@ public:
         glEnableVertexAttribArray(0);glEnableVertexAttribArray(1);glEnableVertexAttribArray(2);
         std::vector<std::uint32_t> ids(8*8*6);
         for(std::uint32_t face=0;face<6;++face)
-            std::fill(ids.begin()+face*64,ids.begin()+(face+1)*64,face+1);
+            std::fill(ids.begin()+face*64,ids.begin()+(face+1)*64,
+                      synthetic_gpu_index_?synthetic_gpu_index_:face+1);
         glGenTextures(1,&raster_id_);
         glBindTexture(GL_TEXTURE_2D_ARRAY,raster_id_);
         glTexImage3D(GL_TEXTURE_2D_ARRAY,0,GL_R32UI,8,8,6,0,GL_RED_INTEGER,
@@ -152,6 +156,13 @@ public:
         std::vector<unsigned char> colors(256*256*4,0);
         for(int i=1;i<=6;++i) {
             const auto at=4*i;
+            colors[at+0]=map_mode==0?220:20;
+            colors[at+1]=map_mode==1?220:20;
+            colors[at+2]=map_mode==2?220:20;
+            colors[at+3]=255;
+        }
+        if(synthetic_gpu_index_){
+            const auto at=4u*synthetic_gpu_index_;
             colors[at+0]=map_mode==0?220:20;
             colors[at+1]=map_mode==1?220:20;
             colors[at+2]=map_mode==2?220:20;
