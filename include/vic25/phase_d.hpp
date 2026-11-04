@@ -46,6 +46,7 @@ struct IndustryRecipe {
     People workers_per_batch{};
     Quantity capacity_per_batch{1};
     bool needs_retrofit{}; // retrofit pipeline remains unsupported by this slice
+    bool requires_same_stage_nonstorable_energy{}; // I2-DISPATCH not yet contracted
 };
 struct ResearchProject {
     std::string id, holder, sponsor, lab_site, region, material_good, tech_id;
@@ -272,6 +273,8 @@ public:
                   d_.active_site_tech.at(r.site)==r.tech_id)),
                 "manufacture requires installed and adopted technique");
         require(!r.needs_retrofit,"phase D recipe retrofit not commissioned");
+        require(!r.requires_same_stage_nonstorable_energy,
+                "I2-DISPATCH nonstorable same-stage energy unsupported");
         const auto capacity=product(batches,r.capacity_per_batch);
         const auto workers=product(batches,r.workers_per_batch);
         for(const auto& x:r.inputs)
