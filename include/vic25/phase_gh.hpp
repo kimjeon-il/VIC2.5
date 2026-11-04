@@ -822,4 +822,5 @@ inline void Stage::execute_autonomous_trade() {
     trade_.fx_held.clear();
 }
 
+} // namespace vic25::phasegh
 #include "vic25/phase_gh_extensions.hpp"
