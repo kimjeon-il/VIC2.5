@@ -16,14 +16,15 @@ namespace vic25::daily {
 namespace detail {
 using Writer=phasec::persistence_detail::BinaryWriter;
 using Reader=phasec::persistence_detail::BinaryReader;
-template<class A>void command(A& a,Command& c){
+template<class A>void command(A& a,Command& c,bool modern=true){
     a(c.id);a(c.kind);a(c.from);a(c.to);a(c.region);a(c.good);
     a(c.amount);a(c.unit_price);
+    if(modern){a(c.destination);a(c.auxiliary);a(c.route_id);}
 }
 template<class A>void entry(A& a,Entry& e) {
     a(e.effective_day);a(e.command_id);a(e.kind);a(e.c_commit_id);
 }
-template<class A,class W>void metadata(A& a,W& world) {
+template<class A,class W>void metadata(A& a,W& world,bool modern=true) {
     a(world.day_);
     a(world.day_commit_);
     a(world.world_seed_);
@@ -41,7 +42,7 @@ template<class A,class W>void metadata(A& a,W& world) {
             std::uint64_t count=commands.size();a(count);
             if(count>200'000)
                 throw std::runtime_error("TIME_ERR_TOO_MANY_COMMANDS");
-            for(const auto& c:commands){auto copy=c;command(a,copy);}
+            for(const auto& c:commands){auto copy=c;command(a,copy,modern);}
         }
     }else {
         for(std::uint64_t i=0;i<groups;++i) {
@@ -51,7 +52,7 @@ template<class A,class W>void metadata(A& a,W& world) {
             std::vector<Command> commands;
             commands.reserve(static_cast<std::size_t>(count));
             for(std::uint64_t j=0;j<count;++j) {
-                Command c;command(a,c);commands.push_back(std::move(c));
+                Command c;command(a,c,modern);commands.push_back(std::move(c));
             }
             if(!world.scheduled_.emplace(day,std::move(commands)).second)
                 throw std::runtime_error("TIME_ERR_DUPLICATE_COMMAND_DAY");
@@ -68,12 +69,38 @@ template<class A,class W>void metadata(A& a,W& world) {
             Entry e;entry(a,e);world.journal_.push_back(std::move(e));
         }
     }
+    if(modern) {
+        std::uint64_t count_cargo=0;
+        if constexpr(std::is_same_v<A,Writer>)
+            count_cargo=world.cargo_.size();
+        a(count_cargo);
+        if(count_cargo>1'000'000)
+            throw std::runtime_error("TIME_ERR_CARGO_SNAPSHOT_LIMIT");
+        if constexpr(std::is_same_v<A,Writer>) {
+            for(const auto& [id,c]:world.cargo_) {
+                a(id);a(c.id);a(c.sender);a(c.recipient);a(c.origin);
+                a(c.destination);a(c.good);a(c.edge_id);a(c.quantity);
+                a(c.loss);a(c.dispatched);a(c.arrival);a(c.arrived);
+            }
+        } else {
+            for(std::uint64_t i=0;i<count_cargo;++i) {
+                std::string id;
+                DailyCargo c;
+                a(id);a(c.id);a(c.sender);a(c.recipient);a(c.origin);
+                a(c.destination);a(c.good);a(c.edge_id);a(c.quantity);
+                a(c.loss);a(c.dispatched);a(c.arrival);a(c.arrived);
+                if(!world.cargo_.emplace(id,std::move(c)).second)
+                    throw std::runtime_error("TIME_ERR_DUPLICATE_CARGO_SNAPSHOT");
+            }
+        }
+    }
 }
 } // namespace detail
 
 struct SnapshotCodec {
     static constexpr const char* magic="VIC25_DAILY_SNAPSHOT_1";
-    static constexpr const char* version="vic25-daily-save/1.0";
+    static constexpr const char* version="vic25-daily-save/2.0";
+    static constexpr const char* prior_version="vic25-daily-save/1.0";
     static std::string encode(const World& world) {
         world.validate();
         const std::string base=phasegh::SnapshotCodec::encode(world.engine_);
@@ -109,7 +136,7 @@ struct SnapshotCodec {
         detail::Reader r{is};
         std::string m,v,t,c;
         r(m);r(v);r(t);r(c);
-        if(m!=magic||v!=version||t!=time_contract||c!=calendar_contract)
+        if(m!=magic||(v!=version&&v!=prior_version)||t!=time_contract||c!=calendar_contract)
             throw std::runtime_error("TIME_ERR_SNAPSHOT_CONTRACT_MISMATCH");
         std::uint64_t length{};r(length);
         if(length==0||length>768'000'000)
@@ -119,7 +146,7 @@ struct SnapshotCodec {
         if(!is)throw std::runtime_error("TIME_ERR_TRUNCATED_LEGACY_PAYLOAD");
         auto original=phasegh::SnapshotCodec::decode(base);
         World result=World::adopt(std::move(original));
-        detail::metadata(r,result);
+        detail::metadata(r,result,v==version);
         if(is.peek()!=std::char_traits<char>::eof())
             throw std::runtime_error("TIME_ERR_TRAILING_DATA");
         result.validate();

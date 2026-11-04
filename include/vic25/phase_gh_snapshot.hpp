@@ -184,7 +184,12 @@ template<class A>void aid(A& a,MilitaryAssistance& x) {
     a(x.event_id);a(x.provider);a(x.receiver);a(x.good);
     a(x.shipment_id);a(x.quantity);a(x.market_value);a(x.month);
 }
-template<class A>void h_state(A& a,DiplomacyState& x) {
+template<class A>void daily_treaty(A& a,DailyTreaty& t) {
+    a(t.id);a(t.country_a);a(t.country_b);a(t.good);
+    a(t.proposed_day);a(t.effective_day);
+    a(t.approved_a);a(t.approved_b);a(t.active);
+}
+template<class A>void h_state(A& a,DiplomacyState& x,bool include_daily=true) {
     checked_map(a,x.tariffs,tariff<A>);
     checked_vector(a,x.scheduled_tariffs,pending_tariff<A>);
     checked_map(a,x.treaties,treaty<A>);
@@ -196,25 +201,28 @@ template<class A>void h_state(A& a,DiplomacyState& x) {
     checked_vector(a,x.funded_exchanges,culture<A>);
     checked_vector(a,x.military_assistance,aid<A>);
     a(x.quota_used);a(x.revision);
+    if(include_daily)checked_map(a,x.daily_treaties,daily_treaty<A>);
 }
 } // namespace persisted
 
 struct SnapshotCodec {
     static constexpr const char* magic="VIC25_PHASE_GH_SNAPSHOT_1";
-    static constexpr const char* version="phase-gh-cpp/0.2";
+    static constexpr const char* version="phase-gh-cpp/0.3";
+    static constexpr const char* legacy_version="phase-gh-cpp/0.2";
     static std::string encode(const World& w) {
         w.validate();
         std::ostringstream out(std::ios::binary|std::ios::out);
         persisted::Writer a{out};
         a(std::string(magic));
-        a(std::string(version));
+        const bool upgraded=!w.diplomacy_.daily_treaties.empty();
+        a(std::string(upgraded?version:legacy_version));
         a(std::string(g_version));
         a(std::string(h_version));
         const std::string existing=phasee::SnapshotCodec::encode(w.core_);
         a(existing);
         auto g=w.trade_;
         auto h=w.diplomacy_;
-        persisted::g_state(a,g);persisted::h_state(a,h);
+        persisted::g_state(a,g);persisted::h_state(a,h,upgraded);
         const std::string payload=out.str();
         std::ostringstream end(std::ios::binary|std::ios::out);
         persisted::Writer check{end};
@@ -228,13 +236,13 @@ struct SnapshotCodec {
         persisted::Reader a{in};
         std::string m,v,g,h,base;
         a(m);a(v);a(g);a(h);
-        if(m!=magic||v!=version||g!=g_version||h!=h_version)
+        if(m!=magic||(v!=version&&v!=legacy_version)||g!=g_version||h!=h_version)
             throw std::runtime_error("G/H incompatible snapshot contract");
         a(base);
         World next;
         next.core_=phasee::SnapshotCodec::decode(base);
         persisted::g_state(a,next.trade_);
-        persisted::h_state(a,next.diplomacy_);
+        persisted::h_state(a,next.diplomacy_,v==version);
         std::uint64_t crc{};a(crc);
         if(in.peek()!=std::char_traits<char>::eof()||
            crc!=phasec::persistence_detail::checksum(

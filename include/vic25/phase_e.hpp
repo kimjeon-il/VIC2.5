@@ -566,6 +566,27 @@ public:
             require(spatial_.provinces.contains(p),"ED0_ERR_INVALID_SCOPE");
         spatial_.scopes.emplace(scope.id,std::move(scope));
     }
+    // A day does not run monthly due() administrative, election or
+    // sovereignty queue. Those legacy relations remain MonthClose-only.
+    phasec::AdvanceReport advance_daily(const Plan& tasks) {
+        SpatialState staged=spatial_;
+        phased::World::Plan bridge;
+        for(int i=0;i<12;++i)
+            bridge[static_cast<std::size_t>(i)].push_back(
+                [&,i](phased::Stage& inner) {
+                    SpatialStage s{inner,staged,i};
+                    for(const auto& callback:tasks[static_cast<std::size_t>(i)])
+                        callback(s);
+                    if(i==11)validate_spatial(staged,inner.phase_c());
+                });
+        static_assert(std::is_nothrow_move_assignable_v<SpatialState>);
+        const auto report=core_.advance_daily(bridge);
+        spatial_=std::move(staged);
+        return report;
+    }
+    [[nodiscard]] bool has_ready_daily_commission()const {
+        return core_.has_ready_daily_commission();
+    }
     [[nodiscard]] const SpatialState& spatial() const{return spatial_;}
     [[nodiscard]] const phased::World& core() const{return core_;}
     [[nodiscard]] Month month()const{return core_.month();}

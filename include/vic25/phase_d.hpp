@@ -783,6 +783,51 @@ public:
         *this=std::move(staged);
         return report;
     }
+    // Run Phase D real construction and manufacturing tasks against the
+    // same stage-valid Phase C financial/inventory/POP world each day.
+    // begin_month() must NOT run here: it renews natural pools and resets
+    // monthly throughput. Those effects still happen only at MonthClose.
+    phasec::AdvanceReport advance_daily(const Plan& tasks) {
+        DomainState next=domain_;
+        phasec::IntegratedWorld::Plan bridge;
+        for(int i=0;i<12;++i) {
+            bridge[static_cast<std::size_t>(i)].push_back([&,i](phasec::IntegratedWorld& live) {
+                if(i==0) {
+                    next.opening_month=live.month();
+                    live.phase_d_enable_shared_resources();
+                    for(auto& [id,project]:next.constructions) {
+                        if(!project.ready || project.commissioned)continue;
+                        const auto cost=project.capitalized_value;
+                        require(cost>0,"daily commissioning lacks financial WIP");
+                        live.phase_d_commission_facility(project.target_site,
+                                project.client,project.region,
+                                project.target_capacity,cost);
+                        project.commissioned=true;
+                        project.ready=false;
+                        next.append(live.month(),"daily-facility-commissioned",id);
+                    }
+                }
+                Stage stage{live,next,i};
+                for(const auto& callback:tasks[static_cast<std::size_t>(i)])
+                    callback(stage);
+                if(i==11) {
+                    next.finalize(live);
+                    live.phase_d_daily_finish_resources();
+                }
+            });
+        }
+        static_assert(std::is_nothrow_move_assignable_v<DomainState>);
+        const auto report=core_.advance_daily(bridge);
+        domain_=std::move(next);
+        return report;
+    }
+    [[nodiscard]] bool has_ready_daily_commission()const {
+        for(const auto& [id,project]:domain_.constructions) {
+            (void)id;
+            if(project.ready&&!project.commissioned)return true;
+        }
+        return false;
+    }
     [[nodiscard]] const phasec::IntegratedWorld& core() const {return core_;}
     phasec::IntegratedWorld& seed_core() {
         require(core_.commit_id()==0,"cannot seed Phase C after first committed month");

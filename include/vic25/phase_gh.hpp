@@ -228,10 +228,19 @@ struct PendingTariff {
     std::string importer, good;
     std::int64_t ppm{};
 };
+// Native day-resolved bilateral agreement, owned by H. Unlike an
+// inherited monthly Treaty, this uses explicit day timestamps and a real
+// effective state. Never copy an old Treaty and guess its missing dates.
+struct DailyTreaty {
+    std::string id, country_a, country_b, good;
+    std::int64_t proposed_day{}, effective_day{};
+    bool approved_a{}, approved_b{}, active{};
+};
 struct DiplomacyState {
     std::map<std::pair<std::string,std::string>,Tariff> tariffs;
     std::vector<PendingTariff> scheduled_tariffs;
     std::map<std::string,Treaty> treaties;
+    std::map<std::string,DailyTreaty> daily_treaties;
     std::map<std::string,Organization> organizations;
     std::map<std::string,Protectorate> protectorates;
     std::map<std::string,Crisis> crises;
@@ -298,6 +307,13 @@ class Stage {
     [[nodiscard]] bool exempt(const std::string& seller,
                               const std::string& buyer,
                               const std::string& good) {
+        for(const auto& [id,daily]:diplomacy_.daily_treaties) {
+            (void)id;
+            if(daily.active && daily.good==good &&
+               ((daily.country_a==seller&&daily.country_b==buyer) ||
+                (daily.country_b==seller&&daily.country_a==buyer)))
+                return true;
+        }
         for (const auto& [id, treaty] : diplomacy_.treaties) {
             (void)id;
             if (!treaty.active) continue;
@@ -333,6 +349,78 @@ public:
     [[nodiscard]] const DiplomacyState& diplomacy() const { return diplomacy_; }
     [[nodiscard]] const TradeState& commerce() const { return trade_; }
 
+    // New daily H treaties use the same authenticated government identities
+    // and one H-owned diplomacy registry. Terms are active from exact days,
+    // not fabricated month timestamps.
+    // Daily logistics settlement uses the authoritative G transport-edge
+    // month-budget (shared with MonthClose) and the actual C inventory.
+    void dispatch_daily_cargo(const std::string& cargo_id,
+                              const std::string& edge_id,
+                              const std::string& sender,
+                              const std::string& origin,
+                              const std::string& destination,
+                              const std::string& good,
+                              Quantity quantity,
+                              std::int32_t day_of_month,
+                              std::int32_t days_in_month) {
+        at(7);
+        require(quantity>0&&days_in_month>=28&&days_in_month<=31 &&
+                day_of_month>=1&&day_of_month<=days_in_month,
+                "G_DAILY_INVALID_THROUGHPUT");
+        const auto& edge=trade_.transport_edges.at(edge_id);
+        const auto& geo=spatial_.spatial();
+        const auto origin_id=geo.regions.at(origin);
+        const auto destination_id=geo.regions.at(destination);
+        require(edge.enabled&&
+                ((edge.from==origin_id&&edge.to==destination_id) ||
+                 (edge.to==origin_id&&edge.from==destination_id)),
+                "G_DAILY_UNREACHABLE_DESTINATION");
+        const auto key=std::make_pair(phase_c().month(),edge_id);
+        const auto used=trade_.edge_usage[key];
+        const auto term=edge.monthly_capacity/days_in_month;
+        const auto rest=edge.monthly_capacity%days_in_month;
+        const auto capacity=phaseb::add_checked(
+            phaseb::mul_checked(term,static_cast<Quantity>(day_of_month)),
+            phaseb::mul_checked(rest,static_cast<Quantity>(day_of_month))/days_in_month);
+        require(used<=capacity&&quantity<=capacity-used,
+                "G_DAILY_MONTHLY_CAPACITY_EXCEEDED");
+        phase_c().phase_time_dispatch(cargo_id,sender,origin,good,quantity);
+        trade_.edge_usage[key]=phaseb::add_checked(used,quantity);
+        ++trade_.revision;
+    }
+
+    void propose_daily_treaty(const std::string& id,
+                              const std::string& a,const std::string& b,
+                              const std::string& good,const std::string& prime,
+                              std::int64_t today,std::int64_t effective_day) {
+        at(9);
+        require(!id.empty()&&!a.empty()&&!b.empty()&&a!=b&&
+                !good.empty()&&effective_day>today&&
+                !diplomacy_.treaties.contains(id)&&
+                !diplomacy_.daily_treaties.contains(id),
+                "H_DAILY_INVALID_PROPOSAL");
+        leader(phase_c(),a,prime);
+        (void)phase_c().government(b);
+        allow_foreign_policy(a);
+        diplomacy_.daily_treaties.emplace(id,DailyTreaty{
+            id,a,b,good,today,effective_day,true,false,false});
+        ++diplomacy_.revision;
+    }
+    void ratify_daily_treaty(const std::string& id,
+                             const std::string& country,
+                             const std::string& prime) {
+        at(9);
+        auto& treaty=diplomacy_.daily_treaties.at(id);
+        require(country==treaty.country_a||country==treaty.country_b,
+                "H_DAILY_INVALID_PARTY");
+        leader(phase_c(),country,prime);
+        allow_foreign_policy(country);
+        bool& approval=(country==treaty.country_a)?
+                        treaty.approved_a:treaty.approved_b;
+        require(!approval,"H_DAILY_DUPLICATE_RATIFICATION");
+        approval=true;
+        ++diplomacy_.revision;
+    }
     void adopt_tariff(const std::string& command, const std::string& importer,
                       const std::string& good, std::int64_t ppm,
                       const std::string& authorized_prime) {
@@ -667,6 +755,36 @@ public:
         result.validate();
         return result;
     }
+    // Native day-aware H + D + E + C staged transaction. No monthly
+    // autonomous merchant/price/demography processing on an ordinary day.
+    phasec::AdvanceReport advance_daily(const Plan& tasks,std::int64_t day) {
+        TradeState new_trade=trade_;
+        DiplomacyState new_diplomacy=diplomacy_;
+        phasee::World::Plan bridge;
+        for(int n=0;n<12;++n)
+            bridge[static_cast<std::size_t>(n)].push_back(
+                [&,n](phasee::SpatialStage& spatial) {
+                    Stage stage{spatial,new_trade,new_diplomacy,n};
+                    if(n==0)
+                        for(auto& [id,t]:new_diplomacy.daily_treaties) {
+                            (void)id;
+                            if(!t.active&&t.approved_a&&t.approved_b&&
+                               t.effective_day<=day) {
+                                t.active=true;
+                                ++new_diplomacy.revision;
+                            }
+                        }
+                    for(const auto& fn:tasks[static_cast<std::size_t>(n)])
+                        fn(stage);
+                    if(n==11)check(new_trade,new_diplomacy,spatial);
+                });
+        static_assert(std::is_nothrow_move_assignable_v<TradeState>);
+        static_assert(std::is_nothrow_move_assignable_v<DiplomacyState>);
+        const auto result=core_.advance_daily(bridge);
+        trade_=std::move(new_trade);
+        diplomacy_=std::move(new_diplomacy);
+        return result;
+    }
     // Real daily Phase C events go through the same authoritative C ledger.
     // G/H autonomous trade, monthly capacity, treaty schedules and Phase B/D
     // background calculations are executed ONLY in advance() at MonthClose.
@@ -719,6 +837,17 @@ public:
     [[nodiscard]] const phasee::World& base() const {return core_;}
     [[nodiscard]] Month month() const{return core_.month();}
     [[nodiscard]] std::uint64_t commit_id()const{return core_.commit_id();}
+    [[nodiscard]] bool has_due_daily_treaty(std::int64_t day)const {
+        for(const auto& [id,t]:diplomacy_.daily_treaties) {
+            (void)id;
+            if(!t.active&&t.approved_a&&t.approved_b&&t.effective_day<=day)
+                return true;
+        }
+        return false;
+    }
+    [[nodiscard]] bool has_ready_daily_commission()const {
+        return core_.has_ready_daily_commission();
+    }
     [[nodiscard]] const TradeState& commerce() const{return trade_;}
     [[nodiscard]] const DiplomacyState& diplomacy()const{return diplomacy_;}
     [[nodiscard]] const TradeContract& contract(const std::string& id)const{
@@ -757,6 +886,12 @@ public:
     }
     void validate()const{
         core_.validate();
+        for(const auto& [id,t]:diplomacy_.daily_treaties)
+            require(id==t.id&&!id.empty()&&
+                    t.country_a!=t.country_b && !t.good.empty()&&
+                    t.effective_day>t.proposed_day &&
+                    (!t.active||(t.approved_a&&t.approved_b)),
+                    "H_DAILY_TREATY_INVARIANT");
         for(const auto& [id,t]:diplomacy_.treaties)
             require(id==t.id && (!t.active||
               (t.parties.empty()?(t.ratified_a&&t.ratified_b):

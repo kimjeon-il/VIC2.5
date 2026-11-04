@@ -98,12 +98,28 @@ inline Date following_day(Date d) {
     return from_day_index(index+1);
 }
 
-enum class Kind :std::uint8_t { payment=1, trade=2, military_control=3 };
+enum class Kind :std::uint8_t {
+    payment=1, trade=2, military_control=3,
+    pop_birth=4, pop_death=5, production=6,
+    construction=7, manufacture=8,
+    cargo_dispatch=9, treaty_offer=10, treaty_ratify=11
+};
 struct Command {
     std::string id;
     Kind kind{};
     std::string from,to,region,good;
     std::int64_t amount{},unit_price{};
+    // v2 fields: a precise target region or diplomatic government,
+    // an additional quantity/day-offset, and an actual G transport edge ID.
+    std::string destination;
+    std::int64_t auxiliary{};
+    std::string route_id;
+};
+struct DailyCargo {
+    std::string id,sender,recipient,origin,destination,good,edge_id;
+    phasec::Quantity quantity{},loss{};
+    DayIndex dispatched{},arrival{};
+    bool arrived{};
 };
 struct Entry {
     DayIndex effective_day{};
@@ -124,6 +140,14 @@ inline std::int32_t stage_of(Kind kind) {
         case Kind::payment:return 5;
         case Kind::trade:return 7;
         case Kind::military_control:return 10;
+        case Kind::pop_birth:
+        case Kind::pop_death:return 10;
+        case Kind::production:
+        case Kind::manufacture:return 4;
+        case Kind::construction:return 1;
+        case Kind::cargo_dispatch:return 7;
+        case Kind::treaty_offer:
+        case Kind::treaty_ratify:return 9;
     }
     throw std::invalid_argument("TIME_ERR_UNSUPPORTED_DAILY_KIND");
 }
@@ -149,6 +173,20 @@ inline void execute(const Command& command,phasec::IntegratedWorld& c) {
                         "TIME_ERR_INVALID_DAILY_ACTION");
                 w.occupy(command.region,command.to);
                 break;
+            case Kind::pop_birth:
+                w.phase_time_birth(static_cast<phasec::Id>(std::stoull(command.from)),
+                                   command.amount);
+                break;
+            case Kind::pop_death:
+                w.phase_time_death(static_cast<phasec::Id>(std::stoull(command.from)),
+                                   command.amount,command.auxiliary);
+                break;
+            case Kind::production:
+                w.produce(command.from,command.region,command.good,command.to,
+                          command.amount,command.unit_price);
+                break;
+            default:
+                throw std::invalid_argument("TIME_ERR_EXPECTED_DOMAIN_STAGE");
         }
     });
 }
@@ -167,6 +205,7 @@ class World {
     std::map<DayIndex,std::vector<Command>> scheduled_;
     std::set<std::string> known_command_ids_;
     std::vector<Entry> journal_;
+    std::map<std::string,DailyCargo> cargo_;
 
     explicit World(phasegh::World engine,Date date,std::uint64_t seed,
                    std::string origin,std::uint64_t legacy_checksum)
@@ -191,6 +230,7 @@ public:
     [[nodiscard]] const std::string& migration_origin()const{return migration_origin_;}
     [[nodiscard]] std::uint64_t migration_checksum()const{return migration_checksum_;}
     [[nodiscard]] const std::vector<Entry>& journal()const{return journal_;}
+    [[nodiscard]] const std::map<std::string,DailyCargo>& cargo()const{return cargo_;}
     [[nodiscard]] std::size_t pending_count()const {
         std::size_t n=0;
         for(const auto& [day,commands]:scheduled_) {
@@ -221,6 +261,20 @@ public:
                     "TIME_ERR_INVALID_EVENT_JOURNAL");
             previous=entry.effective_day;
         }
+        for(const auto& [id,c]:cargo_) {
+            require(id==c.id&&!id.empty()&&known_command_ids_.contains(id)&&
+                    !c.sender.empty()&&!c.recipient.empty()&&
+                    !c.origin.empty()&&!c.destination.empty()&&
+                    !c.good.empty()&&c.quantity>0&&c.loss>=0&&
+                    c.loss<=c.quantity&&c.arrival>c.dispatched&&
+                    c.dispatched<day_ &&
+                    (c.arrived?c.arrival<day_:true),
+                    "TIME_ERR_CARGO_JOURNAL_INTEGRITY");
+            const auto in_transit=engine_.base().core().core().stock(
+                    "TRANSIT:DAY:"+id,"in_transit",c.good);
+            require(in_transit==(c.arrived?0:c.quantity),
+                    "TIME_ERR_CARGO_LEDGER_MISMATCH");
+        }
         require(day_commit_<=static_cast<std::uint64_t>(day_),
                 "TIME_ERR_COMMIT_COUNTER"); // any fresh 1801+ clock has larger ordinal
     }
@@ -235,9 +289,8 @@ public:
         known_command_ids_.insert(std::move(command.id));
     }
 
-    // No world clone on an ordinary day with no due actions and no month-close.
-    // On event or month-close days the *whole* C/D/E/GH state is staged and
-    // published only after all domain/event validation succeeds.
+    // No deep copy on a day without new commands, transit arrivals,
+    // due diplomatic activation, ready facility, or MonthClose.
     DayReport advance_day(const phasegh::World::Plan& month_close_plan={}) {
         const auto current=date();
         const bool close=is_month_end(current);
@@ -247,35 +300,103 @@ public:
         const auto it=scheduled_.find(day_);
         const std::vector<Command> commands=
             it==scheduled_.end()?std::vector<Command>{}:it->second;
+        const bool cargo_due=std::any_of(cargo_.begin(),cargo_.end(),
+            [&](const auto& p){return !p.second.arrived&&p.second.arrival==day_;});
+        const bool treaty_due=engine_.has_due_daily_treaty(day_);
+        const bool construction_due=engine_.has_ready_daily_commission();
         if(day_commit_==std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("TIME_ERR_COMMIT_COUNTER");
-        if(commands.empty()&&!close) {
-            ++day_;
-            ++day_commit_;
+        if(commands.empty()&&!close&&!cargo_due&&!treaty_due&&!construction_due) {
+            ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
         }
-
-        // Prepare all metadata before touching a committed world.
         auto next_scheduled=scheduled_;
         auto next_journal=journal_;
+        auto next_cargo=cargo_;
         next_scheduled.erase(day_);
         auto ordered=commands;
-        std::sort(ordered.begin(),ordered.end(),[](const Command& a,const Command& b) {
-            const auto stage_a=stage_of(a.kind),stage_b=stage_of(b.kind);
-            if(stage_a!=stage_b)return stage_a<stage_b;
-            return a.id<b.id;
-        });
+        std::sort(ordered.begin(),ordered.end(),
+            [](const Command& a,const Command& b) {
+                if(stage_of(a.kind)!=stage_of(b.kind))
+                    return stage_of(a.kind)<stage_of(b.kind);
+                return a.id<b.id;
+            });
         auto candidate=engine_;
-        if(!ordered.empty()) {
-            phasec::IntegratedWorld::Plan real_actions;
-            for(const auto& command:ordered) {
-                real_actions[static_cast<std::size_t>(stage_of(command.kind))]
-                    .push_back([command](phasec::IntegratedWorld& c) {
-                        execute(command,c);
-                    });
-            }
-            candidate.advance_daily(real_actions);
+        phasegh::World::Plan real_actions;
+        for(auto& [id,c]:next_cargo) {
+            if(c.arrived||c.arrival!=day_)continue;
+            real_actions[0].push_back([c](phasegh::Stage& stage) {
+                stage.phase_c().phase_time_arrive(
+                    c.id,c.recipient,c.destination,c.good,c.quantity,c.loss);
+            });
+            c.arrived=true;
         }
+        for(const auto& command:ordered) {
+            const auto stage=static_cast<std::size_t>(stage_of(command.kind));
+            if(command.kind==Kind::construction) {
+                // Same real project, C cash reservation, material inventory,
+                // POP labor and WIP accounting; no fictional progress points.
+                real_actions[1].push_back([command](phasegh::Stage& gh) {
+                    gh.phase_d().plan_work(command.from,command.amount);
+                });
+                real_actions[4].push_back([command](phasegh::Stage& gh) {
+                    gh.phase_d().perform_work(command.from,command.amount);
+                });
+                real_actions[5].push_back([command](phasegh::Stage& gh) {
+                    gh.phase_d().pay_work(command.from,command.amount);
+                });
+                real_actions[8].push_back([command](phasegh::Stage& gh) {
+                    gh.phase_d().capitalize_work(command.from,command.amount);
+                });
+            } else if(command.kind==Kind::manufacture) {
+                real_actions[4].push_back([command](phasegh::Stage& gh) {
+                    gh.phase_d().manufacture(command.from,command.amount);
+                });
+            } else if(command.kind==Kind::cargo_dispatch) {
+                require(command.amount>0&&command.unit_price>0&&
+                        command.auxiliary>=0&&command.auxiliary<=command.amount&&
+                        !command.destination.empty()&&!command.route_id.empty(),
+                        "TIME_ERR_INVALID_CARGO_DISPATCH");
+                const auto arrival=day_+command.unit_price;
+                require(arrival>day_&&arrival<=to_day_index({9999,12,31}),
+                        "TIME_ERR_INVALID_CARGO_ETA");
+                require(!next_cargo.contains(command.id),
+                        "TIME_ERR_DUPLICATE_CARGO");
+                real_actions[7].push_back(
+                    [command,current](phasegh::Stage& gh) {
+                        gh.dispatch_daily_cargo(command.id,command.route_id,
+                            command.from,command.region,command.destination,
+                            command.good,command.amount,current.day,
+                            days_in_month(current.year,current.month));
+                    });
+                next_cargo.emplace(command.id,DailyCargo{
+                    command.id,command.from,command.to,command.region,
+                    command.destination,command.good,command.route_id,
+                    command.amount,command.auxiliary,day_,arrival,false});
+            } else if(command.kind==Kind::treaty_offer) {
+                require(command.auxiliary>0&&
+                        day_+command.auxiliary<=to_day_index({9999,12,31}),
+                        "TIME_ERR_INVALID_TREATY_EFFECTIVE_DAY");
+                real_actions[9].push_back([command,today=day_](phasegh::Stage& gh) {
+                    gh.propose_daily_treaty(command.region,command.from,command.to,
+                        command.good,command.destination,
+                        today,today+command.auxiliary);
+                });
+            } else if(command.kind==Kind::treaty_ratify) {
+                real_actions[9].push_back([command](phasegh::Stage& gh) {
+                    gh.ratify_daily_treaty(command.region,command.from,
+                                           command.destination);
+                });
+            } else {
+                real_actions[stage].push_back([command](phasegh::Stage& gh) {
+                    execute(command,gh.phase_c());
+                });
+            }
+        }
+        // Execute native daily C/D/E/G/H domain events transactionally;
+        // perform legacy monthly settlement once, at calendar month end.
+        if(!ordered.empty()||cargo_due||treaty_due||construction_due)
+            candidate.advance_daily(real_actions,day_);
         if(close)candidate.advance(month_close_plan);
         require(candidate.month()==legacy_month(next),
                 "TIME_ERR_MONTH_CLOSE_NOT_ALIGNED");
@@ -283,16 +404,18 @@ public:
         for(const auto& command:ordered)
             next_journal.push_back({day_,command.id,command.kind,
                                      candidate.commit_id()});
-
         static_assert(std::is_nothrow_move_assignable_v<phasegh::World>);
         static_assert(std::is_nothrow_move_assignable_v<
                       std::map<DayIndex,std::vector<Command>>>);
+        static_assert(std::is_nothrow_move_assignable_v<
+                      std::map<std::string,DailyCargo>>);
         engine_=std::move(candidate);
         scheduled_=std::move(next_scheduled);
         journal_=std::move(next_journal);
-        ++day_;
-        ++day_commit_;
-        return {current,next,day_commit_,engine_.commit_id(),ordered.size(),close};
+        cargo_=std::move(next_cargo);
+        ++day_;++day_commit_;
+        return {current,next,day_commit_,engine_.commit_id(),
+                ordered.size()+(cargo_due?1:0),close};
     }
 };
 } // namespace vic25::daily
