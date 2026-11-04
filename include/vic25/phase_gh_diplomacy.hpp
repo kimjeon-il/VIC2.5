@@ -134,7 +134,7 @@ inline void Stage::terminate_treaty(const std::string& id,
 inline Quantity Stage::lawful_trade_quantity(
             const std::string& seller_country,
             const std::string& buyer_country,
-            const std::string& good,Quantity requested) const {
+            const std::string& good,Quantity requested) {
     require(requested>=0,"G_ERR_NEGATIVE_QUANTITY");
     Quantity allowed=requested;
     for(const auto& [treaty_id,t]:diplomacy_.treaties) {
@@ -436,7 +436,7 @@ inline InfluenceView World::assess_influence(const std::string& source,
     for(const auto& [id,t]:diplomacy_.treaties) {
         (void)id;
         if(!t.active)continue;
-        if(t.parties.contains(source)&&t.parties.contains(target)||
+        if((t.parties.contains(source)&&t.parties.contains(target))||
            (t.parties.empty() &&
             ((t.country_a==source&&t.country_b==target)||
              (t.country_b==source&&t.country_a==target)))) {
