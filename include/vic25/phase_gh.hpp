@@ -96,6 +96,7 @@ struct PlannedTrade {
     Money unit_price{}, total_cost{}, duty{}, freight{};
     std::string contract_id, settlement_currency{"TEST"};
     std::vector<std::string> path_edges;
+    Quantity confirmed_arrival_loss{};
 };
 
 struct PathQuote {
@@ -184,6 +185,7 @@ struct InfluenceView {
 };
 
 class Stage {
+    friend class World;
     phasee::SpatialStage& spatial_;
     TradeState& trade_;
     DiplomacyState& diplomacy_;
@@ -619,10 +621,82 @@ public:
 };
 
 
-inline void Stage::plan_autonomous_trade() {
+
+inline void Stage::plan_contracts() {
     at(1);
     auto& core=phase_c();
     trade_.pending.clear();
+    trade_.fx_held.clear();
+    const auto month=core.month();
+    const auto& geo=spatial_.spatial();
+    for(const auto& [id,agreement]:trade_.contracts) {
+        if(!agreement.active||agreement.effective>month||
+           agreement.expires<month||agreement.fulfilled>=agreement.contracted)
+           continue;
+        const auto& origin=geo.provinces.at(agreement.origin).region;
+        const auto& dest=geo.provinces.at(agreement.destination).region;
+        const auto& country_from=core.sovereignty(origin);
+        const auto& country_to=core.sovereignty(dest);
+        const auto duty_ppm=duty_rate(country_from,country_to,agreement.good);
+        const auto path=quote_path(agreement.origin,agreement.destination,month);
+        if(agreement.origin!=agreement.destination&&
+           !trade_.transport_edges.empty()&&!path)continue;
+        const Money freight_unit=path?path->freight_per_unit:0;
+        const Month travel=path?path->travel_months:
+                                (agreement.origin==agreement.destination?0:1);
+        const Quantity max_route=path?path->capacity:
+                                     std::numeric_limits<Quantity>::max();
+        const Quantity available=core.phase_d_material_available(
+                      agreement.seller,origin,agreement.good);
+        const Money unit_customs=(phaseb::mul_checked(agreement.unit_price,duty_ppm)
+                                   +999'999)/1'000'000;
+        const Money main_unit=phaseb::add_checked(
+                  phaseb::add_checked(agreement.currency=="TEST"?
+                                    agreement.unit_price:0,unit_customs),
+                                    freight_unit);
+        Quantity q=std::min({agreement.contracted-agreement.fulfilled,
+                             agreement.monthly_limit,max_route,available});
+        if(agreement.currency=="TEST") {
+            if(main_unit>0)q=std::min(q,core.phase_d_cash_available(
+                                      agreement.buyer)/main_unit);
+        } else {
+            const auto available_foreign=core.fx_balance(agreement.buyer,
+                                                         agreement.currency);
+            const auto held=trade_.fx_held.contains({agreement.buyer,agreement.currency})?
+                      trade_.fx_held.at({agreement.buyer,agreement.currency}):0;
+            require(available_foreign>=held,"G_ERR_FX_OVERRESERVED");
+            q=std::min(q,(available_foreign-held)/agreement.unit_price);
+            const auto main_cash=core.phase_d_cash_available(agreement.buyer);
+            if(main_unit>0)q=std::min(q,main_cash/main_unit);
+        }
+        if(q<=0)continue;
+        if(!agreement.partial && q!=agreement.contracted-agreement.fulfilled)
+            continue;
+        const Money base=phaseb::mul_checked(q,agreement.unit_price);
+        const Money duty=phaseb::mul_checked(base,duty_ppm)/1'000'000;
+        const Money freight=phaseb::mul_checked(q,freight_unit);
+        const Money local_total=phaseb::add_checked(
+                       agreement.currency=="TEST"?base:0,
+                       phaseb::add_checked(duty,freight));
+        const std::string event="G:contract:"+id+":"+std::to_string(month);
+        if(local_total>0)core.phase_d_reserve_cash(agreement.buyer,event,local_total);
+        core.phase_d_reserve_material(agreement.seller,origin,agreement.good,event,q);
+        if(agreement.currency!="TEST")
+            trade_.fx_held[{agreement.buyer,agreement.currency}]=phaseb::add_checked(
+                  trade_.fx_held[{agreement.buyer,agreement.currency}],base);
+        if(path)for(const auto& edge_id:path->edges) {
+            trade_.edge_usage[{month,edge_id}]=phaseb::add_checked(
+                      trade_.edge_usage[{month,edge_id}],q);
+        }
+        trade_.pending.push_back({event,id,agreement.seller,agreement.buyer,
+               agreement.good,origin,dest,country_from,country_to,q,travel,
+               agreement.unit_price,local_total,duty,freight,id,
+               agreement.currency,path?path->edges:std::vector<std::string>{},0});
+    }
+}
+inline void Stage::plan_autonomous_trade() {
+    at(1);
+    auto& core=phase_c();
     const auto& geo=spatial_.spatial();
     for(const auto& [id,route]:trade_.routes) {
         (void)id;
@@ -634,33 +708,44 @@ inline void Stage::plan_autonomous_trade() {
         const auto& target_quote=core.market(dest,route.good);
         const auto ppm=duty_rate(from,to,route.good);
         const Money price=source_quote.price;
-        require(price>0 && ppm>=0 && ppm<=1'000'000,
+        require(price>0&&ppm>=0&&ppm<=1'000'000,
                 "G_ERR_INVALID_MARKET_QUOTE");
-        const Money unit_duty_ceiling=
-            (phaseb::mul_checked(price,ppm)+999'999)/1'000'000;
-        const Money landed_unit=phaseb::add_checked(price,unit_duty_ceiling);
-        // No compulsory country-wide export quotas: the merchant buys only
-        // when its destination reference price covers landed cost.
+        const auto path=quote_path(route.origin,route.destination,core.month());
+        if(route.origin!=route.destination&&
+           !trade_.transport_edges.empty()&&!path)continue;
+        const Money unit_freight=path?path->freight_per_unit:0;
+        const Quantity max_route=path?path->capacity:route.maximum_quantity;
+        const Month travel=path?path->travel_months:route.travel_months;
+        const Money unit_duty=(phaseb::mul_checked(price,ppm)+999'999)/1'000'000;
+        const Money landed_unit=phaseb::add_checked(
+                          phaseb::add_checked(price,unit_duty),unit_freight);
         if(target_quote.price<=landed_unit)continue;
         const auto available_stock=core.phase_d_material_available(
                                  route.seller,origin,route.good);
         const auto available_cash=core.phase_d_cash_available(route.buyer);
         const Quantity qty=std::min({
-            route.maximum_quantity,available_stock,
+            route.maximum_quantity,max_route,available_stock,
             available_cash/landed_unit
         });
         if(qty<=0)continue;
         const Money goods_cost=phaseb::mul_checked(qty,price);
         const Money duty=phaseb::mul_checked(goods_cost,ppm)/1'000'000;
-        const Money total=phaseb::add_checked(goods_cost,duty);
+        const Money freight=phaseb::mul_checked(qty,unit_freight);
+        const Money total=phaseb::add_checked(goods_cost,
+                                             phaseb::add_checked(duty,freight));
         const std::string eid="G:"+route.id+":"+std::to_string(core.month());
         require(!trade_.executed.contains(eid),"G_ERR_DUPLICATE_EXECUTION");
-        if(duty>0)(void)core.cash(to); // An actual importing treasury is needed.
+        if(duty>0)(void)core.cash(to);
         core.phase_d_reserve_cash(route.buyer,eid,total);
         core.phase_d_reserve_material(route.seller,origin,route.good,eid,qty);
-        trade_.pending.push_back({eid,route.id,route.seller,route.buyer,route.good,
-                         origin,dest,from,to,qty,route.travel_months,
-                         price,total,duty});
+        if(path)for(const auto& edge_id:path->edges)
+            trade_.edge_usage[{core.month(),edge_id}]=phaseb::add_checked(
+                trade_.edge_usage[{core.month(),edge_id}],qty);
+        trade_.pending.push_back({eid,route.id,route.seller,route.buyer,
+                         route.good,origin,dest,from,to,qty,travel,
+                         price,total,duty,freight,"","TEST",
+                         path?path->edges:std::vector<std::string>{},
+                         std::min(qty,route.arrival_loss)});
     }
 }
 inline void Stage::execute_autonomous_trade() {
@@ -669,32 +754,72 @@ inline void Stage::execute_autonomous_trade() {
     for(const auto& order:trade_.pending) {
         require(trade_.executed.insert(order.execution_id).second,
                 "G_ERR_DUPLICATE_EXECUTION");
-        core.phase_d_release_cash(order.buyer,order.execution_id,
-                                  order.total_cost);
+        if(order.total_cost>0)
+            core.phase_d_release_cash(order.buyer,order.execution_id,
+                                      order.total_cost);
         core.phase_g_release_reserved_goods(order.seller,order.origin_region,
-                      order.good,order.execution_id,order.quantity);
+                           order.good,order.execution_id,order.quantity);
+        const Money goods_cost=phaseb::mul_checked(
+                                      order.unit_price,order.quantity);
         if(order.origin_region==order.destination_region) {
-            core.trade(order.seller,order.buyer,order.origin_region,
-                       order.good,order.quantity,order.unit_price);
+            if(order.settlement_currency=="TEST")
+                core.trade(order.seller,order.buyer,order.origin_region,
+                           order.good,order.quantity,order.unit_price);
+            else core.phase_g_transfer_goods(order.seller,order.buyer,
+                                 order.origin_region,order.good,order.quantity);
         } else {
             require(order.travel_months>0,"G_ERR_UNSUPPORTED_TRANSPORT");
             core.ship(order.execution_id,order.seller,order.buyer,
                       order.origin_region,order.destination_region,
-                      order.good,order.quantity,order.travel_months);
-            core.pay(order.buyer,order.seller,
-                     phaseb::mul_checked(order.unit_price,order.quantity));
+                      order.good,order.quantity,order.travel_months,
+                      order.confirmed_arrival_loss);
+            if(order.settlement_currency=="TEST")
+                core.pay(order.buyer,order.seller,goods_cost);
         }
-        if(order.duty>0)
-            core.pay(order.buyer,order.buyer_country,order.duty);
+        if(order.settlement_currency!="TEST")
+            core.phase_g_pay_foreign(order.buyer,order.seller,
+                                     order.settlement_currency,goods_cost);
+        if(order.freight>0) {
+            require(!order.path_edges.empty(),"G_ERR_MISSING_FREIGHT_ROUTE");
+            Money actual_freight=0;
+            for(const auto& edge_id:order.path_edges) {
+                const auto& edge=trade_.transport_edges.at(edge_id);
+                const Money amount=phaseb::mul_checked(
+                                     order.quantity,edge.freight_per_unit);
+                if(amount>0){
+                    require(edge.carrier!=order.buyer,
+                            "G_ERR_SELF_BILLED_FREIGHT_UNSUPPORTED");
+                    core.pay(order.buyer,edge.carrier,amount);
+                    actual_freight=phaseb::add_checked(actual_freight,amount);
+                }
+            }
+            require(actual_freight==order.freight,
+                    "G_ERR_FREIGHT_ACCOUNTING_MISMATCH");
+        }
+        if(order.duty>0) {
+            core.phase_g_pay_customs(order.buyer,order.buyer_country,order.duty);
+            trade_.customs.push_back({order.execution_id,order.buyer_country,
+                 order.buyer_country,order.good,"H:effective-domestic-policy",
+                 core.month(),goods_cost,order.duty,order.duty,order.quantity});
+        }
+        if(!order.contract_id.empty()) {
+            auto& contract=trade_.contracts.at(order.contract_id);
+            require(contract.fulfilled<=contract.contracted &&
+                    order.quantity<=contract.contracted-contract.fulfilled,
+                    "G_ERR_CONTRACT_OVERDELIVERY");
+            contract.fulfilled=phaseb::add_checked(
+                                   contract.fulfilled,order.quantity);
+        }
         trade_.fills.push_back({order.execution_id,order.route_id,
             order.seller_country,order.buyer_country,core.month(),
-            order.quantity,phaseb::mul_checked(order.unit_price,
-                                               order.quantity),
-            order.duty,
-            order.origin_region!=order.destination_region});
+            order.quantity,goods_cost,order.duty,
+            order.origin_region!=order.destination_region,
+            order.freight,order.contract_id,order.settlement_currency,
+            order.path_edges});
         ++trade_.revision;
     }
     trade_.pending.clear();
+    trade_.fx_held.clear();
 }
 
-} // namespace vic25::phasegh
+#include "vic25/phase_gh_extensions.hpp"
