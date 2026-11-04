@@ -193,3 +193,11 @@ if (BUILD_TESTING)
     add_test(NAME vic25_phase_gh_commerce_tests COMMAND vic25_phase_gh_commerce_tests)
     set_tests_properties(vic25_phase_gh_commerce_tests PROPERTIES TIMEOUT 120)
 endif()
+
+# Phase H: contract-verified multilateral treaties and actual C/E/G integration.
+if (BUILD_TESTING)
+    add_executable(vic25_phase_gh_diplomacy_tests tests/test_phase_gh_diplomacy.cpp)
+    target_link_libraries(vic25_phase_gh_diplomacy_tests PRIVATE vic25_core)
+    add_test(NAME vic25_phase_gh_diplomacy_tests COMMAND vic25_phase_gh_diplomacy_tests)
+    set_tests_properties(vic25_phase_gh_diplomacy_tests PROPERTIES TIMEOUT 120)
+endif()
