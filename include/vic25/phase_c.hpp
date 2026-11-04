@@ -164,6 +164,24 @@ public:
         resources_.release_goods(key,purpose,amount);
         phase_d_use_material(owner,region,good,amount);
     }
+    Id phase_d_certify_occupational_training(Id source,People count,
+                                             std::uint8_t new_skill){
+        require_stage({10});
+        ensure(phase_d_reservation_mode_&&people_.has_slice(source) &&
+               count>0 && count<=people_.slice(source).count &&
+               people_.employed(source)==0 && new_skill<=100,
+               "training outcome needs real unemployed eligible POP partition");
+        const auto& slice=people_.slice(source);
+        const auto& economy=people_.economic(slice.key.economic);
+        auto education=people_.education(economy.education);
+        ensure(new_skill>education.occupational_skill,
+               "unearned or unchanged occupational qualification");
+        education.occupational_skill=new_skill;
+        const Id target=people_.change_education(source,count,education,
+                                                    phaseb::EventKind::training,0);
+        events_.push_back("phase-d-real-POP-occupational-training");
+        return target;
+    }
     void phase_d_use_labor(const std::string& owner,People required){
         require_stage({4});
         ensure(phase_d_reservation_mode_,"unbound resource phase");
