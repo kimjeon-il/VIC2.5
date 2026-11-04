@@ -88,3 +88,12 @@ if (BUILD_TESTING)
                 --root "${CMAKE_SOURCE_DIR}"
     )
 endif()
+
+
+# Phase D: bounded construction/industry/research integration on the *same*
+# Phase C atomic World, with explicit unfinished D-V acceptance boundaries.
+if (BUILD_TESTING)
+    add_executable(vic25_phase_d_tests tests/test_phase_d.cpp)
+    target_link_libraries(vic25_phase_d_tests PRIVATE vic25_core)
+    add_test(NAME vic25_phase_d_tests COMMAND vic25_phase_d_tests)
+endif()
