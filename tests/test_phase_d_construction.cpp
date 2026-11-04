@@ -32,7 +32,7 @@ static World base(){
     c.seed_actor("WORKERS",0);
     c.seed_actor("TREASURY",0);
     c.seed_region("R","STATE");
-    c.seed_stock("BUILDER","R","stone",2);
+    c.seed_stock("BUILDER","R","stone",3);
     c.seed_stock("BUILDER","R","steel",1);
     return w;
 }
@@ -82,14 +82,31 @@ static void test_precedence_quality_rework_and_inspection(){
     package_month(w,"FOUNDATION",2,1,false,staff);
     need(w.work_package("FOUNDATION").accepted_work==1 &&
          w.work_package("FOUNDATION").rejected_work==1 &&
-         w.core().stock("BUILDER","R","stone")==0 &&
+         w.core().stock("BUILDER","R","stone")==1 &&
          w.construction("PROJECT").accepted_work==1 &&
          w.core().phase_d_wip("CLIENT")==20,
          "rejected work must consume inputs without progress");
-    // The construction client can purchase a replacement lot for the contractor
-    // only through a real trade. For this bounded fixture use another explicit
-    // opening lot from an already seeded seller rather than creating materials.
-    // The first-month seed should have had 3 stone lots, not 2.
+    package_month(w,"FOUNDATION",1);
+    need(w.work_package("FOUNDATION").accepted_work==2 &&
+         w.work_package("FOUNDATION").finished_month==3201 &&
+         w.core().stock("BUILDER","R","stone")==0 &&
+         !w.construction("PROJECT").ready,
+         "rework did not satisfy physical foundation after real additional material");
+    package_month(w,"EQUIPMENT",1,0,true);
+    need(w.work_package("EQUIPMENT").accepted_work==1 &&
+         w.core().stock("BUILDER","R","steel")==0 &&
+         w.construction("PROJECT").ready &&
+         w.construction("PROJECT").inspected &&
+         w.core().phase_d_wip("CLIENT")==60 &&
+         !w.construction("PROJECT").commissioned,
+         "work-package predecessor cure/inspection and full WIP did not reconcile");
+    w.advance();
+    need(w.construction("PROJECT").commissioned &&
+         w.core().facility("FACTORY").capacity==5 &&
+         w.core().phase_d_wip("CLIENT")==0 &&
+         w.core().financial().balance("CLIENT:fixed_asset")==60,
+         "inspected work-package project did not commission next month");
+    w.validate();
 }
 static void test_credit_invoice_and_later_settlement(){
     World w{3300};
