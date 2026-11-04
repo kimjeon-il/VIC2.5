@@ -148,8 +148,8 @@ static void insured_loss_compensated_from_real_insurer_cash() {
            "claim calculated from confirmed shipment loss and paid by insurer");
     verify(w.base().core().core().cash("INSURER")==330,
            "insurance claim debits actual insurer account");
-    verify(w.base().core().core().stock("BUYER","RB","iron")==10,
-           "initial two units + first five + second three; loss not materialized");
+    verify(w.base().core().core().stock("BUYER","RB","iron")==8,
+           "two existing + three from each confirmed-loss voyage; no imaginary arrival");
     verify(w.base().core().core().stock("SELLER","RA","iron")==0,
            "no phantom supply added");
 }
