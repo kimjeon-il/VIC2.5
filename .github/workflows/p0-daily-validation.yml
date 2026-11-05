@@ -1,8 +1,7 @@
 name: P0 native daily gameplay validation
 on:
-  push:
-    branches: [work/p0-strategic-gameplay-loop]
   pull_request:
+    branches: [main]
     paths:
       - 'include/vic25/**'
       - 'tests/test_p0_daily.cpp'
@@ -11,6 +10,10 @@ on:
       - 'CMakeLists.txt'
       - '.github/workflows/p0-daily-validation.yml'
   workflow_dispatch:
+
+concurrency:
+  group: p0-daily-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   p0-daily:
