@@ -333,7 +333,8 @@ public:
             [](const auto& row){return !row.empty();});
         if(commands.empty()&&!close&&!first_calendar_day&&
            !native_actions&&!cargo_due&&!treaty_due&&!construction_due &&
-           !engine_.base().core().core().daily_auto_demography_enabled()) {
+           !engine_.base().core().core().daily_auto_demography_enabled()&&
+           !engine_.has_autonomous_daily_trade()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
         }
@@ -446,7 +447,8 @@ public:
         });
         // Run autonomous daily POP against the same committed C/D/E/G/H
         // staging world, then do legacy settlement once at month end.
-        candidate.advance_daily(real_actions,day_,first_calendar_day);
+        candidate.advance_daily(real_actions,day_,first_calendar_day,
+                                current.day,days_in_month(current.year,current.month));
         if(close) {
             auto complete_month=month_close_plan;
             complete_month[10].push_back([](phasegh::Stage& gh) {

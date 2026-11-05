@@ -273,6 +273,29 @@ class Stage {
     TradeState& trade_;
     DiplomacyState& diplomacy_;
     int phase_{};
+    std::int32_t day_of_month_{};
+    std::int32_t days_in_month_{};
+    std::int64_t day_index_{-1};
+    // Cumulative allowance: never regrant a full month of quota daily.
+    Quantity day_budget(Quantity total,Quantity used)const {
+        require(total>=0&&used>=0,"G_DAY_BAD_BUDGET");
+        if(day_of_month_<=0)return total; // legacy month, unchanged
+        require(days_in_month_>=28&&days_in_month_<=31&&
+                day_of_month_<=days_in_month_,"G_DAY_BAD_DATE");
+        const Quantity ceiling=phaseb::add_checked(
+          phaseb::mul_checked(total/days_in_month_,day_of_month_),
+          phaseb::mul_checked(total%days_in_month_,day_of_month_)/days_in_month_);
+        return ceiling>used?ceiling-used:0;
+    }
+    Quantity monthly_fill(const std::string& id,bool contract)const {
+        Quantity used=0;
+        for(const auto& fill:trade_.fills) {
+            if(fill.month!=phase_c().month())continue;
+            if(contract?fill.contract_id==id:fill.route_id==id)
+                used=phaseb::add_checked(used,fill.quantity);
+        }
+        return used;
+    }
     void at(int expected) const {
         require(phase_ == expected, "GH_ERR_INVALID_STAGE");
     }
@@ -340,8 +363,11 @@ class Stage {
     }
 public:
     Stage(phasee::SpatialStage& spatial, TradeState& trade,
-          DiplomacyState& diplomacy, int phase)
-        : spatial_(spatial), trade_(trade), diplomacy_(diplomacy), phase_(phase) {}
+          DiplomacyState& diplomacy, int phase,
+          std::int32_t day=0,std::int32_t dim=0,std::int64_t ordinal=-1)
+        : spatial_(spatial), trade_(trade), diplomacy_(diplomacy),
+          phase_(phase), day_of_month_(day), days_in_month_(dim),
+          day_index_(ordinal) {}
     [[nodiscard]] int phase() const { return phase_; }
     [[nodiscard]] phasee::SpatialStage& geography() { return spatial_; }
     [[nodiscard]] phased::Stage& phase_d() { return spatial_.phase_d(); }
@@ -775,16 +801,20 @@ public:
     // Native day-aware H + D + E + C staged transaction. No monthly
     // autonomous merchant/price/demography processing on an ordinary day.
     phasec::AdvanceReport advance_daily(const Plan& tasks,std::int64_t day,
-                                         bool first_calendar_day=false) {
+                                         bool first_calendar_day=false,
+                                         std::int32_t day_of_month=0,
+                                         std::int32_t days_in_month=0) {
         TradeState new_trade=trade_;
         DiplomacyState new_diplomacy=diplomacy_;
         phasee::World::Plan bridge;
         for(int n=0;n<12;++n)
             bridge[static_cast<std::size_t>(n)].push_back(
                 [&,n](phasee::SpatialStage& spatial) {
-                    Stage stage{spatial,new_trade,new_diplomacy,n};
+                    Stage stage{spatial,new_trade,new_diplomacy,n,
+                                day_of_month,days_in_month,day};
                     if(n==0){
                         if(first_calendar_day)stage.advance_legal_state();
+                        if(day_of_month>0)stage.register_arrived_losses();
                         for(auto& [id,t]:new_diplomacy.daily_treaties) {
                             (void)id;
                             if(!t.active&&t.approved_a&&t.approved_b&&
@@ -796,6 +826,18 @@ public:
                     }
                     for(const auto& fn:tasks[static_cast<std::size_t>(n)])
                         fn(stage);
+                    if(day_of_month>0){
+                        if(n==1){
+                            stage.reserve_collateral();
+                            stage.plan_contracts();
+                            stage.plan_autonomous_trade();
+                        }
+                        if(n==5)stage.settle_insurance_claims();
+                        if(n==7){
+                            stage.execute_autonomous_trade();
+                            stage.pay_insurance_premiums();
+                        }
+                    }
                     if(n==11)check(new_trade,new_diplomacy,spatial);
                 });
         static_assert(std::is_nothrow_move_assignable_v<TradeState>);
@@ -808,6 +850,10 @@ public:
     // Real daily Phase C events go through the same authoritative C ledger.
     // G/H autonomous trade, monthly capacity, treaty schedules and Phase B/D
     // background calculations are executed ONLY in advance() at MonthClose.
+    [[nodiscard]] bool has_autonomous_daily_trade()const {
+        return !trade_.routes.empty()||!trade_.contracts.empty()||
+               !trade_.credit.empty()||!trade_.insurance.empty();
+    }
     phasec::AdvanceReport advance_daily(const phasec::IntegratedWorld::Plan& commands) {
         World staged=*this;
         const auto report=staged.core_.advance_daily(commands);
@@ -933,22 +979,25 @@ public:
             bridge[static_cast<std::size_t>(n)].push_back(
                 [&,n](phasee::SpatialStage& spatial){
                     Stage stage{spatial,next_trade,next_diplomacy,n};
-                    if(n==0){
-                        if(!already_opened_on_calendar_day)
-                            stage.advance_legal_state();
+                    if(n==0&&!already_opened_on_calendar_day){
+                        stage.advance_legal_state();
                         stage.register_arrived_losses();
                     }
                     for(const auto& callback:plan[static_cast<std::size_t>(n)])
                         callback(stage);
-                    if(n==1){
-                        stage.reserve_collateral();
-                        stage.plan_contracts();
-                        stage.plan_autonomous_trade();
-                    }
-                    if(n==5)stage.settle_insurance_claims();
-                    if(n==7){
-                        stage.execute_autonomous_trade();
-                        stage.pay_insurance_premiums();
+                    // The calendar day already booked G/H monetary and trade
+                    // events. Keep standalone monthly execution unchanged.
+                    if(!already_opened_on_calendar_day){
+                        if(n==1){
+                            stage.reserve_collateral();
+                            stage.plan_contracts();
+                            stage.plan_autonomous_trade();
+                        }
+                        if(n==5)stage.settle_insurance_claims();
+                        if(n==7){
+                            stage.execute_autonomous_trade();
+                            stage.pay_insurance_premiums();
+                        }
                     }
                     if(n==11)check(next_trade,next_diplomacy,spatial);
                 });
@@ -998,8 +1047,10 @@ inline void Stage::plan_contracts() {
                   phaseb::add_checked(agreement.currency=="TEST"?
                                     agreement.unit_price:0,unit_customs),
                                     freight_unit);
+        const Quantity used_in_month=monthly_fill(id,true);
+        const Quantity available_on_day=day_budget(agreement.monthly_limit,used_in_month);
         Quantity q=std::min({agreement.contracted-agreement.fulfilled,
-                             agreement.monthly_limit,max_route,available});
+                             available_on_day,max_route,available});
         if(agreement.currency=="TEST") {
             if(main_unit>0)q=std::min(q,core.phase_d_cash_available(
                                       agreement.buyer)/main_unit);
@@ -1023,7 +1074,8 @@ inline void Stage::plan_contracts() {
         const Money local_total=phaseb::add_checked(
                        agreement.currency=="TEST"?base:0,
                        phaseb::add_checked(duty,freight));
-        const std::string event="G:contract:"+id+":"+std::to_string(month);
+        const std::string event="G:contract:"+id+":"+std::to_string(month)+
+            (day_of_month_>0?":D"+std::to_string(day_index_):"");
         if(local_total>0)core.phase_d_reserve_cash(agreement.buyer,event,local_total);
         core.phase_d_reserve_material(agreement.seller,origin,agreement.good,event,q);
         if(agreement.currency!="TEST")
@@ -1069,8 +1121,10 @@ inline void Stage::plan_autonomous_trade() {
         const auto available_stock=core.phase_d_material_available(
                                  route.seller,origin,route.good);
         const auto available_cash=core.phase_d_cash_available(route.buyer);
+        const Quantity used_in_month=monthly_fill(route.id,false);
+        const Quantity available_on_day=day_budget(route.maximum_quantity,used_in_month);
         const Quantity qty=lawful_trade_quantity(from,to,route.good,
-             std::min({route.maximum_quantity,max_route,available_stock,
+             std::min({available_on_day,max_route,available_stock,
                        available_cash/landed_unit}));
         if(qty<=0)continue;
         const Money goods_cost=phaseb::mul_checked(qty,price);
@@ -1078,7 +1132,8 @@ inline void Stage::plan_autonomous_trade() {
         const Money freight=phaseb::mul_checked(qty,unit_freight);
         const Money total=phaseb::add_checked(goods_cost,
                                              phaseb::add_checked(duty,freight));
-        const std::string eid="G:"+route.id+":"+std::to_string(core.month());
+        const std::string eid="G:"+route.id+":"+std::to_string(core.month())+
+            (day_of_month_>0?":D"+std::to_string(day_index_):"");
         require(!trade_.executed.contains(eid),"G_ERR_DUPLICATE_EXECUTION");
         if(duty>0)(void)core.cash(to);
         core.phase_d_reserve_cash(route.buyer,eid,total);

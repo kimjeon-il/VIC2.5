@@ -26,7 +26,9 @@ inline std::optional<PathQuote> Stage::quote_path(
             const auto& edge=trade_.transport_edges.at(edge_id);
             const Quantity used=trade_.edge_usage.contains({month,edge_id})?
                                 trade_.edge_usage.at({month,edge_id}):0;
-            if(!edge.enabled || used>=edge.monthly_capacity)continue;
+            const Quantity ceiling=day_of_month_>0?
+                day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
+            if(!edge.enabled || used>=ceiling)continue;
             require(edge.from==node && used>=0,
                     "G_ERR_LOGISTICS_INDEX_CORRUPT");
             const Money next_cost=phaseb::add_checked(cost,edge.freight_per_unit);
@@ -51,9 +53,10 @@ inline std::optional<PathQuote> Stage::quote_path(
         const auto& edge=trade_.transport_edges.at(it->second.second);
         const Quantity used=trade_.edge_usage.contains({month,edge.id})?
                                 trade_.edge_usage.at({month,edge.id}):0;
-        require(used<edge.monthly_capacity,"G_ERR_LOGISTICS_CAPACITY");
-        result.capacity=std::min(result.capacity,
-                                 edge.monthly_capacity-used);
+        const Quantity ceiling=day_of_month_>0?
+            day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
+        require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
+        result.capacity=std::min(result.capacity,ceiling-used);
         result.edges.push_back(edge.id);
         p=it->second.first;
     }
