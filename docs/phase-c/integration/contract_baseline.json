@@ -2,7 +2,7 @@
   "schema_version": "d4-contract-baseline/1.0",
   "scope": "source-and-version-registration-gate-only",
   "note": "Passing D4-T48 confirms this reproducible prototype's registered design contracts, baseline source compatibility and preceding 47 synthetic D4 checks. It does not certify full CE/CP/CM historical game functionality or D4-DONE.",
-  "source_branch": "work/merge-all-to-main",
+  "source_branch": "main",
   "contract_versions": {
     "pop": "pop-design/1.1",
     "common": "phase-c-common/1.0",
@@ -19,8 +19,8 @@
     "docs/pop/D0_ARCHITECTURE.md": "d1ae7d9541696c8f42d0b949a0a5c6184bf141ab",
     "docs/pop/D1_SCHEMA.md": "509569a2fdbce88c09ba28ed790d684746bc3fed",
     "docs/pop/D2_TRANSITIONS.md": "b3917a48a320a48d66e7ca76e214de3e914aa154",
-    "docs/pop/D3_RUNTIME.md": "bd6c0816b77b004a172190beabbb6ebbe4d673ac",
-    "docs/phase-c/C-D0_COMMON_CONTRACT.md": "0cdfdb17de0905db36e0132adc755f4d5c598e14",
+    "docs/pop/D3_RUNTIME.md": "9cd3f9b911201120670b22dc8d075a2c06eedd9b",
+    "docs/phase-c/C-D0_COMMON_CONTRACT.md": "2499cd662811bf5606e57d3e128f49288c756501",
     "docs/phase-c/economy/README.md": "bfb90326d09bd217a678bd2a3333176479e6e907",
     "docs/phase-c/economy/ECONOMIC_ADRS.md": "3d9a7633b5f4856a2d42c205e7c4da9c4d15f843",
     "docs/phase-c/economy/ECONOMIC_ACCEPTANCE_TESTS.md": "57c4906d384d6e670c0c5bca52e4f2e634d6b141",
@@ -75,7 +75,7 @@
     "CMakeLists.txt"
   ],
   "runtime_status": "PARTIAL_IMPLEMENTATION_WITH_SYNTHETIC_INTEGRATION_ACCEPTANCE",
-  "source_lock_revision": "d4-source-lock/1.1",
+  "source_lock_revision": "d4-source-lock/1.2",
   "source_lock_history": [
     {
       "date": "2026-11-05",
@@ -83,6 +83,20 @@
       "modified": [
         "docs/phase-c/politics/C-P2_LAW_POLICY_ENFORCEMENT.md",
         "docs/phase-c/politics/C-P3_POP_INTEREST_GROUPS_MOVEMENTS.md"
+      ]
+    },
+    {
+      "date": "2026-11-05",
+      "change": "ADR-TIME-001/002 and ADR-TIME-003 introduce one-day CommitDay and legacy MonthClose once per calendar month. POP-D3 and C-D0 gained explicit time-contract override headers without changing their pop-design/1.1 or phase-c-common/1.0 population/ledger schema, 48 D4 runnable C++ cases, or Phase C binary snapshot ABI. Only their Git blob IDs are re-locked; this does NOT certify full B-J native daily simulation.",
+      "modified": [
+        "docs/pop/D3_RUNTIME.md",
+        "docs/phase-c/C-D0_COMMON_CONTRACT.md"
+      ],
+      "time_contract": "vic25-time/2.1-native-slice",
+      "authoritative_adrs": [
+        "docs/adr/ADR-TIME-001_DAILY_TICK_B-J.md",
+        "docs/adr/ADR-TIME-002_LEGACY_SAVE_MIGRATION.md",
+        "docs/adr/ADR-TIME-003_NATIVE_DAY_DOMAINS.md"
       ]
     }
   ]
