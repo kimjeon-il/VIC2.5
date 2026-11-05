@@ -337,3 +337,10 @@ if (BUILD_TESTING AND UNIX AND NOT APPLE)
     add_test(NAME vic25_daily_30k COMMAND vic25_daily_30k)
     set_tests_properties(vic25_daily_30k PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
 endif()
+
+# P0 deterministic daily grand-strategy slice: real C/D/E/G/H ledgers.
+if(BUILD_TESTING)
+    add_executable(vic25_p0_daily_tests tests/test_p0_daily.cpp)
+    target_link_libraries(vic25_p0_daily_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p0_daily_tests COMMAND vic25_p0_daily_tests)
+endif()

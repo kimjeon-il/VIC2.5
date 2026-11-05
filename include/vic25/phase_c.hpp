@@ -851,6 +851,36 @@ public:
         events_.push_back("solvent-demand-market-clearance");
         return fulfilled;
     }
+    // P0 native-day market close. The MonthClose compatibility path must not
+    // reprice these same trades or count the same food shortage twice.
+    // A small integer price moves no faster than its currency tick permits.
+    void phase_time_close_daily_markets(int calendar_day) {
+        require_stage({11});
+        ensure(calendar_day>=1 && calendar_day<=31,"invalid daily market date");
+        for(auto& [key,m]:markets_) {
+            const auto& [region,good]=key;
+            if(good=="food"&&m.unmet>0) {
+                regional_food_grievance_[region]=phaseb::add_checked(
+                    regional_food_grievance_[region],m.unmet);
+                events_.push_back("daily-observed-food-shortage");
+            }
+            // 1% nominal pressure per active day, with deterministic discrete
+            // currency ticks for prices below 100 units.
+            const Money step=m.price>=100?std::max<Money>(1,m.price/100):
+                    (calendar_day%std::max<Money>(1,100/m.price)==0?1:0);
+            if(m.unmet>0 && step>0)
+                m.price=std::min(m.ceiling,phaseb::add_checked(m.price,step));
+            else if(m.unmet==0 && m.solvent_demand>0 &&
+                    m.stock_offered>phaseb::add_checked(m.solvent_demand,m.target_stock) &&
+                    step>0)
+                m.price=std::max(m.floor,m.price-step);
+            m.solvent_demand=0;
+            m.delivered=0;
+            m.unmet=0;
+            m.stock_offered=0;
+        }
+        events_.push_back("daily-market-clearing-closed");
+    }
     void household_produce(Id slice,const std::string& good,Quantity output,
                            Quantity max_output_per_person) {
         require_stage({4});
