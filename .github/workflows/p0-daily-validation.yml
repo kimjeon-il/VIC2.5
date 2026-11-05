@@ -6,6 +6,8 @@ on:
     paths:
       - 'include/vic25/**'
       - 'tests/test_p0_daily.cpp'
+      - 'tests/test_p0_daily_longrun.cpp'
+      - 'tests/test_daily_time.cpp'
       - 'CMakeLists.txt'
       - '.github/workflows/p0-daily-validation.yml'
   workflow_dispatch:
@@ -23,9 +25,9 @@ jobs:
       - name: Configure headless C++20
         run: cmake -S . -B build-p0 -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF
       - name: Compile native daily P0 and regressions
-        run: cmake --build build-p0 --config Debug --parallel 2 --target vic25_p0_daily_tests vic25_daily_native_tests vic25_daily_time_tests vic25_phase_c_tests vic25_phase_d_tests vic25_phase_gh_tests
+        run: cmake --build build-p0 --config Debug --parallel 2 --target vic25_p0_daily_tests vic25_p0_daily_longrun vic25_daily_native_tests vic25_daily_time_tests vic25_phase_c_tests vic25_phase_d_tests vic25_phase_gh_tests
       - name: Execute P0 and baseline daily integration
-        run: ctest --test-dir build-p0 -C Debug -R "^(vic25_p0_daily_tests|vic25_daily_native_tests|vic25_daily_time_tests|vic25_phase_c_tests|vic25_phase_d_tests|vic25_phase_gh_tests)$" --output-on-failure -V
+        run: ctest --test-dir build-p0 -C Debug -R "^(vic25_p0_daily_tests|vic25_p0_daily_longrun|vic25_daily_native_tests|vic25_daily_time_tests|vic25_phase_c_tests|vic25_phase_d_tests|vic25_phase_gh_tests)$" --output-on-failure -V
       - name: Preserve failure diagnostics
         if: always()
         uses: actions/upload-artifact@v4
