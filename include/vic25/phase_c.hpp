@@ -844,7 +844,11 @@ public:
         const Quantity available=stock(seller,region,good);
         const Quantity fulfilled=std::min(solvent,available);
         m.solvent_demand=phaseb::add_checked(m.solvent_demand,solvent);
-        m.stock_offered=phaseb::add_checked(m.stock_offered,available);
+        // A second household viewing the same seller's remaining inventory
+        // must not count the same physical stock as newly offered supply.
+        // This conservative upper bound is exact for one seller per market.
+        m.stock_offered=std::max(m.stock_offered,
+            phaseb::add_checked(m.delivered,available));
         m.delivered=phaseb::add_checked(m.delivered,fulfilled);
         m.unmet=phaseb::add_checked(m.unmet,solvent-fulfilled);
         if(fulfilled>0) trade(seller,buyer,region,good,fulfilled,m.price);
@@ -1083,6 +1087,12 @@ public:
     [[nodiscard]] Quantity stock(const std::string& holder, const std::string& region,
                                  const std::string& good) const {
         return goods_.stock({holder, region, good});
+    }
+    [[nodiscard]] People unit_slice_strength(const std::string& unit,Id slice) const {
+        auto owner=units_.find(unit);
+        if(owner==units_.end())return 0;
+        auto assigned=owner->second.find(slice);
+        return assigned==owner->second.end()?0:assigned->second;
     }
     [[nodiscard]] People active_strength(const std::string& unit) const {
         const auto& a = units_.at(unit);

@@ -94,6 +94,7 @@ struct Policies {
 
     void validate() const {
         std::set<std::string> seen_firms,seen_projects,seen_countries;
+        std::set<std::pair<Id,std::string>> seen_pop_goods;
         std::set<std::string> engaged;
         for(const auto& f:manufacturers)
             if(f.recipe.empty() || f.target_inventory<0 ||
@@ -106,7 +107,8 @@ struct Policies {
                 throw std::invalid_argument("P0_INVALID_STAFFING");
         for(const auto& b:buyers)
             if(!b.population_slice||b.household_actor.empty()||b.seller.empty()||
-               b.region.empty()||b.good.empty()||b.units_per_person_per_day<=0)
+               b.region.empty()||b.good.empty()||b.units_per_person_per_day<=0||
+               !seen_pop_goods.insert({b.population_slice,b.good}).second)
                 throw std::invalid_argument("P0_INVALID_BUYER");
         for(const auto& i:investments)
             if(i.construction_project.empty()||i.output_good.empty()||
@@ -147,7 +149,16 @@ struct Policies {
 };
 
 inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
-    People need=p.wanted-c.phase_d_workforce(p.employer);
+    // Count actual employment contracts in this region, NOT effective workers:
+    // a strike is lost production for a day, not a vacant permanent job.
+    People contracted=0;
+    for(const auto& [slice,job]:c.people().jobs()) {
+        if(job.employer!=p.employer)continue;
+        const auto& row=c.people().slice(slice);
+        if(c.people().demographic(row.key.demographic).region==p.region)
+            contracted=phaseb::add_checked(contracted,job.count);
+    }
+    People need=p.wanted-contracted;
     if(need<=0)return;
     // This is not population creation. Only an eligible, truly uncontracted
     // regional slice can be hired; no cross-firm job overwrite.
@@ -245,12 +256,12 @@ inline phasec::CombatLoss tactical_losses(People victim,
 
 inline void fight(phasec::IntegratedWorld& c,const Engagement& e) {
     if(!c.people().has_slice(e.attacker_slice)||!c.people().has_slice(e.defender_slice))return;
-    const People a=c.active_strength(e.attacker);
-    const People b=c.active_strength(e.defender);
-    if(a<=0||b<=0)return;
-    const People a_slice=c.people().slice(e.attacker_slice).count;
-    const People b_slice=c.people().slice(e.defender_slice).count;
-    if(a!=a_slice||b!=b_slice)return; // bounded one-exclusively-assigned-slice test
+    const People a=c.people().slice(e.attacker_slice).count;
+    const People b=c.people().slice(e.defender_slice).count;
+    // The combat order targets a real assigned slice. The parent unit may
+    // retain other active cohorts after an earlier day's injuries or splits.
+    if(a<=0||b<=0||c.unit_slice_strength(e.attacker,e.attacker_slice)!=a||
+       c.unit_slice_strength(e.defender,e.defender_slice)!=b)return;
     const Quantity ammo_a=std::min<Quantity>(a,c.stock(e.attacker,e.region,"ammunition"));
     const Quantity ammo_b=std::min<Quantity>(b,c.stock(e.defender,e.region,"ammunition"));
     if(ammo_a<=0||ammo_b<=0)return;

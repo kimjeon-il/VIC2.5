@@ -217,6 +217,46 @@ static void low_unit_price_still_changes_across_months() {
          "low nominal prices must accrue pressure across month boundaries");
 }
 
+
+static void duplicate_pop_demand_is_rejected() {
+    auto w=fixture();
+    const auto& slices=w.base().core().core().people().slices();
+    const auto buyer=std::next(slices.begin(),2)->first;
+    p0::Policies config;
+    config.buyers.push_back({buyer,"HH","FIRM","R","food",1});
+    config.buyers.push_back({buyer,"HH","FIRM","R","food",1});
+    bool rejected=false;
+    try{p0::DailyGame game(daily::World::adopt(std::move(w),8),config);}
+    catch(const std::invalid_argument&){rejected=true;}
+    require_test(rejected,"same POP and commodity must not be counted twice");
+}
+static void additional_active_cohorts_do_not_block_combat() {
+    phasegh::World gh(24000);
+    auto& e=gh.seed_geography();
+    e.seed_province(1,"R","A");e.seed_unit(11,"A","ROOT");e.seed_assignment(1,11);
+    auto& c=e.seed_core().seed_core();
+    for(auto who:{"A","ATT","DEF"})c.seed_actor(who,100);
+    c.seed_unit("ATT");c.seed_unit("DEF");
+    c.seed_stock("ATT","R","ammunition",12);
+    c.seed_stock("DEF","R","ammunition",12);
+    const auto leadA=people(gh,"R",20,"soldier",phaseb::Service::active);
+    const auto reserveA=people(gh,"R",20,"soldier",phaseb::Service::active);
+    const auto leadB=people(gh,"R",20,"soldier",phaseb::Service::active);
+    const auto reserveB=people(gh,"R",20,"soldier",phaseb::Service::active);
+    c.seed_active("ATT",leadA);c.seed_active("ATT",reserveA);
+    c.seed_active("DEF",leadB);c.seed_active("DEF",reserveB);
+    p0::Policies opts;
+    opts.engagements.push_back({"ATT","DEF","R",leadA,leadB,1'000'000});
+    p0::DailyGame g(daily::World::adopt(std::move(gh),17),opts);
+    const auto before=c.people().population();
+    g.advance_day();
+    require_test(::c(g).people().population()<before,
+       "extra unit cohorts must not disable a valid engaged slice");
+    require_test(::c(g).stock("ATT","R","ammunition")<12 &&
+                 ::c(g).stock("DEF","R","ammunition")<12,
+       "multi-cohort engagement must consume actual ammunition");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -225,7 +265,9 @@ int main(){
         daily_price_not_replayed_at_month_close();
         low_unit_price_still_changes_across_months();
         daily_battle_consumes_actual_ammo_and_pop();
-        std::cout<<"P0 daily grand strategy: 6 bounded integration scenarios PASS\n";
+        additional_active_cohorts_do_not_block_combat();
+        duplicate_pop_demand_is_rejected();
+        std::cout<<"P0 daily grand strategy: 8 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P0 DAILY TEST FAILED: "<<e.what()<<"\n";
