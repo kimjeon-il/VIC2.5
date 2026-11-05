@@ -317,6 +317,48 @@ static void a_strike_is_not_a_permanent_hiring_vacancy() {
        "actual strike should remain active for the configured period");
 }
 
+
+static void native_autonomous_extraction_physical_flow() {
+    auto w=fixture();
+    auto& d=w.seed_geography().seed_core();
+    auto& core=d.seed_core();
+    core.seed_production_facility("MINE","FIRM","R",31);
+    core.seed_market("R","coal",20,1,40,6);
+    phased::ResourceSite site;
+    site.id="COAL-MINE";
+    site.site="MINE";site.owner="FIRM";site.region="R";
+    site.good="coal";site.monthly_capacity=31;
+    site.workers_per_unit=1;site.site_service_per_unit=1;
+    d.seed_resource_site(site);
+    const auto worker=core.seed_population().slices().begin()->first;
+    core.seed_population().hire(worker,4,"FIRM","worker",10,phaseb::JobRequirements{});
+    p0::Policies rules;
+    rules.extractors.push_back({"COAL-MINE",5,1,"WORKERS","TREASURY"});
+    p0::DailyGame game(daily::World::adopt(std::move(w),19),rules);
+    game.advance_day();
+    require_test(::c(game).stock("FIRM","R","coal")==1 &&
+                 ::c(game).cash("WORKERS")==1,
+                 "resource extractor did not produce one day of physical output and wages");
+    const auto initial=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(initial),rules);
+    for(int i=0;i<30;i++) {
+        game.advance_day();
+        replay.advance_day();
+    }
+    require_test(daily::SnapshotCodec::encode(game.world())==
+                 daily::SnapshotCodec::encode(replay.world()),
+                 "resource site native day replay did not preserve actual flow");
+    const auto& r=game.world().engine().base().core().resource_site("COAL-MINE");
+    require_test(r.cumulative_output==5 &&
+                 ::c(game).stock("FIRM","R","coal")==5 &&
+                 ::c(game).cash("WORKERS")==5,
+                 "resource extractor must stop at actual inventory target");
+    game.advance_day(); // February 1, no hidden underground stock regenerated.
+    require_test(game.world().engine().base().core().resource_site("COAL-MINE")
+                          .cumulative_output==5,
+                 "date rollover must not invent or duplicate in-situ output");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -329,7 +371,8 @@ int main(){
         duplicate_pop_demand_is_rejected();
         multiple_households_do_not_inflate_one_sellers_stock();
         a_strike_is_not_a_permanent_hiring_vacancy();
-        std::cout<<"P0 daily grand strategy: 10 bounded integration scenarios PASS\n";
+        native_autonomous_extraction_physical_flow();
+        std::cout<<"P0 daily grand strategy: 11 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P0 DAILY TEST FAILED: "<<e.what()<<"\n";
