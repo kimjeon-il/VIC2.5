@@ -359,6 +359,65 @@ static void native_autonomous_extraction_physical_flow() {
                  "date rollover must not invent or duplicate in-situ output");
 }
 
+
+static void native_autonomous_funded_research_and_day_lab_limit() {
+    auto gh=fixture();
+    auto& d=gh.seed_geography().seed_core();
+    auto& c=d.seed_core();
+    c.seed_production_facility("RESEARCH-LAB","FIRM","R",31);
+    phased::TechnologyDefinition tech;
+    tech.id="TECH-DAILY";
+    d.seed_technology(tech);
+    phased::ResearchProject project;
+    project.id="PROJECT-RESEARCH";
+    project.holder="FIRM";
+    project.sponsor="A";
+    project.lab_site="RESEARCH-LAB";
+    project.region="R";
+    project.material_good="ore";
+    project.tech_id="TECH-DAILY";
+    project.material_per_work=1;
+    project.required_evidence=2;
+    project.workers_per_work=1;
+    project.cash_cost_per_work=5;
+    d.seed_research(project);
+    const auto worker=c.seed_population().slices().begin()->first;
+    c.seed_population().hire(worker,4,"FIRM","worker",10,
+                             phaseb::JobRequirements{});
+    p0::Policies rules;
+    rules.researches.push_back({"PROJECT-RESEARCH",1});
+    p0::DailyGame game(daily::World::adopt(std::move(gh),23),rules);
+    const auto sponsor_cash=::c(game).cash("A");
+    const auto materials=::c(game).stock("FIRM","R","ore");
+    game.advance_day();
+    const auto& progress=game.world().engine().base().core().state().researches.at(
+                          "PROJECT-RESEARCH");
+    require_test(progress.verified_work==1&&progress.paid_work==1&&
+                 !progress.reviewed&&::c(game).cash("A")==sponsor_cash-5&&
+                 ::c(game).stock("FIRM","R","ore")==materials-1,
+                 "research Day1 did not use actual paid labor, materials and lab");
+    auto bytes=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(bytes),rules);
+    game.advance_day();replay.advance_day();
+    require_test(daily::SnapshotCodec::encode(game.world())==
+                 daily::SnapshotCodec::encode(replay.world()),
+                 "research stage replay must be deterministic");
+    require_test(game.world().engine().base().core().state().researches.at(
+                     "PROJECT-RESEARCH").reviewed &&
+                 ::c(game).cash("A")==sponsor_cash-10 &&
+                 ::c(game).stock("FIRM","R","ore")==materials-2 &&
+                 game.world().engine().base().core().knowledge(
+                     "FIRM","TECH-DAILY")!=phased::KnowledgeLevel::usable,
+                 "real paid research must be reviewed on Day2, not instantly usable");
+    for(int day=3;day<=31;++day)game.advance_day();
+    game.advance_day(); // February 1: next-month researched technology is usable.
+    require_test(game.world().engine().base().core().knowledge(
+                     "FIRM","TECH-DAILY")==phased::KnowledgeLevel::usable &&
+                 ::c(game).cash("A")==sponsor_cash-10 &&
+                 ::c(game).stock("FIRM","R","ore")==materials-2,
+                 "next-month knowledge must not duplicate financing or material");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -372,7 +431,8 @@ int main(){
         multiple_households_do_not_inflate_one_sellers_stock();
         a_strike_is_not_a_permanent_hiring_vacancy();
         native_autonomous_extraction_physical_flow();
-        std::cout<<"P0 daily grand strategy: 11 bounded integration scenarios PASS\n";
+        native_autonomous_funded_research_and_day_lab_limit();
+        std::cout<<"P0 daily grand strategy: 12 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P0 DAILY TEST FAILED: "<<e.what()<<"\n";
