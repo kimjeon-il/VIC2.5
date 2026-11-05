@@ -261,12 +261,158 @@ static void migrates_old_daily_v1_without_inventing_actions() {
          vic25::phasegh::SnapshotCodec::encode(migrated.engine())==gh,
          "v1 daily metadata migration changed authoritative world");
 }
+
+static void conversion_only_epidemic_and_consumption(){
+    Fixture fixture;
+    const auto patient=fixture.death_slice;
+    auto world=World::adopt(std::move(fixture.gh),2026);
+    const auto original_people=ledger(world).people().population();
+
+    auto consumption=cmd("CONVERSION-CONSUME",Kind::consumption);
+    consumption.from="SELLER";consumption.region="R1";
+    consumption.good="iron";consumption.amount=3;
+    world.enqueue({2000,1,1},consumption);
+
+    auto epidemic=cmd("CONVERSION-EPIDEMIC",Kind::epidemic);
+    epidemic.from=std::to_string(patient);
+    epidemic.amount=2;epidemic.unit_price=1; // two illnesses, one death
+    world.enqueue({2000,1,1},epidemic);
+
+    const auto report=world.advance_day();
+    need(report.actions==2 && ledger(world).stock("SELLER","R1","iron")==7 &&
+         ledger(world).people().population()==original_people-1 &&
+         world.journal().size()==2,
+         "conversion-only consumption/epidemic did not use authoritative C/B");
+    const auto saved=SnapshotCodec::encode(world);
+    need(SnapshotCodec::encode(SnapshotCodec::decode(saved))==saved,
+         "conversion-only domain commands corrupt daily v2.0 snapshots");
+
+    auto overuse=cmd("INVALID-CONSUMPTION",Kind::consumption);
+    overuse.from="SELLER";overuse.region="R1";
+    overuse.good="iron";overuse.amount=1000;
+    world.enqueue({2000,1,2},overuse);
+    const auto before=SnapshotCodec::encode(world);
+    need(reject([&]{world.advance_day();}) &&
+         SnapshotCodec::encode(world)==before,
+         "invalid direct daily consumption must rollback all domains/date");
+}
+
+static void conversion_only_daily_tariff_and_authority(){
+    Fixture fixture;
+    fixture.gh.seed_tariff("B","iron",100'000);
+    auto world=World::adopt(std::move(fixture.gh));
+    auto policy=cmd("TARIFF-DAY2",Kind::tariff);
+    policy.from="B";policy.to="PM_B";policy.good="iron";
+    policy.amount=250'000;
+    world.enqueue({2000,1,2},policy);
+    world.advance_day(); // 2000-01-01: unchanged
+    need(world.engine().diplomacy().tariffs.at({"B","iron"}).ppm==100'000,
+         "daily tariff applied before effective date");
+    world.advance_day();
+    need(world.engine().diplomacy().tariffs.at({"B","iron"}).ppm==250'000 &&
+         world.engine().diplomacy().scheduled_tariffs.empty(),
+         "authorized daily tariff did not activate or polluted monthly schedule");
+
+    auto illegal=cmd("TARIFF-WRONG-LEADER",Kind::tariff);
+    illegal.from="B";illegal.to="PM_A";illegal.good="iron";
+    illegal.amount=300'000;
+    world.enqueue({2000,1,3},illegal);
+    const auto before=SnapshotCodec::encode(world);
+    need(reject([&]{world.advance_day();}) &&
+         before==SnapshotCodec::encode(world),
+         "unauthorized tariff change must rollback full daily state");
+}
+
+// A hand-authored authentic conversion-branch daily v1.1 header and metadata.
+// Preserve the version/old enum tags independently from current C++ Kind.
+static std::string conversion_legacy_11_fixture(const vic25::phasegh::World& gh,
+                                                  const Command& command,
+                                                  std::uint8_t old_kind){
+    const auto original=vic25::phasegh::SnapshotCodec::encode(gh);
+    std::ostringstream stream(std::ios::binary|std::ios::out);
+    vic25::phasec::persistence_detail::BinaryWriter w{stream};
+    w(std::string("VIC25_DAILY_SNAPSHOT_1"));
+    w(std::string("vic25-daily-save/1.1"));
+    w(std::string(time_contract));
+    w(std::string(calendar_contract));
+    w(static_cast<std::uint64_t>(original.size()));
+    stream.write(original.data(),static_cast<std::streamsize>(original.size()));
+    w(to_day_index({2000,1,1}));
+    w(std::uint64_t{0}); // day commits
+    w(std::uint64_t{14}); // deterministic seed
+    w(std::string("conversion/v1.1"));
+    w(std::uint64_t{0}); // original migration checksum (fixture)
+    w(std::set<std::string>{command.id});
+    w(std::uint64_t{1}); // one scheduled date
+    w(to_day_index({2000,1,1}));
+    w(std::uint64_t{1}); // one command in the date
+    w(command.id);w(old_kind);w(command.from);w(command.to);
+    w(command.region);w(command.good);w(command.amount);
+    w(command.unit_price);w(command.destination);
+    w(std::uint64_t{0}); // no completed journal entries
+    const auto payload=stream.str();
+    std::ostringstream tail(std::ios::binary|std::ios::out);
+    vic25::phasec::persistence_detail::BinaryWriter writer{tail};
+    writer(vic25::phasec::persistence_detail::checksum(payload));
+    return payload+tail.str();
+}
+
+static void conversion_legacy_11_safe_migration(){
+    Fixture fixture;
+    auto consumption=cmd("LEGACY11-CONSUME",Kind::consumption);
+    consumption.from="SELLER";consumption.region="R1";
+    consumption.good="iron";consumption.destination="R2";consumption.amount=2;
+    const auto old=conversion_legacy_11_fixture(fixture.gh,consumption,6);
+    auto restored=SnapshotCodec::decode(old);
+    need(restored.pending_count()==1 &&
+         SnapshotCodec::encode(restored)!=old,
+         "conversion v1.1 daily save must upgrade without altering current ABI");
+    const auto v2=SnapshotCodec::encode(restored);
+    need(SnapshotCodec::encode(SnapshotCodec::decode(v2))==v2,
+         "conversion v1.1->v2.0 save/reload did not preserve commands");
+    restored.advance_day();
+    need(ledger(restored).stock("SELLER","R1","iron")==8 &&
+         restored.journal().back().kind==Kind::consumption,
+         "legacy v1.1 numeric tag 6 must not become a current production command");
+
+    auto epidemic=cmd("LEGACY11-EPIDEMIC",Kind::epidemic);
+    epidemic.from=std::to_string(fixture.death_slice);
+    epidemic.amount=1;epidemic.unit_price=1;
+    auto illness=SnapshotCodec::decode(
+        conversion_legacy_11_fixture(fixture.gh,epidemic,4));
+    const auto count=ledger(illness).people().population();
+    illness.advance_day();
+    need(ledger(illness).people().population()==count-1 &&
+         illness.journal().back().kind==Kind::epidemic,
+         "legacy v1.1 epidemic tag 4 remap failed");
+
+    auto policy=cmd("LEGACY11-TARIFF",Kind::tariff);
+    policy.from="B";policy.to="PM_B";policy.good="iron";policy.amount=200'000;
+    auto law=SnapshotCodec::decode(
+        conversion_legacy_11_fixture(fixture.gh,policy,9));
+    law.advance_day();
+    need(law.engine().diplomacy().tariffs.at({"B","iron"}).ppm==200'000,
+         "legacy v1.1 tariff kind must map to H-owned dated policy");
+
+    auto unsupported=cmd("LEGACY11-ROUTELESS",Kind::cargo_dispatch);
+    unsupported.from="SELLER";unsupported.to="BUYER";
+    unsupported.region="R1";unsupported.destination="R2";
+    unsupported.good="iron";unsupported.amount=2;
+    need(reject([&] {
+        (void)SnapshotCodec::decode(
+            conversion_legacy_11_fixture(fixture.gh,unsupported,10));
+    }),"legacy v1.1 route-free cargo must not bypass real G transport graph");
+}
+
 int main(){
     try{
         cross_domain_daily_events_and_replay();
         daily_rollback_due_to_resource_constraints();
         migrates_old_daily_v1_without_inventing_actions();
         daily_diplomacy_changes_real_trade_tariff();
+        conversion_only_epidemic_and_consumption();
+        conversion_only_daily_tariff_and_authority();
+        conversion_legacy_11_safe_migration();
         std::cout<<"NATIVE_DAILY_BCDGH: 3 domains groups PASS\n";
         return 0;
     }catch(const std::exception& e) {

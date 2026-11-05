@@ -421,6 +421,23 @@ public:
         approval=true;
         ++diplomacy_.revision;
     }
+    // Time-specific, authenticated policy using the canonical H tariff
+    // registry. Existing monthly adopt_tariff() keeps its old semantics.
+    void adopt_tariff_daily(const std::string& command,
+                            const std::string& importer,
+                            const std::string& good,std::int64_t ppm,
+                            const std::string& authorized_prime) {
+        at(0);
+        require(!command.empty()&&!importer.empty()&&!good.empty()&&
+                ppm>=0&&ppm<=1'000'000 &&
+                !diplomacy_.commands.contains("DAY_TARIFF:"+command),
+                "H_ERR_DAILY_TARIFF_POLICY");
+        leader(phase_c(),importer,authorized_prime);
+        allow_foreign_policy(importer);
+        diplomacy_.commands.insert("DAY_TARIFF:"+command);
+        diplomacy_.tariffs[{importer,good}]={importer,good,ppm};
+        ++diplomacy_.revision;
+    }
     void adopt_tariff(const std::string& command, const std::string& importer,
                       const std::string& good, std::int64_t ppm,
                       const std::string& authorized_prime) {

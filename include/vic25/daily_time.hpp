@@ -102,7 +102,9 @@ enum class Kind :std::uint8_t {
     payment=1, trade=2, military_control=3,
     pop_birth=4, pop_death=5, production=6,
     construction=7, manufacture=8,
-    cargo_dispatch=9, treaty_offer=10, treaty_ratify=11
+    cargo_dispatch=9, treaty_offer=10, treaty_ratify=11,
+    // Append-only: existing daily v2.0 Kind tags are unchanged.
+    epidemic=12, consumption=13, tariff=14
 };
 struct Command {
     std::string id;
@@ -141,7 +143,10 @@ inline std::int32_t stage_of(Kind kind) {
         case Kind::trade:return 7;
         case Kind::military_control:return 10;
         case Kind::pop_birth:
-        case Kind::pop_death:return 10;
+        case Kind::pop_death:
+        case Kind::epidemic:return 10;
+        case Kind::consumption:return 7;
+        case Kind::tariff:return 0;
         case Kind::production:
         case Kind::manufacture:return 4;
         case Kind::construction:return 1;
@@ -181,6 +186,22 @@ inline void execute(const Command& command,phasec::IntegratedWorld& c) {
                 w.phase_time_death(static_cast<phasec::Id>(std::stoull(command.from)),
                                    command.amount,command.auxiliary);
                 break;
+            case Kind::epidemic:
+                require(!command.from.empty()&&command.amount>=0&&
+                        command.unit_price>=0&&
+                        (command.amount>0||command.unit_price>0),
+                        "TIME_ERR_INVALID_DAILY_EPIDEMIC");
+                w.epidemic(static_cast<phasec::Id>(std::stoull(command.from)),
+                           command.amount,command.unit_price);
+                break;
+            case Kind::consumption:
+                require(!command.from.empty()&&!command.region.empty()&&
+                        !command.good.empty()&&command.amount>0,
+                        "TIME_ERR_INVALID_DAILY_CONSUMPTION");
+                w.consume(command.from,command.region,command.good,command.amount);
+                break;
+            case Kind::tariff:
+                throw std::invalid_argument("TIME_ERR_EXPECTED_DIPLOMATIC_STAGE");
             case Kind::production:
                 w.produce(command.from,command.region,command.good,command.to,
                           command.amount,command.unit_price);
@@ -192,10 +213,10 @@ inline void execute(const Command& command,phasec::IntegratedWorld& c) {
 }
 
 class World;
-namespace detail { template<class A,class W> void metadata(A&,W&,bool modern=true); }
+namespace detail { template<class A,class W> void metadata(A&,W&,int format=2); }
 class World {
     friend struct SnapshotCodec;
-    template<class A,class W> friend void detail::metadata(A&,W&,bool);
+    template<class A,class W> friend void detail::metadata(A&,W&,int);
     phasegh::World engine_;
     DayIndex day_{};
     std::uint64_t day_commit_{};
@@ -374,6 +395,17 @@ public:
                     command.id,command.from,command.to,command.region,
                     command.destination,command.good,command.route_id,
                     command.amount,command.auxiliary,day_,arrival,false});
+            } else if(command.kind==Kind::tariff) {
+                // A previously scheduled policy is effective at the start
+                // of its designated day, without editing earlier trades.
+                require(!command.from.empty()&&!command.to.empty()&&
+                        !command.good.empty()&&command.amount>=0&&
+                        command.amount<=1'000'000,
+                        "TIME_ERR_INVALID_DAILY_TARIFF");
+                real_actions[0].push_back([command](phasegh::Stage& gh) {
+                    gh.adopt_tariff_daily(command.id,command.from,command.good,
+                                          command.amount,command.to);
+                });
             } else if(command.kind==Kind::treaty_offer) {
                 require(command.auxiliary>0&&
                         day_+command.auxiliary<=to_day_index({9999,12,31}),
