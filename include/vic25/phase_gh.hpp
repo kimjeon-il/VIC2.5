@@ -287,7 +287,7 @@ class Stage {
           phaseb::mul_checked(total%days_in_month_,day_of_month_)/days_in_month_);
         return ceiling>used?ceiling-used:0;
     }
-    Quantity monthly_fill(const std::string& id,bool contract)const {
+    Quantity monthly_fill(const std::string& id,bool contract) {
         Quantity used=0;
         for(const auto& fill:trade_.fills) {
             if(fill.month!=phase_c().month())continue;
