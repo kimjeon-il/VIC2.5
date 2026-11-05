@@ -851,6 +851,16 @@ public:
         events_.push_back("solvent-demand-market-clearance");
         return fulfilled;
     }
+    // P0 consumes the goods through the real inventory ledger and records
+    // the difference between essential demand and fulfilled goods. Unlike the
+    // market-price rule this includes unmet needs caused by insolvency.
+    void phase_time_record_food_need_gap(const std::string& region,People unmet){
+        require_stage({7});
+        ensure(!region.empty()&&unmet>0,"invalid observed food need gap");
+        regional_food_grievance_[region]=phaseb::add_checked(
+              regional_food_grievance_[region],unmet);
+        events_.push_back("daily-pop-food-need-gap");
+    }
     // P0 native-day market close. The MonthClose compatibility path must not
     // reprice these same trades or count the same food shortage twice.
     // A small integer price moves no faster than its currency tick permits.
@@ -865,11 +875,8 @@ public:
         }
         for(auto& [key,m]:markets_) {
             const auto& [region,good]=key;
-            if(good=="food"&&m.unmet>0) {
-                regional_food_grievance_[region]=phaseb::add_checked(
-                    regional_food_grievance_[region],m.unmet);
-                events_.push_back("daily-observed-food-shortage");
-            }
+            (void)region;
+            (void)good; // Need gaps were already counted once at stage 7.
             // 1% nominal pressure per active day, with deterministic discrete
             // currency ticks for prices below 100 units.
             const Money step=m.price>=100?std::max<Money>(1,m.price/100):

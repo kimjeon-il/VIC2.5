@@ -33,6 +33,7 @@ static phasegh::World fixture() {
     core.seed_actor("A",1000);
     core.seed_actor("FIRM",2000);
     core.seed_actor("HH",1000);
+    core.seed_actor("POOR",0);
     core.seed_actor("WORKERS",0);
     core.seed_actor("BUILDER",0);
     core.seed_actor("TREASURY",0);
@@ -82,7 +83,11 @@ static void daily_production_trade_ai_investment_replay() {
     const auto before=c(game).cash("HH");
     game.advance_day();
     require_test(game.world().date()==daily::Date{2000,1,2},"day did not advance");
-    require_test(c(game).stock("FIRM","R","food")>0,"real daily industry did not run");
+    require_test(!game.world().engine().base().core().state().actual_production_runs.empty(),
+                 "real daily industry did not run");
+    require_test(c(game).stock("FIRM","R","food")==0 &&
+                 c(game).stock("HH","R","food")==0,
+                 "food must not be duplicated after purchase and real consumption");
     require_test(c(game).cash("HH")<before,"buyer did not pay real money");
     require_test(c(game).cash("WORKERS")>0,"worker wages were not settled");
     require_test(game.world().engine().base().core().construction("NEW_FARM").accepted_work==1,
@@ -144,12 +149,54 @@ static void daily_battle_consumes_actual_ammo_and_pop() {
     g.advance_day(); // no ammo left: no phantom repeated casualty
     require_test(c(g).people().population()==before,"ammunition-free casualties");
 }
+
+static void daily_insolvent_hunger_is_not_ignored() {
+    auto w=fixture();
+    const auto& slices=w.base().core().core().people().slices();
+    const auto buyer=std::next(slices.begin(),2)->first;
+    p0::Policies opt;
+    opt.buyers.push_back({buyer,"POOR","FIRM","R","food",1});
+    opt.political_reactions.push_back({buyer,"R","FOOD_MOVEMENT",1,1});
+    p0::DailyGame g(daily::World::adopt(std::move(w),12),opt);
+    const auto price=c(g).market("R","food").price;
+    g.advance_day();
+    require_test(c(g).cash("POOR")==0 && c(g).food_grievance("R")>0,
+        "insolvent POP must still register essential unmet food demand");
+    require_test(c(g).market("R","food").price==price,
+        "an insolvent buyer must not cause false solvent-demand price inflation");
+    require_test(c(g).group_members(buyer,"FOOD_MOVEMENT")>0,
+        "observable same-day hunger should support political response");
+}
+static void daily_price_not_replayed_at_month_close() {
+    auto w=fixture();
+    const auto& slices=w.base().core().core().people().slices();
+    const auto buyer=std::next(slices.begin(),2)->first;
+    p0::Policies options;
+    options.buyers.push_back({buyer,"HH","FIRM","R","food",1});
+    p0::DailyGame g(daily::World::adopt(std::move(w),17),options);
+    for(int i=0;i<30;++i)g.advance_day(); // Jan 1 through Jan 30
+    require_test(g.world().date()==daily::Date{2000,1,31},
+        "invalid daily advance before month boundary");
+    const auto price30=c(g).market("R","food").price;
+    const auto report=g.advance_day(); // Jan 31, then MonthClose
+    require_test(report.monthly_close &&
+                 g.world().date()==daily::Date{2000,2,1},
+                 "Gregorian month boundary or MonthClose failed");
+    require_test(c(g).market("R","food").price==price30+1,
+                 "MonthClose applied a duplicate P0 price movement");
+    g.advance_day();
+    require_test(g.world().date()==daily::Date{2000,2,2},
+                 "native day did not resume after monthly accounting close");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
         daily_market_shortage_and_political_response();
+        daily_insolvent_hunger_is_not_ignored();
+        daily_price_not_replayed_at_month_close();
         daily_battle_consumes_actual_ammo_and_pop();
-        std::cout<<"P0 daily grand strategy: 3 bounded integration scenarios PASS\n";
+        std::cout<<"P0 daily grand strategy: 5 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P0 DAILY TEST FAILED: "<<e.what()<<"\n";

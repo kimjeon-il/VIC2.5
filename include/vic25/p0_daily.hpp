@@ -154,11 +154,15 @@ inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
     for(const auto& [id,s]:c.people().slices()) {
         if(need<=0)break;
         const auto& demo=c.people().demographic(s.key.demographic);
-        if(demo.region!=p.region||c.people().job(id)!=nullptr)continue;
+        if(demo.region!=p.region)continue;
+        const auto* current_job=c.people().job(id);
+        if(current_job && (current_job->employer!=p.employer ||
+           current_job->occupation!="worker" ||
+           current_job->wage_per_month!=p.monthly_wage))continue;
         const auto& econ=c.people().economic(s.key.economic);
         if(econ.profession!="worker"&&econ.profession!="unskilled_worker")continue;
         if(!c.people().eligible_for(id,phaseb::JobRequirements{}))continue;
-        const People n=std::min(s.count,need);
+        const People n=std::min(s.count-c.people().employed(id),need);
         if(n>0) {
             c.hire(id,n,p.employer,p.monthly_wage);
             need-=n;
@@ -189,6 +193,10 @@ inline Quantity available_production(const phased::Stage& d,
         cost_per_batch=phaseb::add_checked(cost_per_batch,times(input.per_unit,iq.price));
     }
     const Money revenue=times(primary.per_unit,quote.price);
+    // A profitable recipe must cover the actual P0 payroll as well as inputs.
+    if(policy.wage_per_worker_per_day>0)
+        cost_per_batch=phaseb::add_checked(cost_per_batch,
+                 times(r.workers_per_batch,policy.wage_per_worker_per_day));
     if(revenue<=cost_per_batch)return 0;
     const Quantity stock_shortfall=policy.target_inventory-c.stock(f.owner,f.region,primary.good);
     Quantity batches=stock_shortfall/primary.per_unit+
@@ -356,6 +364,10 @@ public:
                     const Quantity purchased=c.clear_consumer_market(
                         b.seller,b.household_actor,b.region,b.good,demand);
                     if(purchased>0)c.consume(b.household_actor,b.region,b.good,purchased);
+                    // Household deprivation is NOT the same as solvent unmet
+                    // demand: cash-poor POP also generate a real food grievance.
+                    if(b.good=="food"&&purchased<demand)
+                        c.phase_time_record_food_need_gap(b.region,demand-purchased);
                 }
             });
         }
@@ -418,9 +430,10 @@ public:
             plan[10].push_back([combat](phasegh::Stage& gh){
                 fight(gh.phase_c(),combat);
             });
-        plan[11].push_back([day=date.day](phasegh::Stage& gh){
-            gh.phase_c().phase_time_close_daily_markets(day);
-        });
+        if(!policies_.buyers.empty())
+            plan[11].push_back([day=date.day](phasegh::Stage& gh){
+                gh.phase_c().phase_time_close_daily_markets(day);
+            });
         return world_.advance_day(month_close_plan,plan);
     }
 };
