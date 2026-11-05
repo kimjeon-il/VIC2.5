@@ -857,6 +857,12 @@ public:
     void phase_time_close_daily_markets(int calendar_day) {
         require_stage({11});
         ensure(calendar_day>=1 && calendar_day<=31,"invalid daily market date");
+        // Scarcity grievances reflect conditions, not a permanent ever-growing
+        // score. The legacy MonthClose path remains unchanged when P0 is off.
+        for(auto& [region,n]:regional_food_grievance_) {
+            (void)region;
+            if(n>0)n-=std::max<People>(1,n/20);
+        }
         for(auto& [key,m]:markets_) {
             const auto& [region,good]=key;
             if(good=="food"&&m.unmet>0) {
