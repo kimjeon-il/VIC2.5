@@ -257,6 +257,61 @@ static void additional_active_cohorts_do_not_block_combat() {
        "multi-cohort engagement must consume actual ammunition");
 }
 
+
+static void multiple_households_do_not_inflate_one_sellers_stock() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(11,"A","ROOT");geo.seed_assignment(1,11);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_actor("A",100);
+    c.seed_actor("SELLER",0);
+    c.seed_actor("HH1",1000);
+    c.seed_actor("HH2",1000);
+    c.seed_stock("SELLER","R","food",10);
+    c.seed_market("R","food",100,1,300,7);
+    const auto h1=people(gh,"R",2,"civilian");
+    const auto h2=people(gh,"R",2,"civilian");
+    p0::Policies opts;
+    opts.buyers.push_back({h1,"HH1","SELLER","R","food",1});
+    opts.buyers.push_back({h2,"HH2","SELLER","R","food",1});
+    p0::DailyGame game(daily::World::adopt(std::move(gh),5),opts);
+    game.advance_day();
+    require_test(::c(game).stock("SELLER","R","food")==6,
+        "two households must buy four real goods");
+    require_test(::c(game).market("R","food").price==100,
+        "multiple purchasers must not double count one sellers offered stock");
+}
+static void a_strike_is_not_a_permanent_hiring_vacancy() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(11,"A","ROOT");geo.seed_assignment(1,11);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_actor("A",100);
+    c.seed_actor("FIRM",100);
+    c.seed_interest_group("MOVEMENT");
+    const auto workforce=people(gh,"R",4,"worker");
+    c.seed_population().hire(workforce,2,"FIRM","worker",10,
+                             phaseb::JobRequirements{});
+    phasegh::World::Plan plan;
+    plan[9].push_back([workforce](phasegh::Stage& step) {
+        auto& c=step.phase_c();
+        c.join_interest_group(workforce,"MOVEMENT",2);
+        c.protest(workforce,"MOVEMENT",2,2);
+    });
+    gh.advance(plan);
+    require_test(gh.month()==24001,"strike fixture must reach following month");
+    p0::Policies opts;
+    opts.staffing.push_back({"FIRM","R",2,10});
+    p0::DailyGame game(daily::World::adopt(std::move(gh),6),opts);
+    game.advance_day();
+    require_test(::c(game).people().employed(workforce)==2,
+       "temporary strike must not create new permanent employment contracts");
+    require_test(::c(game).currently_striking(workforce)==2,
+       "actual strike should remain active for the configured period");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -267,7 +322,9 @@ int main(){
         daily_battle_consumes_actual_ammo_and_pop();
         additional_active_cohorts_do_not_block_combat();
         duplicate_pop_demand_is_rejected();
-        std::cout<<"P0 daily grand strategy: 8 bounded integration scenarios PASS\n";
+        multiple_households_do_not_inflate_one_sellers_stock();
+        a_strike_is_not_a_permanent_hiring_vacancy();
+        std::cout<<"P0 daily grand strategy: 10 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P0 DAILY TEST FAILED: "<<e.what()<<"\n";
