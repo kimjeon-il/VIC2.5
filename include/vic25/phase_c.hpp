@@ -848,7 +848,7 @@ public:
         // must not count the same physical stock as newly offered supply.
         // This conservative upper bound is exact for one seller per market.
         m.stock_offered=std::max(m.stock_offered,
-            phaseb::add_checked(m.delivered,available));
+            phaseb::add_checked(m.delivered-fulfilled,available));
         m.delivered=phaseb::add_checked(m.delivered,fulfilled);
         m.unmet=phaseb::add_checked(m.unmet,solvent-fulfilled);
         if(fulfilled>0) trade(seller,buyer,region,good,fulfilled,m.price);
