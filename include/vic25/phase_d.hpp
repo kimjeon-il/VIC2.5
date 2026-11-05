@@ -544,6 +544,47 @@ public:
         if(source.renewable)source.standing_biomass-=units;
         d_.append(d_.opening_month,"resource-extracted",id);
     }
+    // Native resource extraction is bounded by both the source's observed
+    // monthly flow and the shared physical facility's prorated capacity.
+    // Neither is an underground total reserve or a hidden depletion stock.
+    void extract_resource_daily(const std::string& id,Quantity units,
+                                std::int32_t day,std::int32_t days_in_month){
+        must(4);
+        require(day>0&&days_in_month>=28&&days_in_month<=31&&
+                day<=days_in_month&&units>0,"D_DAILY_INVALID_EXTRACTION_DATE");
+        const auto& source=d_.resource_sites.at(id);
+        const auto& site=c_.facility(source.site);
+        require(site.capacity>=site.damaged,"D_DAILY_DAMAGED_EXTRACTION_SITE");
+        const auto prorate=[&](Quantity cap){
+            return phaseb::add_checked(
+                phaseb::mul_checked(cap/days_in_month,day),
+                phaseb::mul_checked(cap%days_in_month,day)/days_in_month);
+        };
+        const Quantity source_limit=prorate(source.monthly_capacity);
+        require(source.produced_this_month<=source_limit&&
+                units<=source_limit-source.produced_this_month,
+                "D_DAILY_RESOURCE_FLOW_BUDGET_EXCEEDED");
+        Quantity used_site=0;
+        for(const auto& run:d_.actual_production_runs) {
+            if(run.month!=d_.opening_month)continue;
+            const auto& recipe=d_.recipes.at(run.recipe);
+            if(recipe.site==source.site)
+                used_site=phaseb::add_checked(used_site,
+                    phaseb::mul_checked(run.batches,recipe.capacity_per_batch));
+        }
+        for(const auto& [site_id,other]:d_.resource_sites) {
+            (void)site_id;
+            if(other.site==source.site)
+                used_site=phaseb::add_checked(used_site,
+                    phaseb::mul_checked(other.produced_this_month,
+                                        other.site_service_per_unit));
+        }
+        const Quantity cap=prorate(site.capacity-site.damaged);
+        const Quantity needed=phaseb::mul_checked(units,source.site_service_per_unit);
+        require(used_site<=cap&&needed<=cap-used_site,
+                "D_DAILY_SHARED_SITE_FLOW_EXCEEDED");
+        extract_resource(id,units);
+    }
     void manufacture(const std::string& recipe,Quantity batches) {
         must(4);
         const auto& r=d_.recipes.at(recipe);
@@ -600,6 +641,13 @@ public:
             if(previous.site==spec.site)
                 used=phaseb::add_checked(used,
                     phaseb::mul_checked(run.batches,previous.capacity_per_batch));
+        }
+        for(const auto& [resource_id,source]:d_.resource_sites) {
+            (void)resource_id;
+            if(source.site==spec.site)
+                used=phaseb::add_checked(used,
+                     phaseb::mul_checked(source.produced_this_month,
+                                         source.site_service_per_unit));
         }
         const Quantity required=phaseb::mul_checked(batches,spec.capacity_per_batch);
         require(used<=allowed&&required<=allowed-used,
