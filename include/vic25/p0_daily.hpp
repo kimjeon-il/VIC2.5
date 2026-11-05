@@ -45,6 +45,14 @@ struct Manufacturer {
     std::string employee_wallet,treasury_wallet;
     Money wage_per_worker_per_day{};
 };
+// Autonomous owner supply target: real resource-site output, not a fictional
+// world resource stock. Wages, when configured, use the original C ledger.
+struct Extractor {
+    std::string resource_site;
+    Quantity target_inventory{};
+    Money wage_per_unit{};
+    std::string employee_wallet,treasury_wallet;
+};
 struct Buyer {
     Id population_slice{};
     std::string household_actor,seller,region,good;
@@ -85,6 +93,7 @@ struct Engagement {
 struct Policies {
     std::vector<Staffing> staffing;
     std::vector<Manufacturer> manufacturers;
+    std::vector<Extractor> extractors;
     std::vector<Buyer> buyers;
     std::vector<Investment> investments;
     std::vector<PoliticalReaction> political_reactions;
@@ -102,6 +111,14 @@ struct Policies {
                (f.wage_per_worker_per_day>0 &&
                 (f.employee_wallet.empty()||f.treasury_wallet.empty())))
                 throw std::invalid_argument("P0_INVALID_MANUFACTURER");
+        std::set<std::string> extraction_ids;
+        for(const auto& e:extractors)
+            if(e.resource_site.empty()||e.target_inventory<=0||
+               e.wage_per_unit<0||
+               (e.wage_per_unit>0&&
+                (e.employee_wallet.empty()||e.treasury_wallet.empty()))||
+               !extraction_ids.insert(e.resource_site).second)
+                throw std::invalid_argument("P0_INVALID_EXTRACTOR");
         for(const auto& s:staffing)
             if(s.employer.empty()||s.region.empty()||s.wanted<0||s.monthly_wage<0)
                 throw std::invalid_argument("P0_INVALID_STAFFING");
@@ -361,6 +378,71 @@ public:
                     const Money gross=times(*workers,firm.wage_per_worker_per_day);
                     gh.phase_c().wages_under_law(f.owner,firm.employee_wallet,
                                                   firm.treasury_wallet,gross);
+                });
+        }
+        // A site operator chooses a real output quantity from target stock,
+        // market price, labor, available wages and *cumulative* extraction
+        // plus site throughput. No underground reserve counter is created.
+        for(const auto& policy:policies_.extractors) {
+            auto completed=std::make_shared<Quantity>(0);
+            plan[4].push_back([policy,date,dim,completed](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto& ds=gh.phase_d().state();
+                const auto& src=ds.resource_sites.at(policy.resource_site);
+                const auto& facility=c.facility(src.site);
+                const auto& quote=c.market(src.region,src.good);
+                if(quote.price<=policy.wage_per_unit ||
+                   c.stock(src.owner,src.region,src.good)>=policy.target_inventory)
+                    return;
+                if(src.monthly_capacity<src.produced_this_month||
+                   facility.capacity<=facility.damaged) return;
+                const Quantity target=policy.target_inventory-
+                                      c.stock(src.owner,src.region,src.good);
+                Quantity available=proportional(src.monthly_capacity,date.day,dim);
+                if(src.produced_this_month>=available)return;
+                available=std::min(available-src.produced_this_month,target);
+                if(src.renewable)available=std::min(available,src.standing_biomass);
+                const People workers=c.phase_d_workforce(src.owner)-
+                                     c.phase_d_shared_labor_used(src.owner);
+                if(workers<=0)return;
+                available=std::min(available,
+                                  static_cast<Quantity>(workers/src.workers_per_unit));
+                Quantity already_site=0;
+                for(const auto& run:ds.actual_production_runs) {
+                    if(run.month!=gh.phase_d().month())continue;
+                    const auto& recipe=ds.recipes.at(run.recipe);
+                    if(recipe.site==src.site)
+                        already_site=phaseb::add_checked(already_site,
+                             times(run.batches,recipe.capacity_per_batch));
+                }
+                for(const auto& [id,other]:ds.resource_sites) {
+                    (void)id;
+                    if(other.site==src.site)
+                        already_site=phaseb::add_checked(already_site,
+                             times(other.produced_this_month,
+                                   other.site_service_per_unit));
+                }
+                const Quantity facility_limit=proportional(
+                       facility.capacity-facility.damaged,date.day,dim);
+                if(already_site>=facility_limit)return;
+                available=std::min(available,
+                         (facility_limit-already_site)/src.site_service_per_unit);
+                if(policy.wage_per_unit>0)
+                    available=std::min(available,
+                         c.phase_d_cash_available(src.owner)/policy.wage_per_unit);
+                if(available<=0)return;
+                gh.phase_d().extract_resource_daily(policy.resource_site,
+                                                    available,date.day,dim);
+                *completed=available;
+            });
+            if(policy.wage_per_unit>0)
+                plan[5].push_back([policy,completed](phasegh::Stage& gh){
+                    if(*completed<=0)return;
+                    const auto& src=gh.phase_d().state().resource_sites.at(
+                                              policy.resource_site);
+                    gh.phase_c().wages_under_law(src.owner,policy.employee_wallet,
+                                  policy.treasury_wallet,
+                                  times(*completed,policy.wage_per_unit));
                 });
         }
         for(const auto& b:policies_.buyers) {
