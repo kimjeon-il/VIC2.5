@@ -1053,8 +1053,18 @@ public:
         phasec::IntegratedWorld::Plan bridge;
         for(int i=0;i<12;++i) {
             bridge[static_cast<std::size_t>(i)].push_back([&,i](phasec::IntegratedWorld& live) {
-                if(i==0&&!already_opened_on_calendar_day)
-                    next.begin_month(live);
+                if(i==0) {
+                    if(!already_opened_on_calendar_day) {
+                        next.begin_month(live);
+                    } else {
+                        // At MonthClose, this calendar month was already
+                        // opened on day 1. Only re-open transient reservation
+                        // scopes for legacy G/H trade. Do not regenerate
+                        // renewable resources, reset work or commission twice.
+                        next.opening_month=live.month();
+                        live.phase_d_enable_shared_resources();
+                    }
+                }
                 Stage stage{live,next,i};
                 for(const auto& task:plan[static_cast<std::size_t>(i)])task(stage);
                 if(i==11)next.finalize(live);

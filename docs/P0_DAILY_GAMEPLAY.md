@@ -31,3 +31,12 @@
 - 366일(2000 윤년) 일간 실행, 100일차 스냅샷 복원, 후속 재생 및 자금/인구 보존 테스트 추가.
 
 **검증 상태:** GitHub Actions job의 runner_id=0, steps=[]로 러너가 할당되지 않고 2초 안에 실패. 커밋의 실제 C++ 빌드/CTest 결과가 아니므로 테스트 PASS 주장 금지. 최신 작업을 메인에 병합하지 않음.
+
+## 원본 daily-full 브랜치 CI 회귀 원인과 수정
+
+기존 원본 `work/daily-full-b-h-conversion` CI #41985288715 및 #41985288712에서 실제 Linux/Windows 빌드가 통과한 후 `vic25_daily_time_tests`, `vic25_daily_native_tests` 두 테스트가 실패한 로그를 확인했다. 이는 최신 PR #16의 러너 미할당 실패와 구분된다.
+
+- `vic25_daily_time_tests`는 2월 1일 새 달 시작의 적법한 일별 커밋을 과거 무변경 날짜와 동일하게 비교한 오래된 테스트 계약이었다. 월간 이중정산 여부를 실제 화폐/재고/저널 불변과 `monthly_close=false`로 확인하도록 수정.
+- `vic25_daily_native_tests`의 `unbound resource phase`는 첫날 시작 시에만 `D::begin_month()`를 실행하고 MonthClose에서는 생략하는 새 구조와 G/H의 월말 자동무역 예약이 충돌하여 발생했다. 월말에 공유 예약 범위만 다시 개방하고, 자연자원 재생·공정 초기화·준공은 다시 실행하지 않도록 수정.
+
+GitHub Actions 후속 실제 재실행 전이므로 이 수정의 합격 여부는 **미확정**이다.
