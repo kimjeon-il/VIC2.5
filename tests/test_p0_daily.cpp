@@ -189,14 +189,43 @@ static void daily_price_not_replayed_at_month_close() {
                  "native day did not resume after monthly accounting close");
 }
 
+
+static void low_unit_price_still_changes_across_months() {
+    phasegh::World gh(24000);
+    auto& e=gh.seed_geography();
+    e.seed_province(1,"R","A");
+    e.seed_unit(11,"A","ROOT");
+    e.seed_assignment(1,11);
+    auto& c=e.seed_core().seed_core();
+    c.seed_actor("A",100);
+    c.seed_actor("SELLER",0);
+    c.seed_actor("HH",1000);
+    c.seed_market("R","food",1,1,10);
+    c.seed_government("A","head","PM",5,3);
+    auto& p=c.seed_population();
+    const auto h=p.household_profile({"R","mixed","shared",5});
+    const auto econ=p.economic_profile({"R","worker","wage","employee",p.default_education()});
+    const auto demo=p.demographic_profile({"R",24000-300,phaseb::Sex::female,
+                    "culture","faith","citizen","free",
+                    p.default_health(),phaseb::Service::civilian});
+    const auto slice=p.seed_population(demo,econ,h,5,1);
+    p0::Policies policy;
+    policy.buyers.push_back({slice,"HH","SELLER","R","food",1});
+    p0::DailyGame game(daily::World::adopt(std::move(gh),3),policy);
+    for(int i=0;i<102;++i)game.advance_day();
+    require_test(c(game).market("R","food").price>=2,
+         "low nominal prices must accrue pressure across month boundaries");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
         daily_market_shortage_and_political_response();
         daily_insolvent_hunger_is_not_ignored();
         daily_price_not_replayed_at_month_close();
+        low_unit_price_still_changes_across_months();
         daily_battle_consumes_actual_ammo_and_pop();
-        std::cout<<"P0 daily grand strategy: 5 bounded integration scenarios PASS\n";
+        std::cout<<"P0 daily grand strategy: 6 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P0 DAILY TEST FAILED: "<<e.what()<<"\n";
