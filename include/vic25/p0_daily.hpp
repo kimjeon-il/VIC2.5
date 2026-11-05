@@ -352,8 +352,11 @@ public:
                 const auto& d=c.people().demographic(row.key.demographic);
                 if(d.region!=b.region)return;
                 const Quantity demand=times(row.count,b.units_per_person_per_day);
-                if(demand>0)c.clear_consumer_market(
-                    b.seller,b.household_actor,b.region,b.good,demand);
+                if(demand>0) {
+                    const Quantity purchased=c.clear_consumer_market(
+                        b.seller,b.household_actor,b.region,b.good,demand);
+                    if(purchased>0)c.consume(b.household_actor,b.region,b.good,purchased);
+                }
             });
         }
         for(const auto& p:policies_.political_reactions) {
