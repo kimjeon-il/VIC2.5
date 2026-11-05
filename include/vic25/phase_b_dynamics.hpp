@@ -238,7 +238,7 @@ private:
         // Entering and leaving civilian working age is a real economic status
         // transition; it must not be inferred solely from a family POP's trade.
         // Retirement preserves occupational identity/history while changing livelihood.
-        const auto life_course=monthly_milestones?w.slices():decltype(w.slices()){};
+        const auto life_course=monthly_milestones?w.slices():std::map<Id,Slice>{};
         for(const auto& [id,snapshot]:life_course){
             if(!w.has_slice(id))continue;
             const auto current=w.slice(id);
