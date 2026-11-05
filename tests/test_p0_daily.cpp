@@ -1,6 +1,7 @@
 #include "vic25/p0_daily.hpp"
 #include "vic25/daily_snapshot.hpp"
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 
