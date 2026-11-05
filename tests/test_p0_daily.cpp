@@ -247,9 +247,11 @@ static void additional_active_cohorts_do_not_block_combat() {
     c.seed_active("DEF",leadB);c.seed_active("DEF",reserveB);
     p0::Policies opts;
     opts.engagements.push_back({"ATT","DEF","R",leadA,leadB,1'000'000});
-    p0::DailyGame g(daily::World::adopt(std::move(gh),17),opts);
+    // Capture baselines before moving the source world into the day engine.
+    // A reference into the moved-from GH world is not a valid oracle.
     const auto population_before=c.people().population();
     const auto events_before=c.people().events().size();
+    p0::DailyGame g(daily::World::adopt(std::move(gh),17),opts);
     g.advance_day();
     // Twelve rounds at this calibration wound people but need not kill any.
     require_test(::c(g).people().population()==population_before &&
