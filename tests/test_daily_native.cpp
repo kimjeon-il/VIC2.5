@@ -441,6 +441,48 @@ static void autonomous_pop_is_day_native_not_monthly_replayed() {
          "native day POP and legacy close must remain deterministic");
 }
 
+
+static void autonomous_daily_trade_budget_and_month_close() {
+    Fixture f;
+    auto& c=f.gh.seed_geography().seed_core().seed_core();
+    c.seed_market("R1","iron",10,1,25);
+    c.seed_market("R2","iron",20,1,30);
+    f.gh.seed_route({"AUTO-G","SELLER","BUYER","iron",1,2,5,1,0});
+    auto world=World::adopt(std::move(f.gh),4433);
+    const auto start_seller=ledger(world).stock("SELLER","R1","iron");
+    const auto start_buyer_cash=ledger(world).cash("BUYER");
+    for(int day=1;day<=6;++day){
+        world.advance_day();
+        need(world.engine().commerce().fills.empty(),
+             "G monthly quota allocated before real daily cumulative entitlement");
+    }
+    world.advance_day(); // Jan 7: floor(5*7/31) = 1
+    need(world.engine().commerce().fills.size()==1 &&
+         world.engine().commerce().fills.front().quantity==1 &&
+         ledger(world).stock("SELLER","R1","iron")==start_seller-1,
+         "G autonomous real physical shipment must execute by January 7");
+    const auto snapshot=SnapshotCodec::encode(world);
+    auto replay=SnapshotCodec::decode(snapshot);
+    need(SnapshotCodec::encode(replay)==snapshot,
+         "G autonomous daily trade failed snapshot roundtrip");
+    while(world.date()<Date{2000,2,1}){
+        world.advance_day();
+        replay.advance_day();
+    }
+    need(SnapshotCodec::encode(world)==SnapshotCodec::encode(replay),
+         "G trade events must replay deterministically across month-close");
+    vic25::Quantity total=0;
+    for(const auto& fill:world.engine().commerce().fills){
+        if(fill.month==24000&&fill.route_id=="AUTO-G")total+=fill.quantity;
+    }
+    need(total==5 && ledger(world).stock("SELLER","R1","iron")==start_seller-5 &&
+         ledger(world).cash("BUYER")<start_buyer_cash,
+         "G month-end must not repeat an already-autonomous daily contract");
+    world.advance_day(); // Feb 1 resets G monthly edge allowances on first DAY.
+    need(world.engine().commerce().fills.size()==5,
+         "G must not grant next month's complete volume on February 1");
+}
+
 int main(){
     try{
         cross_domain_daily_events_and_replay();
@@ -451,6 +493,7 @@ int main(){
         conversion_only_epidemic_and_consumption();
         conversion_only_daily_tariff_and_authority();
         conversion_legacy_11_safe_migration();
+        autonomous_daily_trade_budget_and_month_close();
         std::cout<<"NATIVE_DAILY_BCDGH: 3 domains groups PASS\n";
         return 0;
     }catch(const std::exception& e) {
