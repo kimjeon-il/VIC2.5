@@ -229,8 +229,22 @@ static void daily_diplomacy_changes_real_trade_tariff() {
          "H signed treaty not day-effective");
     const auto& x=exempt.engine().commerce().fills;
     const auto& y=taxed.engine().commerce().fills;
-    need(x.size()==1&&y.size()==1 &&
-         x[0].duty_paid==0&&y[0].duty_paid>0,
+    vic25::Quantity exempt_qty=0,taxed_qty=0;
+    vic25::phasec::Money exempt_duty=0,taxed_duty=0;
+    for(const auto& fill:x) {
+        if(fill.route_id!="TRADE-IRON"||fill.month!=24000)continue;
+        exempt_qty+=fill.quantity;
+        exempt_duty+=fill.duty_paid;
+    }
+    for(const auto& fill:y) {
+        if(fill.route_id!="TRADE-IRON"||fill.month!=24000)continue;
+        taxed_qty+=fill.quantity;
+        taxed_duty+=fill.duty_paid;
+    }
+    // In native daily mode a 3-unit monthly route may produce up to 3
+    // physically backed fills across different days. The total and actual
+    // diplomatic duty, not a legacy one-fill/month assumption, are invariant.
+    need(exempt_qty==3&&taxed_qty==3&&exempt_duty==0&&taxed_duty>0,
          "H daily effective treaty did not alter actual G tariff settlement");
 }
 
