@@ -579,6 +579,11 @@ public:
                     phaseb::mul_checked(other.produced_this_month,
                                         other.site_service_per_unit));
         }
+        for(const auto& evidence:d_.research_evidence) {
+            if(evidence.month!=d_.opening_month)continue;
+            if(d_.researches.at(evidence.project).lab_site==source.site)
+                used_site=phaseb::add_checked(used_site,evidence.units);
+        }
         const Quantity cap=prorate(site.capacity-site.damaged);
         const Quantity needed=phaseb::mul_checked(units,source.site_service_per_unit);
         require(used_site<=cap&&needed<=cap-used_site,
@@ -649,6 +654,11 @@ public:
                      phaseb::mul_checked(source.produced_this_month,
                                          source.site_service_per_unit));
         }
+        for(const auto& evidence:d_.research_evidence) {
+            if(evidence.month!=d_.opening_month)continue;
+            if(d_.researches.at(evidence.project).lab_site==spec.site)
+                used=phaseb::add_checked(used,evidence.units);
+        }
         const Quantity required=phaseb::mul_checked(batches,spec.capacity_per_batch);
         require(used<=allowed&&required<=allowed-used,
                 "D_DAILY_MONTHLY_FACILITY_BUDGET_EXCEEDED");
@@ -681,6 +691,42 @@ public:
         p.planned_work-=units;
         d_.research_evidence.push_back({project,c_.month(),units});
         d_.append(c_.month(),"verified-research-work",project);
+    }
+    void perform_research_daily(const std::string& project,Quantity units,
+                                std::int32_t day,std::int32_t days_in_month) {
+        must(4);
+        require(day>0&&days_in_month>=28&&days_in_month<=31&&
+                day<=days_in_month&&units>0,"D_DAILY_INVALID_RESEARCH_DATE");
+        const auto& p=d_.researches.at(project);
+        const auto& site=c_.facility(p.lab_site);
+        require(site.capacity>=site.damaged,"D_DAILY_DAMAGED_RESEARCH_LAB");
+        const Quantity monthly=site.capacity-site.damaged;
+        const Quantity cap=phaseb::add_checked(
+               phaseb::mul_checked(monthly/days_in_month,day),
+               phaseb::mul_checked(monthly%days_in_month,day)/days_in_month);
+        Quantity used=0;
+        for(const auto& run:d_.actual_production_runs) {
+            if(run.month!=d_.opening_month)continue;
+            const auto& recipe=d_.recipes.at(run.recipe);
+            if(recipe.site==p.lab_site)
+                used=phaseb::add_checked(used,
+                     phaseb::mul_checked(run.batches,recipe.capacity_per_batch));
+        }
+        for(const auto& [source_id,source]:d_.resource_sites) {
+            (void)source_id;
+            if(source.site==p.lab_site)
+                used=phaseb::add_checked(used,
+                     phaseb::mul_checked(source.produced_this_month,
+                                         source.site_service_per_unit));
+        }
+        for(const auto& evidence:d_.research_evidence) {
+            if(evidence.month!=d_.opening_month)continue;
+            if(d_.researches.at(evidence.project).lab_site==p.lab_site)
+                used=phaseb::add_checked(used,evidence.units);
+        }
+        require(used<=cap&&units<=cap-used,
+                "D_DAILY_RESEARCH_MONTHLY_LAB_BUDGET");
+        perform_research(project,units);
     }
     void pay_research(const std::string& project,Quantity units) {
         must(5);
