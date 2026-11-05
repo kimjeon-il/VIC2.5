@@ -17,7 +17,7 @@ namespace vic25::p0 {
 // alternate money, inventory, population, diplomatic influence or battle ledger.
 // All consequences are ordinary Phase C/D/E/G/H staged events.
 using Money=phasec::Money;
-using Quantity=phasec::Quantity;
+using Quantity=vic25::Quantity;
 using People=phaseb::People;
 using Id=phaseb::Id;
 
