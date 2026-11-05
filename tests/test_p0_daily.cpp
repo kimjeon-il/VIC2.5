@@ -248,10 +248,13 @@ static void additional_active_cohorts_do_not_block_combat() {
     p0::Policies opts;
     opts.engagements.push_back({"ATT","DEF","R",leadA,leadB,1'000'000});
     p0::DailyGame g(daily::World::adopt(std::move(gh),17),opts);
-    const auto before=c.people().population();
+    const auto population_before=c.people().population();
+    const auto events_before=c.people().events().size();
     g.advance_day();
-    require_test(::c(g).people().population()<before,
-       "extra unit cohorts must not disable a valid engaged slice");
+    // Twelve rounds at this calibration wound people but need not kill any.
+    require_test(::c(g).people().population()==population_before &&
+                 ::c(g).people().events().size()>events_before,
+       "extra unit cohorts must not disable actual injury transitions");
     require_test(::c(g).stock("ATT","R","ammunition")<12 &&
                  ::c(g).stock("DEF","R","ammunition")<12,
        "multi-cohort engagement must consume actual ammunition");
