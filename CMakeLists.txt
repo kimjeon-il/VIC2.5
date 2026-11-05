@@ -9,6 +9,12 @@ target_include_directories(vic25_core INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/inc
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(vic25_core INTERFACE -Wall -Wextra -Wpedantic)
 endif()
+# The C++20 header-heavy native world exceeds MSVC's COFF section limit
+# in several unit-test translation units. Apply /bigobj uniformly through
+# the interface target instead of discovering each test failure separately.
+if(MSVC)
+    target_compile_options(vic25_core INTERFACE /bigobj)
+endif()
 
 add_executable(vic25_demo src/main.cpp)
 target_link_libraries(vic25_demo PRIVATE vic25_core)
@@ -336,4 +342,17 @@ if (BUILD_TESTING AND UNIX AND NOT APPLE)
     target_link_libraries(vic25_daily_30k PRIVATE vic25_core)
     add_test(NAME vic25_daily_30k COMMAND vic25_daily_30k)
     set_tests_properties(vic25_daily_30k PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
+endif()
+
+# P0 deterministic daily grand-strategy slice: real C/D/E/G/H ledgers.
+if(BUILD_TESTING)
+    add_executable(vic25_p0_daily_tests tests/test_p0_daily.cpp)
+    target_link_libraries(vic25_p0_daily_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p0_daily_tests COMMAND vic25_p0_daily_tests)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(vic25_p0_daily_longrun tests/test_p0_daily_longrun.cpp)
+    target_link_libraries(vic25_p0_daily_longrun PRIVATE vic25_core)
+    add_test(NAME vic25_p0_daily_longrun COMMAND vic25_p0_daily_longrun)
 endif()

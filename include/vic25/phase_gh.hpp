@@ -774,7 +774,8 @@ public:
     }
     // Native day-aware H + D + E + C staged transaction. No monthly
     // autonomous merchant/price/demography processing on an ordinary day.
-    phasec::AdvanceReport advance_daily(const Plan& tasks,std::int64_t day) {
+    phasec::AdvanceReport advance_daily(const Plan& tasks,std::int64_t day,
+                                         bool first_calendar_day=false) {
         TradeState new_trade=trade_;
         DiplomacyState new_diplomacy=diplomacy_;
         phasee::World::Plan bridge;
@@ -782,7 +783,8 @@ public:
             bridge[static_cast<std::size_t>(n)].push_back(
                 [&,n](phasee::SpatialStage& spatial) {
                     Stage stage{spatial,new_trade,new_diplomacy,n};
-                    if(n==0)
+                    if(n==0){
+                        if(first_calendar_day)stage.advance_legal_state();
                         for(auto& [id,t]:new_diplomacy.daily_treaties) {
                             (void)id;
                             if(!t.active&&t.approved_a&&t.approved_b&&
@@ -791,13 +793,14 @@ public:
                                 ++new_diplomacy.revision;
                             }
                         }
+                    }
                     for(const auto& fn:tasks[static_cast<std::size_t>(n)])
                         fn(stage);
                     if(n==11)check(new_trade,new_diplomacy,spatial);
                 });
         static_assert(std::is_nothrow_move_assignable_v<TradeState>);
         static_assert(std::is_nothrow_move_assignable_v<DiplomacyState>);
-        const auto result=core_.advance_daily(bridge);
+        const auto result=core_.advance_daily(bridge,first_calendar_day);
         trade_=std::move(new_trade);
         diplomacy_=std::move(new_diplomacy);
         return result;
@@ -921,7 +924,8 @@ public:
                     "G_ERR_INVALID_ROUTE");
         require(trade_.pending.empty(),"G_ERR_PENDING_OUTSIDE_MONTH");
     }
-    phasec::AdvanceReport advance(const Plan& plan={}) {
+    phasec::AdvanceReport advance(const Plan& plan={},
+                                   bool already_opened_on_calendar_day=false) {
         TradeState next_trade=trade_;
         DiplomacyState next_diplomacy=diplomacy_;
         phasee::World::Plan bridge;
@@ -930,7 +934,8 @@ public:
                 [&,n](phasee::SpatialStage& spatial){
                     Stage stage{spatial,next_trade,next_diplomacy,n};
                     if(n==0){
-                        stage.advance_legal_state();
+                        if(!already_opened_on_calendar_day)
+                            stage.advance_legal_state();
                         stage.register_arrived_losses();
                     }
                     for(const auto& callback:plan[static_cast<std::size_t>(n)])
@@ -952,7 +957,7 @@ public:
         // after every C/D/E/G/H operation succeeds.
         static_assert(std::is_nothrow_move_assignable_v<TradeState>);
         static_assert(std::is_nothrow_move_assignable_v<DiplomacyState>);
-        const auto report=core_.advance(bridge);
+        const auto report=core_.advance(bridge,already_opened_on_calendar_day);
         trade_=std::move(next_trade);
         diplomacy_=std::move(next_diplomacy);
         return report;

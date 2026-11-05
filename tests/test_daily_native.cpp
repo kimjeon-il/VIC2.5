@@ -404,12 +404,50 @@ static void conversion_legacy_11_safe_migration(){
     }),"legacy v1.1 route-free cargo must not bypass real G transport graph");
 }
 
+
+static void autonomous_pop_is_day_native_not_monthly_replayed() {
+    Fixture f;
+    vic25::phaseb::DemographyRules rules;
+    rules.fertility_ppm=1'000'000; // high synthetic rate to expose time
+    rules.infant_death_ppm=0;
+    rules.child_death_ppm=0;
+    rules.adult_death_ppm=0;
+    rules.senior_death_ppm=0;
+    rules.very_old_death_ppm=0;
+    rules.illness_incidence_ppm=0;
+    rules.accident_ppm=0;
+    rules.migration_ppm=0;
+    f.gh.seed_geography().seed_core().seed_core().enable_demography(rules);
+    auto w=World::adopt(std::move(f.gh),891);
+    const auto start=ledger(w).people().population();
+    auto restored=SnapshotCodec::decode(SnapshotCodec::encode(w));
+    for(int i=0;i<15;++i){w.advance_day();restored.advance_day();}
+    need(ledger(w).people().population()>start &&
+         w.engine().month()==24000,
+         "autonomous births must change POP before MonthClose");
+    need(SnapshotCodec::encode(w)==SnapshotCodec::encode(restored),
+         "native daily POP exposure must replay deterministically");
+    for(int i=15;i<30;++i){w.advance_day();restored.advance_day();}
+    const auto january30=ledger(w).people().population();
+    need(w.date()==Date{2000,1,31},"invalid Gregorian day progression");
+    auto result=w.advance_day();
+    restored.advance_day();
+    const auto january_close=ledger(w).people().population();
+    need(result.monthly_close&&result.next==Date{2000,2,1} &&
+         january_close>=january30 &&
+         january_close-january30<=2,
+         "MonthClose must not replay an entire month of daily POP births");
+    need(SnapshotCodec::encode(w)==SnapshotCodec::encode(restored),
+         "native day POP and legacy close must remain deterministic");
+}
+
 int main(){
     try{
         cross_domain_daily_events_and_replay();
         daily_rollback_due_to_resource_constraints();
         migrates_old_daily_v1_without_inventing_actions();
         daily_diplomacy_changes_real_trade_tariff();
+        autonomous_pop_is_day_native_not_monthly_replayed();
         conversion_only_epidemic_and_consumption();
         conversion_only_daily_tariff_and_authority();
         conversion_legacy_11_safe_migration();

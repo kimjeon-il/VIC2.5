@@ -844,12 +844,59 @@ public:
         const Quantity available=stock(seller,region,good);
         const Quantity fulfilled=std::min(solvent,available);
         m.solvent_demand=phaseb::add_checked(m.solvent_demand,solvent);
-        m.stock_offered=phaseb::add_checked(m.stock_offered,available);
+        // A second household viewing the same seller's remaining inventory
+        // must not count the same physical stock as newly offered supply.
+        // This conservative upper bound is exact for one seller per market.
+        m.stock_offered=std::max(m.stock_offered,
+            phaseb::add_checked(m.delivered-fulfilled,available));
         m.delivered=phaseb::add_checked(m.delivered,fulfilled);
         m.unmet=phaseb::add_checked(m.unmet,solvent-fulfilled);
         if(fulfilled>0) trade(seller,buyer,region,good,fulfilled,m.price);
         events_.push_back("solvent-demand-market-clearance");
         return fulfilled;
+    }
+    // P0 consumes the goods through the real inventory ledger and records
+    // the difference between essential demand and fulfilled goods. Unlike the
+    // market-price rule this includes unmet needs caused by insolvency.
+    void phase_time_record_food_need_gap(const std::string& region,People unmet){
+        require_stage({7});
+        ensure(!region.empty()&&unmet>0,"invalid observed food need gap");
+        regional_food_grievance_[region]=phaseb::add_checked(
+              regional_food_grievance_[region],unmet);
+        events_.push_back("daily-pop-food-need-gap");
+    }
+    // P0 native-day market close. The MonthClose compatibility path must not
+    // reprice these same trades or count the same food shortage twice.
+    // A small integer price moves no faster than its currency tick permits.
+    void phase_time_close_daily_markets(std::int64_t day_index) {
+        require_stage({11});
+        ensure(day_index>=0,"invalid absolute daily market date");
+        // Scarcity grievances reflect conditions, not a permanent ever-growing
+        // score. The legacy MonthClose path remains unchanged when P0 is off.
+        for(auto& [region,n]:regional_food_grievance_) {
+            (void)region;
+            if(n>0)n-=std::max<People>(1,n/20);
+        }
+        for(auto& [key,m]:markets_) {
+            const auto& [region,good]=key;
+            (void)region;
+            (void)good; // Need gaps were already counted once at stage 7.
+            // 1% nominal pressure per active day, with deterministic discrete
+            // currency ticks for prices below 100 units.
+            const Money step=m.price>=100?std::max<Money>(1,m.price/100):
+                    (day_index%std::max<Money>(1,100/m.price)==0?1:0);
+            if(m.unmet>0 && step>0)
+                m.price=std::min(m.ceiling,phaseb::add_checked(m.price,step));
+            else if(m.unmet==0 && m.solvent_demand>0 &&
+                    m.stock_offered>phaseb::add_checked(m.solvent_demand,m.target_stock) &&
+                    step>0)
+                m.price=std::max(m.floor,m.price-step);
+            m.solvent_demand=0;
+            m.delivered=0;
+            m.unmet=0;
+            m.stock_offered=0;
+        }
+        events_.push_back("daily-market-clearing-closed");
     }
     void household_produce(Id slice,const std::string& good,Quantity output,
                            Quantity max_output_per_person) {
@@ -1040,6 +1087,12 @@ public:
     [[nodiscard]] Quantity stock(const std::string& holder, const std::string& region,
                                  const std::string& good) const {
         return goods_.stock({holder, region, good});
+    }
+    [[nodiscard]] People unit_slice_strength(const std::string& unit,Id slice) const {
+        auto owner=units_.find(unit);
+        if(owner==units_.end())return 0;
+        auto assigned=owner->second.find(slice);
+        return assigned==owner->second.end()?0:assigned->second;
     }
     [[nodiscard]] People active_strength(const std::string& unit) const {
         const auto& a = units_.at(unit);
@@ -1498,6 +1551,33 @@ public:
         resources_.clear_month();
         phase_d_reservation_mode_=false;
     }
+    // Calendar day executes in the caller's one-day staging transaction.
+    // This is the only routine that applies autonomous POP risk on a date.
+    [[nodiscard]] bool daily_auto_demography_enabled() const {
+        return demography_enabled_;
+    }
+    void phase_time_auto_demography(int day,int days_in_month) {
+        require_stage({10});
+        if(!demography_enabled_)return;
+        const auto before=people_.events().size();
+        (void)phaseb::Engine{demographic_rules_}.advance_day(
+            people_,day,days_in_month);
+        sync_service_transitions(before);
+        events_.push_back("daily-auto-demography");
+    }
+    // This transient flag is consumed by the *same* legacy MonthClose,
+    // so daily POP hazard is never run again as a 12-stage month hazard.
+    void phase_time_suppress_monthly_demography() {
+        require_stage({10});
+        suppress_demography_this_close_=true;
+    }
+    // Apply monthly policy expirations, inventories, tax/strike/clinic
+    // availability on the true first DAY, not at the last day of that
+    // month. The ordinary legacy month engine remains unchanged.
+    void phase_time_begin_calendar_month() {
+        require_stage({0});
+        open_month();
+    }
 
     // Daily real-ledger transaction, deliberately separate from legacy
     // monthly settlement. No open_month(), no autonomous market clearing,
@@ -1531,13 +1611,15 @@ public:
         return result;
     }
 
-    AdvanceReport advance(const Plan& plan = {}) {
+    AdvanceReport advance(const Plan& plan = {},
+                          bool already_opened_on_calendar_day=false) {
         IntegratedWorld stage = *this;
         const auto start = month();
         stage.election_this_month_ = false;
         for (int n = 0; n != 12; ++n) {
             stage.stage_ = n;
-            if (n == 0) stage.open_month();
+            if (n == 0 && !already_opened_on_calendar_day)
+                stage.open_month();
             if (n == 9) stage.collect_market_grievances(); // actual stage-7 shortages precede political decisions
             for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
             if (n == 10) {
@@ -1545,7 +1627,7 @@ public:
                 // production; they must not outlive a later death or split.
                 stage.strike_active_.clear();
                 const std::size_t before = stage.people_.events().size();
-                if (stage.demography_enabled_) {
+                if (stage.demography_enabled_ && !stage.suppress_demography_this_close_) {
                     phaseb::Engine engine{stage.demographic_rules_};
                     (void)engine.advance(stage.people_);
                     stage.sync_service_transitions(before);
@@ -1556,7 +1638,10 @@ public:
                     stage.people_.release_ineligible();
                 }
             }
-            if (n == 11) stage.reprice_markets();
+            if (n == 11) {
+                stage.reprice_markets();
+                stage.suppress_demography_this_close_=false;
+            }
             stage.validate();
             if (n == 11) {
                 stage.resources_.clear_month();
@@ -1735,6 +1820,7 @@ private:
     std::uint64_t sequence_{};
     int stage_{-1}, voting_age_years_{21};
     bool election_this_month_{}, demography_enabled_{};
+    bool suppress_demography_this_close_{}; // transient per-close event, not persistent
 
     // Exact nonnegative fraction comparison using Euclid/continued fractions:
     // no 128-bit GNU extension, overflow or floating-point ties (MSVC friendly).
