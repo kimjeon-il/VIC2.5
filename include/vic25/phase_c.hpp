@@ -844,12 +844,59 @@ public:
         const Quantity available=stock(seller,region,good);
         const Quantity fulfilled=std::min(solvent,available);
         m.solvent_demand=phaseb::add_checked(m.solvent_demand,solvent);
-        m.stock_offered=phaseb::add_checked(m.stock_offered,available);
+        // A second household viewing the same seller's remaining inventory
+        // must not count the same physical stock as newly offered supply.
+        // This conservative upper bound is exact for one seller per market.
+        m.stock_offered=std::max(m.stock_offered,
+            phaseb::add_checked(m.delivered-fulfilled,available));
         m.delivered=phaseb::add_checked(m.delivered,fulfilled);
         m.unmet=phaseb::add_checked(m.unmet,solvent-fulfilled);
         if(fulfilled>0) trade(seller,buyer,region,good,fulfilled,m.price);
         events_.push_back("solvent-demand-market-clearance");
         return fulfilled;
+    }
+    // P0 consumes the goods through the real inventory ledger and records
+    // the difference between essential demand and fulfilled goods. Unlike the
+    // market-price rule this includes unmet needs caused by insolvency.
+    void phase_time_record_food_need_gap(const std::string& region,People unmet){
+        require_stage({7});
+        ensure(!region.empty()&&unmet>0,"invalid observed food need gap");
+        regional_food_grievance_[region]=phaseb::add_checked(
+              regional_food_grievance_[region],unmet);
+        events_.push_back("daily-pop-food-need-gap");
+    }
+    // P0 native-day market close. The MonthClose compatibility path must not
+    // reprice these same trades or count the same food shortage twice.
+    // A small integer price moves no faster than its currency tick permits.
+    void phase_time_close_daily_markets(std::int64_t day_index) {
+        require_stage({11});
+        ensure(day_index>=0,"invalid absolute daily market date");
+        // Scarcity grievances reflect conditions, not a permanent ever-growing
+        // score. The legacy MonthClose path remains unchanged when P0 is off.
+        for(auto& [region,n]:regional_food_grievance_) {
+            (void)region;
+            if(n>0)n-=std::max<People>(1,n/20);
+        }
+        for(auto& [key,m]:markets_) {
+            const auto& [region,good]=key;
+            (void)region;
+            (void)good; // Need gaps were already counted once at stage 7.
+            // 1% nominal pressure per active day, with deterministic discrete
+            // currency ticks for prices below 100 units.
+            const Money step=m.price>=100?std::max<Money>(1,m.price/100):
+                    (day_index%std::max<Money>(1,100/m.price)==0?1:0);
+            if(m.unmet>0 && step>0)
+                m.price=std::min(m.ceiling,phaseb::add_checked(m.price,step));
+            else if(m.unmet==0 && m.solvent_demand>0 &&
+                    m.stock_offered>phaseb::add_checked(m.solvent_demand,m.target_stock) &&
+                    step>0)
+                m.price=std::max(m.floor,m.price-step);
+            m.solvent_demand=0;
+            m.delivered=0;
+            m.unmet=0;
+            m.stock_offered=0;
+        }
+        events_.push_back("daily-market-clearing-closed");
     }
     void household_produce(Id slice,const std::string& good,Quantity output,
                            Quantity max_output_per_person) {
@@ -1040,6 +1087,12 @@ public:
     [[nodiscard]] Quantity stock(const std::string& holder, const std::string& region,
                                  const std::string& good) const {
         return goods_.stock({holder, region, good});
+    }
+    [[nodiscard]] People unit_slice_strength(const std::string& unit,Id slice) const {
+        auto owner=units_.find(unit);
+        if(owner==units_.end())return 0;
+        auto assigned=owner->second.find(slice);
+        return assigned==owner->second.end()?0:assigned->second;
     }
     [[nodiscard]] People active_strength(const std::string& unit) const {
         const auto& a = units_.at(unit);

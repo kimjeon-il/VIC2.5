@@ -97,9 +97,19 @@ static void daily_real_ledgers_and_month_close() {
           d.journal().size()==3 &&
           d.day_commit_id()==31,"month-close must not duplicate daily effects");
     const auto prior=d.engine().commit_id();
-    d.advance_day();
-    check(d.engine().month()==24001&&d.engine().commit_id()==prior,
-          "Feb 1 must not trigger a second Jan settlement");
+    const auto cash_before=ledger(d).cash("BUYER");
+    const auto stock_before=ledger(d).stock("BUYER","R1","steel");
+    const auto journal_before=d.journal().size();
+    const auto feb1=d.advance_day();
+    // Native month-open runs on Feb 1. It is one legitimate day commit,
+    // not a second Jan MonthClose or repeated January economic transaction.
+    check(!feb1.monthly_close && d.date()==Date{2000,2,2} &&
+          d.engine().month()==24001 &&
+          d.engine().commit_id()==prior+1 &&
+          ledger(d).cash("BUYER")==cash_before &&
+          ledger(d).stock("BUYER","R1","steel")==stock_before &&
+          d.journal().size()==journal_before,
+          "Feb 1 must open February without replaying January transactions");
 }
 static void daily_rejection_and_atomic_month_rollback() {
     auto d=World::adopt(base_world());

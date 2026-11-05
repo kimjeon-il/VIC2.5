@@ -312,7 +312,8 @@ public:
 
     // No deep copy on a day without new commands, transit arrivals,
     // due diplomatic activation, ready facility, or MonthClose.
-    DayReport advance_day(const phasegh::World::Plan& month_close_plan={}) {
+    DayReport advance_day(const phasegh::World::Plan& month_close_plan={},
+                          const phasegh::World::Plan& native_day_plan={}) {
         const auto current=date();
         const bool close=is_month_end(current);
         const bool first_calendar_day=current.day==1;
@@ -328,8 +329,10 @@ public:
         const bool construction_due=engine_.has_ready_daily_commission();
         if(day_commit_==std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("TIME_ERR_COMMIT_COUNTER");
+        const bool native_actions=std::any_of(native_day_plan.begin(),native_day_plan.end(),
+            [](const auto& row){return !row.empty();});
         if(commands.empty()&&!close&&!first_calendar_day&&
-           !cargo_due&&!treaty_due&&!construction_due &&
+           !native_actions&&!cargo_due&&!treaty_due&&!construction_due &&
            !engine_.base().core().core().daily_auto_demography_enabled()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
@@ -429,6 +432,11 @@ public:
                 });
             }
         }
+        // P0 domain decisions run on the real calendar day, in the same
+        // C/D/E/G/H transaction as scheduled commands and POP dynamics.
+        for(std::size_t n=0;n<native_day_plan.size();++n)
+            for(const auto& action:native_day_plan[n])
+                real_actions[n].push_back(action);
         // The autonomous population hazard is calendar-day resolved, even
         // without user actions. The existing monthly rate is NOT replayed
         // at MonthClose.
