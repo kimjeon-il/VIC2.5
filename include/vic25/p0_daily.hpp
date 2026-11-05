@@ -431,8 +431,8 @@ public:
                 fight(gh.phase_c(),combat);
             });
         if(!policies_.buyers.empty())
-            plan[11].push_back([day=date.day](phasegh::Stage& gh){
-                gh.phase_c().phase_time_close_daily_markets(day);
+            plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
+                gh.phase_c().phase_time_close_daily_markets(ordinal);
             });
         return world_.advance_day(month_close_plan,plan);
     }
