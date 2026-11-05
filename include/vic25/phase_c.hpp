@@ -1518,6 +1518,13 @@ public:
         require_stage({10});
         suppress_demography_this_close_=true;
     }
+    // Apply monthly policy expirations, inventories, tax/strike/clinic
+    // availability on the true first DAY, not at the last day of that
+    // month. The ordinary legacy month engine remains unchanged.
+    void phase_time_begin_calendar_month() {
+        require_stage({0});
+        open_month();
+    }
 
     // Daily real-ledger transaction, deliberately separate from legacy
     // monthly settlement. No open_month(), no autonomous market clearing,
@@ -1551,13 +1558,15 @@ public:
         return result;
     }
 
-    AdvanceReport advance(const Plan& plan = {}) {
+    AdvanceReport advance(const Plan& plan = {},
+                          bool already_opened_on_calendar_day=false) {
         IntegratedWorld stage = *this;
         const auto start = month();
         stage.election_this_month_ = false;
         for (int n = 0; n != 12; ++n) {
             stage.stage_ = n;
-            if (n == 0) stage.open_month();
+            if (n == 0 && !already_opened_on_calendar_day)
+                stage.open_month();
             if (n == 9) stage.collect_market_grievances(); // actual stage-7 shortages precede political decisions
             for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
             if (n == 10) {

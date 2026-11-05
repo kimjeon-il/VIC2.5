@@ -315,6 +315,7 @@ public:
     DayReport advance_day(const phasegh::World::Plan& month_close_plan={}) {
         const auto current=date();
         const bool close=is_month_end(current);
+        const bool first_calendar_day=current.day==1;
         if(!close)for(const auto& stage:month_close_plan)
             require(stage.empty(),"TIME_ERR_MONTHLY_PLAN_OUTSIDE_CLOSE");
         const auto next=following_day(current);
@@ -327,7 +328,8 @@ public:
         const bool construction_due=engine_.has_ready_daily_commission();
         if(day_commit_==std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("TIME_ERR_COMMIT_COUNTER");
-        if(commands.empty()&&!close&&!cargo_due&&!treaty_due&&!construction_due &&
+        if(commands.empty()&&!close&&!first_calendar_day&&
+           !cargo_due&&!treaty_due&&!construction_due &&
            !engine_.base().core().core().daily_auto_demography_enabled()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
@@ -436,13 +438,13 @@ public:
         });
         // Run autonomous daily POP against the same committed C/D/E/G/H
         // staging world, then do legacy settlement once at month end.
-        candidate.advance_daily(real_actions,day_);
+        candidate.advance_daily(real_actions,day_,first_calendar_day);
         if(close) {
             auto complete_month=month_close_plan;
             complete_month[10].push_back([](phasegh::Stage& gh) {
                 gh.phase_c().phase_time_suppress_monthly_demography();
             });
-            candidate.advance(complete_month);
+            candidate.advance(complete_month,true);
         }
         require(candidate.month()==legacy_month(next),
                 "TIME_ERR_MONTH_CLOSE_NOT_ALIGNED");
