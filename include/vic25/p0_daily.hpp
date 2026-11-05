@@ -53,6 +53,10 @@ struct Extractor {
     Money wage_per_unit{};
     std::string employee_wallet,treasury_wallet;
 };
+struct ResearchPolicy {
+    std::string project;
+    Quantity maximum_daily_work{1};
+};
 struct Buyer {
     Id population_slice{};
     std::string household_actor,seller,region,good;
@@ -94,6 +98,7 @@ struct Policies {
     std::vector<Staffing> staffing;
     std::vector<Manufacturer> manufacturers;
     std::vector<Extractor> extractors;
+    std::vector<ResearchPolicy> researches;
     std::vector<Buyer> buyers;
     std::vector<Investment> investments;
     std::vector<PoliticalReaction> political_reactions;
@@ -119,6 +124,11 @@ struct Policies {
                 (e.employee_wallet.empty()||e.treasury_wallet.empty()))||
                !extraction_ids.insert(e.resource_site).second)
                 throw std::invalid_argument("P0_INVALID_EXTRACTOR");
+        std::set<std::string> research_ids;
+        for(const auto& r:researches)
+            if(r.project.empty()||r.maximum_daily_work<=0||
+               !research_ids.insert(r.project).second)
+                throw std::invalid_argument("P0_INVALID_RESEARCH_POLICY");
         for(const auto& s:staffing)
             if(s.employer.empty()||s.region.empty()||s.wanted<0||s.monthly_wage<0)
                 throw std::invalid_argument("P0_INVALID_STAFFING");
@@ -444,6 +454,73 @@ public:
                                   policy.treasury_wallet,
                                   times(*completed,policy.wage_per_unit));
                 });
+        }
+        // Funded, self-scheduling research is an actual D work order:
+        // stage1 cash reservation, stage4 lab work/materials, stage5 pay,
+        // stage9 verified result. Every lab shares cumulative DAY capacity
+        // with manufacturing and geological extraction.
+        for(const auto& research:policies_.researches) {
+            auto work=std::make_shared<Quantity>(0);
+            plan[1].push_back([research,date,dim,work](phasegh::Stage& gh) {
+                const auto& ds=gh.phase_d().state();
+                const auto& p=ds.researches.at(research.project);
+                if(p.reviewed||p.verified_work>=p.required_evidence)return;
+                auto& c=gh.phase_c();
+                const auto& lab=c.facility(p.lab_site);
+                if(lab.capacity<=lab.damaged)return;
+                Quantity used=0;
+                for(const auto& run:ds.actual_production_runs) {
+                    if(run.month!=gh.phase_d().month())continue;
+                    const auto& recipe=ds.recipes.at(run.recipe);
+                    if(recipe.site==p.lab_site)
+                        used=phaseb::add_checked(used,
+                                  times(run.batches,recipe.capacity_per_batch));
+                }
+                for(const auto& [id,source]:ds.resource_sites) {
+                    (void)id;
+                    if(source.site==p.lab_site)
+                        used=phaseb::add_checked(used,
+                                  times(source.produced_this_month,
+                                        source.site_service_per_unit));
+                }
+                for(const auto& evidence:ds.research_evidence) {
+                    if(evidence.month!=gh.phase_d().month())continue;
+                    if(ds.researches.at(evidence.project).lab_site==p.lab_site)
+                        used=phaseb::add_checked(used,evidence.units);
+                }
+                const Quantity cap=proportional(lab.capacity-lab.damaged,
+                                                date.day,dim);
+                if(used>=cap)return;
+                const People labor=c.phase_d_workforce(p.holder)-
+                                  c.phase_d_shared_labor_used(p.holder);
+                if(labor<=0)return;
+                const Quantity material=c.phase_d_material_available(
+                                    p.holder,p.region,p.material_good);
+                const Money funds=c.phase_d_cash_available(p.sponsor);
+                if(funds<=0)return;
+                const Quantity n=std::min({research.maximum_daily_work,
+                    p.required_evidence-p.verified_work,cap-used,
+                    material/p.material_per_work,
+                    static_cast<Quantity>(labor/p.workers_per_work),
+                    static_cast<Quantity>(funds/p.cash_cost_per_work)});
+                if(n<=0)return;
+                gh.phase_d().plan_research(research.project,n);
+                *work=n;
+            });
+            plan[4].push_back([research,date,dim,work](phasegh::Stage& gh){
+                if(*work>0)
+                    gh.phase_d().perform_research_daily(research.project,
+                                                   *work,date.day,dim);
+            });
+            plan[5].push_back([research,work](phasegh::Stage& gh){
+                if(*work>0)gh.phase_d().pay_research(research.project,*work);
+            });
+            plan[9].push_back([research](phasegh::Stage& gh){
+                const auto& p=gh.phase_d().state().researches.at(research.project);
+                if(!p.reviewed&&p.verified_work>=p.required_evidence&&
+                   p.paid_work>=p.required_evidence)
+                    gh.phase_d().review_research(research.project);
+            });
         }
         for(const auto& b:policies_.buyers) {
             plan[7].push_back([b](phasegh::Stage& gh){
