@@ -213,7 +213,7 @@ static void low_unit_price_still_changes_across_months() {
     policy.buyers.push_back({slice,"HH","SELLER","R","food",1});
     p0::DailyGame game(daily::World::adopt(std::move(gh),3),policy);
     for(int i=0;i<102;++i)game.advance_day();
-    require_test(c(game).market("R","food").price>=2,
+    require_test(game.world().engine().base().core().core().market("R","food").price>=2,
          "low nominal prices must accrue pressure across month boundaries");
 }
 
