@@ -2,6 +2,8 @@ name: VIC2.5 consolidated integration Linux Windows
 on:
   push:
     branches: [work/merge-all-to-main, main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 concurrency:
   group: vic25-unified-${{ github.ref }}
