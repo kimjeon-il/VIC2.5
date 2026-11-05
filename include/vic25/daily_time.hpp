@@ -327,7 +327,8 @@ public:
         const bool construction_due=engine_.has_ready_daily_commission();
         if(day_commit_==std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("TIME_ERR_COMMIT_COUNTER");
-        if(commands.empty()&&!close&&!cargo_due&&!treaty_due&&!construction_due) {
+        if(commands.empty()&&!close&&!cargo_due&&!treaty_due&&!construction_due &&
+           !engine_.base().core().core().daily_auto_demography_enabled()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
         }
@@ -426,11 +427,23 @@ public:
                 });
             }
         }
-        // Execute native daily C/D/E/G/H domain events transactionally;
-        // perform legacy monthly settlement once, at calendar month end.
-        if(!ordered.empty()||cargo_due||treaty_due||construction_due)
-            candidate.advance_daily(real_actions,day_);
-        if(close)candidate.advance(month_close_plan);
+        // The autonomous population hazard is calendar-day resolved, even
+        // without user actions. The existing monthly rate is NOT replayed
+        // at MonthClose.
+        real_actions[10].push_back([current](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_auto_demography(
+                current.day,days_in_month(current.year,current.month));
+        });
+        // Run autonomous daily POP against the same committed C/D/E/G/H
+        // staging world, then do legacy settlement once at month end.
+        candidate.advance_daily(real_actions,day_);
+        if(close) {
+            auto complete_month=month_close_plan;
+            complete_month[10].push_back([](phasegh::Stage& gh) {
+                gh.phase_c().phase_time_suppress_monthly_demography();
+            });
+            candidate.advance(complete_month);
+        }
         require(candidate.month()==legacy_month(next),
                 "TIME_ERR_MONTH_CLOSE_NOT_ALIGNED");
         candidate.validate();

@@ -62,6 +62,67 @@ public:
         return result;
     }
     MonthReport advance(World& w) const{return advance(w,[](vic25::MonthStage){});}
+
+    // A real daily POP update. The monthly PPM is distributed over the
+    // calendar's exact number of days using integer cumulative quotas.
+    // Sum(day_ppm, 1..days_in_month) == monthly_ppm, without float drift.
+    // The caller must stage the entire C/D/E/G/H world atomically.
+    MonthReport advance_day(World& w,int day,int days_in_month)const {
+        require(days_in_month>=28&&days_in_month<=31&&day>=1&&
+                day<=days_in_month,"invalid autonomous POP calendar day");
+        const auto per_day=[&](People monthly_ppm)->People {
+            return (monthly_ppm*day)/days_in_month-
+                   (monthly_ppm*(day-1))/days_in_month;
+        };
+        DemographyRules today=rules_;
+        today.fertility_ppm=per_day(rules_.fertility_ppm);
+        today.infant_death_ppm=per_day(rules_.infant_death_ppm);
+        today.child_death_ppm=per_day(rules_.child_death_ppm);
+        today.adult_death_ppm=per_day(rules_.adult_death_ppm);
+        today.senior_death_ppm=per_day(rules_.senior_death_ppm);
+        today.very_old_death_ppm=per_day(rules_.very_old_death_ppm);
+        today.illness_incidence_ppm=per_day(rules_.illness_incidence_ppm);
+        today.illness_recovery_ppm=per_day(rules_.illness_recovery_ppm);
+        today.accident_ppm=per_day(rules_.accident_ppm);
+        today.injury_recovery_ppm=per_day(rules_.injury_recovery_ppm);
+        today.migration_ppm=per_day(rules_.migration_ppm);
+        for(auto& vacancy:today.monthly_vacancies){
+            const auto monthly=vacancy.slots;
+            vacancy.slots=(monthly*day)/days_in_month-
+                          (monthly*(day-1))/days_in_month;
+        }
+        std::erase_if(today.monthly_vacancies,
+                      [](const Vacancy& v){return v.slots==0;});
+        // Educational access, certification and labor age transitions are
+        // performed on the due day only; they must not fire 28-31 times.
+        const bool month_end=day==days_in_month;
+        if(!month_end){
+            today.primary_access_ppm=0;
+            today.secondary_access_ppm=0;
+            today.tertiary_access_ppm=0;
+            today.adult_literacy_access_ppm=0;
+            today.training_ppm=0;
+        }
+        Engine engine{today};
+        MonthReport report;
+        report.month_index=w.month();
+        report.start_population=w.population();
+        const auto prior=w.events().size();
+        if(!today.monthly_vacancies.empty())
+            (void)w.match_jobs(today.monthly_vacancies,today.labor);
+        engine.do_demography(w,report,month_end);
+        w.release_ineligible(today.labor);
+        w.prune_residuals();
+        require(w.validate(today.labor),"autonomous daily demographic invariant");
+        report.end_population=w.population();
+        if(report.end_population!=add_checked(add_checked(report.start_population,
+                                           report.births),-report.deaths))
+            throw std::logic_error("autonomous daily population balance failure");
+        report.events_added=w.events().size()-prior;
+        report.active_slices=w.slices().size();
+        report.digest=w.fingerprint();
+        return report;
+    }
 private:
     DemographyRules rules_;
     static People job_allocation(const World& w, Id id,People total){
@@ -78,7 +139,8 @@ private:
         if(hp.temporary_injury)rate=std::min(PPM,rate*std::int64_t(2));
         return rate;
     }
-    void do_demography(World& w,MonthReport& report)const{
+    void do_demography(World& w,MonthReport& report,
+                       bool monthly_milestones=true)const{
         const auto original=w.slices();
         for(const auto& [id,initial]:original){
             if(!w.has_slice(id))continue;
@@ -145,7 +207,7 @@ private:
             }
             if(!w.has_slice(id))continue;
             remaining=w.slice(id).count;
-            if(age >= 0 && age%12==0){
+            if(monthly_milestones && age >= 0 && age%12==0){
                 Education next=ed;People rate=0;
                 if(ed.school==School::none && age>=8*12 && age<65*12){
                     rate=age<18*12?rules_.primary_access_ppm:rules_.adult_literacy_access_ppm;
@@ -165,7 +227,8 @@ private:
             }
             if(!w.has_slice(id))continue;
             remaining=w.slice(id).count;
-            if(age >= 18*12 && age%12==0 && w.employed(id)>0 && ed.occupational_skill<100){
+            if(monthly_milestones && age >= 18*12 && age%12==0 &&
+               w.employed(id)>0 && ed.occupational_skill<100){
                 const auto n=w.allocate_rate(id,"training",w.employed(id),rules_.training_ppm);
                 if(n){Education next=ed;next.occupational_skill=static_cast<std::uint8_t>(std::min(100,static_cast<int>(next.occupational_skill)+10));
                     w.change_education(id,n,next,EventKind::training,n);report.trained=add_checked(report.trained,n);}
@@ -175,7 +238,7 @@ private:
         // Entering and leaving civilian working age is a real economic status
         // transition; it must not be inferred solely from a family POP's trade.
         // Retirement preserves occupational identity/history while changing livelihood.
-        const auto life_course=w.slices();
+        const auto life_course=monthly_milestones?w.slices():decltype(w.slices()){};
         for(const auto& [id,snapshot]:life_course){
             if(!w.has_slice(id))continue;
             const auto current=w.slice(id);

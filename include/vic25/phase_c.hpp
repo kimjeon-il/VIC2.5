@@ -1498,6 +1498,26 @@ public:
         resources_.clear_month();
         phase_d_reservation_mode_=false;
     }
+    // Calendar day executes in the caller's one-day staging transaction.
+    // This is the only routine that applies autonomous POP risk on a date.
+    [[nodiscard]] bool daily_auto_demography_enabled() const {
+        return demography_enabled_;
+    }
+    void phase_time_auto_demography(int day,int days_in_month) {
+        require_stage({10});
+        if(!demography_enabled_)return;
+        const auto before=people_.events().size();
+        (void)phaseb::Engine{demographic_rules_}.advance_day(
+            people_,day,days_in_month);
+        sync_service_transitions(before);
+        events_.push_back("daily-auto-demography");
+    }
+    // This transient flag is consumed by the *same* legacy MonthClose,
+    // so daily POP hazard is never run again as a 12-stage month hazard.
+    void phase_time_suppress_monthly_demography() {
+        require_stage({10});
+        suppress_demography_this_close_=true;
+    }
 
     // Daily real-ledger transaction, deliberately separate from legacy
     // monthly settlement. No open_month(), no autonomous market clearing,
@@ -1545,7 +1565,7 @@ public:
                 // production; they must not outlive a later death or split.
                 stage.strike_active_.clear();
                 const std::size_t before = stage.people_.events().size();
-                if (stage.demography_enabled_) {
+                if (stage.demography_enabled_ && !stage.suppress_demography_this_close_) {
                     phaseb::Engine engine{stage.demographic_rules_};
                     (void)engine.advance(stage.people_);
                     stage.sync_service_transitions(before);
@@ -1556,7 +1576,10 @@ public:
                     stage.people_.release_ineligible();
                 }
             }
-            if (n == 11) stage.reprice_markets();
+            if (n == 11) {
+                stage.reprice_markets();
+                stage.suppress_demography_this_close_=false;
+            }
             stage.validate();
             if (n == 11) {
                 stage.resources_.clear_month();
@@ -1735,6 +1758,7 @@ private:
     std::uint64_t sequence_{};
     int stage_{-1}, voting_age_years_{21};
     bool election_this_month_{}, demography_enabled_{};
+    bool suppress_demography_this_close_{}; // transient per-close event, not persistent
 
     // Exact nonnegative fraction comparison using Euclid/continued fractions:
     // no 128-bit GNU extension, overflow or floating-point ties (MSVC friendly).
