@@ -156,6 +156,9 @@ inline void Stage::register_arrived_losses() {
     for(auto& [id,policy]:trade_.insurance) {
         (void)id;
         if(!policy.premium_paid||policy.claim_registered)continue;
+        // Daily F cargo is finalized by the actual arrival event, which
+        // carries the dated loss proof. Legacy G deliveries stay monthly.
+        if(trade_.executed.contains("DAY:"+policy.shipment_id))continue;
         const auto& ship=phase_c().phase_g_shipment(policy.shipment_id);
         if(!ship.delivered)continue;
         require(ship.quantity>=policy.insured_quantity&&ship.loss<=ship.quantity,
@@ -171,7 +174,9 @@ inline void Stage::pay_insurance_premiums() {
     at(7);
     for(auto& [id,policy]:trade_.insurance) {
         (void)id;
-        if(policy.premium_paid||!trade_.executed.contains(policy.shipment_id))
+        if(policy.premium_paid||policy.claim_registered||
+           (!trade_.executed.contains(policy.shipment_id)&&
+            !trade_.executed.contains("DAY:"+policy.shipment_id)))
             continue;
         // The insurer receives actual money; coverage is a legal promise,
         // never a free cash asset for the beneficiary.

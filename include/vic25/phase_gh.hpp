@@ -380,6 +380,32 @@ public:
     // not fabricated month timestamps.
     // Daily logistics settlement uses the authoritative G transport-edge
     // month-budget (shared with MonthClose) and the actual C inventory.
+    // F/G daily physical arrival is a stage-0 event in the same authoritative
+    // world transaction as the C inventory delivery. Insurance is paid only
+    // when coverage was funded before loss; never fabricate a claim.
+    void acknowledge_daily_cargo_arrival(const std::string& cargo_id,
+                                         Quantity actual_quantity,
+                                         Quantity confirmed_loss) {
+        at(0);
+        require(!cargo_id.empty()&&actual_quantity>0&&confirmed_loss>=0&&
+                confirmed_loss<=actual_quantity&&
+                trade_.executed.contains("DAY:"+cargo_id)&&
+                trade_.executed.insert("ARRIVED:DAY:"+cargo_id).second,
+                "F_ERR_UNVERIFIED_OR_DUPLICATE_DAILY_ARRIVAL");
+        for(auto& [id,coverage]:trade_.insurance) {
+            (void)id;
+            if(coverage.shipment_id!=cargo_id||coverage.claim_registered)
+                continue;
+            require(actual_quantity>=coverage.insured_quantity,
+                    "F_ERR_INSURANCE_EXCEEDS_SHIPMENT");
+            coverage.claim_due=coverage.premium_paid?
+                phaseb::mul_checked(coverage.maximum_claim,
+                      std::min(confirmed_loss,coverage.insured_quantity))/
+                      coverage.insured_quantity:0;
+            coverage.claim_registered=true;
+        }
+        ++trade_.revision;
+    }
     void dispatch_daily_cargo(const std::string& cargo_id,
                               const std::string& edge_id,
                               const std::string& sender,
@@ -410,7 +436,16 @@ public:
             phaseb::mul_checked(rest,static_cast<Quantity>(day_of_month))/days_in_month);
         require(used<=capacity&&quantity<=capacity-used,
                 "G_DAILY_MONTHLY_CAPACITY_EXCEEDED");
+        require(!cargo_id.empty()&&
+                !trade_.executed.contains("DAY:"+cargo_id),
+                "F_ERR_DUPLICATE_DAILY_DISPATCH");
+        const Money freight=phaseb::mul_checked(quantity,edge.freight_per_unit);
+        // Freight is a real monetary transaction, not a shadow transport
+        // points balance. An own-carrier route needs no internal transfer.
+        if(freight>0&&sender!=edge.carrier)
+            phase_c().pay(sender,edge.carrier,freight);
         phase_c().phase_time_dispatch(cargo_id,sender,origin,good,quantity);
+        trade_.executed.insert("DAY:"+cargo_id);
         trade_.edge_usage[key]=phaseb::add_checked(used,quantity);
         ++trade_.revision;
     }

@@ -356,6 +356,8 @@ public:
             real_actions[0].push_back([c](phasegh::Stage& stage) {
                 stage.phase_c().phase_time_arrive(
                     c.id,c.recipient,c.destination,c.good,c.quantity,c.loss);
+                stage.acknowledge_daily_cargo_arrival(
+                    c.id,c.quantity,c.loss);
             });
             c.arrived=true;
         }
