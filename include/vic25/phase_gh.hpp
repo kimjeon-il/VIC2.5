@@ -121,6 +121,81 @@ struct TradeState {
     std::uint64_t revision{};
 };
 
+// One F/G route oracle for both autonomous trade and autonomous physical
+// freight. It uses the authoritative G edge ledger (including already-used
+// throughput), not a second sidecar graph.
+inline std::optional<PathQuote> quote_daily_freight_path(
+        const TradeState& trade,Id from,Id to,Month month,
+        std::int32_t day_of_month=0,std::int32_t days_in_month=0) {
+    auto day_budget=[&](Quantity total,Quantity used)->Quantity {
+        require(total>=0&&used>=0,"F_ERR_BAD_BUDGET");
+        if(day_of_month<=0)return total;
+        require(days_in_month>=28&&days_in_month<=31&&
+                day_of_month<=days_in_month,"F_ERR_BAD_DAY");
+        const Quantity ceiling=phaseb::add_checked(
+            phaseb::mul_checked(total/days_in_month,day_of_month),
+            phaseb::mul_checked(total%days_in_month,day_of_month)/
+                            days_in_month);
+        return ceiling>used?ceiling-used:0;
+    };
+    if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
+    if(trade.transport_edges.empty())return std::nullopt;
+    using Item=std::tuple<Money,Month,Id>;
+    std::priority_queue<Item,std::vector<Item>,std::greater<Item>> queue;
+    std::map<Id,std::pair<Money,Month>> best;
+    std::map<Id,std::pair<Id,std::string>> parent;
+    best[from]={0,0};
+    queue.push({0,0,from});
+    while(!queue.empty()) {
+        const auto [cost,travel,node]=queue.top();
+        queue.pop();
+        if(best.at(node)!=std::pair<Money,Month>{cost,travel})continue;
+        if(node==to)break;
+        auto it=trade.transport_adjacency.find(node);
+        if(it==trade.transport_adjacency.end())continue;
+        // World::seed_transport_edge inserts in deterministic ID order.
+        for(const auto& edge_id:it->second) {
+            const auto& edge=trade.transport_edges.at(edge_id);
+            const Quantity used=trade.edge_usage.contains({month,edge_id})?
+                                trade.edge_usage.at({month,edge_id}):0;
+            const Quantity ceiling=day_of_month>0?
+                day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
+            if(!edge.enabled || used>=ceiling)continue;
+            require(edge.from==node && used>=0,
+                    "G_ERR_LOGISTICS_INDEX_CORRUPT");
+            const Money next_cost=phaseb::add_checked(cost,edge.freight_per_unit);
+            const Month next_travel=phaseb::add_checked(travel,edge.transit_months);
+            const std::pair<Money,Month> candidate{next_cost,next_travel};
+            auto old=best.find(edge.to);
+            if(old==best.end() || candidate<old->second) {
+                best[edge.to]=candidate;
+                parent[edge.to]={node,edge_id};
+                queue.push({next_cost,next_travel,edge.to});
+            }
+        }
+    }
+    if(!best.contains(to))return std::nullopt;
+    PathQuote result;
+    result.freight_per_unit=best.at(to).first;
+    result.travel_months=best.at(to).second;
+    result.capacity=std::numeric_limits<Quantity>::max();
+    for(Id p=to;p!=from;) {
+        auto it=parent.find(p);
+        require(it!=parent.end(),"G_ERR_LOGISTICS_PARENT_MISSING");
+        const auto& edge=trade.transport_edges.at(it->second.second);
+        const Quantity used=trade.edge_usage.contains({month,edge.id})?
+                                trade.edge_usage.at({month,edge.id}):0;
+        const Quantity ceiling=day_of_month>0?
+            day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
+        require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
+        result.capacity=std::min(result.capacity,ceiling-used);
+        result.edges.push_back(edge.id);
+        p=it->second.first;
+    }
+    std::reverse(result.edges.begin(),result.edges.end());
+    return result;
+}
+
 struct Tariff {
     std::string importer_country, good;
     std::int64_t ppm{};

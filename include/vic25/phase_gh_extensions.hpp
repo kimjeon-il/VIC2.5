@@ -5,63 +5,9 @@
 namespace vic25::phasegh {
 
 inline std::optional<PathQuote> Stage::quote_path(
-        Id from, Id to, Month month) const {
-    if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
-    if(trade_.transport_edges.empty())return std::nullopt;
-    using Item=std::tuple<Money,Month,Id>;
-    std::priority_queue<Item,std::vector<Item>,std::greater<Item>> queue;
-    std::map<Id,std::pair<Money,Month>> best;
-    std::map<Id,std::pair<Id,std::string>> parent;
-    best[from]={0,0};
-    queue.push({0,0,from});
-    while(!queue.empty()) {
-        const auto [cost,travel,node]=queue.top();
-        queue.pop();
-        if(best.at(node)!=std::pair<Money,Month>{cost,travel})continue;
-        if(node==to)break;
-        auto it=trade_.transport_adjacency.find(node);
-        if(it==trade_.transport_adjacency.end())continue;
-        // World::seed_transport_edge inserts in deterministic ID order.
-        for(const auto& edge_id:it->second) {
-            const auto& edge=trade_.transport_edges.at(edge_id);
-            const Quantity used=trade_.edge_usage.contains({month,edge_id})?
-                                trade_.edge_usage.at({month,edge_id}):0;
-            const Quantity ceiling=day_of_month_>0?
-                day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
-            if(!edge.enabled || used>=ceiling)continue;
-            require(edge.from==node && used>=0,
-                    "G_ERR_LOGISTICS_INDEX_CORRUPT");
-            const Money next_cost=phaseb::add_checked(cost,edge.freight_per_unit);
-            const Month next_travel=phaseb::add_checked(travel,edge.transit_months);
-            const std::pair<Money,Month> candidate{next_cost,next_travel};
-            auto old=best.find(edge.to);
-            if(old==best.end() || candidate<old->second) {
-                best[edge.to]=candidate;
-                parent[edge.to]={node,edge_id};
-                queue.push({next_cost,next_travel,edge.to});
-            }
-        }
-    }
-    if(!best.contains(to))return std::nullopt;
-    PathQuote result;
-    result.freight_per_unit=best.at(to).first;
-    result.travel_months=best.at(to).second;
-    result.capacity=std::numeric_limits<Quantity>::max();
-    for(Id p=to;p!=from;) {
-        auto it=parent.find(p);
-        require(it!=parent.end(),"G_ERR_LOGISTICS_PARENT_MISSING");
-        const auto& edge=trade_.transport_edges.at(it->second.second);
-        const Quantity used=trade_.edge_usage.contains({month,edge.id})?
-                                trade_.edge_usage.at({month,edge.id}):0;
-        const Quantity ceiling=day_of_month_>0?
-            day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
-        require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
-        result.capacity=std::min(result.capacity,ceiling-used);
-        result.edges.push_back(edge.id);
-        p=it->second.first;
-    }
-    std::reverse(result.edges.begin(),result.edges.end());
-    return result;
+        Id from,Id to,Month month) const {
+    return quote_daily_freight_path(
+        trade_,from,to,month,day_of_month_,days_in_month_);
 }
 inline void Stage::create_trade_contract(TradeContract c) {
     at(9);
