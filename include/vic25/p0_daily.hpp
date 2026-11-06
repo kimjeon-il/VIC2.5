@@ -87,6 +87,17 @@ struct CountryAI {
     Quantity surplus_stock_threshold{};
     std::int64_t protective_tariff_ppm{100'000};
 };
+// Government strategy rules are scenario inputs, not independent diplomacy,
+ // funds or population state. Actual negotiations/dues use existing H/C ledgers.
+struct CrisisMandate {
+    std::string country,prime_minister;
+    Money maximum_cash_settlement{};
+    bool accept_claim_withdrawal{true};
+    bool mediate_neutral_crises{false};
+};
+struct OrganizationDuesMandate {
+    std::string country,prime_minister,organization;
+};
 struct Engagement {
     std::string attacker,defender,region;
     Id attacker_slice{},defender_slice{};
@@ -104,6 +115,8 @@ struct Policies {
     std::vector<PoliticalReaction> political_reactions;
     std::vector<Election> elections;
     std::vector<CountryAI> countries;
+    std::vector<CrisisMandate> crisis_mandates;
+    std::vector<OrganizationDuesMandate> organization_dues;
     std::vector<Engagement> engagements;
 
     void validate() const {
@@ -161,6 +174,18 @@ struct Policies {
                c.protective_tariff_ppm<0||c.protective_tariff_ppm>1'000'000||
                !seen_countries.insert(c.country+":"+c.good).second)
                 throw std::invalid_argument("P0_INVALID_COUNTRY_AI");
+        std::set<std::string> crisis_countries;
+        for(const auto& mandate:crisis_mandates)
+            if(mandate.country.empty()||mandate.prime_minister.empty()||
+               mandate.maximum_cash_settlement<0||
+               !crisis_countries.insert(mandate.country).second)
+                throw std::invalid_argument("P0_INVALID_CRISIS_MANDATE");
+        std::set<std::pair<std::string,std::string>> dues_members;
+        for(const auto& mandate:organization_dues)
+            if(mandate.country.empty()||mandate.prime_minister.empty()||
+               mandate.organization.empty()||
+               !dues_members.insert({mandate.organization,mandate.country}).second)
+                throw std::invalid_argument("P0_INVALID_DUES_MANDATE");
         for(const auto& b:engagements) {
             if(b.attacker.empty()||b.defender.empty()||
                b.attacker==b.defender||b.region.empty()||
@@ -596,6 +621,65 @@ public:
                           {election.reform_party,reform}});
             });
         }
+        for(const auto& dues:policies_.organization_dues)
+            plan[5].push_back([dues](phasegh::Stage& gh) {
+                const auto& org=gh.diplomacy().organizations.at(dues.organization);
+                if(!org.active||!org.members.contains(dues.country)||
+                   org.dues_per_member<=0)return;
+                if(gh.phase_c().government(dues.country).prime_minister!=
+                   dues.prime_minister)
+                    throw std::invalid_argument("P0_DUES_UNAUTHORIZED_GOVERNMENT");
+                const auto key=std::make_pair(gh.phase_c().month(),dues.country);
+                const auto it=org.paid.find(key);
+                const Money already=it==org.paid.end()?0:it->second;
+                if(already>=org.dues_per_member)return;
+                const Money due=org.dues_per_member-already;
+                if(gh.phase_c().phase_d_cash_available(dues.country)<due)return;
+                gh.pay_dues(dues.organization,dues.country,due);
+            });
+        for(const auto& ai:policies_.crisis_mandates)
+            plan[9].push_back([ai](phasegh::Stage& gh) {
+                if(gh.phase_c().government(ai.country).prime_minister!=
+                   ai.prime_minister)
+                    throw std::invalid_argument("P0_CRISIS_UNAUTHORIZED_GOVERNMENT");
+                for(const auto& [id,crisis]:gh.diplomacy().crises) {
+                    if(crisis.status==phasegh::CrisisStatus::settled||
+                       crisis.status==phasegh::CrisisStatus::withdrawn||
+                       crisis.status==phasegh::CrisisStatus::escalated||
+                       crisis.status==phasegh::CrisisStatus::scheduled)
+                        continue;
+                    if(ai.mediate_neutral_crises&&
+                       crisis.status==phasegh::CrisisStatus::active&&
+                       ai.country!=crisis.claimant&&
+                       ai.country!=crisis.respondent&&crisis.mediator.empty()) {
+                        gh.mediate_crisis(id,ai.country,ai.prime_minister);
+                        continue;
+                    }
+                    if(ai.country!=crisis.claimant&&ai.country!=crisis.respondent)
+                        continue;
+                    // No arbitrary war/claim generation or unfunded concession:
+                    // select an actual proposal and compare real treasury risk.
+                    const phasegh::CrisisProposal* selected=nullptr;
+                    for(const auto& [offer_id,offer]:crisis.proposals) {
+                        (void)offer_id;
+                        if(offer.approvers.contains(ai.country)||
+                           (offer.freeze_claim&&
+                            ai.country==crisis.claimant&&
+                            !ai.accept_claim_withdrawal))continue;
+                        if(offer.compensation>0&&offer.payer==ai.country &&
+                           (offer.compensation>ai.maximum_cash_settlement ||
+                            offer.compensation>
+                              gh.phase_c().phase_d_cash_available(ai.country)))
+                            continue;
+                        if(!selected||offer.compensation<selected->compensation||
+                           (offer.compensation==selected->compensation&&
+                            offer.id<selected->id))
+                            selected=&offer;
+                    }
+                    if(selected)gh.respond_crisis_offer(
+                        id,selected->id,ai.country,true,ai.prime_minister);
+                }
+            });
         for(const auto& combat:policies_.engagements)
             plan[10].push_back([combat](phasegh::Stage& gh){
                 fight(gh.phase_c(),combat);
