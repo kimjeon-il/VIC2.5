@@ -748,6 +748,95 @@ static void autonomous_h_treaty_risk_and_institutional_vote() {
     require_test(rejected,"duplicate H institutional decision must fail policy validation");
 }
 
+
+static void autonomous_f_parallel_lanes_respect_shared_real_resources() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"RA","A");geo.seed_province(2,"RB","B");
+    geo.seed_border(1,2);
+    geo.seed_unit(11,"A","UA");geo.seed_unit(22,"B","UB");
+    geo.seed_assignment(1,11);geo.seed_assignment(2,22);
+    auto& core=geo.seed_core().seed_core();
+    core.seed_actor("SELLER",100);core.seed_actor("B1",100);
+    core.seed_actor("B2",100);core.seed_actor("CARRIER",100);
+    core.seed_stock("SELLER","RA","iron",3);
+    gh.seed_transport_edge({"LINK","CARRIER",1,2,310,1,1,true});
+    phasef::FreightLane l1;
+    l1.id="ONE";l1.seller="SELLER";l1.buyer="B1";l1.good="iron";
+    l1.origin_region="RA";l1.destination_region="RB";
+    l1.target_inventory=2;l1.maximum_daily_units=2;
+    l1.edge_transit_days={{"LINK",1}};
+    auto l2=l1;l2.id="TWO";l2.buyer="B2";
+    p0::Policies rules;rules.freight_lanes={l1,l2};
+    p0::DailyGame game(daily::World::adopt(std::move(gh),311),rules);
+    game.advance_day();
+    require_test(game.world().cargo().size()==2 &&
+                 c(game).stock("SELLER","RA","iron")==0 &&
+                 c(game).cash("SELLER")==97 &&
+                 c(game).cash("CARRIER")==103,
+                 "F overlapping cargo lanes overcommitted actual stock or cash");
+    Quantity shipped1=0,shipped2=0;
+    for(const auto& [id,cargo]:game.world().cargo()) {
+        if(id.starts_with("F:ONE:"))shipped1=cargo.quantity;
+        if(id.starts_with("F:TWO:"))shipped2=cargo.quantity;
+    }
+    require_test(shipped1==2&&shipped2==1,
+                 "F deterministic policy order must allocate scarce common stock");
+    auto checkpoint=daily::SnapshotCodec::encode(game.world());
+    auto replay=p0::DailyGame(daily::SnapshotCodec::decode(checkpoint),rules);
+    game.advance_day();replay.advance_day();
+    require_test(daily::SnapshotCodec::encode(game.world())==
+                 daily::SnapshotCodec::encode(replay.world())&&
+                 c(game).stock("B1","RB","iron")==2 &&
+                 c(game).stock("B2","RB","iron")==1,
+                 "parallel F cargo receipts must conserve all goods across replay");
+}
+
+static void autonomous_f_congestion_uses_actual_alternate_edge() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"RA","A");geo.seed_province(2,"RB","B");
+    geo.seed_province(3,"RC","C");
+    geo.seed_border(1,2);geo.seed_border(1,3);geo.seed_border(3,2);
+    geo.seed_unit(11,"A","UA");geo.seed_unit(22,"B","UB");
+    geo.seed_unit(33,"C","UC");
+    geo.seed_assignment(1,11);geo.seed_assignment(2,22);
+    geo.seed_assignment(3,33);
+    auto& core=geo.seed_core().seed_core();
+    core.seed_actor("S",100);core.seed_actor("B1",100);
+    core.seed_actor("B2",100);core.seed_actor("CARRIER",100);
+    core.seed_stock("S","RA","iron",3);
+    // The direct link can move ONE unit on Jan 1; alternate path is
+    // more expensive but physically available using two existing edges.
+    gh.seed_transport_edge({"DIRECT","CARRIER",1,2,31,1,1,true});
+    gh.seed_transport_edge({"ALT-1","CARRIER",1,3,310,2,1,true});
+    gh.seed_transport_edge({"ALT-2","CARRIER",3,2,310,2,1,true});
+    phasef::FreightLane a;
+    a.id="FIRST";a.seller="S";a.buyer="B1";a.good="iron";
+    a.origin_region="RA";a.destination_region="RB";
+    a.target_inventory=1;a.maximum_daily_units=1;
+    a.edge_transit_days={{"DIRECT",1},{"ALT-1",1},{"ALT-2",1}};
+    auto b=a;b.id="SECOND";b.buyer="B2";
+    p0::Policies rules;rules.freight_lanes={a,b};
+    p0::DailyGame game(daily::World::adopt(std::move(gh)),rules);
+    game.advance_day();
+    const auto& G=game.world().engine().commerce();
+    require_test(G.edge_usage.at({24000,"DIRECT"})==1 &&
+                 G.edge_usage.at({24000,"ALT-1"})==1 &&
+                 G.edge_usage.find({24000,"ALT-2"})==G.edge_usage.end() &&
+                 c(game).stock("S","RA","iron")==1,
+                 "F capacity-constrained route search must use free alternate first hop");
+    bool direct=false,alternate=false;
+    for(const auto& [id,cargo]:game.world().cargo()) {
+        if(id.starts_with("F:FIRST:"))
+            direct=cargo.destination=="RB"&&cargo.edge_id=="DIRECT";
+        if(id.starts_with("F:SECOND:"))
+            alternate=cargo.destination=="RC"&&cargo.edge_id=="ALT-1";
+    }
+    require_test(direct&&alternate,
+                 "F congested alternatives must not teleport cargo or ignore edge availability");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -766,6 +855,8 @@ int main(){
         autonomous_f_two_hop_freight_and_save_replay();
         autonomous_daily_facility_maintenance_with_real_inputs();
         autonomous_h_treaty_risk_and_institutional_vote();
+        autonomous_f_parallel_lanes_respect_shared_real_resources();
+        autonomous_f_congestion_uses_actual_alternate_edge();
         std::cout<<"P0 daily grand strategy: 12 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
