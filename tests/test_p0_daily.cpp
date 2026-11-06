@@ -694,7 +694,7 @@ static void autonomous_h_treaty_risk_and_institutional_vote() {
          "A","PM_A",{{"A","PM_A",50},{"B","PM_B",200}}});
     auto world=seed_lawful_autonomous_treaty_and_council();
     p0::DailyGame game(std::move(world),policy);
-    const Money beforeA=c(game).cash("A"),beforeB=c(game).cash("B");
+    const auto beforeA=c(game).cash("A"),beforeB=c(game).cash("B");
     game.advance_day(); // January 2: lawful country AI decisions
     const auto& h=game.world().engine().diplomacy();
     require_test(h.treaties.at("PACT-A-B").ratifications.contains("B") &&
@@ -709,7 +709,8 @@ static void autonomous_h_treaty_risk_and_institutional_vote() {
     game.advance_day();replay.advance_day();
     require_test(daily::SnapshotCodec::encode(game.world())==
                  daily::SnapshotCodec::encode(replay.world()) &&
-                 h.organizations.at("LEAGUE").decisions.size()==2,
+                 game.world().engine().diplomacy().
+                    organizations.at("LEAGUE").decisions.size()==2,
                  "H dated AI treaties/council decisions must be idempotent on replay");
     while(game.world().date()!=daily::Date{2000,2,1})
         game.advance_day(); // no backdated H legal effects until due month
