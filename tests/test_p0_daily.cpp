@@ -920,6 +920,112 @@ static void native_cg_credit_service_keeps_trade_facility_in_sync() {
                  "G/C post-repayment facility and liability must survive checkpoint replay");
 }
 
+
+static void national_elections_are_independent_and_persistent() {
+    auto build=[] {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"RA","A");
+        geo.seed_province(2,"RB","B");
+        geo.seed_border(1,2);
+        geo.seed_unit(11,"A","A-ROOT");geo.seed_unit(22,"B","B-ROOT");
+        geo.seed_assignment(1,11);geo.seed_assignment(2,22);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",100);c.seed_actor("B",100);
+        c.seed_government("A","HEAD_A","PM_A",5,3);
+        c.seed_government("B","HEAD_B","PM_B",5,3);
+        auto& pop=c.seed_population();
+        for(const auto& [region,n]:std::array<std::pair<const char*,phaseb::People>,2>{{
+              {"RA",20},{"RB",16}}}) {
+            auto h=pop.household_profile({region,"mixed","shared",n});
+            auto econ=pop.economic_profile({region,"worker","wage","employee",
+                                            pop.default_education()});
+            auto dem=pop.demographic_profile(
+                {region,24000-360,phaseb::Sex::female,"culture","faith",
+                 "citizen","free",pop.default_health(),phaseb::Service::civilian});
+            pop.seed_population(dem,econ,h,n,region==std::string("RA")?1:2);
+        }
+        gh.validate();
+        return gh;
+    };
+    p0::Policies policy;
+    policy.elections.push_back({"A","A_INC","A_REF",2000,1,1,1'000'000});
+    policy.elections.push_back({"B","B_INC","B_REF",2000,1,1,1'000'000});
+
+    auto opening=build();
+    const auto old_c=phasec::SnapshotCodec::encode(
+                         opening.base().core().core());
+    require_test(phasec::SnapshotCodec::encode(
+                   phasec::SnapshotCodec::decode(old_c))==old_c,
+                 "legacy C electionless snapshot must remain byte-identical");
+
+    p0::DailyGame a(daily::World::adopt(std::move(opening),43),policy);
+    phasegh::World::Plan cabinet;
+    cabinet[9].push_back([](phasegh::Stage& gh){
+        gh.phase_c().appoint_cabinet("A","HEAD_A","NEXT_PM_A",{"A_INC"});
+    });
+    a.advance_day(cabinet);
+    const auto& c=::c(a);
+    const auto& ae=c.country_election("A");
+    const auto& be=c.country_election("B");
+    require_test(c.country_elections().size()==2&&
+                 ae.eligible==20&&be.eligible==16&&
+                 ae.registered==20&&be.registered==16&&
+                 ae.valid==20&&be.valid==16&&
+                 ae.total_seats==5&&be.total_seats==5&&
+                 ae.seats.at("A_INC")==3&&be.seats.at("B_INC")==3&&
+                 c.country_election_month("A")==24000&&
+                 c.country_election_month("B")==24000,
+                 "country voter scope, elections or national seat ledger incorrect");
+    const auto saved=daily::SnapshotCodec::encode(a.world());
+    auto restored=daily::SnapshotCodec::decode(saved);
+    require_test(daily::SnapshotCodec::encode(restored)==saved &&
+                 restored.engine().base().core().core().country_elections().size()==2,
+                 "country elections must survive C/D/E/GH/day nested snapshots");
+
+    p0::DailyGame replay(std::move(restored),policy);
+    while(a.world().date()<daily::Date{2000,2,2}) {
+        a.advance_day();replay.advance_day();
+    }
+    require_test(daily::SnapshotCodec::encode(a.world())==
+                 daily::SnapshotCodec::encode(replay.world())&&
+                 ::c(a).country_election("B").votes.at("B_INC")==8&&
+                 ::c(a).government("A").prime_minister=="NEXT_PM_A"&&
+                 ::c(a).government("B").prime_minister=="PM_B",
+                 "month-effective national cabinet authority or replay diverged");
+
+    // No other country's incumbent seats may authorize B's government.
+    auto rejected=daily::World::adopt(build(),89);
+    p0::DailyGame unlawful(std::move(rejected),policy);
+    phasegh::World::Plan wrong;
+    wrong[9].push_back([](phasegh::Stage& gh) {
+        gh.phase_c().appoint_cabinet("B","HEAD_B","UNLAWFUL",{"A_INC"});
+    });
+    const auto before=daily::SnapshotCodec::encode(unlawful.world());
+    bool failed=false;
+    try{unlawful.advance_day(wrong);}catch(const std::exception&){failed=true;}
+    require_test(failed && daily::SnapshotCodec::encode(unlawful.world())==before,
+                 "foreign electoral majority must not seat a government/advance day");
+
+    p0::Policies duplicate=policy;
+    duplicate.elections.push_back({"A","ALT_INC","ALT_REF",2000,1,15,1'000'000});
+    bool invalid=false;
+    try{p0::DailyGame bad(daily::World::adopt(build()),duplicate);}
+    catch(const std::invalid_argument&){invalid=true;}
+    require_test(invalid,"duplicate national election during one calendar month");
+
+    auto capped=daily::World::adopt(build());
+    phasegh::World::Plan over;
+    over[9].push_back([](phasegh::Stage& gh){
+        gh.phase_c().hold_country_election("B",17,0,{{"B_INC",17}});
+    });
+    const auto original=daily::SnapshotCodec::encode(capped);
+    bool overcount=false;
+    try{capped.advance_day(over);}catch(const std::exception&){overcount=true;}
+    require_test(overcount&&original==daily::SnapshotCodec::encode(capped),
+                 "national election must reject registering citizens of another state");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -934,6 +1040,7 @@ int main(){
         a_strike_is_not_a_permanent_hiring_vacancy();
         native_autonomous_extraction_physical_flow();
         native_autonomous_funded_research_and_day_lab_limit();
+        national_elections_are_independent_and_persistent();
         native_autonomous_h_crisis_and_organization_funding();
         autonomous_f_two_hop_freight_and_save_replay();
         autonomous_daily_facility_maintenance_with_real_inputs();
