@@ -106,6 +106,23 @@ struct CrisisMandate {
 struct OrganizationDuesMandate {
     std::string country,prime_minister,organization;
 };
+// H autonomous ratification is conditional on real fiscal resources and
+// observed treaty obligations; an AI must not invent or sign unknown clauses.
+struct TreatyDecisionMandate {
+    std::string country,prime_minister;
+    Money maximum_new_fiscal_obligation{};
+    bool allow_trade_constraints{};
+    bool allow_military_commitments{};
+    bool allow_territorial_cession{};
+};
+struct CouncilMemberRule {
+    std::string country,prime_minister;
+    Money minimum_free_treasury_for_yes{};
+};
+struct CouncilDecisionMandate {
+    std::string organization,decision_id,subject,proposer,prime_minister;
+    std::vector<CouncilMemberRule> member_rules;
+};
 struct Engagement {
     std::string attacker,defender,region;
     Id attacker_slice{},defender_slice{};
@@ -126,6 +143,8 @@ struct Policies {
     std::vector<CountryAI> countries;
     std::vector<CrisisMandate> crisis_mandates;
     std::vector<OrganizationDuesMandate> organization_dues;
+    std::vector<TreatyDecisionMandate> treaty_ratifications;
+    std::vector<CouncilDecisionMandate> council_decisions;
     std::vector<phasef::FreightLane> freight_lanes;
     std::vector<Engagement> engagements;
 
@@ -205,6 +224,28 @@ struct Policies {
                mandate.organization.empty()||
                !dues_members.insert({mandate.organization,mandate.country}).second)
                 throw std::invalid_argument("P0_INVALID_DUES_MANDATE");
+        std::set<std::string> treaty_countries;
+        for(const auto& m:treaty_ratifications)
+            if(m.country.empty()||m.prime_minister.empty()||
+               m.maximum_new_fiscal_obligation<0||
+               !treaty_countries.insert(m.country).second)
+                throw std::invalid_argument("P0_INVALID_TREATY_DECISION");
+        std::set<std::pair<std::string,std::string>> council_ids;
+        for(const auto& m:council_decisions) {
+            if(m.organization.empty()||m.decision_id.empty()||
+               m.subject.empty()||m.proposer.empty()||
+               m.prime_minister.empty()||m.member_rules.empty()||
+               !council_ids.insert({m.organization,m.decision_id}).second)
+                throw std::invalid_argument("P0_INVALID_COUNCIL_DECISION");
+            std::set<std::string> members;
+            for(const auto& member:m.member_rules)
+                if(member.country.empty()||member.prime_minister.empty()||
+                   member.minimum_free_treasury_for_yes<0||
+                   !members.insert(member.country).second)
+                    throw std::invalid_argument("P0_INVALID_COUNCIL_MEMBER");
+            if(!members.contains(m.proposer))
+                throw std::invalid_argument("P0_MISSING_COUNCIL_PROPOSER");
+        }
         std::set<std::string> freight_ids;
         for(const auto& f:freight_lanes) {
             phasef::validate(f);
@@ -743,6 +784,69 @@ public:
                     if(selected)gh.respond_crisis_offer(
                         id,selected->id,ai.country,true,ai.prime_minister);
                 }
+            });
+        for(const auto& rule:policies_.treaty_ratifications)
+            plan[9].push_back([rule](phasegh::Stage& gh){
+                auto& c=gh.phase_c();
+                if(c.government(rule.country).prime_minister!=rule.prime_minister)
+                    throw std::invalid_argument("P0_H_TREATY_UNAUTHORIZED_PRIME");
+                for(const auto& [id,t]:gh.diplomacy().treaties) {
+                    if(t.parties.empty()||!t.parties.contains(rule.country)||
+                       t.active||t.pending_termination||
+                       t.ratifications.contains(rule.country))
+                        continue;
+                    Money fiscal_exposure=0;
+                    bool eligible=true;
+                    for(const auto& term:t.clauses) {
+                        if(term.obligor!=rule.country)continue;
+                        const auto kind=term.kind;
+                        if(kind==phasegh::ClauseKind::territorial_cession &&
+                           !rule.allow_territorial_cession)
+                            eligible=false;
+                        if((kind==phasegh::ClauseKind::trade_embargo ||
+                            kind==phasegh::ClauseKind::trade_quota) &&
+                           !rule.allow_trade_constraints)
+                            eligible=false;
+                        if((kind==phasegh::ClauseKind::military_access ||
+                            kind==phasegh::ClauseKind::defense_guarantee ||
+                            kind==phasegh::ClauseKind::protectorate) &&
+                           !rule.allow_military_commitments)
+                            eligible=false;
+                        if(kind==phasegh::ClauseKind::financial_aid ||
+                           kind==phasegh::ClauseKind::reparations ||
+                           kind==phasegh::ClauseKind::cultural_exchange)
+                            fiscal_exposure=phaseb::add_checked(
+                                fiscal_exposure,term.amount);
+                    }
+                    if(!eligible||
+                       fiscal_exposure>rule.maximum_new_fiscal_obligation||
+                       fiscal_exposure>c.phase_d_cash_available(rule.country))
+                        continue;
+                    gh.ratify_package_member(id,rule.country,rule.prime_minister);
+                }
+            });
+        for(const auto& rule:policies_.council_decisions)
+            plan[9].push_back([rule](phasegh::Stage& gh){
+                const auto& org=gh.diplomacy().organizations.at(rule.organization);
+                if(!org.active||org.decisions.contains(rule.decision_id))
+                    return;
+                if(!org.members.contains(rule.proposer)||
+                   gh.phase_c().government(rule.proposer).prime_minister!=
+                         rule.prime_minister)
+                    throw std::invalid_argument("P0_H_COUNCIL_NO_PROPOSER");
+                std::map<std::string,phasegh::VoteChoice> votes;
+                for(const auto& m:rule.member_rules) {
+                    if(!org.members.contains(m.country)||
+                       gh.phase_c().government(m.country).prime_minister!=
+                            m.prime_minister)
+                        throw std::invalid_argument("P0_H_COUNCIL_UNAUTHORIZED_MEMBER");
+                    const Money actual=gh.phase_c().phase_d_cash_available(m.country);
+                    votes.emplace(m.country,actual>=m.minimum_free_treasury_for_yes?
+                        phasegh::VoteChoice::yes:phasegh::VoteChoice::no);
+                }
+                if(votes.size()<org.governance.quorum)return;
+                gh.hold_organization_vote(rule.organization,rule.decision_id,
+                       rule.subject,votes,rule.proposer,rule.prime_minister);
             });
         for(const auto& combat:policies_.engagements)
             plan[10].push_back([combat](phasegh::Stage& gh){
