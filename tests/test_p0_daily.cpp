@@ -598,6 +598,69 @@ static void autonomous_f_two_hop_freight_and_save_replay() {
                  "missing grounded transit days must not fabricate route or post money");
 }
 
+
+static void autonomous_daily_facility_maintenance_with_real_inputs() {
+    auto w=fixture();
+    auto& seeded=w.seed_geography().seed_core().seed_core();
+    seeded.seed_stock("FIRM","R","steel",3);
+    auto& persons=seeded.seed_population();
+    const auto labor_slice=persons.slices().begin()->first;
+    persons.hire(labor_slice,4,"FIRM","technician",10,
+                 phaseb::JobRequirements{});
+    auto world=daily::World::adopt(std::move(w),99);
+    phasegh::World::Plan damage;
+    damage[10].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().war_damage_facility("FARM",3);
+    });
+    world.advance_day(damage); // first day causes real physical damage
+    require_test(world.engine().base().core().core().facility("FARM").damaged==3,
+                 "unfunded maintenance fixture failed to create damage");
+    p0::Policies policy;
+    policy.maintenance.push_back({"FARM","steel",2,1,1,1,
+                                  "WORKERS","TREASURY"});
+    p0::DailyGame game(std::move(world),policy);
+    const auto before=daily::SnapshotCodec::encode(game.world());
+    phasegh::World::Plan fail;
+    fail[9].push_back([](phasegh::Stage&){
+        throw std::runtime_error("injected later stage failure");
+    });
+    bool aborted=false;
+    try{game.advance_day(fail);}catch(const std::runtime_error&){aborted=true;}
+    require_test(aborted &&
+                 daily::SnapshotCodec::encode(game.world())==before,
+                 "late failure must roll back materials, wages, repaired capacity and day");
+
+    game.advance_day(); // day 2: two real restoration units
+    require_test(c(game).facility("FARM").damaged==1 &&
+                 c(game).stock("FIRM","R","steel")==1 &&
+                 c(game).cash("FIRM")==1998 &&
+                 c(game).cash("WORKERS")==2,
+                 "D day-native maintenance must restore capacity and use real C ledger");
+    const auto checkpoint=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(checkpoint),policy);
+    game.advance_day();replay.advance_day(); // day 3, remaining one unit
+    require_test(c(game).facility("FARM").damaged==0 &&
+                 c(game).stock("FIRM","R","steel")==0 &&
+                 c(game).cash("FIRM")==1997 &&
+                 c(game).cash("WORKERS")==3 &&
+                 daily::SnapshotCodec::encode(game.world())==
+                 daily::SnapshotCodec::encode(replay.world()),
+                 "D maintenance replay/remaining capacity accounting diverged");
+    game.advance_day();replay.advance_day();
+    require_test(c(game).facility("FARM").damaged==0 &&
+                 c(game).cash("FIRM")==1997 &&
+                 daily::SnapshotCodec::encode(game.world())==
+                 daily::SnapshotCodec::encode(replay.world()),
+                 "D no-damage day must never book phantom labor, stock or wages");
+
+    p0::Policies duplicate=policy;
+    duplicate.maintenance.push_back(policy.maintenance.front());
+    bool refused=false;
+    try {p0::DailyGame illegal(daily::SnapshotCodec::decode(checkpoint),duplicate);}
+    catch(const std::invalid_argument&){refused=true;}
+    require_test(refused,"duplicate owner-site maintenance policy must be rejected");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -614,6 +677,7 @@ int main(){
         native_autonomous_funded_research_and_day_lab_limit();
         native_autonomous_h_crisis_and_organization_funding();
         autonomous_f_two_hop_freight_and_save_replay();
+        autonomous_daily_facility_maintenance_with_real_inputs();
         std::cout<<"P0 daily grand strategy: 12 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
