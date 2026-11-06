@@ -277,6 +277,14 @@ struct SnapshotCodec {
         std::ostringstream os(std::ios::binary|std::ios::out);
         persistence_detail::BinaryWriter ar{os};
         all(ar,w);
+        // Optional self-delimiting tail. Authentic old raw Phase C payloads
+        // are byte-for-byte unchanged unless country election records exist.
+        // D/E/GH/daily serializers embed the length-prefixed C payload.
+        if(!w.country_elections_.empty()) {
+            ar(std::string("VIC25_PHASEC_COUNTRY_ELECTIONS_1"));
+            ar(w.country_elections_);
+            ar(w.country_election_months_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -284,6 +292,18 @@ struct SnapshotCodec {
         persistence_detail::BinaryReader ar{is};
         IntegratedWorld w;
         all(ar,w);
+        if(is.peek()!=std::char_traits<char>::eof()) {
+            std::string extension;
+            ar(extension);
+            if(extension!="VIC25_PHASEC_COUNTRY_ELECTIONS_1")
+                throw std::runtime_error("unknown Phase C election extension");
+            ar(w.country_elections_);
+            ar(w.country_election_months_);
+            if(w.country_elections_.empty() ||
+               w.country_elections_.size()!=w.country_election_months_.size() ||
+               w.country_elections_.size()>100'000)
+                throw std::runtime_error("invalid serialized national elections");
+        }
         if(is.peek()!=std::char_traits<char>::eof())
             throw std::runtime_error("trailing data in snapshot");
         if(w.stage_!=-1)throw std::runtime_error("staged month cannot be loaded");

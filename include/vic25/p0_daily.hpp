@@ -8,6 +8,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -87,9 +88,9 @@ struct PoliticalReaction {
     People max_new_members_per_day{1};
     People max_protesters_per_day{1};
 };
-// Existing C election implementation stores the last election globally. Until
-// its nationalized election registry lands, P0 accepts at most one election
-// schedule per world, rather than silently replacing another nation's result.
+// National ballot targets use the country-specific Phase C/E election
+// registry. Elections of multiple countries can occur on the same date
+// without sharing a seat or voter-count ledger.
 struct Election {
     std::string country,incumbent_party,reform_party;
     std::int32_t year{},month{1},day{1};
@@ -210,14 +211,15 @@ struct Policies {
             if(!p.population_slice||p.region.empty()||p.interest_group.empty()||
                p.max_new_members_per_day<0||p.max_protesters_per_day<0)
                 throw std::invalid_argument("P0_INVALID_POLITICS");
-        if(elections.size()>1)throw std::invalid_argument("P0_SINGLE_ELECTION_REGISTRY");
+        std::set<std::tuple<std::string,int,int>> election_months;
         for(const auto& e:elections)
             if(e.country.empty()||e.incumbent_party.empty()||e.reform_party.empty()||
                e.incumbent_party==e.reform_party||e.year<1||e.year>9999||
                e.month<1||e.month>12||e.day<1||
                e.day>daily::days_in_month(e.year,e.month)||
-               e.turnout_ppm<0||e.turnout_ppm>1'000'000)
-                throw std::invalid_argument("P0_INVALID_ELECTION");
+               e.turnout_ppm<0||e.turnout_ppm>1'000'000||
+               !election_months.insert({e.country,e.year,e.month}).second)
+                throw std::invalid_argument("P0_INVALID_COUNTRY_ELECTION");
         for(const auto& c:countries)
             if(c.country.empty()||c.prime_minister.empty()||
                c.domestic_region.empty()||c.good.empty()||
@@ -755,7 +757,7 @@ public:
                 }
                 const People registered=phaseb::add_checked(incumbent,reform);
                 if(registered>0)
-                    c.hold_election(registered,0,g.chamber_seats,
+                    c.hold_country_election(election.country,registered,0,
                          {{election.incumbent_party,incumbent},
                           {election.reform_party,reform}});
             });
