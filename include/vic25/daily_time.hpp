@@ -450,11 +450,21 @@ public:
         candidate.advance_daily(real_actions,day_,first_calendar_day,
                                 current.day,days_in_month(current.year,current.month));
         if(close) {
-            auto complete_month=month_close_plan;
-            complete_month[10].push_back([](phasegh::Stage& gh) {
-                gh.phase_c().phase_time_suppress_monthly_demography();
-            });
-            candidate.advance(complete_month,true);
+            const bool explicit_legacy_month_plan=std::any_of(
+                month_close_plan.begin(),month_close_plan.end(),
+                [](const auto& callbacks){return !callbacks.empty();});
+            if(explicit_legacy_month_plan) {
+                // Explicit compatibility-only API used by historical
+                // snapshots/tests. No implicit monthly production or market
+                // decision is permitted on the native game-day path.
+                auto legacy=month_close_plan;
+                legacy[10].push_back([](phasegh::Stage& gh) {
+                    gh.phase_c().phase_time_suppress_monthly_demography();
+                });
+                candidate.advance(legacy,true);
+            } else {
+                candidate.close_native_calendar_month();
+            }
         }
         require(candidate.month()==legacy_month(next),
                 "TIME_ERR_MONTH_CLOSE_NOT_ALIGNED");

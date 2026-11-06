@@ -1611,6 +1611,30 @@ public:
         return result;
     }
 
+    // Native rollover is strictly a calendar/accounting action. All
+    // autonomous social, economic, industrial and diplomatic consequences
+    // have already been committed on their actual game dates.
+    AdvanceReport close_native_calendar_month() {
+        IntegratedWorld staged=*this;
+        const auto opening=staged.month();
+        staged.stage_=10;
+        staged.strike_active_.clear();
+        staged.people_.finish_month();
+        staged.people_.release_ineligible();
+        staged.stage_=11;
+        staged.resources_.clear_month();
+        staged.phase_d_reservation_mode_=false;
+        staged.suppress_demography_this_close_=false;
+        staged.election_this_month_=false;
+        staged.validate();
+        ensure(staged.commit_id_<std::numeric_limits<std::uint64_t>::max(),
+               "calendar month rollover commit counter exhausted");
+        staged.stage_=-1;
+        ++staged.commit_id_;
+        *this=std::move(staged);
+        return {opening,month(),people_.population(),commit_id_};
+    }
+
     AdvanceReport advance(const Plan& plan = {},
                           bool already_opened_on_calendar_day=false) {
         IntegratedWorld stage = *this;
@@ -1620,7 +1644,8 @@ public:
             stage.stage_ = n;
             if (n == 0 && !already_opened_on_calendar_day)
                 stage.open_month();
-            if (n == 9) stage.collect_market_grievances(); // actual stage-7 shortages precede political decisions
+            if (n == 9 && !already_opened_on_calendar_day)
+                stage.collect_market_grievances(); // legacy monthly path only
             for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
             if (n == 10) {
                 // Strikes reserve actual working time only for this month's
@@ -1639,7 +1664,7 @@ public:
                 }
             }
             if (n == 11) {
-                stage.reprice_markets();
+                if(!already_opened_on_calendar_day)stage.reprice_markets();
                 stage.suppress_demography_this_close_=false;
             }
             stage.validate();

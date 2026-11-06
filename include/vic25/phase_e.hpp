@@ -666,6 +666,13 @@ public:
         core_.validate();
         validate_spatial(spatial_,core_.core());
     }
+    phasec::AdvanceReport close_native_calendar_month() {
+        // All effective-month geographic and administrative due events are
+        // applied exactly once on day one, not retroactively at MonthClose.
+        const auto result=core_.close_native_calendar_month();
+        validate();
+        return result;
+    }
     phasec::AdvanceReport advance(const Plan& plan={},
                                    bool already_opened_on_calendar_day=false) {
         SpatialState staged=spatial_;

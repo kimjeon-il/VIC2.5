@@ -970,6 +970,12 @@ public:
                     "G_ERR_INVALID_ROUTE");
         require(trade_.pending.empty(),"G_ERR_PENDING_OUTSIDE_MONTH");
     }
+    phasec::AdvanceReport close_native_calendar_month() {
+        // Daily G freight/trade and H legal actions are already settled.
+        const auto result=core_.close_native_calendar_month();
+        validate();
+        return result;
+    }
     phasec::AdvanceReport advance(const Plan& plan={},
                                    bool already_opened_on_calendar_day=false) {
         TradeState next_trade=trade_;

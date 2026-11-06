@@ -1139,6 +1139,13 @@ private:
         copy.finalize(core_);
     }
 public:
+    phasec::AdvanceReport close_native_calendar_month() {
+        // Daily stage 11 already certified WIP, project readiness and
+        // resource conservation. No automatic month-end D writers.
+        const auto result=core_.close_native_calendar_month();
+        validate();
+        return result;
+    }
     phasec::AdvanceReport advance(const Plan& plan={},
                                    bool already_opened_on_calendar_day=false) {
         // Both the domain state and Phase C's internal snapshot are staged.
