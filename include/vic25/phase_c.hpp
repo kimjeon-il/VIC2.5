@@ -1583,18 +1583,30 @@ public:
     // monthly settlement. No open_month(), no autonomous market clearing,
     // no monthly POP mortality/aging/production, and no finish_month().
     // Call only whitelisted stage-valid C commands from the day coordinator.
-    AdvanceReport advance_daily(const Plan& plan) {
+    AdvanceReport advance_daily(const Plan& plan,
+                                bool final_calendar_day=false) {
         IntegratedWorld staged = *this;
         const auto opening_month = month();
         for (int n=0; n<12; ++n) {
             staged.stage_=n;
             for (const auto& command:plan[static_cast<std::size_t>(n)])
                 command(staged);
+            if(n==10&&final_calendar_day) {
+                // Update month-based age classification after today's real
+                // population events; never rerun month-sized risk rates.
+                staged.strike_active_.clear();
+                staged.people_.finish_month();
+                staged.people_.release_ineligible();
+            }
+            if(n==11&&final_calendar_day) {
+                staged.suppress_demography_this_close_=false;
+                staged.election_this_month_=false;
+            }
             staged.validate();
         }
         staged.stage_=-1;
-        ensure(staged.month()==opening_month,
-               "daily action attempted to advance legacy monthly clock");
+        ensure(staged.month()==opening_month+(final_calendar_day?1:0),
+               "TIME_ERR_NATIVE_CALENDAR_ROLLOVER");
         ensure(staged.commit_id_<std::numeric_limits<std::uint64_t>::max(),
                "daily commit id exhausted");
         ++staged.commit_id_;
@@ -1609,30 +1621,6 @@ public:
         result.people_=std::move(pop);
         result.validate();
         return result;
-    }
-
-    // Native rollover is strictly a calendar/accounting action. All
-    // autonomous social, economic, industrial and diplomatic consequences
-    // have already been committed on their actual game dates.
-    AdvanceReport close_native_calendar_month() {
-        IntegratedWorld staged=*this;
-        const auto opening=staged.month();
-        staged.stage_=10;
-        staged.strike_active_.clear();
-        staged.people_.finish_month();
-        staged.people_.release_ineligible();
-        staged.stage_=11;
-        staged.resources_.clear_month();
-        staged.phase_d_reservation_mode_=false;
-        staged.suppress_demography_this_close_=false;
-        staged.election_this_month_=false;
-        staged.validate();
-        ensure(staged.commit_id_<std::numeric_limits<std::uint64_t>::max(),
-               "calendar month rollover commit counter exhausted");
-        staged.stage_=-1;
-        ++staged.commit_id_;
-        *this=std::move(staged);
-        return {opening,month(),people_.population(),commit_id_};
     }
 
     AdvanceReport advance(const Plan& plan = {},

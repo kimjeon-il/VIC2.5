@@ -913,7 +913,8 @@ public:
     phasec::AdvanceReport advance_daily(const Plan& tasks,std::int64_t day,
                                          bool first_calendar_day=false,
                                          std::int32_t day_of_month=0,
-                                         std::int32_t days_in_month=0) {
+                                         std::int32_t days_in_month=0,
+                                         bool final_calendar_day=false) {
         TradeState new_trade=trade_;
         DiplomacyState new_diplomacy=diplomacy_;
         phasee::World::Plan bridge;
@@ -952,7 +953,8 @@ public:
                 });
         static_assert(std::is_nothrow_move_assignable_v<TradeState>);
         static_assert(std::is_nothrow_move_assignable_v<DiplomacyState>);
-        const auto result=core_.advance_daily(bridge,first_calendar_day);
+        const auto result=core_.advance_daily(bridge,first_calendar_day,
+                                               final_calendar_day);
         trade_=std::move(new_trade);
         diplomacy_=std::move(new_diplomacy);
         return result;
@@ -1079,12 +1081,6 @@ public:
                     core_.spatial().provinces.contains(r.destination),
                     "G_ERR_INVALID_ROUTE");
         require(trade_.pending.empty(),"G_ERR_PENDING_OUTSIDE_MONTH");
-    }
-    phasec::AdvanceReport close_native_calendar_month() {
-        // Daily G freight/trade and H legal actions are already settled.
-        const auto result=core_.close_native_calendar_month();
-        validate();
-        return result;
     }
     phasec::AdvanceReport advance(const Plan& plan={},
                                    bool already_opened_on_calendar_day=false) {

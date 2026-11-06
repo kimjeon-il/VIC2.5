@@ -914,7 +914,8 @@ public:
     // begin_month() must NOT run here: it renews natural pools and resets
     // monthly throughput. Those effects still happen only at MonthClose.
     phasec::AdvanceReport advance_daily(const Plan& tasks,
-                                         bool first_calendar_day=false) {
+                                         bool first_calendar_day=false,
+                                         bool final_calendar_day=false) {
         DomainState next=domain_;
         phasec::IntegratedWorld::Plan bridge;
         for(int i=0;i<12;++i) {
@@ -949,7 +950,7 @@ public:
             });
         }
         static_assert(std::is_nothrow_move_assignable_v<DomainState>);
-        const auto report=core_.advance_daily(bridge);
+        const auto report=core_.advance_daily(bridge,final_calendar_day);
         domain_=std::move(next);
         return report;
     }
@@ -1139,13 +1140,6 @@ private:
         copy.finalize(core_);
     }
 public:
-    phasec::AdvanceReport close_native_calendar_month() {
-        // Daily stage 11 already certified WIP, project readiness and
-        // resource conservation. No automatic month-end D writers.
-        const auto result=core_.close_native_calendar_month();
-        validate();
-        return result;
-    }
     phasec::AdvanceReport advance(const Plan& plan={},
                                    bool already_opened_on_calendar_day=false) {
         // Both the domain state and Phase C's internal snapshot are staged.

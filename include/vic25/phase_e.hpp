@@ -569,7 +569,8 @@ public:
     // Apply the legally scheduled spatial operation on the FIRST calendar
     // day of its effective month; MonthClose never applies it twice.
     phasec::AdvanceReport advance_daily(const Plan& tasks,
-                                         bool first_calendar_day=false) {
+                                         bool first_calendar_day=false,
+                                         bool final_calendar_day=false) {
         SpatialState staged=spatial_;
         phased::World::Plan bridge;
         for(int i=0;i<12;++i)
@@ -582,7 +583,8 @@ public:
                     if(i==11)validate_spatial(staged,inner.phase_c());
                 });
         static_assert(std::is_nothrow_move_assignable_v<SpatialState>);
-        const auto report=core_.advance_daily(bridge,first_calendar_day);
+        const auto report=core_.advance_daily(bridge,first_calendar_day,
+                                               final_calendar_day);
         spatial_=std::move(staged);
         return report;
     }
@@ -665,13 +667,6 @@ public:
     void validate()const {
         core_.validate();
         validate_spatial(spatial_,core_.core());
-    }
-    phasec::AdvanceReport close_native_calendar_month() {
-        // All effective-month geographic and administrative due events are
-        // applied exactly once on day one, not retroactively at MonthClose.
-        const auto result=core_.close_native_calendar_month();
-        validate();
-        return result;
     }
     phasec::AdvanceReport advance(const Plan& plan={},
                                    bool already_opened_on_calendar_day=false) {
