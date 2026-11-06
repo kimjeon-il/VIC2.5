@@ -837,6 +837,49 @@ static void autonomous_f_congestion_uses_actual_alternate_edge() {
                  "F congested alternatives must not teleport cargo or ignore edge availability");
 }
 
+
+static void autonomous_daily_bank_debt_service_and_liquidity_floor() {
+    auto gh=fixture();
+    auto world=daily::World::adopt(std::move(gh),2701);
+    phasegh::World::Plan origination;
+    origination[1].push_back([](phasegh::Stage& stage){
+        stage.phase_c().lend("FIRM",30);
+    });
+    world.advance_day(origination); // day 1 real loan booked
+    require_test(world.engine().base().core().core().
+                    outstanding_loan("FIRM")==30 &&
+                 world.engine().base().core().core().cash("FIRM")==2030,
+                 "C day loan must create equal real bank liability/cash");
+    p0::Policies policy;
+    policy.debt_service.push_back({"FIRM",2015,10});
+    p0::DailyGame game(std::move(world),policy);
+    game.advance_day(); // day 2, principal 10
+    require_test(c(game).outstanding_loan("FIRM")==20 &&
+                 c(game).cash("FIRM")==2020,
+                 "C autonomous debt service did not retire actual principal");
+    const auto checkpoint=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(checkpoint),policy);
+    game.advance_day();replay.advance_day(); // day 3, principal 5, cash reserve
+    require_test(c(game).outstanding_loan("FIRM")==15 &&
+                 c(game).cash("FIRM")==2015 &&
+                 daily::SnapshotCodec::encode(game.world())==
+                    daily::SnapshotCodec::encode(replay.world()),
+                 "C day debt repayment must preserve reserve buffer and replay");
+    game.advance_day();replay.advance_day();
+    require_test(c(game).outstanding_loan("FIRM")==15 &&
+                 c(game).cash("FIRM")==2015 &&
+                 daily::SnapshotCodec::encode(game.world())==
+                    daily::SnapshotCodec::encode(replay.world()),
+                 "C daily credit decision must not invent cash to pay debt");
+
+    p0::Policies duplicate=policy;
+    duplicate.debt_service.push_back(policy.debt_service.front());
+    bool invalid=false;
+    try {p0::DailyGame bad(daily::SnapshotCodec::decode(checkpoint),duplicate);}
+    catch(const std::invalid_argument&){invalid=true;}
+    require_test(invalid,"duplicate autonomous borrower policy must be rejected");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -857,6 +900,7 @@ int main(){
         autonomous_h_treaty_risk_and_institutional_vote();
         autonomous_f_parallel_lanes_respect_shared_real_resources();
         autonomous_f_congestion_uses_actual_alternate_edge();
+        autonomous_daily_bank_debt_service_and_liquidity_floor();
         std::cout<<"P0 daily grand strategy: 12 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
