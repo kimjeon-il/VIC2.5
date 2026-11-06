@@ -661,6 +661,92 @@ static void autonomous_daily_facility_maintenance_with_real_inputs() {
     require_test(refused,"duplicate owner-site maintenance policy must be rejected");
 }
 
+
+static daily::World seed_lawful_autonomous_treaty_and_council() {
+    auto gh=real_h_crisis_and_organization_fixture();
+    auto world=daily::World::adopt(std::move(gh),912);
+    phasegh::World::Plan setup;
+    setup[9].push_back([](phasegh::Stage& stage){
+        phasegh::TreatyClause clause;
+        clause.id="FISCAL-AID";clause.kind=phasegh::ClauseKind::financial_aid;
+        clause.obligor="B";clause.beneficiary="A";clause.amount=20;
+        stage.propose_treaty_package("PACT-A-B",{"A","B"},
+                                    {clause},"A","PM_A");
+        phasegh::OrganizationRule rule;
+        rule.quorum=2;rule.yes_required=1;
+        rule.veto_members.insert("B");
+        stage.configure_organization("LEAGUE",rule,"PM_A");
+    });
+    world.advance_day(setup); // January 1: lawful C/H proposal, no AI fiat
+    require_test(world.engine().diplomacy().organizations.at("LEAGUE").active,
+                 "real H organization must be active before votes");
+    return world;
+}
+
+static void autonomous_h_treaty_risk_and_institutional_vote() {
+    p0::Policies policy;
+    policy.treaty_ratifications.push_back({"B","PM_B",20,false,false,false});
+    policy.council_decisions.push_back(
+        {"LEAGUE","COUNCIL-APPROVE","research:cooperation",
+         "A","PM_A",{{"A","PM_A",50},{"B","PM_B",50}}});
+    policy.council_decisions.push_back(
+        {"LEAGUE","COUNCIL-VETO","trade:embargo",
+         "A","PM_A",{{"A","PM_A",50},{"B","PM_B",200}}});
+    auto world=seed_lawful_autonomous_treaty_and_council();
+    p0::DailyGame game(std::move(world),policy);
+    const Money beforeA=c(game).cash("A"),beforeB=c(game).cash("B");
+    game.advance_day(); // January 2: lawful country AI decisions
+    const auto& h=game.world().engine().diplomacy();
+    require_test(h.treaties.at("PACT-A-B").ratifications.contains("B") &&
+                 !h.treaties.at("PACT-A-B").active &&
+                 h.organizations.at("LEAGUE").decisions.at("COUNCIL-APPROVE").adopted &&
+                 !h.organizations.at("LEAGUE").decisions.at("COUNCIL-VETO").adopted &&
+                 c(game).cash("A")==beforeA && c(game).cash("B")==beforeB,
+                 "H AI must respect real treaty ratification, organization quorum/veto and no free money");
+
+    const auto checkpoint=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(checkpoint),policy);
+    game.advance_day();replay.advance_day();
+    require_test(daily::SnapshotCodec::encode(game.world())==
+                 daily::SnapshotCodec::encode(replay.world()) &&
+                 h.organizations.at("LEAGUE").decisions.size()==2,
+                 "H dated AI treaties/council decisions must be idempotent on replay");
+    while(game.world().date()!=daily::Date{2000,2,1})
+        game.advance_day(); // no backdated H legal effects until due month
+    require_test(!game.world().engine().diplomacy().
+                   treaties.at("PACT-A-B").active,
+                 "H treaty must not retroactively activate during January");
+    game.advance_day();
+    require_test(game.world().engine().diplomacy().
+                    treaties.at("PACT-A-B").active,
+                 "approved H treaty must activate at actual February 1 opening");
+
+    p0::Policies unwilling=policy;
+    unwilling.treaty_ratifications[0].maximum_new_fiscal_obligation=5;
+    p0::DailyGame limited(seed_lawful_autonomous_treaty_and_council(),unwilling);
+    limited.advance_day();
+    require_test(!limited.world().engine().diplomacy().
+                   treaties.at("PACT-A-B").ratifications.contains("B"),
+                 "country AI must not approve liabilities above declared fiscal mandate");
+
+    p0::Policies impersonator=policy;
+    impersonator.council_decisions[0].member_rules[1].prime_minister="INVALID";
+    p0::DailyGame illegal(seed_lawful_autonomous_treaty_and_council(),impersonator);
+    const auto prior=daily::SnapshotCodec::encode(illegal.world());
+    bool denied=false;
+    try{illegal.advance_day();}catch(const std::exception&){denied=true;}
+    require_test(denied && prior==daily::SnapshotCodec::encode(illegal.world()),
+                 "H forged member ballot must roll back earlier same-day treaty and all ledgers");
+
+    p0::Policies duplicate=policy;
+    duplicate.council_decisions.push_back(duplicate.council_decisions.front());
+    bool rejected=false;
+    try{p0::DailyGame invalid(seed_lawful_autonomous_treaty_and_council(),
+                              duplicate);}
+    catch(const std::invalid_argument&){rejected=true;}
+    require_test(rejected,"duplicate H institutional decision must fail policy validation");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -678,6 +764,7 @@ int main(){
         native_autonomous_h_crisis_and_organization_funding();
         autonomous_f_two_hop_freight_and_save_replay();
         autonomous_daily_facility_maintenance_with_real_inputs();
+        autonomous_h_treaty_risk_and_institutional_vote();
         std::cout<<"P0 daily grand strategy: 12 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
