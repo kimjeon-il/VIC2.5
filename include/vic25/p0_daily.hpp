@@ -867,8 +867,9 @@ public:
         // must be committed together with today's B/C/D/G/H events, never
         // leave a stray queue entry when a carrier/insurance payment fails.
         daily::World staged=world_;
+        phasef::DayPlanningReservations freight_plan;
         for(const auto& lane:policies_.freight_lanes)
-            if(auto job=phasef::plan_next_hop(staged,lane))
+            if(auto job=phasef::plan_next_hop(staged,lane,freight_plan))
                 staged.enqueue(date,std::move(*job));
         const auto report=staged.advance_day(plan);
         world_=std::move(staged);

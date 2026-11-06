@@ -12,6 +12,16 @@
 
 namespace vic25::phasef {
 using Quantity=vic25::Quantity;
+using Money=phasec::Money;
+
+// Ephemeral within one day only. The authoritative reservation and inventory
+// ledgers still live in C/G; this prevents independent AI freight lanes from
+// scheduling the same owner's goods/cash or the same edge twice in one tick.
+struct DayPlanningReservations {
+    std::map<std::tuple<std::string,std::string,std::string>,Quantity> goods;
+    std::map<std::string,Quantity> edge_units;
+    std::map<std::string,Money> cash;
+};
 
 struct FreightLane {
     std::string id,seller,buyer,good,origin_region,destination_region;
@@ -40,7 +50,8 @@ inline void validate(const FreightLane& lane) {
 // initial shipment only after the previous chain reaches the final receiver.
 // This avoids duplicate purchases at transit hubs and speculative teleport.
 inline std::optional<daily::Command> plan_next_hop(
-        const daily::World& world,const FreightLane& lane) {
+        const daily::World& world,const FreightLane& lane,
+        DayPlanningReservations& provisional) {
     validate(lane);
     const auto& gh=world.engine();
     const auto& geo=gh.base().spatial();
@@ -82,7 +93,7 @@ inline std::optional<daily::Command> plan_next_hop(
     const auto from=geo.regions.at(origin);
     const auto to=geo.regions.at(lane.destination_region);
     const auto route=phasegh::quote_daily_freight_path(
-        trade,from,to,gh.month(),current.day,dim);
+        trade,from,to,gh.month(),current.day,dim,&provisional.edge_units);
     if(!route||route->edges.empty()||route->capacity<=0)
         return std::nullopt;
     const auto& edge=trade.transport_edges.at(route->edges.front());
@@ -90,13 +101,25 @@ inline std::optional<daily::Command> plan_next_hop(
     if(duration==lane.edge_transit_days.end())
         throw std::invalid_argument("F_MISSING_VERIFIED_EDGE_DAYS");
     const auto& hop_region=geo.provinces.at(edge.to).region;
+    const auto stock_key=std::make_tuple(shipper,origin,lane.good);
     const Quantity stock=ledger.stock(shipper,origin,lane.good);
-    const Quantity units=std::min({wanted,route->capacity,stock});
+    const Quantity held=provisional.goods[stock_key];
+    if(held>stock)throw std::logic_error("F_PROVISIONAL_GOODS_OVERRESERVED");
+    Quantity units=std::min({wanted,route->capacity,stock-held});
+    const Money available_cash=ledger.cash(shipper);
+    const Money cash_held=provisional.cash[shipper];
+    if(cash_held>available_cash)
+        throw std::logic_error("F_PROVISIONAL_CASH_OVERRESERVED");
+    if(shipper!=edge.carrier&&edge.freight_per_unit>0)
+        units=std::min(units,
+           (available_cash-cash_held)/edge.freight_per_unit);
     if(units<=0)return std::nullopt;
-    const auto freight=phaseb::mul_checked(units,edge.freight_per_unit);
-    if(shipper!=edge.carrier&&
-       ledger.cash(shipper)<freight)
-        return std::nullopt;
+    const Money freight=shipper==edge.carrier?0:
+         phaseb::mul_checked(units,edge.freight_per_unit);
+    provisional.goods[stock_key]=phaseb::add_checked(held,units);
+    provisional.edge_units[edge.id]=phaseb::add_checked(
+           provisional.edge_units[edge.id],units);
+    provisional.cash[shipper]=phaseb::add_checked(cash_held,freight);
 
     daily::Command command;
     command.id=std::move(id);
@@ -111,5 +134,12 @@ inline std::optional<daily::Command> plan_next_hop(
     command.unit_price=duration->second; // actual travel days
     command.auxiliary=std::min(units,lane.confirmed_loss_per_hop);
     return command;
+}
+// Single-lane callers can still obtain a quote without retaining the local
+// projection; multi-lane P0 runs pass the shared day-local reservation set.
+inline std::optional<daily::Command> plan_next_hop(
+        const daily::World& world,const FreightLane& lane) {
+    DayPlanningReservations provisional;
+    return plan_next_hop(world,lane,provisional);
 }
 } // namespace vic25::phasef

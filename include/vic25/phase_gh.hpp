@@ -126,7 +126,8 @@ struct TradeState {
 // throughput), not a second sidecar graph.
 inline std::optional<PathQuote> quote_daily_freight_path(
         const TradeState& trade,Id from,Id to,Month month,
-        std::int32_t day_of_month=0,std::int32_t days_in_month=0) {
+        std::int32_t day_of_month=0,std::int32_t days_in_month=0,
+        const std::map<std::string,Quantity>* provisional_edges=nullptr) {
     auto day_budget=[&](Quantity total,Quantity used)->Quantity {
         require(total>=0&&used>=0,"F_ERR_BAD_BUDGET");
         if(day_of_month<=0)return total;
@@ -156,8 +157,12 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         // World::seed_transport_edge inserts in deterministic ID order.
         for(const auto& edge_id:it->second) {
             const auto& edge=trade.transport_edges.at(edge_id);
-            const Quantity used=trade.edge_usage.contains({month,edge_id})?
-                                trade.edge_usage.at({month,edge_id}):0;
+            const Quantity committed=trade.edge_usage.contains({month,edge_id})?
+                                     trade.edge_usage.at({month,edge_id}):0;
+            const Quantity pending=(provisional_edges&&
+                provisional_edges->contains(edge_id))?
+                provisional_edges->at(edge_id):0;
+            const Quantity used=phaseb::add_checked(committed,pending);
             const Quantity ceiling=day_of_month>0?
                 day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
             if(!edge.enabled || used>=ceiling)continue;
@@ -183,8 +188,12 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         auto it=parent.find(p);
         require(it!=parent.end(),"G_ERR_LOGISTICS_PARENT_MISSING");
         const auto& edge=trade.transport_edges.at(it->second.second);
-        const Quantity used=trade.edge_usage.contains({month,edge.id})?
-                                trade.edge_usage.at({month,edge.id}):0;
+        const Quantity committed=trade.edge_usage.contains({month,edge.id})?
+                                 trade.edge_usage.at({month,edge.id}):0;
+        const Quantity pending=(provisional_edges&&
+            provisional_edges->contains(edge.id))?
+            provisional_edges->at(edge.id):0;
+        const Quantity used=phaseb::add_checked(committed,pending);
         const Quantity ceiling=day_of_month>0?
             day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
         require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
