@@ -1245,6 +1245,13 @@ public:
         membership_[{slice,group}]+=n;
         events_.push_back("material-shortage-political-organization");
     }
+    [[nodiscard]] Money outstanding_loan(const std::string& borrower) const {
+        ensure(actors_.contains(borrower),"unknown bank-debt obligor");
+        const Money debt=money_.balance(account(borrower,"debt"));
+        ensure(debt<=0&&debt>std::numeric_limits<Money>::min(),
+               "invalid financial liability balance");
+        return -debt;
+    }
     void repay(const std::string& borrower, Money amount) {
         require_stage({8});
         if(phase_d_reservation_mode_)

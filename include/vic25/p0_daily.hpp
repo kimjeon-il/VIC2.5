@@ -63,6 +63,12 @@ struct Buyer {
     Quantity units_per_person_per_day{1};
 };
 // Real owner repair decision, with a strict daily labor/material budget.
+// Autonomous credit principal repayment uses the canonical C bank ledger;
+ // no separate debt balance or generated repayment funds.
+struct DebtService {
+    std::string borrower;
+    Money minimum_cash_reserve{},max_daily_principal{};
+};
 struct FacilityMaintenance {
     std::string facility,building_good;
     Quantity max_daily_restoration{1},material_per_unit{1};
@@ -136,6 +142,7 @@ struct Policies {
     std::vector<Extractor> extractors;
     std::vector<ResearchPolicy> researches;
     std::vector<FacilityMaintenance> maintenance;
+    std::vector<DebtService> debt_service;
     std::vector<Buyer> buyers;
     std::vector<Investment> investments;
     std::vector<PoliticalReaction> political_reactions;
@@ -183,6 +190,12 @@ struct Policies {
                 (m.employee_wallet.empty()||m.treasury_wallet.empty()))||
                !maintained_sites.insert(m.facility).second)
                 throw std::invalid_argument("P0_INVALID_MAINTENANCE_POLICY");
+        std::set<std::string> debt_borrowers;
+        for(const auto& credit:debt_service)
+            if(credit.borrower.empty()||credit.minimum_cash_reserve<0||
+               credit.max_daily_principal<=0||
+               !debt_borrowers.insert(credit.borrower).second)
+                throw std::invalid_argument("P0_INVALID_DEBT_SERVICE");
         for(const auto& b:buyers)
             if(!b.population_slice||b.household_actor.empty()||b.seller.empty()||
                b.region.empty()||b.good.empty()||b.units_per_person_per_day<=0||
@@ -652,6 +665,16 @@ public:
                           maintenance.treasury_wallet,gross);
                 });
         }
+        for(const auto& credit:policies_.debt_service)
+            plan[8].push_back([credit](phasegh::Stage& gh){
+                auto& c=gh.phase_c();
+                const Money debt=c.outstanding_loan(credit.borrower);
+                const Money available=c.phase_d_cash_available(credit.borrower);
+                if(debt<=0||available<=credit.minimum_cash_reserve)return;
+                const Money due=std::min({debt,credit.max_daily_principal,
+                               available-credit.minimum_cash_reserve});
+                if(due>0)c.repay(credit.borrower,due);
+            });
         for(const auto& b:policies_.buyers) {
             plan[7].push_back([b](phasegh::Stage& gh){
                 auto& c=gh.phase_c();
