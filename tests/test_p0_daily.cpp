@@ -880,6 +880,46 @@ static void autonomous_daily_bank_debt_service_and_liquidity_floor() {
     require_test(invalid,"duplicate autonomous borrower policy must be rejected");
 }
 
+
+static void native_cg_credit_service_keeps_trade_facility_in_sync() {
+    auto gh=fixture();
+    gh.seed_geography().seed_core().seed_core().seed_stock("FIRM","R","steel",10);
+    phasegh::World::Plan offer;
+    offer[9].push_back([](phasegh::Stage& h){
+        phasegh::CreditFacility credit;
+        credit.id="TRADE-CREDIT";
+        credit.borrower="FIRM";credit.pledge_region="R";
+        credit.pledge_good="steel";credit.pledged_goods=5;
+        credit.limit=30;
+        h.offer_trade_credit(credit);
+    });
+    gh.advance(offer); // offer lawful from next month, actual stock pledged
+    phasegh::World::Plan draw;
+    draw[1].push_back([](phasegh::Stage& h){
+        h.draw_trade_credit("TRADE-CREDIT",30);
+    });
+    gh.advance(draw); // actual C bank creates 30, matching G utilization
+    require_test(gh.commerce().credit.at("TRADE-CREDIT").drawn==30 &&
+                 gh.base().core().core().outstanding_loan("FIRM")==30,
+                 "G trade line must reflect original C loan and actual collateral");
+    p0::Policies policy;
+    policy.debt_service.push_back({"FIRM",2015,10});
+    p0::DailyGame game(daily::World::adopt(std::move(gh)),policy);
+    game.advance_day();
+    require_test(c(game).outstanding_loan("FIRM")==20 &&
+                 game.world().engine().commerce().credit.at("TRADE-CREDIT").drawn==20 &&
+                 c(game).cash("FIRM")==2020,
+                 "C automatic repayment must update actual G line utilization");
+    const auto saved=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(saved),policy);
+    game.advance_day();replay.advance_day();
+    require_test(c(game).outstanding_loan("FIRM")==15 &&
+                 game.world().engine().commerce().credit.at("TRADE-CREDIT").drawn==15 &&
+                 daily::SnapshotCodec::encode(game.world())==
+                      daily::SnapshotCodec::encode(replay.world()),
+                 "G/C post-repayment facility and liability must survive checkpoint replay");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -901,7 +941,8 @@ int main(){
         autonomous_f_parallel_lanes_respect_shared_real_resources();
         autonomous_f_congestion_uses_actual_alternate_edge();
         autonomous_daily_bank_debt_service_and_liquidity_floor();
-        std::cout<<"P0 daily grand strategy: 12 bounded integration scenarios PASS\n";
+        native_cg_credit_service_keeps_trade_facility_in_sync();
+        std::cout<<"P0 daily grand strategy: 20 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P0 DAILY TEST FAILED: "<<e.what()<<"\n";
