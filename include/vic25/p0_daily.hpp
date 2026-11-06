@@ -1,5 +1,5 @@
 #pragma once
-#include "vic25/daily_time.hpp"
+#include "vic25/phase_f.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -117,6 +117,7 @@ struct Policies {
     std::vector<CountryAI> countries;
     std::vector<CrisisMandate> crisis_mandates;
     std::vector<OrganizationDuesMandate> organization_dues;
+    std::vector<phasef::FreightLane> freight_lanes;
     std::vector<Engagement> engagements;
 
     void validate() const {
@@ -186,6 +187,12 @@ struct Policies {
                mandate.organization.empty()||
                !dues_members.insert({mandate.organization,mandate.country}).second)
                 throw std::invalid_argument("P0_INVALID_DUES_MANDATE");
+        std::set<std::string> freight_ids;
+        for(const auto& f:freight_lanes) {
+            phasef::validate(f);
+            if(!freight_ids.insert(f.id).second)
+                throw std::invalid_argument("P0_DUPLICATE_AUTONOMOUS_FREIGHT");
+        }
         for(const auto& b:engagements) {
             if(b.attacker.empty()||b.defender.empty()||
                b.attacker==b.defender||b.region.empty()||
@@ -688,7 +695,18 @@ public:
             plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
                 gh.phase_c().phase_time_close_daily_markets(ordinal);
             });
-        return world_.advance_day(month_close_plan,plan);
+        if(policies_.freight_lanes.empty())
+            return world_.advance_day(month_close_plan,plan);
+        // Freight planning may enqueue several dated physical commands. They
+        // must be committed together with today's B/C/D/G/H events, never
+        // leave a stray queue entry when a carrier/insurance payment fails.
+        daily::World staged=world_;
+        for(const auto& lane:policies_.freight_lanes)
+            if(auto job=phasef::plan_next_hop(staged,lane))
+                staged.enqueue(date,std::move(*job));
+        const auto report=staged.advance_day(month_close_plan,plan);
+        world_=std::move(staged);
+        return report;
     }
 };
 } // namespace vic25::p0
