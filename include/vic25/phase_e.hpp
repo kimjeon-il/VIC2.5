@@ -668,22 +668,20 @@ public:
         core_.validate();
         validate_spatial(spatial_,core_.core());
     }
-    phasec::AdvanceReport advance(const Plan& plan={},
-                                   bool already_opened_on_calendar_day=false) {
+    phasec::AdvanceReport advance(const Plan& plan={}) {
         SpatialState staged=spatial_;
         phased::World::Plan bridge;
         for(int i=0;i<12;++i) {
             bridge[static_cast<std::size_t>(i)].push_back(
                 [&,i](phased::Stage& live) {
-                    if(i==0&&!already_opened_on_calendar_day)
-                        due(staged,live.phase_c());
+                    if(i==0)due(staged,live.phase_c());
                     SpatialStage stage{live,staged,i};
                     for(const auto& task:plan[static_cast<std::size_t>(i)])task(stage);
                     if(i==11)validate_spatial(staged,live.phase_c());
                 });
         }
         static_assert(std::is_nothrow_move_assignable_v<SpatialState>);
-        const auto report=core_.advance(bridge,already_opened_on_calendar_day);
+        const auto report=core_.advance(bridge);
         spatial_=std::move(staged);
         return report;
     }

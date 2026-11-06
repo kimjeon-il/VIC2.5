@@ -1565,12 +1565,6 @@ public:
         sync_service_transitions(before);
         events_.push_back("daily-auto-demography");
     }
-    // This transient flag is consumed by the *same* legacy MonthClose,
-    // so daily POP hazard is never run again as a 12-stage month hazard.
-    void phase_time_suppress_monthly_demography() {
-        require_stage({10});
-        suppress_demography_this_close_=true;
-    }
     // Apply monthly policy expirations, inventories, tax/strike/clinic
     // availability on the true first DAY, not at the last day of that
     // month. The ordinary legacy month engine remains unchanged.
@@ -1599,7 +1593,6 @@ public:
                 staged.people_.release_ineligible();
             }
             if(n==11&&final_calendar_day) {
-                staged.suppress_demography_this_close_=false;
                 staged.election_this_month_=false;
             }
             staged.validate();
@@ -1623,24 +1616,21 @@ public:
         return result;
     }
 
-    AdvanceReport advance(const Plan& plan = {},
-                          bool already_opened_on_calendar_day=false) {
+    AdvanceReport advance(const Plan& plan = {}) {
         IntegratedWorld stage = *this;
         const auto start = month();
         stage.election_this_month_ = false;
         for (int n = 0; n != 12; ++n) {
             stage.stage_ = n;
-            if (n == 0 && !already_opened_on_calendar_day)
-                stage.open_month();
-            if (n == 9 && !already_opened_on_calendar_day)
-                stage.collect_market_grievances(); // legacy monthly path only
+            if (n == 0) stage.open_month();
+            if (n == 9) stage.collect_market_grievances();
             for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
             if (n == 10) {
                 // Strikes reserve actual working time only for this month's
                 // production; they must not outlive a later death or split.
                 stage.strike_active_.clear();
                 const std::size_t before = stage.people_.events().size();
-                if (stage.demography_enabled_ && !stage.suppress_demography_this_close_) {
+                if (stage.demography_enabled_) {
                     phaseb::Engine engine{stage.demographic_rules_};
                     (void)engine.advance(stage.people_);
                     stage.sync_service_transitions(before);
@@ -1652,8 +1642,7 @@ public:
                 }
             }
             if (n == 11) {
-                if(!already_opened_on_calendar_day)stage.reprice_markets();
-                stage.suppress_demography_this_close_=false;
+                stage.reprice_markets();
             }
             stage.validate();
             if (n == 11) {
@@ -1833,7 +1822,6 @@ private:
     std::uint64_t sequence_{};
     int stage_{-1}, voting_age_years_{21};
     bool election_this_month_{}, demography_enabled_{};
-    bool suppress_demography_this_close_{}; // transient per-close event, not persistent
 
     // Exact nonnegative fraction comparison using Euclid/continued fractions:
     // no 128-bit GNU extension, overflow or floating-point ties (MSVC friendly).

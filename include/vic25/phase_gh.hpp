@@ -1082,8 +1082,7 @@ public:
                     "G_ERR_INVALID_ROUTE");
         require(trade_.pending.empty(),"G_ERR_PENDING_OUTSIDE_MONTH");
     }
-    phasec::AdvanceReport advance(const Plan& plan={},
-                                   bool already_opened_on_calendar_day=false) {
+    phasec::AdvanceReport advance(const Plan& plan={}) {
         TradeState next_trade=trade_;
         DiplomacyState next_diplomacy=diplomacy_;
         phasee::World::Plan bridge;
@@ -1091,25 +1090,23 @@ public:
             bridge[static_cast<std::size_t>(n)].push_back(
                 [&,n](phasee::SpatialStage& spatial){
                     Stage stage{spatial,next_trade,next_diplomacy,n};
-                    if(n==0&&!already_opened_on_calendar_day){
+                    if(n==0){
                         stage.advance_legal_state();
                         stage.register_arrived_losses();
                     }
                     for(const auto& callback:plan[static_cast<std::size_t>(n)])
                         callback(stage);
-                    // The calendar day already booked G/H monetary and trade
-                    // events. Keep standalone monthly execution unchanged.
-                    if(!already_opened_on_calendar_day){
-                        if(n==1){
-                            stage.reserve_collateral();
-                            stage.plan_contracts();
-                            stage.plan_autonomous_trade();
-                        }
-                        if(n==5)stage.settle_insurance_claims();
-                        if(n==7){
-                            stage.execute_autonomous_trade();
-                            stage.pay_insurance_premiums();
-                        }
+                    // Standalone legacy monthly API still runs its own
+                    // isolated monthly simulation; native day never calls it.
+                    if(n==1){
+                        stage.reserve_collateral();
+                        stage.plan_contracts();
+                        stage.plan_autonomous_trade();
+                    }
+                    if(n==5)stage.settle_insurance_claims();
+                    if(n==7){
+                        stage.execute_autonomous_trade();
+                        stage.pay_insurance_premiums();
                     }
                     if(n==11)check(next_trade,next_diplomacy,spatial);
                 });
@@ -1118,7 +1115,7 @@ public:
         // after every C/D/E/G/H operation succeeds.
         static_assert(std::is_nothrow_move_assignable_v<TradeState>);
         static_assert(std::is_nothrow_move_assignable_v<DiplomacyState>);
-        const auto report=core_.advance(bridge,already_opened_on_calendar_day);
+        const auto report=core_.advance(bridge);
         trade_=std::move(next_trade);
         diplomacy_=std::move(next_diplomacy);
         return report;

@@ -1140,26 +1140,14 @@ private:
         copy.finalize(core_);
     }
 public:
-    phasec::AdvanceReport advance(const Plan& plan={},
-                                   bool already_opened_on_calendar_day=false) {
+    phasec::AdvanceReport advance(const Plan& plan={}) {
         // Both the domain state and Phase C's internal snapshot are staged.
         // No mutable Phase D state escapes when C throws in any of stages 0..11.
         DomainState next=domain_;
         phasec::IntegratedWorld::Plan bridge;
         for(int i=0;i<12;++i) {
             bridge[static_cast<std::size_t>(i)].push_back([&,i](phasec::IntegratedWorld& live) {
-                if(i==0) {
-                    if(!already_opened_on_calendar_day) {
-                        next.begin_month(live);
-                    } else {
-                        // At MonthClose, this calendar month was already
-                        // opened on day 1. Only re-open transient reservation
-                        // scopes for legacy G/H trade. Do not regenerate
-                        // renewable resources, reset work or commission twice.
-                        next.opening_month=live.month();
-                        live.phase_d_enable_shared_resources();
-                    }
-                }
+                if(i==0)next.begin_month(live);
                 Stage stage{live,next,i};
                 for(const auto& task:plan[static_cast<std::size_t>(i)])task(stage);
                 if(i==11)next.finalize(live);
@@ -1170,7 +1158,7 @@ public:
         // triples peak population RAM without adding rollback safety.
         static_assert(std::is_nothrow_move_assignable_v<DomainState>,
                       "Phase D domain commit must never throw after Phase C commit");
-        const auto report=core_.advance(bridge,already_opened_on_calendar_day);
+        const auto report=core_.advance(bridge);
         domain_=std::move(next);
         return report;
     }
