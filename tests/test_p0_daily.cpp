@@ -528,10 +528,10 @@ static void autonomous_f_two_hop_freight_and_save_replay() {
     geo.seed_unit(33,"C","UC");
     geo.seed_assignment(1,11);geo.seed_assignment(2,22);
     geo.seed_assignment(3,33);
-    auto& c=geo.seed_core().seed_core();
-    c.seed_actor("SELLER",100);c.seed_actor("BUYER",100);
-    c.seed_actor("CARRIER",100);
-    c.seed_stock("SELLER","A-HUB","iron",3);
+    auto& initial_core=geo.seed_core().seed_core();
+    initial_core.seed_actor("SELLER",100);initial_core.seed_actor("BUYER",100);
+    initial_core.seed_actor("CARRIER",100);
+    initial_core.seed_stock("SELLER","A-HUB","iron",3);
     gh.seed_transport_edge({"HOP-A-B","CARRIER",1,2,310,1,1,true});
     gh.seed_transport_edge({"HOP-B-C","CARRIER",2,3,310,1,1,true});
     phasef::FreightLane lane;
