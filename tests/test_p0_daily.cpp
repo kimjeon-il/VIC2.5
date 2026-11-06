@@ -516,6 +516,88 @@ static void native_autonomous_h_crisis_and_organization_funding() {
                  "H unlawful government policy must rollback every daily domain");
 }
 
+
+static void autonomous_f_two_hop_freight_and_save_replay() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"A-HUB","A");
+    geo.seed_province(2,"B-HUB","B");
+    geo.seed_province(3,"C-HUB","C");
+    geo.seed_border(1,2);geo.seed_border(2,3);
+    geo.seed_unit(11,"A","UA");geo.seed_unit(22,"B","UB");
+    geo.seed_unit(33,"C","UC");
+    geo.seed_assignment(1,11);geo.seed_assignment(2,22);
+    geo.seed_assignment(3,33);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_actor("SELLER",100);c.seed_actor("BUYER",100);
+    c.seed_actor("CARRIER",100);
+    c.seed_stock("SELLER","A-HUB","iron",3);
+    gh.seed_transport_edge({"HOP-A-B","CARRIER",1,2,310,1,1,true});
+    gh.seed_transport_edge({"HOP-B-C","CARRIER",2,3,310,1,1,true});
+    phasef::FreightLane lane;
+    lane.id="IRON";lane.seller="SELLER";lane.buyer="BUYER";
+    lane.good="iron";lane.origin_region="A-HUB";
+    lane.destination_region="C-HUB";
+    lane.target_inventory=2;lane.maximum_daily_units=2;
+    lane.edge_transit_days={{"HOP-A-B",1},{"HOP-B-C",1}};
+    p0::Policies options;
+    options.freight_lanes.push_back(lane);
+    p0::DailyGame game(daily::World::adopt(std::move(gh),55),options);
+    game.advance_day(); // Jan 1: autonomous A->B dispatch, actual freight
+    require_test(game.world().cargo().size()==1,
+                 "autonomous F cargo must be tracked under exact dispatch ID");
+    const auto first=game.world().cargo().begin()->second;
+    require_test(first.origin=="A-HUB"&&first.destination=="B-HUB" &&
+                 c(game).stock("SELLER","A-HUB","iron")==1&&
+                 c(game).cash("SELLER")==98 &&
+                 c(game).cash("CARRIER")==102,
+                 "first F hop must move real stock and pay actual freight");
+    game.advance_day(); // Jan 2: arrival at intermediate hub
+    require_test(c(game).stock("BUYER","B-HUB","iron")==2 &&
+                 game.world().cargo().begin()->second.arrived,
+                 "F did not deliver to actual intermediate owner");
+    const auto checkpoint=daily::SnapshotCodec::encode(game.world());
+    auto replay=p0::DailyGame(daily::SnapshotCodec::decode(checkpoint),options);
+    game.advance_day();replay.advance_day(); // Jan 3: autonomous B->C
+    require_test(game.world().cargo().size()==2 &&
+                 c(game).stock("BUYER","B-HUB","iron")==0 &&
+                 c(game).cash("BUYER")==98 &&
+                 c(game).cash("CARRIER")==104,
+                 "second real carrier must be charged exactly once");
+    game.advance_day();replay.advance_day(); // Jan 4: final delivery
+    require_test(daily::SnapshotCodec::encode(game.world())==
+                 daily::SnapshotCodec::encode(replay.world())&&
+                 c(game).stock("BUYER","C-HUB","iron")==2,
+                 "multi-hop F forwarding/replay failed or stock duplicated");
+    game.advance_day(); // Jan 5: target met, no extra movement
+    require_test(game.world().cargo().size()==2 &&
+                 c(game).stock("SELLER","A-HUB","iron")==1,
+                 "fulfilled autonomous F lane should stop shipping");
+
+    phasegh::World missing(24000);
+    auto& eg=missing.seed_geography();
+    eg.seed_province(1,"R1","A");eg.seed_province(2,"R2","B");
+    eg.seed_border(1,2);
+    eg.seed_unit(11,"A","UA");eg.seed_unit(22,"B","UB");
+    eg.seed_assignment(1,11);eg.seed_assignment(2,22);
+    auto& cc=eg.seed_core().seed_core();
+    cc.seed_actor("S",100);cc.seed_actor("B",100);cc.seed_actor("CARRIER",100);
+    cc.seed_stock("S","R1","iron",3);
+    missing.seed_transport_edge({"NO-DURATION","CARRIER",1,2,310,1,1,true});
+    phasef::FreightLane bad_lane;
+    bad_lane.id="BAD";bad_lane.seller="S";bad_lane.buyer="B";
+    bad_lane.good="iron";bad_lane.origin_region="R1";
+    bad_lane.destination_region="R2";bad_lane.target_inventory=1;
+    bad_lane.maximum_daily_units=1;bad_lane.edge_transit_days={{"UNRELATED",1}};
+    p0::Policies policy;policy.freight_lanes.push_back(bad_lane);
+    p0::DailyGame invalid(daily::World::adopt(std::move(missing)),policy);
+    const auto before=daily::SnapshotCodec::encode(invalid.world());
+    bool refused=false;
+    try{invalid.advance_day();}catch(const std::exception&){refused=true;}
+    require_test(refused && daily::SnapshotCodec::encode(invalid.world())==before,
+                 "missing grounded transit days must not fabricate route or post money");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -531,6 +613,7 @@ int main(){
         native_autonomous_extraction_physical_flow();
         native_autonomous_funded_research_and_day_lab_limit();
         native_autonomous_h_crisis_and_organization_funding();
+        autonomous_f_two_hop_freight_and_save_replay();
         std::cout<<"P0 daily grand strategy: 12 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
