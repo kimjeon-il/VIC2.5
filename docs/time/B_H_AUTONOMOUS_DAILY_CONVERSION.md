@@ -7,7 +7,7 @@
 
 ## 1. Baseline and mandatory compatibility
 
-The existing `daily::World::advance_day()` runs explicit day-stamped C/D/G/H commands and arrivals, but its `candidate.advance(month_close_plan)` at calendar month end still runs the legacy 12-stage monthly engine. **Therefore B–H automatic daily conversion is not yet complete** even though daily-native CTest passes.
+Historical baseline (2026-11-05): `daily::World::advance_day()` originally called `candidate.advance(month_close_plan)`. **Superseded 2026-11-06** by [NATIVE_CALENDAR_CUTOVER_2026-11-06.md](NATIVE_CALENDAR_CUTOVER_2026-11-06.md): the daily runtime no longer exposes `month_close_plan` and commits calendar rollover at day-stage 10. This removes legacy monthly automatic replay **from the actual daily path** but does not finish all autonomous B–H systems.
 
 - Keep PopulationSlice as the sole person ledger; money/production/stock/ownership/employment/asset and G/H diplomatic ledger have single authoritative owners.
 - Keep `J-R1` geological **no-total-reserves** rule; keep I-C1 language as culture metadata and religion effects conditional on law. Neither I nor J is included in this B–H delivery.

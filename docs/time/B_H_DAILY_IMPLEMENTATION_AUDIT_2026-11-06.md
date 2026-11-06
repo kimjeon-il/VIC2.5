@@ -1,5 +1,7 @@
 # Phase B–H autonomous daily conversion: verified implementation inventory
 
+> **Historical snapshot, superseded 2026-11-06:** Some references below to daily `candidate.advance(month_close_plan)` and monthly market repricing describe the prior baseline only. Current native runtime removed that callback and uses a single staged daily calendar rollover; see [NATIVE_CALENDAR_CUTOVER_2026-11-06.md](NATIVE_CALENDAR_CUTOVER_2026-11-06.md). Remaining F/H and global AI completion gaps still apply.
+
 > 2026-11-06 · Branch `work/daily-full-b-h-conversion` at `c8e6a894896ea4ac47a290281dfa79e45a1195ed`
 > Latest main `e1ae021dd4862564557e1206bc6a3784be788421` is already an ancestor of this branch (12 branch-only commits). No redundant merge or forced ref update required.
 > **Status: PARTIAL, NOT IMPLEMENTATION COMPLETE.** A passing CI proves existing tests pass; it does not prove all autonomous monthly writers were converted.

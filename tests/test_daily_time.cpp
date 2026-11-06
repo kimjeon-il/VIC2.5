@@ -4,9 +4,18 @@
 #include <iterator>
 #include <iostream>
 #include <stdexcept>
+#include <type_traits>
 #include <string>
 #include <utility>
 using namespace vic25::daily;
+// Breaking API change: exactly ONE stage-valid plan on the current date.
+// Prevent ever restoring a (month_close_plan,native_plan) overload.
+using DayPlan=vic25::phasegh::World::Plan;
+static_assert(std::is_invocable_v<decltype(&World::advance_day),
+                                  World&,const DayPlan&>);
+static_assert(!std::is_invocable_v<decltype(&World::advance_day),
+                                   World&,const DayPlan&,const DayPlan&>,
+              "MonthClose callback adapter must not be reintroduced");
 
 static void check(bool yes,const char* message) {
     if(!yes)throw std::runtime_error(message);
