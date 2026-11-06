@@ -497,12 +497,81 @@ static void autonomous_daily_trade_budget_and_month_close() {
          "G must not grant next month's complete volume on February 1");
 }
 
+
+static void real_freight_insurance_and_dated_delivery() {
+    Fixture f;
+    f.gh.seed_transport_edge({"F-BILLED","CARRIER",1,2,310,2,1,true});
+    f.gh.seed_geography().seed_core().seed_core().seed_actor("INSURER",200);
+    auto world=World::adopt(std::move(f.gh));
+
+    vic25::phasegh::World::Plan insure;
+    insure[9].push_back([](vic25::phasegh::Stage& stage) {
+        vic25::phasegh::CargoInsurance x;
+        x.id="DAY-POLICY";x.shipment_id="REAL-F-CARGO";
+        x.insurer="INSURER";x.beneficiary="BUYER";
+        x.premium=3;x.maximum_claim=30;x.insured_quantity=3;
+        stage.insure_cargo(x);
+    });
+    world.advance_day({},insure); // Jan 1 legal insurance contract
+    auto shipment=cmd("REAL-F-CARGO",Kind::cargo_dispatch);
+    shipment.from="SELLER";shipment.to="BUYER";
+    shipment.region="R1";shipment.destination="R2";
+    shipment.good="iron";shipment.route_id="F-BILLED";
+    shipment.amount=3;shipment.unit_price=2;shipment.auxiliary=1;
+    world.enqueue({2000,1,2},shipment);
+    const auto original=SnapshotCodec::encode(world);
+    world.advance_day(); // Jan 2: actual C money and stock
+    const auto& c=ledger(world);
+    need(c.cash("SELLER")==94 && c.cash("CARRIER")==106 &&
+         c.cash("BUYER")==97 && c.cash("INSURER")==203 &&
+         c.stock("SELLER","R1","iron")==7 &&
+         c.stock("TRANSIT:DAY:REAL-F-CARGO","in_transit","iron")==3 &&
+         world.engine().commerce().insurance.at("DAY-POLICY").premium_paid,
+         "F physical dispatch must book actual carrier freight and insurer premium");
+    const auto in_flight=SnapshotCodec::encode(world);
+    auto replay=SnapshotCodec::decode(in_flight);
+    need(SnapshotCodec::encode(replay)==in_flight,
+         "F covered daily cargo must save real insurance/liability metadata");
+
+    world.advance_day();replay.advance_day(); // Jan 3: in transit
+    world.advance_day();replay.advance_day(); // Jan 4: arrival and claim
+    need(SnapshotCodec::encode(world)==SnapshotCodec::encode(replay) &&
+         ledger(world).stock("BUYER","R2","iron")==2 &&
+         ledger(world).stock("TRANSIT:DAY:REAL-F-CARGO","in_transit","iron")==0 &&
+         ledger(world).cash("BUYER")==107 &&
+         ledger(world).cash("INSURER")==193,
+         "F dated physical loss and actual G insurance cash payout not conserved");
+    const auto& claim=world.engine().commerce().insurance.at("DAY-POLICY");
+    need(claim.claim_registered&&claim.claim_due==10&&claim.claim_paid==10,
+         "covered physical loss claim must be measured from delivered goods");
+    world.advance_day();
+    need(ledger(world).cash("BUYER")==107 &&
+         world.engine().commerce().insurance.at("DAY-POLICY").claim_paid==10,
+         "F/G repeated insurance claim must be idempotent");
+
+    Fixture no_funds;
+    no_funds.gh.seed_transport_edge({"EXPENSIVE","CARRIER",1,2,310,1000,1,true});
+    auto rejected=World::adopt(std::move(no_funds.gh));
+    auto bad=cmd("UNFUNDED-FREIGHT",Kind::cargo_dispatch);
+    bad.from="SELLER";bad.to="BUYER";
+    bad.region="R1";bad.destination="R2";
+    bad.good="iron";bad.route_id="EXPENSIVE";
+    bad.amount=2;bad.unit_price=2;
+    rejected.enqueue({2000,1,1},bad);
+    const auto before=SnapshotCodec::encode(rejected);
+    need(reject([&]{rejected.advance_day();})&&
+         before==SnapshotCodec::encode(rejected),
+         "unfunded real freight must rollback date and every C/G owner ledger");
+    (void)original;
+}
+
 int main(){
     try{
         cross_domain_daily_events_and_replay();
         daily_rollback_due_to_resource_constraints();
         migrates_old_daily_v1_without_inventing_actions();
         daily_diplomacy_changes_real_trade_tariff();
+        real_freight_insurance_and_dated_delivery();
         autonomous_pop_is_day_native_not_monthly_replayed();
         conversion_only_epidemic_and_consumption();
         conversion_only_daily_tariff_and_authority();
