@@ -629,6 +629,39 @@ public:
         site.damaged+=destroyed;
         events_.push_back("physical-facility-war-damage");
     }
+    // Owner-directed physical maintenance is performed at stage 4 on the
+    // actual game date. Shares the same C/D POP, stock and facility ledgers.
+    void phase_time_maintain_facility(const std::string& id,
+                                     const std::string& good,
+                                     Quantity units,Quantity material_per_unit,
+                                     People workers) {
+        require_stage({4});
+        auto& site=facilities_.at(id);
+        ensure(units>0&&material_per_unit>0&&workers>0&&
+               units<=site.damaged&&!good.empty()&&
+               phase_d_reservation_mode_,
+               "TIME_D_INVALID_FACILITY_MAINTENANCE");
+        Quantity reserved=0;
+        for(const auto& [due,sites]:scheduled_site_repairs_) {
+            if(due<=month())continue;
+            if(const auto it=sites.find(id);it!=sites.end())
+                reserved=phaseb::add_checked(reserved,it->second);
+        }
+        ensure(reserved<=site.damaged&&units<=site.damaged-reserved,
+               "TIME_D_REPAIR_ALREADY_SCHEDULED");
+        const Quantity consumed=positive_product(units,material_per_unit);
+        ensure(phase_d_material_available(site.owner,site.region,good)>=consumed &&
+               employed_by(site.owner)>=workers,
+               "TIME_D_MAINTENANCE_UNFUNDED_INPUTS");
+        resources_.use_labor(site.owner,workers,employed_by(site.owner));
+        resources_.assert_stage4_available(
+            {site.owner,site.region,good},consumed,
+            stock(site.owner,site.region,good));
+        goods_.consume({site.owner,site.region,good},consumed);
+        site.damaged-=units;
+        events_.push_back("daily-facility-restoration-actual-material-and-labor");
+    }
+
     void rebuild_facility(const std::string& id,const std::string& building_good,
                           Quantity restored,People construction_workers) {
         require_stage({4});

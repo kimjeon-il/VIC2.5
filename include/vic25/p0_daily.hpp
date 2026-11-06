@@ -62,6 +62,14 @@ struct Buyer {
     std::string household_actor,seller,region,good;
     Quantity units_per_person_per_day{1};
 };
+// Real owner repair decision, with a strict daily labor/material budget.
+struct FacilityMaintenance {
+    std::string facility,building_good;
+    Quantity max_daily_restoration{1},material_per_unit{1};
+    People workers_per_unit{1};
+    Money wage_per_worker_per_day{};
+    std::string employee_wallet,treasury_wallet;
+};
 struct Investment {
     std::string construction_project,output_good;
     Money reserve_cash{},minimum_output_price{};
@@ -110,6 +118,7 @@ struct Policies {
     std::vector<Manufacturer> manufacturers;
     std::vector<Extractor> extractors;
     std::vector<ResearchPolicy> researches;
+    std::vector<FacilityMaintenance> maintenance;
     std::vector<Buyer> buyers;
     std::vector<Investment> investments;
     std::vector<PoliticalReaction> political_reactions;
@@ -146,6 +155,15 @@ struct Policies {
         for(const auto& s:staffing)
             if(s.employer.empty()||s.region.empty()||s.wanted<0||s.monthly_wage<0)
                 throw std::invalid_argument("P0_INVALID_STAFFING");
+        std::set<std::string> maintained_sites;
+        for(const auto& m:maintenance)
+            if(m.facility.empty()||m.building_good.empty()||
+               m.max_daily_restoration<=0||m.material_per_unit<=0||
+               m.workers_per_unit<=0||m.wage_per_worker_per_day<0||
+               (m.wage_per_worker_per_day>0&&
+                (m.employee_wallet.empty()||m.treasury_wallet.empty()))||
+               !maintained_sites.insert(m.facility).second)
+                throw std::invalid_argument("P0_INVALID_MAINTENANCE_POLICY");
         for(const auto& b:buyers)
             if(!b.population_slice||b.household_actor.empty()||b.seller.empty()||
                b.region.empty()||b.good.empty()||b.units_per_person_per_day<=0||
@@ -553,6 +571,45 @@ public:
                    p.paid_work>=p.required_evidence)
                     gh.phase_d().review_research(research.project);
             });
+        }
+        for(const auto& maintenance:policies_.maintenance) {
+            auto completed=std::make_shared<Quantity>(0);
+            plan[4].push_back([maintenance,completed](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto& site=c.facility(maintenance.facility);
+                if(site.damaged<=0)return;
+                const Quantity available=c.phase_d_material_available(
+                       site.owner,site.region,maintenance.building_good);
+                const People used=c.phase_d_shared_labor_used(site.owner);
+                const People employed=c.phase_d_workforce(site.owner);
+                if(employed<=used)return;
+                Quantity work=std::min({site.damaged,
+                       maintenance.max_daily_restoration,
+                       available/maintenance.material_per_unit,
+                       (employed-used)/maintenance.workers_per_unit});
+                if(work<=0)return;
+                if(maintenance.wage_per_worker_per_day>0) {
+                    const Money cost=times(times(work,maintenance.workers_per_unit),
+                                           maintenance.wage_per_worker_per_day);
+                    if(cost>c.phase_d_cash_available(site.owner))return;
+                }
+                c.phase_time_maintain_facility(maintenance.facility,
+                         maintenance.building_good,work,
+                         maintenance.material_per_unit,
+                         times(work,maintenance.workers_per_unit));
+                *completed=work;
+            });
+            if(maintenance.wage_per_worker_per_day>0)
+                plan[5].push_back([maintenance,completed](phasegh::Stage& gh) {
+                    if(*completed<=0)return;
+                    const auto& site=gh.phase_c().facility(maintenance.facility);
+                    const Money gross=times(times(*completed,
+                          maintenance.workers_per_unit),
+                          maintenance.wage_per_worker_per_day);
+                    gh.phase_c().wages_under_law(site.owner,
+                          maintenance.employee_wallet,
+                          maintenance.treasury_wallet,gross);
+                });
         }
         for(const auto& b:policies_.buyers) {
             plan[7].push_back([b](phasegh::Stage& gh){
