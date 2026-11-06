@@ -671,9 +671,20 @@ public:
                 const Money debt=c.outstanding_loan(credit.borrower);
                 const Money available=c.phase_d_cash_available(credit.borrower);
                 if(debt<=0||available<=credit.minimum_cash_reserve)return;
-                const Money due=std::min({debt,credit.max_daily_principal,
+                Money remaining=std::min({debt,credit.max_daily_principal,
                                available-credit.minimum_cash_reserve});
-                if(due>0)c.repay(credit.borrower,due);
+                // G trade credit is a bounded legal facility backed by this
+                // SAME C bank loan. Retire its utilization before a direct
+                // C repayment, otherwise G.drawn would disagree with C debt.
+                for(const auto& [id,facility]:gh.commerce().credit) {
+                    if(remaining<=0)break;
+                    if(!facility.active||facility.borrower!=credit.borrower ||
+                       facility.drawn<=0)continue;
+                    const Money amount=std::min(remaining,facility.drawn);
+                    gh.repay_trade_credit(id,amount);
+                    remaining-=amount;
+                }
+                if(remaining>0)c.repay(credit.borrower,remaining);
             });
         for(const auto& b:policies_.buyers) {
             plan[7].push_back([b](phasegh::Stage& gh){
