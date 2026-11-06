@@ -418,6 +418,104 @@ static void native_autonomous_funded_research_and_day_lab_limit() {
                  "next-month knowledge must not duplicate financing or material");
 }
 
+
+static phasegh::World real_h_crisis_and_organization_fixture() {
+    phasegh::World w(23998); // November 1999, legacy seeding only
+    auto& e=w.seed_geography();
+    e.seed_province(1,"RA","A");e.seed_province(2,"RB","B");
+    e.seed_province(3,"RC","C");e.seed_border(1,2);e.seed_border(2,3);
+    e.seed_unit(11,"A","UA");e.seed_unit(22,"B","UB");
+    e.seed_unit(33,"C","UC");
+    e.seed_assignment(1,11);e.seed_assignment(2,22);e.seed_assignment(3,33);
+    auto& c=e.seed_core().seed_core();
+    for(const char* name:{"A","B","C"})c.seed_actor(name,100);
+    c.seed_actor("ORG:LEAGUE",0);
+    c.seed_government("A","HEAD_A","PM_A",5,3);
+    c.seed_government("B","HEAD_B","PM_B",5,3);
+    c.seed_government("C","HEAD_C","PM_C",5,3);
+    phasegh::World::Plan claimed;
+    claimed[9].push_back([](phasegh::Stage& h){
+        h.geography().queue_claim("CLAIM-A-RB",2,"A",true);
+    });
+    w.advance(claimed); // December 1999, true claim in E
+    phasegh::World::Plan organized;
+    organized[9].push_back([](phasegh::Stage& h){
+        h.open_crisis("CRISIS-RB",2,"A","B","PM_A");
+        h.create_organization("LEAGUE",{"A","B"},10,
+                              {{"A","PM_A"},{"B","PM_B"}});
+    });
+    w.advance(organized); // January 2000, legal pending activation
+    require_test(w.month()==24000,"crisis fixture not aligned to 2000");
+    return w;
+}
+
+static void native_autonomous_h_crisis_and_organization_funding() {
+    auto gh=real_h_crisis_and_organization_fixture();
+    auto day=daily::World::adopt(std::move(gh),77);
+    phasegh::World::Plan mediated;
+    mediated[9].push_back([](phasegh::Stage& s) {
+        s.mediate_crisis("CRISIS-RB","C","PM_C");
+        phasegh::CrisisProposal offer;
+        offer.id="REAL-OFFER";offer.proposer="C";
+        offer.payer="B";offer.recipient="A";offer.compensation=20;
+        offer.freeze_claim=true;
+        s.offer_crisis_compromise("CRISIS-RB",offer,"PM_C");
+    });
+    day.advance_day({},mediated); // Jan 1: real H legal state and proposal
+    require_test(day.engine().diplomacy().crises.at("CRISIS-RB").status==
+                 phasegh::CrisisStatus::mediation &&
+                 day.engine().diplomacy().organizations.at("LEAGUE").active,
+                 "H real legal effectiveness or neutral mediation failed");
+
+    p0::Policies mandates;
+    mandates.crisis_mandates.push_back({"A","PM_A",0,true,false});
+    mandates.crisis_mandates.push_back({"B","PM_B",30,true,false});
+    mandates.organization_dues.push_back({"A","PM_A","LEAGUE"});
+    mandates.organization_dues.push_back({"B","PM_B","LEAGUE"});
+    p0::DailyGame game(std::move(day),mandates);
+    game.advance_day(); // Jan 2: actual country policy decisions and payments
+    const auto& org=game.world().engine().diplomacy().organizations.at("LEAGUE");
+    const auto& crisis=game.world().engine().diplomacy().crises.at("CRISIS-RB");
+    require_test(crisis.status==phasegh::CrisisStatus::settled &&
+                 crisis.proposals.at("REAL-OFFER").approvers.size()==2 &&
+                 c(game).cash("A")==90 && c(game).cash("B")==90 &&
+                 c(game).cash("ORG:LEAGUE")==20 &&
+                 org.paid.at({24000,"A"})==10 && org.paid.at({24000,"B"})==10,
+                 "H autonomous diplomacy must use actual signed offers/dues/treasury");
+    const auto snapshot=daily::SnapshotCodec::encode(game.world());
+    auto replay=p0::DailyGame(daily::SnapshotCodec::decode(snapshot),mandates);
+    game.advance_day();replay.advance_day();
+    require_test(daily::SnapshotCodec::encode(game.world())==
+                 daily::SnapshotCodec::encode(replay.world()) &&
+                 c(game).cash("ORG:LEAGUE")==20,
+                 "H autonomous obligations replayed or paid duplicate monthly dues");
+
+    auto gh_unwilling=real_h_crisis_and_organization_fixture();
+    auto pending=daily::World::adopt(std::move(gh_unwilling),77);
+    pending.advance_day({},mediated);
+    p0::Policies no_coercion=mandates;
+    no_coercion.crisis_mandates[1].maximum_cash_settlement=5;
+    p0::DailyGame limited(std::move(pending),no_coercion);
+    limited.advance_day();
+    require_test(limited.world().engine().diplomacy().crises.at("CRISIS-RB").status==
+                 phasegh::CrisisStatus::mediation &&
+                 limited.world().engine().diplomacy().crises.at("CRISIS-RB").
+                      proposals.at("REAL-OFFER").approvers.size()==1,
+                 "unaffordable crisis concession must not be accepted automatically");
+
+    auto gh_unauthorized=real_h_crisis_and_organization_fixture();
+    auto unauthorized=daily::World::adopt(std::move(gh_unauthorized));
+    unauthorized.advance_day({},mediated);
+    p0::Policies wrong=mandates;
+    wrong.organization_dues[0].prime_minister="INVALID-PRIME";
+    p0::DailyGame rejected(std::move(unauthorized),wrong);
+    const auto before=daily::SnapshotCodec::encode(rejected.world());
+    bool failed=false;
+    try{rejected.advance_day();}catch(const std::exception&){failed=true;}
+    require_test(failed && daily::SnapshotCodec::encode(rejected.world())==before,
+                 "H unlawful government policy must rollback every daily domain");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -432,6 +530,7 @@ int main(){
         a_strike_is_not_a_permanent_hiring_vacancy();
         native_autonomous_extraction_physical_flow();
         native_autonomous_funded_research_and_day_lab_limit();
+        native_autonomous_h_crisis_and_organization_funding();
         std::cout<<"P0 daily grand strategy: 12 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
