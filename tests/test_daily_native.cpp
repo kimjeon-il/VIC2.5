@@ -512,7 +512,7 @@ static void real_freight_insurance_and_dated_delivery() {
         x.premium=3;x.maximum_claim=30;x.insured_quantity=3;
         stage.insure_cargo(x);
     });
-    world.advance_day({},insure); // Jan 1 legal insurance contract
+    world.advance_day(insure); // Jan 1 legal insurance contract
     auto shipment=cmd("REAL-F-CARGO",Kind::cargo_dispatch);
     shipment.from="SELLER";shipment.to="BUYER";
     shipment.region="R1";shipment.destination="R2";

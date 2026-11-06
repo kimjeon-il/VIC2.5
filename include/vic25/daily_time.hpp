@@ -3,8 +3,8 @@
 //
 // A day is the world-visible commit boundary. Supported real day actions are
 // posted into the *existing* Phase C Financial/Inventory/Jurisdiction ledgers,
-// while the legacy B/C/D/E/G/H monthly simulation runs once at calendar month
-// end, never 28-31 times per month. I/J remain specification-only.
+// and Gregorian calendar rollovers are committed inside the SAME native day
+// transaction. No separate month-close callback exists. I/J are design-only.
 //
 // The immutable-world no-op daily fast path intentionally avoids cloning a
 // 30k-Province / 1m-POP simulation on days without a due action.
@@ -310,15 +310,12 @@ public:
         known_command_ids_.insert(std::move(command.id));
     }
 
-    // No deep copy on a day without new commands, transit arrivals,
-    // due diplomatic activation, ready facility, or MonthClose.
-    DayReport advance_day(const phasegh::World::Plan& month_close_plan={},
-                          const phasegh::World::Plan& native_day_plan={}) {
+    // Each stage callback executes on today's date. On the last calendar
+    // day, POP age/eligibility updates share this exact transaction.
+    DayReport advance_day(const phasegh::World::Plan& native_day_plan={}) {
         const auto current=date();
         const bool close=is_month_end(current);
         const bool first_calendar_day=current.day==1;
-        if(!close)for(const auto& stage:month_close_plan)
-            require(stage.empty(),"TIME_ERR_MONTHLY_PLAN_OUTSIDE_CLOSE");
         const auto next=following_day(current);
         const auto it=scheduled_.find(day_);
         const std::vector<Command> commands=
@@ -447,27 +444,11 @@ public:
             gh.phase_c().phase_time_auto_demography(
                 current.day,days_in_month(current.year,current.month));
         });
-        // Run autonomous daily POP against the same committed C/D/E/G/H
-        // staging world, then do legacy settlement once at month end.
+        // One atomic C/D/E/G/H commit for native events AND calendar
+        // rollover. No second mutable month-close pass or event replay.
         candidate.advance_daily(real_actions,day_,first_calendar_day,
-                                current.day,days_in_month(current.year,current.month));
-        if(close) {
-            const bool explicit_legacy_month_plan=std::any_of(
-                month_close_plan.begin(),month_close_plan.end(),
-                [](const auto& callbacks){return !callbacks.empty();});
-            if(explicit_legacy_month_plan) {
-                // Explicit compatibility-only API used by historical
-                // snapshots/tests. No implicit monthly production or market
-                // decision is permitted on the native game-day path.
-                auto legacy=month_close_plan;
-                legacy[10].push_back([](phasegh::Stage& gh) {
-                    gh.phase_c().phase_time_suppress_monthly_demography();
-                });
-                candidate.advance(legacy,true);
-            } else {
-                candidate.close_native_calendar_month();
-            }
-        }
+                                current.day,days_in_month(current.year,current.month),
+                                close);
         require(candidate.month()==legacy_month(next),
                 "TIME_ERR_MONTH_CLOSE_NOT_ALIGNED");
         candidate.validate();

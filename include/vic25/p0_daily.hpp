@@ -345,7 +345,7 @@ public:
     [[nodiscard]] const Policies& policies()const {return policies_;}
     // Campaign/save data owns the policy definitions; base day snapshots remain
     // fully compatible and replay exactly when the same policy set is restored.
-    daily::DayReport advance_day(const phasegh::World::Plan& month_close_plan={}) {
+    daily::DayReport advance_day(const phasegh::World::Plan& additional_today={}) {
         const auto date=world_.date();
         const int dim=daily::days_in_month(date.year,date.month);
         phasegh::World::Plan plan;
@@ -695,8 +695,13 @@ public:
             plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
                 gh.phase_c().phase_time_close_daily_markets(ordinal);
             });
+        // Supplemental commands execute today in the canonical day
+        // transaction. No monthly callback staging or adapter remains.
+        for(std::size_t i=0;i<plan.size();++i)
+            plan[i].insert(plan[i].end(),
+                additional_today[i].begin(),additional_today[i].end());
         if(policies_.freight_lanes.empty())
-            return world_.advance_day(month_close_plan,plan);
+            return world_.advance_day(plan);
         // Freight planning may enqueue several dated physical commands. They
         // must be committed together with today's B/C/D/G/H events, never
         // leave a stray queue entry when a carrier/insurance payment fails.
@@ -704,7 +709,7 @@ public:
         for(const auto& lane:policies_.freight_lanes)
             if(auto job=phasef::plan_next_hop(staged,lane))
                 staged.enqueue(date,std::move(*job));
-        const auto report=staged.advance_day(month_close_plan,plan);
+        const auto report=staged.advance_day(plan);
         world_=std::move(staged);
         return report;
     }

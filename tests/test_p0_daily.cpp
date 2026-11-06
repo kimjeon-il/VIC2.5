@@ -461,7 +461,7 @@ static void native_autonomous_h_crisis_and_organization_funding() {
         offer.freeze_claim=true;
         s.offer_crisis_compromise("CRISIS-RB",offer,"PM_C");
     });
-    day.advance_day({},mediated); // Jan 1: real H legal state and proposal
+    day.advance_day(mediated); // Jan 1: real H legal state and proposal
     require_test(day.engine().diplomacy().crises.at("CRISIS-RB").status==
                  phasegh::CrisisStatus::mediation &&
                  day.engine().diplomacy().organizations.at("LEAGUE").active,
@@ -492,7 +492,7 @@ static void native_autonomous_h_crisis_and_organization_funding() {
 
     auto gh_unwilling=real_h_crisis_and_organization_fixture();
     auto pending=daily::World::adopt(std::move(gh_unwilling),77);
-    pending.advance_day({},mediated);
+    pending.advance_day(mediated);
     p0::Policies no_coercion=mandates;
     no_coercion.crisis_mandates[1].maximum_cash_settlement=5;
     p0::DailyGame limited(std::move(pending),no_coercion);
@@ -505,7 +505,7 @@ static void native_autonomous_h_crisis_and_organization_funding() {
 
     auto gh_unauthorized=real_h_crisis_and_organization_fixture();
     auto unauthorized=daily::World::adopt(std::move(gh_unauthorized));
-    unauthorized.advance_day({},mediated);
+    unauthorized.advance_day(mediated);
     p0::Policies wrong=mandates;
     wrong.organization_dues[0].prime_minister="INVALID-PRIME";
     p0::DailyGame rejected(std::move(unauthorized),wrong);

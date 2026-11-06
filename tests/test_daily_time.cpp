@@ -134,14 +134,24 @@ static void daily_rejection_and_atomic_month_rollback() {
     check(rejects([&]{good.advance_day(plan);}) &&
           SnapshotCodec::encode(good)==before,
           "failed month-close must also rollback all that day's money");
+    const auto previous_commit=good.engine().commit_id();
     const auto success=good.advance_day();
-    check(success.monthly_close&&ledger(good).cash("BUYER")==98 &&
+    check(success.monthly_close&&
+          good.engine().commit_id()==previous_commit+1 &&
+          ledger(good).cash("BUYER")==98 &&
           good.date()==Date{2000,2,1},"retry after rollback must be safe");
-    check(rejects([&]{
-        vic25::phasegh::World::Plan wrong;
-        wrong[5].push_back([](auto&){});
-        good.advance_day(wrong);
-    }),"invalid monthly callback on nonmonth day must not be silently discarded");
+    // The old month-close callback route was deleted. A Plan is always
+    // today's native stage work, including the first day of any month.
+    const auto commit_before_feb=good.engine().commit_id();
+    vic25::phasegh::World::Plan feb1;
+    feb1[5].push_back([](vic25::phasegh::Stage& gh){
+        gh.phase_c().pay("BUYER","SELLER",1);
+    });
+    const auto report=good.advance_day(feb1);
+    check(!report.monthly_close && good.date()==Date{2000,2,2} &&
+          good.engine().commit_id()==commit_before_feb+1 &&
+          ledger(good).cash("BUYER")==97,
+          "native callback must execute Feb 1, never defer to MonthClose");
 }
 static void exact_legacy_migration() {
     const auto legacy=base_world();
