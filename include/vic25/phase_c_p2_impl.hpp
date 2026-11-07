@@ -423,8 +423,20 @@ inline void IntegratedWorld::p2_approve_bill(
         ensure(order.direct_executive&&voting_parties.empty(),
                "P2 no parliament and no legal direct authority");
     }
-    bill.status=P2BillStatus::approved;
-    events_.push_back("p2-law-approved:"+bill.id);
+    if(p1_constitutions_.at(bill.country).legislature==
+            P1LegislatureKind::bicameral) {
+        ensure(p2_upper_chambers_.contains(bill.country)&&
+               country_election_months_.contains(bill.country)&&
+               !p2_chamber_decisions_.contains(bill.id),
+               "P2 bicameral bill requires registered elected upper house");
+        p2_chamber_decisions_[bill.id]=P2ChamberDecision{
+            bill.id,p2_upper_chambers_.at(bill.country),
+            country_election_months_.at(bill.country),-1,true,false};
+        events_.push_back("p2-lower-chamber-approved:"+bill.id);
+    } else {
+        bill.status=P2BillStatus::approved;
+        events_.push_back("p2-law-approved:"+bill.id);
+    }
 }
 
 inline void IntegratedWorld::p2_promulgate_bill(
@@ -490,6 +502,20 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             law_id=next.id;
             p2_laws_.emplace(next.id,next);
             p2_active_base_[slot]=next.id;
+            if(const auto negotiated=p2_negotiated_.find(id);
+               negotiated!=p2_negotiated_.end()) {
+                for(const auto& accepted:negotiated->second) {
+                    const auto& amendment=accepted.amendment;
+                    ensure(!p2_amendments_.contains(amendment.id)&&
+                           amendment.law_id==next.id,
+                           "P2 negotiated provision missing its promised base");
+                    p2_check_amendment(amendment);
+                    p2_amendments_.emplace(amendment.id,amendment);
+                    p2_active_amendments_.insert(amendment.id);
+                    events_.push_back(
+                        "p2-group-compromise-effective:"+accepted.demand_id);
+                }
+            }
         } else if(bill.action==P2BillAction::attach_amendment) {
             const auto& amendment=bill.proposed_amendment;
             ensure(p2_is_active_base(amendment.law_id)&&
