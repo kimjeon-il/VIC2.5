@@ -299,6 +299,10 @@ struct SnapshotCodec {
             ar(w.bank_interest_annual_ppm_);
             ar(w.bank_interest_fraction_);
         }
+        if(!w.people_.exact_birth_days_.empty()) {
+            ar(std::string("VIC25_PHASEC_EXACT_BIRTH_DAYS_1"));
+            ar(w.people_.exact_birth_days_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -306,7 +310,8 @@ struct SnapshotCodec {
         persistence_detail::BinaryReader ar{is};
         IntegratedWorld w;
         all(ar,w);
-        bool seen_elections=false,seen_fiscal=false,seen_interest=false;
+        bool seen_elections=false,seen_fiscal=false,seen_interest=false,
+             seen_birth_days=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -335,6 +340,12 @@ struct SnapshotCodec {
                    w.bank_interest_annual_ppm_>1'000'000||
                    w.bank_interest_fraction_.size()>1'000'000)
                     throw std::runtime_error("invalid bank interest extension");
+            } else if(extension=="VIC25_PHASEC_EXACT_BIRTH_DAYS_1" &&
+                      !seen_birth_days) {
+                seen_birth_days=true;
+                ar(w.people_.exact_birth_days_);
+                if(w.people_.exact_birth_days_.size()>5'000'000)
+                    throw std::runtime_error("oversized POP exact birth extension");
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
