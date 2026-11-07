@@ -606,6 +606,16 @@ inline void IntegratedWorld::p5_guerrilla_rebuild_indexes() {
            campaign.stage==P5GuerrillaStage::active||
            campaign.stage==P5GuerrillaStage::supply_exhausted)
             p5_guerrilla_review_due_[campaign.next_review_day].insert(id);
+    p5_guerrilla_region_penalty_ppm_.clear();
+    for(const auto& [region,effects]:p5_guerrilla_effect_active_) {
+        std::int64_t summed=0;
+        for(const auto& effect:effects)
+            summed=std::min<std::int64_t>(500'000,
+                summed+effect.penalty_ppm);
+        if(summed>0)
+            p5_guerrilla_region_penalty_ppm_[region]=
+                static_cast<std::int32_t>(summed);
+    }
 }
 
 } // namespace vic25::phasec
