@@ -476,6 +476,9 @@ public:
     [[nodiscard]] int phase() const { return phase_; }
     [[nodiscard]] phasee::SpatialStage& geography() { return spatial_; }
     [[nodiscard]] phased::Stage& phase_d() { return spatial_.phase_d(); }
+    [[nodiscard]] const phasee::SpatialState& geography()const {
+        return spatial_.spatial();
+    }
     [[nodiscard]] phasec::IntegratedWorld& phase_c() { return spatial_.phase_c(); }
     [[nodiscard]] const DiplomacyState& diplomacy() const { return diplomacy_; }
     [[nodiscard]] const TradeState& commerce() const { return trade_; }
