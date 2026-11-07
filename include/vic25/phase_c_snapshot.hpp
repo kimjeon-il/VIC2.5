@@ -459,12 +459,14 @@ struct SnapshotCodec {
             ar(w.p3_movements_);
             ar(w.p3_last_reaction_day_);
         }
-        if(!w.p5_crises_.empty()||!w.p5_actions_.empty()||
+        if(!w.p5_crises_.empty()||!w.p5_capitals_.empty()||
+           !w.p5_actions_.empty()||
            !w.p5_settlements_.empty()||
            !w.p5_scheduled_daily_strikes_.empty()||
            !w.p5_active_daily_strikes_.empty()) {
             ar(std::string("VIC25_PHASEC_P5_UNREST_1"));
             ar(w.p5_crises_);
+            ar(w.p5_capitals_);
             ar(w.p5_actions_);
             ar(w.p5_settlements_);
             ar(w.p5_control_evidence_);
@@ -625,6 +627,7 @@ struct SnapshotCodec {
             } else if(extension=="VIC25_PHASEC_P5_UNREST_1"&&!seen_p5) {
                 seen_p5=true;
                 ar(w.p5_crises_);
+                ar(w.p5_capitals_);
                 ar(w.p5_actions_);
                 ar(w.p5_settlements_);
                 ar(w.p5_control_evidence_);
@@ -636,6 +639,7 @@ struct SnapshotCodec {
                         throw std::runtime_error(
                             "duplicate stored P5 collective action identity");
                 if(w.p5_crises_.size()>100'000||
+                   w.p5_capitals_.size()>100'000||
                    w.p5_actions_.size()>1'000'000||
                    w.p5_settlements_.size()>1'000'000||
                    w.p5_control_evidence_.size()>100'000||
