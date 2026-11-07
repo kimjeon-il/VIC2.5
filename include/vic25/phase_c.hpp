@@ -3052,6 +3052,14 @@ public:
                    p4_contests_.at(contest_id).office==
                        P4Office::upper_chamber,
                    "P2 upper chamber not backed by an actual P4 senate");
+        for(const auto& id:p2_negotiation_watch_)
+            ensure(p2_bills_.contains(id)&&
+                   p2_bills_.at(id).status==P2BillStatus::submitted&&
+                   p2_bills_.at(id).action==
+                       P2BillAction::enact_or_replace_base&&
+                   (!p2_chamber_decisions_.contains(id)||
+                    !p2_chamber_decisions_.at(id).lower_passed),
+                   "P2 stale submitted-bill negotiation index");
         for(const auto& [id,decision]:p2_chamber_decisions_)
             ensure(p2_bills_.contains(id)&&decision.bill_id==id&&
                    p4_contests_.contains(decision.upper_contest_id)&&
@@ -3335,6 +3343,7 @@ private:
     std::map<std::string,P2ChamberDecision> p2_chamber_decisions_;
     std::map<std::string,P2GroupDemand> p2_group_demands_;
     std::map<std::string,std::vector<P2NegotiatedAmendment>> p2_negotiated_;
+    std::set<std::string> p2_negotiation_watch_; // derived from submitted bills
     std::vector<P2LawEvent> p2_history_;
     std::map<std::int64_t,std::set<std::string>> p2_due_; // derived from P2 bills
     std::map<std::int64_t, std::vector<CabinetChange>> scheduled_cabinets_;
