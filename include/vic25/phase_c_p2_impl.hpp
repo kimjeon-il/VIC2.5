@@ -416,7 +416,10 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
         }
     }
     bill.introduced_day=today;
-    p2_bills_.emplace(bill.id,std::move(bill));
+    const auto id=bill.id;
+    if(bill.action==P2BillAction::enact_or_replace_base)
+        p2_negotiation_watch_.insert(id);
+    p2_bills_.emplace(id,std::move(bill));
     events_.push_back("p2-bill-introduced");
 }
 
@@ -455,11 +458,13 @@ inline void IntegratedWorld::p2_approve_bill(
                country_election_months_.contains(bill.country)&&
                !p2_chamber_decisions_.contains(bill.id),
                "P2 bicameral bill requires registered elected upper house");
+        p2_negotiation_watch_.erase(bill.id);
         p2_chamber_decisions_[bill.id]=P2ChamberDecision{
             bill.id,p2_upper_chambers_.at(bill.country),
             country_election_months_.at(bill.country),-1,true,false};
         events_.push_back("p2-lower-chamber-approved:"+bill.id);
     } else {
+        p2_negotiation_watch_.erase(bill.id);
         bill.status=P2BillStatus::approved;
         events_.push_back("p2-law-approved:"+bill.id);
     }
@@ -599,9 +604,16 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
 
 inline void IntegratedWorld::p2_rebuild_due_index() {
     p2_due_.clear();
-    for(const auto& [id,bill]:p2_bills_)
+    p2_negotiation_watch_.clear();
+    for(const auto& [id,bill]:p2_bills_) {
         if(bill.status==P2BillStatus::promulgated)
             p2_due_[bill.effective_day].insert(id);
+        if(bill.status==P2BillStatus::submitted&&
+           bill.action==P2BillAction::enact_or_replace_base&&
+           (!p2_chamber_decisions_.contains(id)||
+            !p2_chamber_decisions_.at(id).lower_passed))
+            p2_negotiation_watch_.insert(id);
+    }
 }
 
 } // namespace vic25::phasec
