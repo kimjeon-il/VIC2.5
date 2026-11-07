@@ -99,6 +99,9 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,WageArrearsClaim>) {
         V(id);V(employer);V(worker);V(treasury);V(country);
         V(accrued);V(outstanding);V(issued_day);
+    } else if constexpr(std::is_same_v<X,SovereignBond>) {
+        V(id);V(country);V(treasury);V(original_face);V(coupon_ppm);
+        V(issue_day);V(maturity_day);
     } else {
         static_assert(sizeof(X)==0,"SnapshotCodec needs an explicit struct layout");
     }
@@ -311,6 +314,16 @@ struct SnapshotCodec {
             ar(w.wage_arrears_);
             ar(w.bankrupt_firms_);
         }
+        if(!w.bank_principal_by_borrower_.empty()||
+           !w.sovereign_bonds_.empty()||
+           !w.sovereign_coupon_due_.empty()||
+           !w.sovereign_coupon_fraction_.empty()) {
+            ar(std::string("VIC25_PHASEC_SOVEREIGN_BONDS_1"));
+            ar(w.bank_principal_by_borrower_);
+            ar(w.sovereign_bonds_);
+            ar(w.sovereign_coupon_due_);
+            ar(w.sovereign_coupon_fraction_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -319,7 +332,7 @@ struct SnapshotCodec {
         IntegratedWorld w;
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
-             seen_birth_days=false,seen_wages=false;
+             seen_birth_days=false,seen_wages=false,seen_bonds=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -361,6 +374,18 @@ struct SnapshotCodec {
                 if(w.wage_arrears_.size()>5'000'000||
                    w.bankrupt_firms_.size()>1'000'000)
                     throw std::runtime_error("oversized real wage debt state");
+            } else if(extension=="VIC25_PHASEC_SOVEREIGN_BONDS_1"&&
+                      !seen_bonds) {
+                seen_bonds=true;
+                ar(w.bank_principal_by_borrower_);
+                ar(w.sovereign_bonds_);
+                ar(w.sovereign_coupon_due_);
+                ar(w.sovereign_coupon_fraction_);
+                if(w.sovereign_bonds_.size()>1'000'000 ||
+                   w.bank_principal_by_borrower_.size()>1'000'000||
+                   w.sovereign_coupon_due_.size()>5'000'000||
+                   w.sovereign_coupon_fraction_.size()>5'000'000)
+                    throw std::runtime_error("oversized sovereign bond state");
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
