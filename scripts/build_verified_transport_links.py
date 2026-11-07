@@ -9,10 +9,12 @@ Inputs:
 Requires shapely >=2. Output TSV plugs into verified_transport_seed.hpp.
 """
 import argparse
+import calendar
 import csv
 import hashlib
 import json
 import pathlib
+import re
 from collections import defaultdict
 
 LINK_COLUMNS = ("link_id", "source_feature", "from_province",
@@ -66,6 +68,46 @@ def mode_of(props):
     return None
 
 
+def known_month(value, is_start):
+    """Earliest/last *certain* complete month of an OHM dated feature.
+
+    A year-only date is not silently changed to a fabricated January 1.
+    The complete existence window starts the next year for an undated
+    month, the next month for an uncertain day, and similarly ends
+    conservatively before the month/year containing an unknown end.
+    """
+    match = re.fullmatch(r"(\\d{4})(?:-(\\d{2}))?(?:-(\\d{2}))?",
+                         str(value or ""))
+    if not match:
+        return None
+    year = int(match[1])
+    month = int(match[2]) if match[2] else None
+    day = int(match[3]) if match[3] else None
+    if year < 1 or year > 9999 or (month is not None and
+                                    (month < 1 or month > 12)):
+        raise ValueError("Historical transport source date out of range")
+    if month is None:
+        return (year + 1) * 12 if is_start else (year - 1) * 12 + 11
+    index = year * 12 + month - 1
+    if day is None:
+        return index + 1 if is_start else index - 1
+    if day < 1 or day > calendar.monthrange(year, month)[1]:
+        raise ValueError("Invalid historical transport feature date")
+    if is_start:
+        return index if day == 1 else index + 1
+    return index if day == calendar.monthrange(year, month)[1] else index - 1
+
+
+def feature_lifetime(properties):
+    begin = properties.get("start_date")
+    finish = properties.get("end_date")
+    first = known_month(begin, True) if begin else None
+    last = known_month(finish, False) if finish else None
+    if first is not None and last is not None and last < first:
+        raise ValueError("Historical feature has no complete active month")
+    return first, last
+
+
 def lines_of(geom):
     if geom.geom_type == "LineString":
         yield geom
@@ -104,7 +146,7 @@ def make_links(province_path, line_path):
         raise ValueError("Duplicate province identifier")
     spatial_index = STRtree(polygons)
     province_by_id = dict(zip(ids, polygons))
-    links = {}
+    links, lifetimes = {}, {}
     for feature in features(line_path):
         props = feature.get("properties") or {}
         mode = mode_of(props)
@@ -114,6 +156,7 @@ def make_links(province_path, line_path):
         sid = str(sid)
         if not sid or any(c in sid for c in "\r\n\t"):
             raise ValueError("Invalid source feature reference")
+        initial_month, last_month = feature_lifetime(props)
         geometry = shape(feature["geometry"])
         for line in lines_of(geometry):
             if line.length <= 0:
@@ -150,11 +193,15 @@ def make_links(province_path, line_path):
                 ).hexdigest()[:24]
                 if link_id in links and links[link_id] != key:
                     raise ValueError("Source link hash collision")
+                if link_id in lifetimes and lifetimes[link_id] != (
+                        initial_month, last_month):
+                    raise ValueError("Conflicting dates on the same real link")
                 links[link_id] = key
-    return links, len(polygons)
+                lifetimes[link_id] = (initial_month, last_month)
+    return links, len(polygons), lifetimes
 
 
-def make_services(path, links, digest):
+def make_services(path, links, digest, lifetimes):
     rows = []
     if path is None:
         return rows
@@ -182,6 +229,12 @@ def make_services(path, links, digest):
             last = int(row["valid_through_month"])
             if cap <= 0 or fare < 0 or days <= 0 or first < 0 or last < first:
                 raise ValueError("Missing actual capacity/fare/day or dating")
+            geometry_first, geometry_last = lifetimes.get(
+                lid, (None, None))
+            if ((geometry_first is not None and first < geometry_first) or
+                    (geometry_last is not None and last > geometry_last)):
+                raise ValueError("Dated service exceeds certain OHM "
+                                 "physical network lifetime")
             _, origin, destination, mode = links[lid]
             rows.append((sid, lid, row["carrier"], origin, destination, mode,
                          cap, fare, days, first, last, digest))
@@ -202,16 +255,28 @@ def main():
     p.add_argument("--services", type=pathlib.Path)
     p.add_argument("--output", required=True, type=pathlib.Path)
     args = p.parse_args()
-    links, province_count = make_links(args.provinces, args.lines)
+    links, province_count, lifetimes = make_links(
+        args.provinces, args.lines)
     digest_lines = sha256(args.lines)
     digest_provinces = sha256(args.provinces)
     digest_services = sha256(args.services) if args.services else None
-    services = make_services(args.services, links, digest_services or "")
+    services = make_services(
+        args.services, links, digest_services or "", lifetimes)
     args.output.mkdir(parents=True, exist_ok=True)
     link_rows = [(id, key[0], key[1], key[2], key[3])
                  for id, key in sorted(links.items())]
     write_tsv(args.output / "geographic_links.tsv", LINK_COLUMNS, link_rows)
     write_tsv(args.output / "transport_services.tsv", SERVICE_COLUMNS, services)
+    lifetime_rows = [
+        (key, first if first is not None else "",
+         last if last is not None else "")
+        for key,(first,last) in sorted(lifetimes.items())
+        if first is not None or last is not None
+    ]
+    if lifetime_rows:
+        write_tsv(args.output / "physical_line_lifetimes.tsv",
+                  ("link_id","certain_from_month","certain_through_month"),
+                  lifetime_rows)
     (args.output / "provenance.json").write_text(json.dumps({
         "province_geodata_sha256": digest_provinces,
         "network_line_data_sha256": digest_lines,
@@ -221,6 +286,10 @@ def main():
         "physical_links": len(links),
         "dated_verifiable_transport_services": len(services),
         "historical_routes_not_inferred": True,
+        "date_evidence_complete_months": sum(
+            1 for first,last in lifetimes.values()
+            if first is not None and last is not None),
+        "dated_physical_lines": len(lifetime_rows),
         "travel_days_and_capacity_not_inferred": True,
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
