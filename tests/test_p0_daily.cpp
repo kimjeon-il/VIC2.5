@@ -1095,7 +1095,9 @@ static void p1_autocracy_uses_real_institution_and_rejects_false_votes() {
                  administration.legal_slots==30&&
                  administration.staffed_slots==4&&
                  administration.usable_slots==4 &&
-                 c.p1_authority("A").head_can_appoint,
+                 c.p1_authority("A").head_can_appoint &&
+                 c.government("A").chamber_seats==0 &&
+                 c.government("A").quorum==0,
                  "P1 institution used synthetic staff or executive authority");
     p0::Policies policy;
     policy.government_formations.push_back({
