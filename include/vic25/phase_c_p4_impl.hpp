@@ -159,11 +159,14 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
     std::vector<const P4Party*> candidates;
     for(const auto& [id,party]:p4_parties_) {
         (void)id;
+        const auto nominees=p4_nominations_.find({contest_id,party.id});
+        const std::string head=(nominees!=p4_nominations_.end()&&
+                                !nominees->second.empty())?
+            nominees->second.front():party.head_candidate;
         if(party.country==contest.country&&party.active&&party.registered&&
            (contest.office!=P4Office::head_of_state&&
             contest.office!=P4Office::local_head||
-            (!party.head_candidate.empty()&&
-             p2_candidate_eligible(contest_id,party.head_candidate))))
+            (!head.empty()&&p2_candidate_eligible(contest_id,head))))
             candidates.push_back(&party);
     }
     ensure(!candidates.empty()&&candidates.size()<=128,
@@ -268,12 +271,16 @@ inline void IntegratedWorld::p4_hold_contest(
     const auto& order=p1_constitution(contest.country);
     std::size_t permitted=0;
     for(const auto& [pid,party]:p4_parties_)
-        if(party.country==contest.country&&party.registered&&party.active&&
-           (contest.office!=P4Office::head_of_state&&
-            contest.office!=P4Office::local_head||
-            (!party.head_candidate.empty()&&
-             p2_candidate_eligible(id,party.head_candidate))))
-            ++permitted;
+        if(party.country==contest.country&&party.registered&&party.active) {
+            const auto nominees=p4_nominations_.find({id,party.id});
+            const std::string head=(nominees!=p4_nominations_.end()&&
+                                    !nominees->second.empty())?
+                nominees->second.front():party.head_candidate;
+            if(contest.office!=P4Office::head_of_state&&
+               contest.office!=P4Office::local_head||
+               (!head.empty()&&p2_candidate_eligible(id,head)))
+                ++permitted;
+        }
     if(order.power==P1PowerDistribution::single_party)
         ensure(permitted==1,"P4 unlawful multi-party election");
     for(const auto& [party,votes]:ballot.votes) {
@@ -282,9 +289,14 @@ inline void IntegratedWorld::p4_hold_contest(
                p4_parties_.at(party).active&&p4_parties_.at(party).registered&&
                (contest.office!=P4Office::head_of_state&&
                 contest.office!=P4Office::local_head||
-                (!p4_parties_.at(party).head_candidate.empty()&&
-                 p2_candidate_eligible(
-                     id,p4_parties_.at(party).head_candidate))),
+                ([&]{
+                    const auto nominees=p4_nominations_.find({id,party});
+                    const std::string head=(nominees!=p4_nominations_.end()&&
+                                            !nominees->second.empty())?
+                        nominees->second.front():
+                        p4_parties_.at(party).head_candidate;
+                    return !head.empty()&&p2_candidate_eligible(id,head);
+                }())),
                "P4 ballots for unregistered party or foreign contest");
         sum=phaseb::add_checked(sum,votes);
     }
@@ -341,7 +353,10 @@ inline void IntegratedWorld::p4_hold_contest(
             p1_coalitions_.at(contest.country).caretaker=true;
     } else if(contest.office==P4Office::head_of_state) {
         const auto& chosen=p4_parties_.at(result.winning_party);
-        result.office_holder=chosen.head_candidate;
+        const auto nomination=p4_nominations_.find({id,result.winning_party});
+        result.office_holder=(nomination!=p4_nominations_.end()&&
+                              !nomination->second.empty())?
+            nomination->second.front():chosen.head_candidate;
         ensure(!result.office_holder.empty(),"P4 election winner lacks real nominee");
         auto& next=p1_pending_[today+1][contest.country];
         ensure(!next.replace_head,"P4 duplicate national head of state transition");
