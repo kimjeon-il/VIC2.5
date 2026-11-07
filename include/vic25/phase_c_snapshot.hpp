@@ -74,6 +74,15 @@ void fields(Archive& a,T& x) {
         V(holder_id);V(region_id);V(good_id);
     } else if constexpr(std::is_same_v<X,GovernmentState>){
         V(country);V(head_of_state);V(prime_minister);V(chamber_seats);V(quorum);V(revision);
+    } else if constexpr(std::is_same_v<X,P1Constitution>){
+        V(governance);V(power);V(legislature);V(legal_basis);
+    } else if constexpr(std::is_same_v<X,P1Coalition>){
+        V(ruling_groups);V(ruling_parties);V(caretaker);
+    } else if constexpr(std::is_same_v<X,P1GovernmentChange>){
+        V(country);V(new_head);V(new_prime);V(coalition);
+        V(legal_basis);V(replace_head);V(replace_prime);
+    } else if constexpr(std::is_same_v<X,P1Institution>){
+        V(country);V(public_institution_id);V(kind);V(level);
     } else if constexpr(std::is_same_v<X,CabinetChange>){
         V(country);V(new_head);V(new_prime_minister);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,TypedEntityId>){
@@ -334,6 +343,13 @@ struct SnapshotCodec {
             ar(std::string("VIC25_PHASEC_ESTATE_CLOSURES_1"));
             ar(w.completed_liquidations_);
         }
+        if(!w.p1_constitutions_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_GOVERNANCE_1"));
+            ar(w.p1_constitutions_);
+            ar(w.p1_coalitions_);
+            ar(w.p1_institutions_);
+            ar(w.p1_pending_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -343,7 +359,7 @@ struct SnapshotCodec {
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
-             seen_armies=false,seen_estates=false;
+             seen_armies=false,seen_estates=false,seen_p1=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -409,6 +425,18 @@ struct SnapshotCodec {
                 ar(w.completed_liquidations_);
                 if(w.completed_liquidations_.size()>1'000'000)
                     throw std::runtime_error("oversized closed estate records");
+            } else if(extension=="VIC25_PHASEC_P1_GOVERNANCE_1"&&!seen_p1) {
+                seen_p1=true;
+                ar(w.p1_constitutions_);
+                ar(w.p1_coalitions_);
+                ar(w.p1_institutions_);
+                ar(w.p1_pending_);
+                if(w.p1_constitutions_.empty()||
+                   w.p1_constitutions_.size()>100'000||
+                   w.p1_coalitions_.size()!=w.p1_constitutions_.size()||
+                   w.p1_institutions_.size()>1'000'000||
+                   w.p1_pending_.size()>1'000'000)
+                    throw std::runtime_error("invalid P1 constitutional extension");
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }

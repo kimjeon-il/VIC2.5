@@ -1026,6 +1026,112 @@ static void national_elections_are_independent_and_persistent() {
                  "national election must reject registering citizens of another state");
 }
 
+
+static void p1_parliamentary_cabinet_next_day_and_save() {
+    auto opening=fixture();
+    auto& c=opening.seed_geography().seed_core().seed_core();
+    c.seed_interest_group("LANDOWNERS");
+    c.seed_p1_constitution("A",{
+        phasec::P1GovernancePrinciple::parliamentary_republic,
+        phasec::P1PowerDistribution::universal_vote,
+        phasec::P1LegislatureKind::unicameral,"test:p1-parliament"});
+    c.seed_p1_coalition("A",{{"LANDOWNERS"},{"INC"},false});
+    const auto voter=c.people().slices().begin()->first;
+    require_test(c.p1_authority("A").assembly_confidence_required,
+                 "P1 parliamentary cabinet must require confidence");
+    const auto original_population=c.people().population();
+    p0::Policies policy;
+    policy.elections.push_back({"A","INC","REF",2000,1,1,1'000'000});
+    policy.government_formations.push_back({
+        "A","headA","PM_NEXT","test:p1-vote",
+        {"LANDOWNERS"},{"INC"},2000,1,1,false});
+    p0::DailyGame game(daily::World::adopt(std::move(opening),308),policy);
+    phasegh::World::Plan join;
+    join[9].push_back([voter](phasegh::Stage& gh) {
+        gh.phase_c().join_interest_group(voter,"LANDOWNERS",1);
+    });
+    game.advance_day(join);
+    const auto& p=::c(game);
+    require_test(p.government("A").prime_minister=="PM_A" &&
+                 p.has_due_p1_government(game.world().day_index()),
+                 "P1 government changed before its next-day effective date");
+    const auto treasury_before_read=p.cash("A");
+    const auto legitimacy=p.p1_legitimacy("A");
+    require_test(legitimacy.observed_groups&&legitimacy.observed_election&&
+                 legitimacy.score>=0&&legitimacy.score<=100 &&
+                 p.people().population()==original_population &&
+                 p.cash("A")==treasury_before_read,
+                 "P1 legitimacy created people or money or lost P3/P4 evidence");
+    const auto encoded=daily::SnapshotCodec::encode(game.world());
+    auto saved=daily::SnapshotCodec::decode(encoded);
+    require_test(daily::SnapshotCodec::encode(saved)==encoded,
+                 "P1 pending cabinet lost checkpoint round-trip");
+    p0::DailyGame replay(std::move(saved),policy);
+    game.advance_day();
+    replay.advance_day();
+    require_test(::c(game).government("A").prime_minister=="PM_NEXT" &&
+                 ::c(game).p1_coalition("A").ruling_parties==
+                     std::vector<std::string>{"INC"} &&
+                 ::c(game).people().population()==original_population &&
+                 daily::SnapshotCodec::encode(game.world())==
+                     daily::SnapshotCodec::encode(replay.world()),
+                 "P1 next-day office change did not replay atomically");
+}
+
+static void p1_autocracy_uses_real_institution_and_rejects_false_votes() {
+    auto opening=fixture();
+    auto& c=opening.seed_geography().seed_core().seed_core();
+    c.seed_p1_constitution("A",{
+        phasec::P1GovernancePrinciple::monarchy,
+        phasec::P1PowerDistribution::autocracy,
+        phasec::P1LegislatureKind::none,"test:p1-monarchy"});
+    const auto worker=c.people().slices().begin()->first;
+    c.seed_population().hire(worker,1,"FIRM","worker",5,{});
+    c.seed_public_institution("P1_ADMIN","FIRM","R","food",30,4);
+    c.seed_p1_institution("A","P1_ADMIN",
+                          phasec::P1InstitutionKind::administration,5);
+    const auto administration=c.p1_institution_capacity("P1_ADMIN");
+    require_test(administration.employed_staff==1&&
+                 administration.legal_slots==30&&
+                 administration.staffed_slots==4&&
+                 administration.usable_slots==4 &&
+                 c.p1_authority("A").head_can_appoint &&
+                 c.government("A").chamber_seats==0 &&
+                 c.government("A").quorum==0,
+                 "P1 institution used synthetic staff or executive authority");
+    p0::Policies policy;
+    policy.government_formations.push_back({
+        "A","headA","PM_APPOINTED","test:p1-royal-appointment",
+        {},{},2000,1,1,false});
+    p0::DailyGame game(daily::World::adopt(std::move(opening),309),policy);
+    game.advance_day();
+    game.advance_day();
+    require_test(::c(game).government("A").prime_minister=="PM_APPOINTED",
+                 "P1 head-appointed government failed without fictitious election");
+    phasegh::World::Plan decree;
+    decree[9].push_back([](phasegh::Stage& gh) {
+        gh.phase_c().propose_tax_law("A","PM_APPOINTED",{},200'000);
+    });
+    game.advance_day(decree);
+    require_test(::c(game).has_pending_country_tax("A"),
+                 "P1 direct executive created fake parliament or rejected legal tax");
+
+    auto false_election=fixture();
+    auto& state=false_election.seed_geography().seed_core().seed_core();
+    state.seed_p1_constitution("A",{
+        phasec::P1GovernancePrinciple::monarchy,
+        phasec::P1PowerDistribution::autocracy,
+        phasec::P1LegislatureKind::none,"test:p1-no-parliament"});
+    p0::Policies wrong;
+    wrong.elections.push_back({"A","INC","REF",2000,1,1,1'000'000});
+    p0::DailyGame rejected(daily::World::adopt(std::move(false_election),310),wrong);
+    const auto before=daily::SnapshotCodec::encode(rejected.world());
+    bool denied=false;
+    try{rejected.advance_day();}catch(const std::exception&){denied=true;}
+    require_test(denied&&before==daily::SnapshotCodec::encode(rejected.world()),
+                 "P1 no-legislature regime fabricated electoral authority");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -1041,6 +1147,8 @@ int main(){
         native_autonomous_extraction_physical_flow();
         native_autonomous_funded_research_and_day_lab_limit();
         national_elections_are_independent_and_persistent();
+        p1_parliamentary_cabinet_next_day_and_save();
+        p1_autocracy_uses_real_institution_and_rejects_false_votes();
         native_autonomous_h_crisis_and_organization_funding();
         autonomous_f_two_hop_freight_and_save_replay();
         autonomous_daily_facility_maintenance_with_real_inputs();
@@ -1049,7 +1157,7 @@ int main(){
         autonomous_f_congestion_uses_actual_alternate_edge();
         autonomous_daily_bank_debt_service_and_liquidity_floor();
         native_cg_credit_service_keeps_trade_facility_in_sync();
-        std::cout<<"P0 daily grand strategy: 20 bounded integration scenarios PASS\n";
+        std::cout<<"P0 daily grand strategy: 22 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P0 DAILY TEST FAILED: "<<e.what()<<"\n";

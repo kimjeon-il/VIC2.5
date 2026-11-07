@@ -5,6 +5,7 @@
 // Implements actual staged transactions; high-detail political/war models remain
 // separate future modules (see docs/phase-c/integration/).
 #include "vic25/phase_b.hpp"
+#include "vic25/phase_c_p1.hpp"
 #include "vic25/ledgers.hpp"
 #include "vic25/shared_reservations.hpp"
 #include <algorithm>
@@ -759,6 +760,13 @@ public:
                paid_staff_this_month_[service.operator_id]>0 &&
                stock(service.operator_id,service.region,service.good)>=patients,
                "public service cannot exceed actual paid staff facility and supplies");
+        if(const auto link=p1_institutions_.find(institution);
+           link!=p1_institutions_.end()&&
+           link->second.kind==P1InstitutionKind::healthcare) {
+            const auto capacity=p1_institution_capacity(institution);
+            ensure(service.provided+patients<=capacity.usable_slots,
+                   "P1 healthcare level, real payroll or staff capacity exhausted");
+        }
         if(phase_d_reservation_mode_)
             resources_.assert_goods_available({service.operator_id,service.region,service.good},
                                               patients,stock(service.operator_id,service.region,service.good));
@@ -1467,6 +1475,26 @@ public:
         ensure(sovereign_exists, "country has no region");
         governments_.emplace(country, GovernmentState{country, head, prime, chamber_seats, quorum, 1});
     }
+    // P1 exposes legally configured country government, not a second
+    // electorate, public sector payroll, political-power or treasury ledger.
+    void seed_p1_constitution(const std::string&,P1Constitution);
+    [[nodiscard]] const P1Constitution& p1_constitution(const std::string&)const;
+    [[nodiscard]] const P1Coalition& p1_coalition(const std::string&)const;
+    [[nodiscard]] P1AuthorityView p1_authority(const std::string&)const;
+    void seed_p1_coalition(const std::string&,P1Coalition);
+    [[nodiscard]] P1LegitimacyView p1_legitimacy(const std::string&)const;
+    void seed_p1_institution(const std::string&,const std::string&,
+                             P1InstitutionKind,std::uint8_t);
+    [[nodiscard]] P1InstitutionView p1_institution_capacity(
+                             const std::string&)const;
+    [[nodiscard]] bool has_due_p1_government(std::int64_t)const;
+    void schedule_p1_cabinet_daily(const std::string&,const std::string&,
+                                  std::string,P1Coalition,std::int64_t,
+                                  const std::string&);
+    void schedule_p1_head_succession_daily(const std::string&,
+                                          const std::string&,std::string,
+                                          std::int64_t,const std::string&);
+    void phase_time_apply_p1_government(std::int64_t);
     [[nodiscard]] const GovernmentState& government(const std::string& country) const {
         return governments_.at(country);
     }
@@ -1537,19 +1565,27 @@ public:
                          const std::vector<std::string>& supporting_parties, int ppm) {
         require_stage({9});
         ensure(ppm >= 0 && ppm <= 1'000'000, "invalid tax rate");
-        const auto& g = governments_.at(country);
-        const auto& result=legislature_for(country);
-        ensure(g.prime_minister == proposer && result.total_seats == g.chamber_seats,
-               "unauthorized tax bill or missing national legislature");
-        ensure(coalition_seats(supporting_parties,result) >= g.quorum &&
-               !has_pending_country_tax(country),
-               "insufficient votes or country tax law already scheduled");
+        const auto& g=governments_.at(country);
+        ensure(g.prime_minister==proposer&&!has_pending_country_tax(country),
+               "unauthorized or duplicate national income-tax bill");
+        if(p1_constitutions_.contains(country)&&
+           p1_authority(country).direct_executive) {
+            ensure(supporting_parties.empty(),
+                   "P1 direct executive may not invent parliamentary votes");
+        } else {
+            const auto& result=legislature_for(country);
+            ensure(result.total_seats==g.chamber_seats &&
+                   coalition_seats(supporting_parties,result)>=g.quorum,
+                   "insufficient lawful national parliamentary confidence");
+        }
         scheduled_country_income_tax_[month()+1][country]=ppm;
         events_.push_back("constitutional-tax-law:"+country);
     }
     void appoint_cabinet(const std::string& country, const std::string& head,
                         std::string minister, const std::vector<std::string>& supporting_parties) {
         require_stage({9});
+        ensure(!p1_constitutions_.contains(country),
+               "P1 constitutional cabinet must use dated government formation");
         const auto& g=governments_.at(country);
         const auto& result=legislature_for(country);
         ensure(g.head_of_state == head && !minister.empty() &&
@@ -1563,6 +1599,8 @@ public:
                               const std::string& current_head,
                               std::string successor) {
         require_stage({9});
+        ensure(!p1_constitutions_.contains(country),
+               "P1 constitutional succession must use dated office transition");
         const auto& g=governments_.at(country);
         ensure(g.head_of_state == current_head && !successor.empty() &&
                current_head != successor, "invalid head-of-state succession");
@@ -2218,6 +2256,8 @@ public:
     void hold_election(People registered, People invalid, People seats,
                        const std::map<std::string, People>& votes) {
         require_stage({9});
+        ensure(p1_constitutions_.empty(),
+               "P1 constitutional country requires national P4 election registry");
         ensure(!election_this_month_, "duplicate election this month");
         const People eligible = eligible_voters();
         ensure(registered >= 0 && registered <= eligible && invalid >= 0 &&
@@ -2264,6 +2304,9 @@ public:
             const std::map<std::string,People>& votes) {
         require_stage({9});
         const auto& g=governments_.at(country);
+        ensure(!p1_constitutions_.contains(country)||
+               p1_constitutions_.at(country).legislature!=P1LegislatureKind::none,
+               "P1 state without legislature cannot hold party election");
         ensure(!country_election_months_.contains(country)||
                country_election_months_.at(country)!=month(),
                "duplicate national election in calendar month");
@@ -2277,7 +2320,7 @@ public:
                demo.service==phaseb::Service::active||
                demo.service==phaseb::Service::pow||
                demo.service==phaseb::Service::missing||
-               people_.age_months_slice(slice)<
+               people_.age_months_slice(id)<
                    static_cast<std::int64_t>(voting_age_years_)*12)
                 continue;
             eligible=phaseb::add_checked(eligible,row.count);
@@ -2692,9 +2735,44 @@ public:
                    "national election votes/seats not conserved");
         }
         for (const auto& [id,g] : governments_) {
+            const auto order=p1_constitutions_.find(id);
+            const bool no_parliament=order!=p1_constitutions_.end()&&
+                order->second.legislature==P1LegislatureKind::none;
             ensure(id==g.country && !g.head_of_state.empty() && !g.prime_minister.empty() &&
-                   g.chamber_seats>0 && g.quorum>0 && g.quorum<=g.chamber_seats,
-                   "invalid government institution");
+                   (no_parliament?
+                      (g.chamber_seats==0&&g.quorum==0):
+                      (g.chamber_seats>0&&g.quorum>0&&g.quorum<=g.chamber_seats)),
+                   "invalid legal P1 or legacy government institution");
+        }
+        ensure(p1_constitutions_.size()==p1_coalitions_.size(),
+               "P1 constitution/coalition mismatch");
+        for(const auto& [country,order]:p1_constitutions_) {
+            ensure(governments_.contains(country)&&
+                   valid_p1_constitution(order)&&p1_coalitions_.contains(country),
+                   "P1 constitution not backed by a legal government");
+            p1_check_coalition(p1_coalitions_.at(country));
+        }
+        for(const auto& [id,entry]:p1_institutions_) {
+            ensure(entry.public_institution_id==id&&
+                   p1_constitutions_.contains(entry.country)&&
+                   public_institutions_.contains(id)&&entry.level<=5&&
+                   static_cast<unsigned>(entry.kind)<=
+                      static_cast<unsigned>(P1InstitutionKind::elections)&&
+                   sovereignty_.contains(public_institutions_.at(id).region)&&
+                   sovereignty_.at(public_institutions_.at(id).region)==entry.country,
+                   "P1 invalid or foreign public institution");
+        }
+        for(const auto& [effective,changes]:p1_pending_) {
+            ensure(effective>=0&&!changes.empty(),"P1 invalid future effective day");
+            for(const auto& [country,change]:changes) {
+                ensure(p1_constitutions_.contains(country)&&
+                       change.country==country&&!change.legal_basis.empty()&&
+                       (change.replace_head||change.replace_prime)&&
+                       (!change.replace_head||!change.new_head.empty())&&
+                       (!change.replace_prime||!change.new_prime.empty()),
+                       "P1 invalid pending cabinet or succession");
+                p1_check_coalition(change.coalition);
+            }
         }
         for(const auto& [country,ppm]:country_income_tax_)
             ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
@@ -2926,6 +3004,11 @@ private:
     std::map<Id, People> participation_this_month_, strike_active_;
     std::map<std::int64_t,std::map<Id,People>> scheduled_strikes_;
     std::map<std::string, GovernmentState> governments_;
+    // P1 stores constitutional choices and coalition identity only.
+    std::map<std::string,P1Constitution> p1_constitutions_;
+    std::map<std::string,P1Coalition> p1_coalitions_;
+    std::map<std::string,P1Institution> p1_institutions_;
+    std::map<std::int64_t,std::map<std::string,P1GovernmentChange>> p1_pending_;
     std::map<std::int64_t, std::vector<CabinetChange>> scheduled_cabinets_;
     std::map<std::string, Shipment> shipments_;
     std::set<std::string> tracked_goods_;
@@ -2953,6 +3036,8 @@ private:
 
     // Exact nonnegative fraction comparison using Euclid/continued fractions:
     // no 128-bit GNU extension, overflow or floating-point ties (MSVC friendly).
+    void p1_check_coalition(const P1Coalition&)const;
+    [[nodiscard]] static int p1_percent(People,People);
     static int compare_nonnegative_ratios(std::uint64_t a, std::uint64_t b,
                                           std::uint64_t c, std::uint64_t d) {
         ensure(b != 0 && d != 0, "zero election divisor");
@@ -3004,6 +3089,8 @@ private:
             const std::string& country) const {
         const auto it=country_elections_.find(country);
         if(it!=country_elections_.end())return it->second;
+        ensure(!p1_constitutions_.contains(country),
+               "P1 constitutional law needs the country's own election");
         // Legacy single-legislature fixtures retain their original meaning.
         // Once a modern country-specific election exists, other nations must
         // have their OWN election rather than reuse a neighbour's seats.
@@ -3188,3 +3275,5 @@ private:
     }
 };
 } // namespace vic25::phasec
+
+#include "vic25/phase_c_p1_impl.hpp"

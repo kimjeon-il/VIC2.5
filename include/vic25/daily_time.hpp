@@ -336,7 +336,8 @@ public:
            !engine_.base().core().core().daily_auto_demography_enabled()&&
            engine_.base().core().core().annual_bank_interest_ppm()==0&&
            !engine_.base().core().core().has_active_sovereign_bonds()&&
-           !engine_.has_autonomous_daily_trade()) {
+           !engine_.has_autonomous_daily_trade()&&
+           !engine_.base().core().core().has_due_p1_government(day_)) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
         }
@@ -448,8 +449,11 @@ public:
         // Exact birth day and age eligibility must be known at Stage0,
         // before any same-day labor, election or explicit birth command.
         real_actions[0].insert(real_actions[0].begin(),
-            [day=current.day](phasegh::Stage& gh) {
+            [day=current.day,today=day_](phasegh::Stage& gh) {
                 gh.phase_c().phase_time_set_calendar_day(day);
+                // A lawful change enters on its scheduled calendar day even
+                // if no P0 controller, battle or economic command is active.
+                gh.phase_c().phase_time_apply_p1_government(today);
             });
         // P0 domain decisions run on the real calendar day, in the same
         // C/D/E/G/H transaction as scheduled commands and POP dynamics.
