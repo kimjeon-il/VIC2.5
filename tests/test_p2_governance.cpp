@@ -169,6 +169,38 @@ static void elected_head_term_limit_and_scheduled_law() {
          "P4 must exclude P2 term-limited incumbent from subsequent election");
 }
 
+
+static void constitutional_transition_explicitly_changes_incumbent_term(){
+    Scenario state;
+    auto world=daily::World::adopt(std::move(state.gh),404);
+    phasegh::World::Plan votes;
+    votes[9].push_back([today=day({2000,1,1})](phasegh::Stage& gh){
+        auto& c=gh.phase_c();
+        c.hold_country_election("A",100,0,{{"PARTY_A",100}});
+        auto bill=bill_for("EXTEND-CURRENT",
+            phasec::P2BillAction::attach_amendment,day({2000,1,2}));
+        bill.proposed_amendment={
+            "CURRENT-TERM-60","TERM-LAW-V1","act:term-transitional","incumbent",
+            {clause("term-60","A-HOUSE",phasec::P2ClauseKind::term_months,60)}
+        };
+        bill.transitions.push_back({
+            "A-HOUSE",phasec::P2TermTransition::incumbent_as_well,
+            day({2005,1,1})});
+        c.p2_submit_bill(bill,today);
+        c.p2_approve_bill("EXTEND-CURRENT",{"PARTY_A"});
+        c.p2_promulgate_bill("EXTEND-CURRENT","HEAD_A",today);
+    });
+    world.advance_day(votes);
+    need(actual(world).p4_contest("A-HOUSE").next_poll_day==
+             day({2004,1,1}),
+         "P2 transitional amendment changed poll before its effective day");
+    world.advance_day();
+    need(actual(world).p4_contest("A-HOUSE").term_months==60&&
+         actual(world).p4_contest("A-HOUSE").next_poll_day==
+             day({2005,1,1}),
+         "P2 incumbent-as-well transitional clause did not reschedule legal election");
+}
+
 static void invalid_amendments_and_illegal_votes_rollback() {
     Scenario state;
     auto world=daily::World::adopt(std::move(state.gh),403);
@@ -209,8 +241,9 @@ int main() {
     try{
         exact_day_law_enactment_amendment_and_repeal();
         elected_head_term_limit_and_scheduled_law();
+        constitutional_transition_explicitly_changes_incumbent_term();
         invalid_amendments_and_illegal_votes_rollback();
-        std::cout<<"P2 law, amendment and elected-term scenarios: 3 PASS\n";
+        std::cout<<"P2 law, amendment and elected-term scenarios: 4 PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P2 GOVERNANCE FAILED: "<<e.what()<<"\n";
