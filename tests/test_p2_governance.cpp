@@ -237,13 +237,37 @@ static void invalid_amendments_and_illegal_votes_rollback() {
     need(rejected,"P2 local ordinance must not overrule nationwide suffrage");
 }
 
+static void incompatible_statutory_amendments_are_rejected(){
+    Scenario state;
+    auto& c=state.gh.seed_geography().seed_core().seed_core();
+    c.p2_seed_amendment({
+        "FIRST-EXCEPTION","TERM-LAW-V1","proof:first","exclusive-term-treaty",
+        {clause("one","A-HOUSE",phasec::P2ClauseKind::term_months,60)}
+    });
+    need(c.p2_amendment_active("FIRST-EXCEPTION")&&
+         c.p4_contest("A-HOUSE").term_months==60,
+         "P2 real amendment did not override one named legal provision");
+    bool denied=false;
+    try{
+        c.p2_seed_amendment({
+            "SECOND-EXCEPTION","TERM-LAW-V1",
+            "proof:incompatible","exclusive-term-treaty",
+            {clause("two","A-HOUSE",phasec::P2ClauseKind::term_cycle_mode,1)}
+        });
+    }catch(const std::exception&){denied=true;}
+    need(denied&&!c.p2_amendment_active("SECOND-EXCEPTION")&&
+         c.p4_contest("A-HOUSE").term_months==60,
+         "P2 mutually exclusive compromises must not coexist");
+}
+
 int main() {
     try{
         exact_day_law_enactment_amendment_and_repeal();
         elected_head_term_limit_and_scheduled_law();
         constitutional_transition_explicitly_changes_incumbent_term();
         invalid_amendments_and_illegal_votes_rollback();
-        std::cout<<"P2 law, amendment and elected-term scenarios: 4 PASS\n";
+        incompatible_statutory_amendments_are_rejected();
+        std::cout<<"P2 law, amendment and elected-term scenarios: 5 PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P2 GOVERNANCE FAILED: "<<e.what()<<"\n";
