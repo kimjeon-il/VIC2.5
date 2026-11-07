@@ -76,7 +76,7 @@ def known_month(value, is_start):
     month, the next month for an uncertain day, and similarly ends
     conservatively before the month/year containing an unknown end.
     """
-    match = re.fullmatch(r"(\\d{4})(?:-(\\d{2}))?(?:-(\\d{2}))?",
+    match = re.fullmatch(r"(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?",
                          str(value or ""))
     if not match:
         return None
