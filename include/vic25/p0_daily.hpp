@@ -131,6 +131,16 @@ struct GovernmentFormation {
     std::int32_t year{},month{1},day{1};
     bool caretaker{};
 };
+struct ParliamentDissolution {
+    std::string contest_id,incumbent_head,legal_basis;
+    daily::Date decision_date{},early_poll_date{};
+};
+struct ElectionTermReform {
+    phasec::P4TermAmendment amendment;
+    std::string proposer;
+    std::vector<std::string> supporting_parties;
+    daily::Date decision_date{};
+};
 struct CountryAI {
     std::string country,prime_minister,domestic_region,good,domestic_seller;
     Money protect_below_price{};
@@ -262,6 +272,8 @@ struct Policies {
     std::vector<BondSecondaryAsk> bond_secondary_asks;
     std::vector<BondSecondaryBid> bond_secondary_bids;
     std::vector<GovernmentFormation> government_formations; // append-only
+    std::vector<ParliamentDissolution> dissolutions;
+    std::vector<ElectionTermReform> election_term_reforms;
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -399,6 +411,25 @@ struct Policies {
                 throw std::invalid_argument("P0_INVALID_P1_GOVERNMENT_FORMATION");
             (void)daily::to_day_index({change.year,change.month,change.day});
         }
+        std::set<std::pair<std::string,daily::DayIndex>> dissolution_decisions;
+        for(const auto& action:dissolutions) {
+            if(action.contest_id.empty()||action.incumbent_head.empty()||
+               action.legal_basis.empty()||
+               daily::to_day_index(action.early_poll_date)<=
+                   daily::to_day_index(action.decision_date)||
+               !dissolution_decisions.insert({
+                   action.contest_id,daily::to_day_index(action.decision_date)
+               }).second)
+                throw std::invalid_argument("P0_INVALID_P4_DISSOLUTION");
+        }
+        std::set<std::string> reform_targets;
+        for(const auto& reform:election_term_reforms)
+            if(reform.proposer.empty()||
+               reform.amendment.contest_id.empty()||
+               !reform_targets.insert(reform.amendment.contest_id).second||
+               reform.amendment.effective_day<=
+                   daily::to_day_index(reform.decision_date))
+                throw std::invalid_argument("P0_INVALID_P4_TERM_REFORM");
         for(const auto& e:elections)
             if(e.country.empty()||e.incumbent_party.empty()||e.reform_party.empty()||
                e.incumbent_party==e.reform_party||e.year<1||e.year>9999||
@@ -1368,9 +1399,31 @@ public:
                 if(protest>0)c.protest(p.population_slice,p.interest_group,protest);
             });
         }
+        // Execute independent national parliamentary, local and elected-head
+        // contests only on their scheduled day. Voters and party preference
+        // are read from actual Phase B/P3 state in the Stage9 transaction.
+        for(const auto& contest_id:game_c.p4_due_contests(world_.day_index())) {
+            plan[9].push_back([contest_id,today=world_.day_index(),
+                               date](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto& contest=c.p4_contest(contest_id);
+                const auto next=daily::to_day_index(
+                    daily::add_calendar_months(date,contest.term_months));
+                c.p4_hold_contest(contest_id,today,next,
+                                  c.p4_autonomous_ballot(contest_id));
+            });
+        }
         for(const auto& election:decisions.elections) {
             if(date.year!=election.year||date.month!=election.month||date.day!=election.day)continue;
             plan[9].push_back([election](phasegh::Stage& gh){
+                const auto& registered=gh.phase_c().p4_contests();
+                for(const auto& [id,contest]:registered) {
+                    (void)id;
+                    if(contest.country==election.country&&
+                       contest.office==phasec::P4Office::legislature)
+                        throw std::invalid_argument(
+                            "P0_P4_LEGACY_PARLIAMENTARY_ELECTION_CONFLICT");
+                }
                 auto& c=gh.phase_c();
                 const auto& pop=c.people();
                 const auto& g=c.government(election.country);
@@ -1399,6 +1452,25 @@ public:
                     c.hold_country_election(election.country,registered,0,
                          {{election.incumbent_party,incumbent},
                           {election.reform_party,reform}});
+            });
+        }
+        for(const auto& action:decisions.dissolutions) {
+            if(date!=action.decision_date)continue;
+            plan[9].push_back([action,today=world_.day_index()]
+                             (phasegh::Stage& gh) {
+                gh.phase_c().p4_dissolve(
+                    action.contest_id,action.incumbent_head,
+                    action.legal_basis,today,
+                    daily::to_day_index(action.early_poll_date));
+            });
+        }
+        for(const auto& reform:decisions.election_term_reforms) {
+            if(date!=reform.decision_date)continue;
+            plan[9].push_back([reform,today=world_.day_index()]
+                             (phasegh::Stage& gh) {
+                gh.phase_c().p4_schedule_term_amendment(
+                    reform.amendment,reform.proposer,
+                    reform.supporting_parties,today);
             });
         }
         for(const auto& formation:decisions.government_formations) {
