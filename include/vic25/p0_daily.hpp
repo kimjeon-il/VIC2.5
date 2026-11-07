@@ -239,6 +239,7 @@ struct Policies {
     bool retire_bank_debt_after_wages{true};
     bool allow_market_liquidation_of_real_stock{true};
     bool allow_autonomous_army_resupply{true};
+    bool auto_national_budgets_from_actual_services{true};
     std::vector<NationalBudgetEnvelope> national_budget_envelopes;
     std::vector<BondBuyerOrder> bond_buyer_orders;
 
@@ -649,6 +650,71 @@ public:
                 if(!game_c.has_market(project.region,good))continue;
                 decisions.investments.push_back(Investment{id,good,0,1,1});
                 break;
+            }
+        }
+        // When a country has no explicit national budget, derive only the
+        // obligations backed by current statutory services and contracts.
+        // Unobserved transport rates, historical coupons and fictional tax
+        // income are never inserted. An unknown bank rate disables endogenous
+        // commercial bids; only real investor orders can finance such debt.
+        if(decisions.auto_national_budgets_from_actual_services) {
+            std::set<std::string> managed;
+            for(const auto& b:decisions.national_budget_envelopes)
+                managed.insert(b.country);
+            for(const auto& b:decisions.sovereign_financing)
+                managed.insert(b.country);
+            for(const auto& [country,government]:game_c.governments()) {
+                (void)government;
+                if(managed.contains(country)||!game_c.has_country_treasury(
+                        country))continue;
+                const auto fiscal=game_c.country_fiscal(country);
+                Money real_need=0;
+                if(game_c.has_public_healthcare_right())
+                    for(const auto& [id,svc]:game_c.public_institutions()) {
+                        (void)id;
+                        if(game_c.sovereignty(svc.region)!=country||
+                           !game_c.has_market(svc.region,svc.good)||
+                           game_c.phase_d_workforce(svc.operator_id)<=0)
+                            continue;
+                        const Quantity throughput=daily_budget::increment(
+                            svc.monthly_slots,date.day,dim);
+                        const Quantity on_hand=game_c.stock(
+                            svc.operator_id,svc.region,svc.good);
+                        const Quantity units=std::min(throughput,on_hand);
+                        if(units>0)
+                            real_need=phaseb::add_checked(real_need,
+                                times(units,game_c.market(
+                                    svc.region,svc.good).price));
+                    }
+                for(const auto& public_program:decisions.public_budget)
+                    if(public_program.country==country)
+                        real_need=phaseb::add_checked(real_need,
+                            public_program.daily_spending_limit);
+                if(real_need<=0&&fiscal.unpaid_coupons<=0)continue;
+                const Money observed_receipts=std::max<Money>(
+                    0,fiscal.realized_revenue);
+                const Money unsecured_ceiling=phaseb::add_checked(
+                    fiscal.bond_principal,observed_receipts);
+                const Money daily_financing_need=phaseb::add_checked(
+                    real_need,fiscal.unpaid_coupons);
+                NationalBudgetEnvelope envelope;
+                envelope.country=country;
+                envelope.reserve_cash=0;
+                envelope.maximum_daily_spending=real_need;
+                envelope.target_cash=fiscal.unpaid_coupons;
+                envelope.maximum_daily_new_bonds=
+                    std::max<Money>(1,daily_financing_need);
+                envelope.maximum_total_bond_principal=
+                    std::max<Money>(1,unsecured_ceiling);
+                envelope.minimum_coupon_ppm=
+                    game_c.annual_bank_interest_ppm();
+                envelope.maximum_coupon_ppm=envelope.minimum_coupon_ppm;
+                envelope.maturity_days=365; // declared game policy, not historical rate
+                envelope.offer_to_operating_firms=
+                    envelope.minimum_coupon_ppm>0;
+                envelope.finance_real_public_services=true;
+                decisions.national_budget_envelopes.push_back(
+                    std::move(envelope));
             }
         }
         phasegh::World::Plan plan;
