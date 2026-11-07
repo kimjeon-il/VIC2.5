@@ -505,6 +505,66 @@ public:
             }
         }
         phasegh::World::Plan plan;
+        // A real Employment contract can pay a real household wallet each
+        // calendar day. The C bank/tax ledger remains the sole authority.
+        // P0 scenario payroll, when explicitly configured, owns that firm's
+        // remuneration and must not be paid for a second time.
+        std::set<std::string> scenario_payroll;
+        for(const auto& p:decisions.manufacturers)
+            if(p.wage_per_worker_per_day>0)
+                scenario_payroll.insert(
+                    game_c.facility(industry.recipes.at(p.recipe).site).owner);
+        for(const auto& p:decisions.extractors)
+            if(p.wage_per_unit>0)
+                scenario_payroll.insert(industry.resource_sites.at(p.resource_site).owner);
+        for(const auto& p:decisions.maintenance)
+            if(p.wage_per_worker_per_day>0)
+                scenario_payroll.insert(game_c.facility(p.facility).owner);
+        for(const auto& [slice_id,contract]:game_c.people().jobs()) {
+            if(contract.count<=0||contract.wage_per_month<=0||
+               scenario_payroll.contains(contract.employer))continue;
+            const auto& slice=game_c.people().slice(slice_id);
+            const auto& dem=game_c.people().demographic(slice.key.demographic);
+            const auto wallet="HH:"+std::to_string(slice.key.household);
+            if(!game_c.has_actor(wallet)||!game_c.has_actor(contract.employer))
+                continue;
+            const auto sovereign=game_c.sovereignty(dem.region);
+            if(game_c.has_government(sovereign)&&
+               !game_c.has_actor(game_c.country_treasury(sovereign)))
+                continue;
+            if(!game_c.has_government(sovereign)&&
+               !game_c.has_actor(sovereign))continue;
+            const auto treasury=game_c.has_government(sovereign)?
+                                 game_c.country_treasury(sovereign):sovereign;
+            if(contract.employer==wallet||contract.employer==treasury||
+               wallet==treasury)continue;
+            const auto employer=contract.employer;
+            const auto purpose="P0:CONTRACT-WAGE:"+std::to_string(world_.day_index())+
+                               ":"+std::to_string(slice_id);
+            auto reserved=std::make_shared<Money>(0);
+            plan[1].push_back(
+                [slice_id,employer,purpose,date,dim,reserved](phasegh::Stage& gh) {
+                    auto& c=gh.phase_c();
+                    const auto* now=c.people().job(slice_id);
+                    if(!now||now->employer!=employer||now->count<=0||
+                       now->wage_per_month<=0)return;
+                    const Money full_month=times(now->count,now->wage_per_month);
+                    const Money today=daily_increment(full_month,date.day,dim);
+                    const Money available=c.phase_d_cash_available(employer);
+                    const Money payable=std::min(today,std::max<Money>(0,available));
+                    if(payable<=0)return;
+                    c.phase_d_reserve_cash(employer,purpose,payable);
+                    *reserved=payable;
+                });
+            plan[5].push_back(
+                [employer,wallet,treasury,sovereign,purpose,reserved](phasegh::Stage& gh) {
+                    if(*reserved<=0)return;
+                    auto& c=gh.phase_c();
+                    c.phase_d_release_cash(employer,purpose,*reserved);
+                    c.wages_under_law(employer,wallet,treasury,*reserved,
+                                      c.has_government(sovereign)?sovereign:"");
+                });
+        }
         for(const auto& ai:decisions.countries) {
             plan[0].push_back([ai,date](phasegh::Stage& gh) {
                 const auto& c=gh.phase_c();
