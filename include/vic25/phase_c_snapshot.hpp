@@ -98,6 +98,22 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,P4TermAmendment>){
         V(contest_id);V(law_id);V(effective_day);V(next_poll_day);
         V(term_months);V(applies_to_incumbent);V(term_mode);
+    } else if constexpr(std::is_same_v<X,P2Clause>){
+        V(id);V(target);V(kind);V(value);
+    } else if constexpr(std::is_same_v<X,P2BaseLaw>){
+        V(id);V(country);V(domain);V(scope);V(base_choice);V(legal_basis);
+        V(tier);V(clauses);
+    } else if constexpr(std::is_same_v<X,P2Amendment>){
+        V(id);V(law_id);V(legal_basis);V(exclusivity_group);V(clauses);
+    } else if constexpr(std::is_same_v<X,P2ElectionTransition>){
+        V(contest_id);V(mode);V(next_poll_day);
+    } else if constexpr(std::is_same_v<X,P2Bill>){
+        V(id);V(country);V(proposer);V(legal_basis);V(action);V(status);
+        V(proposed_base);V(proposed_amendment);V(target_id);V(transitions);
+        V(introduced_day);V(promulgated_day);V(effective_day);
+    } else if constexpr(std::is_same_v<X,P2LawEvent>){
+        V(bill_id);V(country);V(law_id);V(amendment_id);V(legal_basis);
+        V(action);V(effective_day);
     } else if constexpr(std::is_same_v<X,CabinetChange>){
         V(country);V(new_head);V(new_prime_minister);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,TypedEntityId>){
@@ -374,6 +390,15 @@ struct SnapshotCodec {
             ar(w.p4_history_);
             ar(w.p4_amendments_);
         }
+        if(!w.p2_laws_.empty()||!w.p2_bills_.empty()) {
+            ar(std::string("VIC25_PHASEC_P2_LAWS_1"));
+            ar(w.p2_laws_);
+            ar(w.p2_active_base_);
+            ar(w.p2_amendments_);
+            ar(w.p2_active_amendments_);
+            ar(w.p2_bills_);
+            ar(w.p2_history_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -383,7 +408,7 @@ struct SnapshotCodec {
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
-             seen_armies=false,seen_estates=false,seen_p1=false,seen_p4=false;
+             seen_armies=false,seen_estates=false,seen_p1=false,seen_p4=false,seen_p2=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -477,6 +502,22 @@ struct SnapshotCodec {
                    w.p4_amendments_.size()>1'000'000)
                     throw std::runtime_error("oversized P4 election extension");
                 w.p4_rebuild_due_index();
+            } else if(extension=="VIC25_PHASEC_P2_LAWS_1"&&!seen_p2) {
+                seen_p2=true;
+                ar(w.p2_laws_);
+                ar(w.p2_active_base_);
+                ar(w.p2_amendments_);
+                ar(w.p2_active_amendments_);
+                ar(w.p2_bills_);
+                ar(w.p2_history_);
+                if(w.p2_laws_.size()>100'000||
+                   w.p2_active_base_.size()>100'000||
+                   w.p2_amendments_.size()>1'000'000||
+                   w.p2_active_amendments_.size()>1'000'000||
+                   w.p2_bills_.size()>1'000'000||
+                   w.p2_history_.size()>1'000'000)
+                    throw std::runtime_error("oversized P2 legislation extension");
+                w.p2_rebuild_due_index();
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
