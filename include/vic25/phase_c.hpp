@@ -125,6 +125,14 @@ public:
     [[nodiscard]] std::int64_t month() const { return people_.month(); }
     [[nodiscard]] std::uint64_t commit_id() const { return commit_id_; }
     [[nodiscard]] const FinancialLedger& financial() const { return money_; }
+    void seed_annual_bank_interest_ppm(int ppm) {
+        ensure(stage_==-1&&commit_id_==0&&ppm>=0&&ppm<=1'000'000,
+               "invalid annual bank interest policy");
+        bank_interest_annual_ppm_=ppm;
+    }
+    [[nodiscard]] int annual_bank_interest_ppm()const {
+        return bank_interest_annual_ppm_;
+    }
     // C and D share the single transient month-local authority, while
     // FinancialLedger / InventoryLedger / Population remain the only stocks.
     void phase_d_enable_shared_resources() {
@@ -1329,6 +1337,61 @@ public:
         paid_staff_this_month_[payer]=phaseb::add_checked(paid_staff_this_month_[payer],gross);
         events_.push_back("wages");
     }
+    // Interest is a claim, never a new cash deposit or trade-credit draw.
+    // It accrues on real outstanding loan PRINCIPAL at ACT/365 (including
+    // leap-year days); integer fractional micro-units are carried per debtor.
+    void phase_time_accrue_and_settle_interest() {
+        require_stage({8});
+        if(bank_interest_annual_ppm_<=0)return;
+        constexpr Money denominator=365'000'000;
+        if(!money_.has_account("BANK:interest_receivable"))
+            money_.add_account("BANK:interest_receivable","BANK",
+                               AccountType::asset);
+        if(!money_.has_account("BANK:interest_revenue"))
+            money_.add_account("BANK:interest_revenue","BANK",
+                               AccountType::revenue);
+        for(const auto& debtor:actors_) {
+            const Money principal=outstanding_loan(debtor);
+            if(principal<=0)continue;
+            const Money carry=bank_interest_fraction_[debtor];
+            ensure(carry>=0&&carry<denominator,"invalid interest carry");
+            const Money high=phaseb::mul_checked(
+                principal/denominator,bank_interest_annual_ppm_);
+            const Money low=phaseb::add_checked(
+                phaseb::mul_checked(principal%denominator,
+                                    bank_interest_annual_ppm_),carry);
+            const Money interest=phaseb::add_checked(high,low/denominator);
+            bank_interest_fraction_[debtor]=low%denominator;
+            if(interest<=0)continue;
+            const auto account_id=account(debtor,"interest_payable");
+            if(!money_.has_account(account_id))
+                money_.add_account(account_id,debtor,AccountType::liability);
+            money_.post({unique("bank-interest-accrual"),
+                "interest receivable from actual principal",{
+                {account(debtor,"expense"),interest,0},
+                {account_id,0,interest},
+                {"BANK:interest_receivable",interest,0},
+                {"BANK:interest_revenue",0,interest}}});
+            events_.push_back("daily-bank-interest-accrued");
+        }
+        for(const auto& debtor:actors_) {
+            const auto payable=account(debtor,"interest_payable");
+            if(!money_.has_account(payable))continue;
+            const Money due=-money_.balance(payable);
+            if(due<=0)continue;
+            const Money liquid=std::max<Money>(
+                0,phase_d_cash_available(debtor));
+            const Money paid=std::min(due,liquid);
+            if(paid<=0)continue;
+            money_.post({unique("bank-interest-payment"),
+                "pay recognized loan interest from existing deposit",{
+                {payable,paid,0},
+                {account(debtor,"cash"),0,paid},
+                {"BANK:deposit",paid,0},
+                {"BANK:interest_receivable",0,paid}}});
+            events_.push_back("daily-bank-interest-paid");
+        }
+    }
     void lend(const std::string& borrower, Money amount) {
         require_stage({1});
         ensure(amount > 0 && actors_.contains(borrower) && !bank_insolvent_,
@@ -1839,6 +1902,7 @@ public:
             staged.stage_=n;
             for (const auto& command:plan[static_cast<std::size_t>(n)])
                 command(staged);
+            if(n==8)staged.phase_time_accrue_and_settle_interest();
             if(n==10&&final_calendar_day) {
                 // Update month-based age classification after today's real
                 // population events; never rerun month-sized risk rates.
@@ -2086,6 +2150,8 @@ private:
     Money total_bad_debt_{};
     bool bank_insolvent_{};
     std::map<std::string,People> regional_food_grievance_;
+    int bank_interest_annual_ppm_{}; // zero until historically configured
+    std::map<std::string,Money> bank_interest_fraction_;
     std::map<std::string,FinancialLedger> foreign_ledgers_;
     std::set<std::pair<std::string,std::string>> foreign_holders_;
     std::map<std::string,Reparation> reparations_;
