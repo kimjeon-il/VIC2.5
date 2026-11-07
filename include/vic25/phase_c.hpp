@@ -1469,6 +1469,8 @@ public:
     }
     [[nodiscard]] bool p5_needs_daily_tick()const;
     void p5_daily_advance(std::int64_t);
+    [[nodiscard]] bool p5_has_due_daily_strike(std::int64_t)const;
+    void phase_time_apply_p5_strikes(std::int64_t);
     void p5_perform_action(P5CollectiveAction);
     void p5_pledge_army_unit(const std::string&,const std::string&);
     void p5_designate_coup(const std::string&);
@@ -1528,8 +1530,11 @@ public:
         return it==participation_this_month_.end()?0:it->second;
     }
     [[nodiscard]] People currently_striking(Id slice) const {
-        auto it=strike_active_.find(slice);
-        return it==strike_active_.end()?0:it->second;
+        const auto monthly=strike_active_.find(slice);
+        const auto today=p5_active_daily_strikes_.find(slice);
+        return phaseb::add_checked(
+            monthly==strike_active_.end()?0:monthly->second,
+            today==p5_active_daily_strikes_.end()?0:today->second);
     }
     void seed_government(std::string country, std::string head,
                          std::string prime, People chamber_seats, People quorum) {
@@ -2964,6 +2969,18 @@ public:
                    static_cast<unsigned>(outcome.kind)<=
                        static_cast<unsigned>(P5SettlementKind::independence_recognized),
                    "P5 settlement without real conflict");
+        for(const auto& [slice,n]:p5_active_daily_strikes_)
+            ensure(people_.has_slice(slice)&&n>=0&&
+                   n<=people_.employed(slice)&&
+                   currently_striking(slice)<=people_.employed(slice),
+                   "P5 daily worker shutdown exceeds real employment");
+        for(const auto& [when,allocations]:p5_scheduled_daily_strikes_) {
+            ensure(when>=0,"P5 invalid dated labor action");
+            for(const auto& [slice,n]:allocations)
+                ensure(people_.has_slice(slice)&&n>0&&
+                       n<=people_.employed(slice),
+                       "P5 future strike requires actually contracted workers");
+        }
         for(const auto& [crisis,regions]:p5_control_evidence_) {
             ensure(p5_crises_.contains(crisis),
                    "P5 political control lacks crisis");
@@ -3468,6 +3485,8 @@ private:
     std::vector<P5Settlement> p5_settlements_;
     // Only evidence of real C military control, not duplicate ownership.
     std::map<std::string,std::set<std::string>> p5_control_evidence_;
+    std::map<std::int64_t,std::map<Id,People>> p5_scheduled_daily_strikes_;
+    std::map<Id,People> p5_active_daily_strikes_;
     std::map<Id, People> participation_this_month_, strike_active_;
     std::map<std::int64_t,std::map<Id,People>> scheduled_strikes_;
     std::map<std::string, GovernmentState> governments_;
