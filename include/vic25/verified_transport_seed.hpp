@@ -99,11 +99,11 @@ inline void seed(phasegh::World& world,
         std::string row;
         if(!std::getline(*historical_line_lifetimes,row))
             throw std::invalid_argument("GEO_ERR_MISSING_HISTORICAL_HEADER");
-        if(!row.empty()&&row.back()=='\\r')row.pop_back();
+        if(!row.empty()&&row.back()=='\r')row.pop_back();
         if(split_tsv(row)!=historical_header)
             throw std::invalid_argument("GEO_ERR_HISTORICAL_SCHEMA");
         while(std::getline(*historical_line_lifetimes,row)) {
-            if(!row.empty()&&row.back()=='\\r')row.pop_back();
+            if(!row.empty()&&row.back()=='\r')row.pop_back();
             const auto fields=split_tsv(row);
             if(fields.size()!=3||fields[0].empty()||
                !real_links.contains(fields[0])||
