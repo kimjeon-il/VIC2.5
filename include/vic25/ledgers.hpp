@@ -71,6 +71,9 @@ public:
         transaction_ids_.insert(entry.transaction_id);
     }
 
+    [[nodiscard]] bool has_account(const std::string& id)const {
+        return accounts_.contains(id);
+    }
     [[nodiscard]] Amount balance(const std::string& id) const { return accounts_.at(id).debit_minus_credit; }
     [[nodiscard]] bool balanced() const {
         std::map<std::string, Amount> totals;
