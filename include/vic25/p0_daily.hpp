@@ -168,6 +168,10 @@ struct Policies {
     // per month when real government borrowing exceeds available cash.
     int autonomous_tax_step_ppm{5'000};
     int autonomous_tax_ceiling_ppm{300'000};
+    // Scenario commodity lots are arbitrary until calibrated. Only food is
+    // a daily necessity by default; clothing is spread across each month.
+    Quantity daily_food_units_per_person{1};
+    Quantity monthly_clothing_units_per_person{1};
     std::vector<Staffing> staffing;
     std::vector<Manufacturer> manufacturers;
     std::vector<Extractor> extractors;
@@ -189,7 +193,9 @@ struct Policies {
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
-           autonomous_tax_ceiling_ppm>1'000'000)
+           autonomous_tax_ceiling_ppm>1'000'000||
+           daily_food_units_per_person<0||
+           monthly_clothing_units_per_person<0)
             throw std::invalid_argument("P0_INVALID_AUTONOMOUS_FISCAL_RULE");
         std::set<std::string> seen_firms,seen_projects,seen_countries;
         std::set<std::pair<Id,std::string>> seen_pop_goods;
@@ -941,7 +947,10 @@ public:
         for(const auto& buyer:decisions.buyers)
             explicitly_managed_demand.insert({buyer.population_slice,buyer.good});
         plan[7].push_back(
-            [explicitly_managed_demand](phasegh::Stage& gh) {
+            [explicitly_managed_demand,date,dim,
+             food_units=decisions.daily_food_units_per_person,
+             clothing_monthly=decisions.monthly_clothing_units_per_person]
+            (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 const auto& people=c.people();
                 using NeedKey=std::tuple<std::string,Id,std::string>;
@@ -949,15 +958,17 @@ public:
                 for(const auto& [slice_id,pop]:people.slices()) {
                     if(pop.count<=0)continue;
                     const auto& d=people.demographic(pop.key.demographic);
-                    const auto age=people.age_months(pop.key.demographic);
                     const std::array<std::pair<std::string,Quantity>,2> baskets{{
-                        {"food",age<10*12?2:3},{"clothing",1}
+                        {"food",times(pop.count,food_units)},
+                        {"clothing",daily_increment(
+                            times(pop.count,clothing_monthly),date.day,dim)}
                     }};
-                    for(const auto& [good,per_person]:baskets) {
-                        if(explicitly_managed_demand.contains({slice_id,good}))
+                    for(const auto& [good,amount]:baskets) {
+                        if(amount<=0 ||
+                           explicitly_managed_demand.contains({slice_id,good}))
                             continue;
                         auto& due=needs[{d.region,pop.key.household,good}];
-                        due=phaseb::add_checked(due,times(pop.count,per_person));
+                        due=phaseb::add_checked(due,amount);
                     }
                 }
                 const auto sellers=c.market_seller_index();
