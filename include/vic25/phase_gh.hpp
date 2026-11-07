@@ -1087,7 +1087,9 @@ public:
         const auto& front=geographical.provinces.at(crisis.province).region;
         bool claimant_ready=false,respondent_ready=false;
         for(const auto& [unit,deployment]:phase_c().army_deployments()) {
-            if(deployment.region!=front||phase_c().active_strength(unit)<=0||
+            if(deployment.region!=front||
+               phase_c().p5_guerrilla_is_insurgent_unit(unit)||
+               phase_c().active_strength(unit)<=0||
                phase_c().stock(unit,front,"ammunition")<=0)continue;
             if(deployment.country==claimant)claimant_ready=true;
             if(deployment.country==crisis.respondent)respondent_ready=true;
@@ -1111,7 +1113,8 @@ public:
         require(war.active&&!war.armistice &&
                 (deployment.country==war.attacker||
                  deployment.country==war.defender) &&
-                c.active_strength(unit)>0,
+                c.active_strength(unit)>0&&
+                !c.p5_guerrilla_is_insurgent_unit(unit),
                 "H_ERR_UNAUTHORIZED_ARMY_WAR_MARCH");
         const auto claimed_fronts=war_front_regions(war);
         // A foreign territory can be entered only at a disputed province
