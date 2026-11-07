@@ -118,7 +118,8 @@ inline P1LegitimacyView IntegratedWorld::p1_legitimacy(
         result.observed_election=true;
         result.electoral_support=p1_percent(seats,election->second.total_seats);
         if(p1_authority(country).assembly_confidence_required&&
-           seats<governments_.at(country).quorum)
+           (seats<governments_.at(country).quorum||
+            p4_parliament_dissolved(country)))
             result.legal_compatibility=coalition.caretaker?50:0;
     } else if(p1_authority(country).assembly_confidence_required) {
         // Unknown legislature is not a fictional majority.
@@ -186,6 +187,8 @@ inline void IntegratedWorld::schedule_p1_cabinet_daily(
     p1_check_coalition(coalition);
     const auto authority=p1_authority(country);
     if(authority.assembly_confidence_required) {
+        ensure(!p4_parliament_dissolved(country),
+               "P1 cannot form a parliamentary government from dissolved seats");
         const auto election=country_elections_.find(country);
         ensure(election!=country_elections_.end()&&
                coalition_seats(coalition.ruling_parties,election->second)>=
