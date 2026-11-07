@@ -10,6 +10,7 @@
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
 #include "vic25/phase_c_p5.hpp"
+#include "vic25/phase_c_p5_guerrilla.hpp"
 #include "vic25/ledgers.hpp"
 #include "vic25/shared_reservations.hpp"
 #include <algorithm>
@@ -1484,6 +1485,35 @@ public:
         const std::string&,const std::string&,std::int64_t);
     void p5_settle(P5Settlement);
     void phase_time_apply_p5_settlement(std::int64_t);
+    // P5-G: guerrilla war is a regional political-military journal,
+    // independent of a national civil-war front or sovereign state creation.
+    void p5_begin_guerrilla(P5GuerrillaCampaign);
+    void p5_guerrilla_extend(const std::string&,const std::string&,
+                            const std::string&,std::int64_t);
+    void p5_guerrilla_disrupt(const std::string&,const std::string&,
+                             const std::string&,const std::string&,
+                             Quantity,std::int64_t);
+    void p5_guerrilla_skirmish(
+        const std::string&,const std::string&,
+        const std::string&,Id,const std::string&,Id,
+        const std::string&,CombatLoss,CombatLoss,std::int64_t);
+    void p5_guerrilla_to_conventional(const std::string&,
+                                     const std::string&,std::int64_t);
+    void p5_guerrilla_resume(const std::string&,std::int64_t);
+    void p5_guerrilla_end(P5GuerrillaOutcome);
+    [[nodiscard]] P5GuerrillaRegionView p5_guerrilla_region_view(
+        const std::string&,const std::string&)const;
+    [[nodiscard]] int p5_guerrilla_disruption_ppm(
+        const std::string&)const;
+    [[nodiscard]] bool p5_guerrilla_has_calendar_work(std::int64_t)const;
+    void phase_time_apply_p5_guerrilla_access(std::int64_t);
+    void p5_guerrilla_daily_review(std::int64_t);
+    [[nodiscard]] const std::map<std::string,P5GuerrillaCampaign>&
+        p5_guerrilla_campaigns()const {return p5_guerrilla_campaigns_;}
+    [[nodiscard]] const std::vector<P5GuerrillaIncident>&
+        p5_guerrilla_incidents()const {return p5_guerrilla_incidents_;}
+    [[nodiscard]] const std::vector<P5GuerrillaOutcome>&
+        p5_guerrilla_outcomes()const {return p5_guerrilla_outcomes_;}
     void seed_interest_group(std::string group) {
         ensure(stage_==-1 && commit_id_==0 && !group.empty() &&
                interest_groups_.insert(std::move(group)).second, "invalid interest group");
@@ -3527,6 +3557,19 @@ private:
     std::map<std::string,std::set<std::string>> p5_control_evidence_;
     std::map<std::int64_t,std::vector<P5ControlReconciliation>>
         p5_scheduled_control_reconciliation_;
+    // P5-G campaign information is stored only as political references.
+    // Lasting armed strength, physical stocks and land titles remain in C.
+    std::map<std::string,P5GuerrillaCampaign> p5_guerrilla_campaigns_;
+    std::vector<P5GuerrillaIncident> p5_guerrilla_incidents_;
+    std::vector<P5GuerrillaOutcome> p5_guerrilla_outcomes_;
+    std::set<std::string> p5_guerrilla_incident_ids_; // derived index
+    std::map<std::int64_t,std::vector<P5GuerrillaAccessEffect>>
+        p5_guerrilla_effect_due_;
+    std::map<std::string,std::vector<P5GuerrillaAccessEffect>>
+        p5_guerrilla_effect_active_;
+    std::map<std::string,std::int32_t> p5_guerrilla_region_penalty_ppm_;
+    std::map<std::int64_t,std::set<std::string>>
+        p5_guerrilla_review_due_; // reconstructed from active campaign
     std::map<std::int64_t,std::map<Id,People>> p5_scheduled_daily_strikes_;
     std::map<Id,People> p5_active_daily_strikes_;
     std::map<Id, People> participation_this_month_, strike_active_;
@@ -3596,6 +3639,7 @@ private:
     [[nodiscard]] static People p4_scaled(People,People,People);
     void p4_rebuild_due_index();
     void p4_record_elected_persons(const P4Result&);
+    void p5_guerrilla_rebuild_indexes();
     static bool p2_valid_clause(const P2Clause&);
     void p2_validate_clauses(
         const std::string&,const std::vector<P2Clause>&)const;
@@ -3850,3 +3894,4 @@ private:
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"
+#include "vic25/phase_c_p5_guerrilla_impl.hpp"
