@@ -482,6 +482,28 @@ public:
             decisions.extractors.push_back(Extractor{
                 id,std::max<Quantity>(1,quote.target_stock)});
         }
+        for(const auto& [id,research]:industry.researches) {
+            if(research.reviewed||research.verified_work>=research.required_evidence||
+               std::any_of(decisions.researches.begin(),decisions.researches.end(),
+                    [&](const ResearchPolicy& p){return p.project==id;}))
+                continue;
+            decisions.researches.push_back(ResearchPolicy{id,1});
+        }
+        for(const auto& [id,project]:industry.constructions) {
+            if(project.ready||project.commissioned||
+               project.accepted_work>=project.work_required||
+               std::any_of(decisions.investments.begin(),decisions.investments.end(),
+                    [&](const Investment& p){return p.construction_project==id;}))
+                continue;
+            for(const auto& [recipe_id,recipe]:industry.recipes) {
+                (void)recipe_id;
+                if(recipe.site!=project.target_site||recipe.outputs.empty())continue;
+                const auto& good=recipe.outputs.front().good;
+                if(!game_c.has_market(project.region,good))continue;
+                decisions.investments.push_back(Investment{id,good,0,1,1});
+                break;
+            }
+        }
         phasegh::World::Plan plan;
         for(const auto& ai:decisions.countries) {
             plan[0].push_back([ai,date](phasegh::Stage& gh) {
@@ -920,10 +942,11 @@ public:
             plan[10].push_back([combat](phasegh::Stage& gh){
                 fight(gh.phase_c(),combat);
             });
-        if(!decisions.buyers.empty())
-            plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
-                gh.phase_c().phase_time_close_daily_markets(ordinal);
-            });
+        // Closing market observations is a daily accounting operation,
+        // independent of whether a scenario supplied explicit household buyers.
+        plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
+            gh.phase_c().phase_time_close_daily_markets(ordinal);
+        });
         // Supplemental commands execute today in the canonical day
         // transaction. No monthly callback staging or adapter remains.
         for(std::size_t i=0;i<plan.size();++i)
