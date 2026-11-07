@@ -193,6 +193,28 @@ public:
         shares_[{asset, from}] -= units;
         shares_[{asset, to}] += units;
     }
+    // Bond retirement reduces the original issued asset, never creates a
+    // second financial or security record. Partial redemption is supported.
+    void redeem(const std::string& asset,const std::string& owner,
+                std::int64_t quantity) {
+        auto issuance=issued_.find(asset);
+        auto holding=shares_.find({asset,owner});
+        if(issuance==issued_.end()||holding==shares_.end()||
+           quantity<=0||holding->second<quantity||
+           issuance->second<quantity)
+            throw std::invalid_argument("invalid asset redemption");
+        issuance->second-=quantity;
+        holding->second-=quantity;
+        if(holding->second==0)shares_.erase(holding);
+        // Keep zero-issued asset identity to reject duplicate future issues.
+    }
+    [[nodiscard]] std::map<std::string,std::int64_t> holders(
+            const std::string& asset)const {
+        std::map<std::string,std::int64_t> result;
+        for(const auto& [key,n]:shares_)
+            if(key.first==asset&&n>0)result.emplace(key.second,n);
+        return result;
+    }
     [[nodiscard]] std::int64_t units(const std::string& asset, const std::string& owner) const {
         auto it = shares_.find({asset, owner}); return it == shares_.end() ? 0 : it->second;
     }
