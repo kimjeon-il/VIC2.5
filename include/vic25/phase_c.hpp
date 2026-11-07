@@ -1738,6 +1738,43 @@ public:
     // facilities, investment WIP, financial securities or public debt.
     // A documented 'company:<firm>' share registry is the only beneficiary
     // authority; never guess private owners or pay fictitious dividends.
+    [[nodiscard]] bool bankrupt_estate_has_non_cash_rights(
+            const std::string& firm)const {
+        if(phase_d_wip(firm)>0)return true;
+        if(money_.balance(account(firm,"reparations_receivable"))>0)
+            return true;
+        if(money_.has_account(account(firm,"wage_receivable"))&&
+           money_.balance(account(firm,"wage_receivable"))>0)return true;
+        if(money_.has_account(account(firm,"bond_coupon_receivable"))&&
+           money_.balance(account(firm,"bond_coupon_receivable"))>0)return true;
+        if(money_.has_account(account(firm,"bond_coupon_payable"))&&
+           money_.balance(account(firm,"bond_coupon_payable"))<0)return true;
+        for(const auto& [id,claim]:reparations_) {
+            (void)id;
+            if(claim.remaining>0&&
+               (claim.payer==firm||claim.recipient==firm))
+                return true;
+        }
+        for(const auto& [id,claim]:dividends_) {
+            (void)id;
+            if(claim.payer==firm||claim.holder==firm)return true;
+        }
+        for(const auto& [id,svc]:public_institutions_) {
+            (void)id;
+            if(svc.operator_id==firm)return true;
+        }
+        for(const auto& [id,site]:facilities_) {
+            (void)id;
+            if(site.owner==firm)return true;
+        }
+        for(const auto& [key,qty]:goods_.holdings())
+            if(key.holder_id==firm&&qty>0)return true;
+        for(const auto& [holder,asset]:security_accounts_)
+            if(holder==firm&&shares(asset,firm)>0)return true;
+        for(const auto& [holder,currency]:foreign_holders_)
+            if(holder==firm&&fx_balance(firm,currency)>0)return true;
+        return false;
+    }
     void phase_time_distribute_liquidation_equity() {
         require_stage({8});
         for(const auto& [firm,declared]:bankrupt_firms_) {
@@ -1749,28 +1786,8 @@ public:
             if(money_.balance(account(firm,"debt"))<0)continue;
             if(money_.has_account(account(firm,"interest_payable"))&&
                money_.balance(account(firm,"interest_payable"))<0)continue;
-            bool creditors=false,property=false;
-            for(const auto& [id,t]:reparations_) {
-                (void)id;
-                if(t.payer==firm&&t.remaining>0){creditors=true;break;}
-            }
-            if(creditors)continue;
-            for(const auto& [site,record]:facilities_)
-                if(record.owner==firm){(void)site;property=true;break;}
-            if(property)continue;
-            for(const auto& [key,qty]:goods_.holdings())
-                if(key.holder_id==firm&&qty>0){property=true;break;}
-            if(property)continue;
-            for(const auto& [holder,asset]:security_accounts_)
-                if(holder==firm&&shares(asset,firm)>0){
-                    property=true;break;
-                }
-            if(property)continue;
-            for(const auto& [key,claim]:dividends_) {
-                (void)key;
-                if(claim.payer==firm){creditors=true;break;}
-            }
-            if(creditors)continue;
+            if(bankrupt_estate_has_non_cash_rights(firm))continue;
+            bool property=false;
             const Money available=std::max<Money>(0,
                 phase_d_cash_available(firm));
             if(available<=0)continue;
@@ -1841,34 +1858,7 @@ public:
             if(money_.has_account(account(firm,"interest_payable"))&&
                money_.balance(account(firm,"interest_payable"))<0)
                 continue;
-            bool has_open_reparations=false;
-            for(const auto& [id,t]:reparations_) {
-                (void)id;
-                if(t.payer==firm&&t.remaining>0) {
-                    has_open_reparations=true;
-                    break;
-                }
-            }
-            if(has_open_reparations)continue;
-            bool has_property=false;
-            for(const auto& [site,f]:facilities_)
-                if(f.owner==firm){(void)site;has_property=true;break;}
-            if(has_property)continue;
-            for(const auto& [key,qty]:goods_.holdings())
-                if(key.holder_id==firm&&qty>0){
-                    has_property=true;break;
-                }
-            if(has_property)continue;
-            for(const auto& [holder,asset]:security_accounts_)
-                if(holder==firm&&shares(asset,firm)>0){
-                    has_property=true;break;
-                }
-            if(has_property)continue;
-            for(const auto& [key,dividend]:dividends_)
-                if(dividend.payer==firm){
-                    (void)key;has_property=true;break;
-                }
-            if(has_property)continue;
+            if(bankrupt_estate_has_non_cash_rights(firm))continue;
             completed_liquidations_[firm]=today;
             events_.push_back("empty-real-bankrupt-estate-closed");
         }
