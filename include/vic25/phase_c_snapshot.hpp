@@ -83,6 +83,19 @@ void fields(Archive& a,T& x) {
         V(legal_basis);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,P1Institution>){
         V(country);V(public_institution_id);V(kind);V(level);
+    } else if constexpr(std::is_same_v<X,P3Stance>){
+        V(preference_ppm);V(importance_ppm);
+    } else if constexpr(std::is_same_v<X,P3Attitude>){
+        V(slice);V(radical_ppm);V(loyal_ppm);V(engagement_ppm);
+        V(observed_day);V(issues);
+    } else if constexpr(std::is_same_v<X,P3Group>){
+        V(country);V(id);V(leader_anchor);V(issue_domain);
+        V(preferred_choice);V(type);V(organization_ppm);
+        V(institutional_access_ppm);
+    } else if constexpr(std::is_same_v<X,P3Movement>){
+        V(id);V(country);V(issue_domain);V(desired_choice);
+        V(region);V(goal);V(groups);V(parties);
+        V(activism_ppm);V(radical_ppm);V(active);
     } else if constexpr(std::is_same_v<X,P4Party>){
         V(id);V(country);V(head_candidate);V(organization_ppm);
         V(registered);V(active);
@@ -427,6 +440,14 @@ struct SnapshotCodec {
             ar(w.p2_group_demands_);
             ar(w.p2_negotiated_);
         }
+        if(!w.p3_groups_.empty()||!w.p3_attitudes_.empty()||
+           !w.p3_movements_.empty()) {
+            ar(std::string("VIC25_PHASEC_P3_POLITICS_1"));
+            ar(w.p3_attitudes_);
+            ar(w.p3_groups_);
+            ar(w.p3_movements_);
+            ar(w.p3_last_reaction_day_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -437,7 +458,8 @@ struct SnapshotCodec {
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
-             seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false;
+             seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
+             seen_p3=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -567,6 +589,16 @@ struct SnapshotCodec {
                    w.p2_group_demands_.size()>1'000'000||
                    w.p2_negotiated_.size()>1'000'000)
                     throw std::runtime_error("oversized P2 parliamentary record");
+            } else if(extension=="VIC25_PHASEC_P3_POLITICS_1"&&!seen_p3) {
+                seen_p3=true;
+                ar(w.p3_attitudes_);
+                ar(w.p3_groups_);
+                ar(w.p3_movements_);
+                ar(w.p3_last_reaction_day_);
+                if(w.p3_attitudes_.size()>5'000'000||
+                   w.p3_groups_.size()>500'000||
+                   w.p3_movements_.size()>100'000)
+                    throw std::runtime_error("oversized POP political state");
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
