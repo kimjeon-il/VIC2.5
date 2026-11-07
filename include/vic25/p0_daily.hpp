@@ -1540,14 +1540,18 @@ public:
                                 break;
                             }
                         }
-                    if(fighting_capability)continue;
                     const auto treaty_id=
                         std::string(war.armistice?"AUTO:PEACE:":"AUTO:CEASEFIRE:")+id;
                     if(gh.diplomacy().treaties.contains(treaty_id))continue;
                     const auto idle_from=std::max(war.started_day,
                                                   war.last_combat_day);
-                    if(today<idle_from || today-idle_from<
-                       (war.armistice?90:30))continue;
+                    // An armed but wholly inactive front can also be a
+                    // stalemate. Do not lock countries into endless war
+                    // merely because both sides still own cartridges.
+                    const auto required_idle=war.armistice?90:
+                        (fighting_capability?90:30);
+                    if(today<idle_from||today-idle_from<required_idle)
+                        continue;
                     phasegh::TreatyClause term;
                     term.id="end-hostilities";
                     term.obligor=war.attacker;
