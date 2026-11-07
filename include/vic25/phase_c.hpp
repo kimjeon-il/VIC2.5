@@ -1626,6 +1626,10 @@ public:
 
     // Execute an externally identified command at most once across committed
     // months. A failed staged month also rolls back its dedupe set.
+    [[nodiscard]] bool command_processed(
+            const std::string& external_id)const {
+        return processed_commands_.contains(external_id);
+    }
     void command_once(const std::string& external_id, const Task& command) {
         ensure(stage_ >= 0 && !external_id.empty() &&
                !processed_commands_.contains(external_id),
