@@ -1442,6 +1442,12 @@ public:
         require_stage({9});
         ensure(people_.has_slice(slice) && interest_groups_.contains(group) &&
                n>0 && n<=people_.slice(slice).count, "invalid group membership");
+        const auto& d=people_.demographic(people_.slice(slice).key.demographic);
+        const auto country=sovereignty_.find(d.region);
+        if(country!=sovereignty_.end())
+            ensure(p2_rule(country->second,country->second,
+                   P2ClauseKind::political_association_allowed).value_or(1)!=0,
+                   "P2 lawful interest-group registration prohibited");
         membership_[{slice,group}]=n;
         events_.push_back("interest-group-membership");
     }
@@ -1458,6 +1464,15 @@ public:
                strikers<=participants && strikers<=people_.employed(slice) &&
                scheduled_strikes_[month()+1][slice]+strikers<=people_.employed(slice),
                "political action exceeds actual participants or workers");
+        if(strikers>0) {
+            const auto& d=people_.demographic(
+                people_.slice(slice).key.demographic);
+            const auto country=sovereignty_.find(d.region);
+            if(country!=sovereignty_.end())
+                ensure(p2_rule(country->second,country->second,
+                       P2ClauseKind::peaceful_strike_allowed).value_or(1)!=0,
+                       "P2 legal strike right does not permit this action");
+        }
         participation_this_month_[slice]+=participants;
         scheduled_strikes_[month()+1][slice]+=strikers;
         events_.push_back("verified-protest");
@@ -2198,6 +2213,11 @@ public:
         ensure(people_.has_slice(slice)&&n>0&&interest_groups_.contains(group),
                "invalid political issue association");
         const auto& d=people_.demographic(people_.slice(slice).key.demographic);
+        const auto country=sovereignty_.find(d.region);
+        if(country!=sovereignty_.end())
+            ensure(p2_rule(country->second,country->second,
+                   P2ClauseKind::political_association_allowed).value_or(1)!=0,
+                   "P2 no legal political organization in this jurisdiction");
         ensure(n<=food_grievance(d.region)&&
                group_members(slice,group)+n<=people_.slice(slice).count,
                "political organization exceeds actual grievance or persons");
@@ -2425,6 +2445,9 @@ public:
                demo.service==phaseb::Service::active||
                demo.service==phaseb::Service::pow||
                demo.service==phaseb::Service::missing||
+               (demo.sex==phaseb::Sex::female&&
+                p2_rule(country,country,
+                  P2ClauseKind::female_suffrage_allowed).value_or(1)==0)||
                people_.age_months_slice(id)<
                    static_cast<std::int64_t>(p2_voting_age(country))*12)
                 continue;
