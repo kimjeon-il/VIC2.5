@@ -17,7 +17,7 @@ static daily::DayIndex day(daily::Date d){return daily::to_day_index(d);}
 struct Scenario {
     phasegh::World gh{24000};
     phaseb::Id urban{}, rural{};
-    Scenario() {
+    explicit Scenario(bool fixed_cycle=false) {
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"RA1","A");
         geo.seed_province(2,"RA2","A");
@@ -55,7 +55,8 @@ struct Scenario {
         core.p4_seed_contest({"A-lower","A","national","law:house",
             phasec::P4Office::legislature,
             phasec::P4BallotMethod::list_dhondt,
-            phasec::P4TermMode::restart_after_poll,
+            fixed_cycle?phasec::P4TermMode::fixed_cycle:
+                phasec::P4TermMode::restart_after_poll,
             48,1'000'000,5,election,election,-1,true,true,false});
         core.p4_seed_contest({"A-local","A","RA1","law:local",
             phasec::P4Office::local,
@@ -197,12 +198,29 @@ static void constitutional_reform_changes_date_on_effective_day_only() {
           "constitutional amendment incorrectly changed unrelated election cycle");
 }
 
+static void fixed_cycle_early_poll_preserves_original_regular_date(){
+    Scenario fixture(true);
+    p0::Policies policy;
+    policy.dissolutions.push_back({
+        "A-lower","PRESIDENT_A","law:fixed-cycle-early",
+        {2000,1,3},{2000,2,1}});
+    p0::DailyGame g(daily::World::adopt(std::move(fixture.gh),44),policy);
+    g.advance_day();
+    g.advance_day();
+    g.advance_day();
+    while(g.world().date()<daily::Date{2000,2,2})g.advance_day();
+    check(c(g).p4_contest("A-lower").next_poll_day==day({2004,1,2})&&
+          c(g).p4_contest("A-local").next_poll_day==day({2002,1,2}),
+          "fixed-cycle early election must preserve old regular polling date");
+}
+
 int main(){
     try{
         distinct_elections_party_affinity_and_checkpoint();
         dissolve_then_early_poll_restarts_only_one_calendar();
         constitutional_reform_changes_date_on_effective_day_only();
-        std::cout<<"P4 election governance: three integration scenarios PASS\n";
+        fixed_cycle_early_poll_preserves_original_regular_date();
+        std::cout<<"P4 election governance: four integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& ex){
         std::cerr<<"P4 GOVERNANCE FAILED: "<<ex.what()<<"\n";
