@@ -2968,8 +2968,11 @@ public:
                        !region.empty(),
                        "P5 armed organization has fictitious territory");
         }
+        ensure(p5_action_ids_.size()==p5_actions_.size(),
+               "P5 action identity registry out of sync");
         for(const auto& action:p5_actions_) {
-            ensure(p3_movements_.contains(action.movement)&&
+            ensure(p5_action_ids_.contains(action.id)&&
+                   p3_movements_.contains(action.movement)&&
                    action.day>=0&&action.participants>=0&&
                    action.strikers>=0&&action.strikers<=action.participants&&
                    static_cast<unsigned>(action.kind)<=
@@ -3494,6 +3497,7 @@ private:
     std::int64_t p3_last_reaction_day_{-1};
     std::map<std::string,P5Crisis> p5_crises_;
     std::vector<P5CollectiveAction> p5_actions_;
+    std::set<std::string> p5_action_ids_; // derived from action journal
     std::vector<P5Settlement> p5_settlements_;
     // Only evidence of real C military control, not duplicate ownership.
     std::map<std::string,std::set<std::string>> p5_control_evidence_;
