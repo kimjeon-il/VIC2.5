@@ -1,3 +1,5 @@
+> **2026-11-07 잔여작업 추가 진행:** [군수 보급·다수 전선·OHM 시기별 교통망·파산 청산·국채 유통시장 구현 범위](docs/time/DAILY_REMAINDER_INCREMENT_2026-11-07.md). 빌드·검사·CI 실행 생략, 세계 전역 실측 자료 미적재, PR #19 Draft, main 미병합.
+
 > **2026-11-07 기업청산·교통망·다전선·국가재정 후속 구현:** [코드 변경/미완 상태 보고서](docs/time/ENTERPRISE_TRANSPORT_WAR_FISCAL_2026-11-07.md) · [세계 교통망 데이터 입력 계약](docs/time/VERIFIED_TRANSPORT_DATA_PIPELINE_2026-11-07.md). **전 세계 자료는 아직 적재되지 않았으며, 빌드·검사·CI 미실행, main 미병합.**
 
 > **2026-11-07 추가 핵심 구현(미검증):** [실제 임금채권·파산, POP 생일, 자율 공장 확장, 간선별 세계 복합 물류, 전쟁·휴전·종전, 국가 국채·예산 처리 및 한계](docs/time/DAILY_REMAINING_CORE_2026-11-07.md). **모두 빌드/CTest/CI 실행 생략, 부분 구현, main 미병합**.
