@@ -404,14 +404,30 @@ public:
         return units_.at(unit);
     }
     void phase_time_move_army(const std::string& unit,
-                              const std::string& destination) {
+                              const std::string& destination,
+                              Quantity carried_ammunition=0) {
         require_stage({10});
         auto it=army_deployments_.find(unit);
         ensure(it!=army_deployments_.end()&&
                sovereignty_.contains(destination)&&
-               active_strength(unit)>0,"invalid real army move");
+               active_strength(unit)>0&&carried_ammunition>=0 &&
+               carried_ammunition<=active_strength(unit),
+               "invalid real army move");
+        const auto old=it->second.region;
+        ensure(old!=destination,"army must actually move");
+        ensure(stock(unit,old,"ammunition")>=carried_ammunition,
+               "army march has no physical ammunition");
+        if(carried_ammunition>0) {
+            if(phase_d_reservation_mode_)
+                resources_.assert_goods_available(
+                    {unit,old,"ammunition"},carried_ammunition,
+                    stock(unit,old,"ammunition"));
+            goods_.transfer({unit,old,"ammunition"},
+                            {unit,destination,"ammunition"},
+                            carried_ammunition);
+        }
         it->second.region=destination;
-        events_.push_back("dated-army-relocation");
+        events_.push_back("dated-physical-army-march");
     }
     void seed_active(std::string unit, Id slice) {
         ensure(stage_ == -1 && commit_id_ == 0, "seed active after start");
