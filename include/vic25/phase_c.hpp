@@ -1584,6 +1584,8 @@ public:
     void appoint_cabinet(const std::string& country, const std::string& head,
                         std::string minister, const std::vector<std::string>& supporting_parties) {
         require_stage({9});
+        ensure(!p1_constitutions_.contains(country),
+               "P1 constitutional cabinet must use dated government formation");
         const auto& g=governments_.at(country);
         const auto& result=legislature_for(country);
         ensure(g.head_of_state == head && !minister.empty() &&
@@ -1597,6 +1599,8 @@ public:
                               const std::string& current_head,
                               std::string successor) {
         require_stage({9});
+        ensure(!p1_constitutions_.contains(country),
+               "P1 constitutional succession must use dated office transition");
         const auto& g=governments_.at(country);
         ensure(g.head_of_state == current_head && !successor.empty() &&
                current_head != successor, "invalid head-of-state succession");
@@ -2252,6 +2256,8 @@ public:
     void hold_election(People registered, People invalid, People seats,
                        const std::map<std::string, People>& votes) {
         require_stage({9});
+        ensure(p1_constitutions_.empty(),
+               "P1 constitutional country requires national P4 election registry");
         ensure(!election_this_month_, "duplicate election this month");
         const People eligible = eligible_voters();
         ensure(registered >= 0 && registered <= eligible && invalid >= 0 &&
@@ -3078,6 +3084,8 @@ private:
             const std::string& country) const {
         const auto it=country_elections_.find(country);
         if(it!=country_elections_.end())return it->second;
+        ensure(!p1_constitutions_.contains(country),
+               "P1 constitutional law needs the country's own election");
         // Legacy single-legislature fixtures retain their original meaning.
         // Once a modern country-specific election exists, other nations must
         // have their OWN election rather than reuse a neighbour's seats.
