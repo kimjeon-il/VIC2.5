@@ -71,7 +71,8 @@ inline P1AuthorityView IntegratedWorld::p1_authority(
     const bool confidence=formation!=P1FormationRule::head_appointment;
     return {formation,constitution.legislature!=P1LegislatureKind::none,
             confidence,!confidence,
-            constitution.power==P1PowerDistribution::autocracy&&!confidence};
+            !confidence&&(constitution.power==P1PowerDistribution::autocracy||
+                         constitution.legislature==P1LegislatureKind::none)};
 }
 
 inline void IntegratedWorld::seed_p1_coalition(
