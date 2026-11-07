@@ -104,6 +104,8 @@ void fields(Archive& a,T& x) {
         V(pressure_days);V(calm_days);V(last_checked_day);
         V(armed_day);V(settled_day);V(pledged_units);
         V(contested_regions);V(verified_engagements);
+    } else if constexpr(std::is_same_v<X,P5ControlReconciliation>){
+        V(crisis_id);V(country);V(successor_head);V(verified_regions);
     } else if constexpr(std::is_same_v<X,P5Settlement>){
         V(id);V(crisis_id);V(legal_basis);V(successor_head);
         V(new_sovereign);V(region);V(kind);V(day);
@@ -462,6 +464,7 @@ struct SnapshotCodec {
         if(!w.p5_crises_.empty()||!w.p5_capitals_.empty()||
            !w.p5_actions_.empty()||
            !w.p5_settlements_.empty()||
+           !w.p5_scheduled_control_reconciliation_.empty()||
            !w.p5_scheduled_daily_strikes_.empty()||
            !w.p5_active_daily_strikes_.empty()) {
             ar(std::string("VIC25_PHASEC_P5_UNREST_1"));
@@ -470,6 +473,7 @@ struct SnapshotCodec {
             ar(w.p5_actions_);
             ar(w.p5_settlements_);
             ar(w.p5_control_evidence_);
+            ar(w.p5_scheduled_control_reconciliation_);
             ar(w.p5_scheduled_daily_strikes_);
             ar(w.p5_active_daily_strikes_);
         }
@@ -631,6 +635,7 @@ struct SnapshotCodec {
                 ar(w.p5_actions_);
                 ar(w.p5_settlements_);
                 ar(w.p5_control_evidence_);
+                ar(w.p5_scheduled_control_reconciliation_);
                 ar(w.p5_scheduled_daily_strikes_);
                 ar(w.p5_active_daily_strikes_);
                 w.p5_action_ids_.clear();
@@ -643,6 +648,7 @@ struct SnapshotCodec {
                    w.p5_actions_.size()>1'000'000||
                    w.p5_settlements_.size()>1'000'000||
                    w.p5_control_evidence_.size()>100'000||
+                   w.p5_scheduled_control_reconciliation_.size()>1'000'000||
                    w.p5_scheduled_daily_strikes_.size()>1'000'000||
                    w.p5_active_daily_strikes_.size()>5'000'000)
                     throw std::runtime_error("oversized P5 real civic/crisis state");
