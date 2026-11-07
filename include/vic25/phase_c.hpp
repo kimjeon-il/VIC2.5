@@ -427,6 +427,29 @@ public:
                             {unit,destination,"ammunition"},
                             carried_ammunition);
         }
+        // Issued rifles/field equipment are physically carried by this
+        // same army. Spare, unassigned depots stay behind in their region.
+        std::vector<std::pair<std::string,Quantity>> carried_equipment;
+        for(const auto& [key,units]:equipment_assignment_) {
+            const auto& [assigned_unit,region,good]=key;
+            if(assigned_unit==unit&&region==old&&units>0)
+                carried_equipment.emplace_back(good,units);
+        }
+        for(const auto& [good,units]:carried_equipment) {
+            ensure(stock(unit,old,good)>=units&&units<=active_strength(unit),
+                   "army has no documented physical issued equipment");
+            if(phase_d_reservation_mode_)
+                resources_.assert_goods_available({unit,old,good},units,
+                    stock(unit,old,good));
+            const auto next=std::make_tuple(unit,destination,good);
+            ensure(equipment_assignment_[next]<=
+                   std::numeric_limits<Quantity>::max()-units,
+                   "equipment moving overflows destination assignment");
+            goods_.transfer({unit,old,good},{unit,destination,good},units);
+            equipment_assignment_[next]=phaseb::add_checked(
+                equipment_assignment_[next],units);
+            equipment_assignment_.erase({unit,old,good});
+        }
         it->second.region=destination;
         events_.push_back("dated-physical-army-march");
     }
