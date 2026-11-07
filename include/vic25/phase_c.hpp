@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <set>
@@ -1790,9 +1791,37 @@ public:
                         phaseb::mul_checked(available/total_shares,shares),
                         phaseb::mul_checked(available%total_shares,shares)/
                         total_shares);
-                if(amount<=0)continue;
-                pay(firm,owner,amount);
-                remainder-=amount;
+                // Investment principal securities are actually retired.
+                // Record the investor's realized accounting gain/loss
+                // separately from the transferred existing bank deposit.
+                if(amount>0) {
+                    if(phase_d_reservation_mode_)
+                        resources_.assert_cash_available(firm,amount,
+                                                          cash(firm));
+                    std::vector<Posting> lines{
+                        {account(firm,"capital"),amount,0},
+                        {account(firm,"cash"),0,amount},
+                        {account(owner,"cash"),amount,0},
+                        {security_account(owner,asset),0,shares}};
+                    if(amount>shares)
+                        lines.push_back({account(owner,"revenue"),0,
+                                         amount-shares});
+                    else if(shares>amount)
+                        lines.push_back({account(owner,"expense"),
+                                         shares-amount,0});
+                    money_.post({unique("real-company-equity-liquidation"),
+                        "actual cash proceeds of retired corporate shares",
+                        lines});
+                    remainder-=amount;
+                } else {
+                    // A legitimate investor may receive zero when the
+                    // estate has insufficient residual proceeds.
+                    money_.post({unique("equity-worthless-retirement"),
+                        "unrecoverable principal of dissolved corporation",{
+                        {account(owner,"expense"),shares,0},
+                        {security_account(owner,asset),0,shares}}});
+                }
+                ownership_.redeem(asset,owner,shares);
             }
             events_.push_back("actual-liquidation-equity-cash-distribution");
         }
