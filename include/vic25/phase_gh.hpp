@@ -233,7 +233,8 @@ enum class ClauseKind : std::uint8_t {
     tariff_exemption, trade_embargo, trade_quota, military_access,
     defense_guarantee, non_aggression, territorial_cession,
     financial_aid, reparations, protectorate, research_cooperation,
-    cultural_exchange, ceasefire, military_withdrawal
+    cultural_exchange, ceasefire, military_withdrawal,
+    peace_settlement // distinct from a temporary armistice
 };
 struct TreatyClause {
     std::string id, obligor, beneficiary, good;
@@ -340,11 +341,17 @@ struct DailyTreaty {
     std::int64_t proposed_day{}, effective_day{};
     bool approved_a{}, approved_b{}, active{};
 };
+struct WarState {
+    std::string id,crisis,attacker,defender;
+    std::int64_t started_day{},last_combat_day{-1},ended_day{-1};
+    bool active{true},armistice{};
+};
 struct DiplomacyState {
     std::map<std::pair<std::string,std::string>,Tariff> tariffs;
     std::vector<PendingTariff> scheduled_tariffs;
     std::map<std::string,Treaty> treaties;
     std::map<std::string,DailyTreaty> daily_treaties;
+    std::map<std::string,WarState> wars; // legal war state only, never duplicate army ledger
     std::map<std::string,Organization> organizations;
     std::map<std::string,Protectorate> protectorates;
     std::map<std::string,Crisis> crises;
@@ -834,6 +841,87 @@ public:
     void exchange_currencies(const std::string& a, const std::string& b,
                              const std::string& sold, Money sold_amount,
                              const std::string& bought, Money bought_amount);
+    // War starts only from a recorded unresolved crisis backed by actual
+    // opposed, deployed and armed units at its documented disputed province.
+    // No abstract belligerence points, free armies or automatic claims.
+    bool begin_war_from_crisis(const std::string& crisis_id,
+                              const std::string& claimant,
+                              const std::string& prime) {
+        at(9);
+        auto it=diplomacy_.crises.find(crisis_id);
+        if(it==diplomacy_.crises.end()||day_index_<0)return false;
+        auto& crisis=it->second;
+        if(crisis.claimant!=claimant||
+           (crisis.status!=CrisisStatus::active &&
+            crisis.status!=CrisisStatus::escalated)||
+           diplomacy_.wars.contains("WAR:"+crisis_id))
+            return false;
+        leader(phase_c(),claimant,prime);
+        allow_foreign_policy(claimant);
+        const auto& geographical=spatial_.spatial();
+        if(!geographical.provinces.contains(crisis.province))return false;
+        const auto& front=geographical.provinces.at(crisis.province).region;
+        bool claimant_ready=false,respondent_ready=false;
+        for(const auto& [unit,deployment]:phase_c().army_deployments()) {
+            if(deployment.region!=front||phase_c().active_strength(unit)<=0||
+               phase_c().stock(unit,front,"ammunition")<=0)continue;
+            if(deployment.country==claimant)claimant_ready=true;
+            if(deployment.country==crisis.respondent)respondent_ready=true;
+        }
+        if(!claimant_ready||!respondent_ready)return false;
+        (void)phase_c().government(crisis.respondent);
+        const auto id="WAR:"+crisis_id;
+        diplomacy_.wars.emplace(id,WarState{
+            id,crisis_id,claimant,crisis.respondent,day_index_,-1,-1,true,false});
+        crisis.status=CrisisStatus::escalated;
+        ++diplomacy_.revision;
+        return true;
+    }
+    void record_actual_war_engagement(const std::string& id) {
+        at(10);
+        auto& war=diplomacy_.wars.at(id);
+        require(war.active&&day_index_>=war.started_day,
+                "H_ERR_NO_ACTIVE_WAR_FRONT");
+        war.last_combat_day=day_index_;
+        ++diplomacy_.revision;
+    }
+    // A ratified, effective ceasefire pauses combat; only an explicit peace
+    // settlement clause terminates the war permanently. Neither transfers
+    // provinces nor creates payments: those require their own C/E treaty acts.
+    void reconcile_war_treaties() {
+        at(0);
+        if(day_index_<0)return;
+        for(auto& [id,war]:diplomacy_.wars) {
+            (void)id;
+            if(war.ended_day>=0)continue;
+            bool ceasefire=false,peace=false;
+            for(const auto& [treaty_id,t]:diplomacy_.treaties) {
+                (void)treaty_id;
+                if(!t.active)continue;
+                for(const auto& clause:t.clauses) {
+                    if(clause.effective>phase_c().month()||
+                       (clause.expires>=0&&clause.expires<phase_c().month()))
+                        continue;
+                    const bool matches=
+                        (clause.obligor==war.attacker&&
+                         clause.beneficiary==war.defender)||
+                        (clause.obligor==war.defender&&
+                         clause.beneficiary==war.attacker);
+                    if(!matches)continue;
+                    if(clause.kind==ClauseKind::ceasefire)ceasefire=true;
+                    if(clause.kind==ClauseKind::peace_settlement)peace=true;
+                }
+            }
+            if(peace) {
+                war.active=false;war.armistice=false;war.ended_day=day_index_;
+                ++diplomacy_.revision;
+            } else if(war.active==ceasefire || war.armistice!=ceasefire) {
+                war.active=!ceasefire;
+                war.armistice=ceasefire;
+                ++diplomacy_.revision;
+            }
+        }
+    }
     void advance_legal_state() {
         at(0);
         for(const auto& rule:diplomacy_.scheduled_tariffs) {
@@ -939,6 +1027,13 @@ private:
         for(const auto& [id,c]:h.crises)
             require(id==c.id && s.spatial().provinces.contains(c.province),
                     "H_ERR_CRISIS_INVARIANT");
+        for(const auto& [id,war]:h.wars)
+            require(id==war.id&&h.crises.contains(war.crisis)&&
+                    war.attacker!=war.defender&&
+                    war.started_day>=0&&war.last_combat_day>=-1&&
+                    war.ended_day>=-1&&
+                    (war.ended_day<0||!war.active),
+                    "H_ERR_WAR_RECORD_INVARIANT");
         for(const auto& [id,cargo]:g.daily_shipments) {
             require(id==cargo.id&&!id.empty()&&!cargo.buyer.empty()&&
                     !cargo.destination.empty()&&!cargo.good.empty()&&
@@ -985,6 +1080,7 @@ public:
                                 ++new_diplomacy.revision;
                             }
                         }
+                        stage.reconcile_war_treaties();
                     }
                     for(const auto& fn:tasks[static_cast<std::size_t>(n)])
                         fn(stage);
