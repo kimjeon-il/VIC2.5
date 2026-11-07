@@ -246,6 +246,9 @@ public:
     [[nodiscard]] bool has_government(const std::string& country)const {
         return governments_.contains(country);
     }
+    [[nodiscard]] bool has_any_government()const {
+        return !governments_.empty();
+    }
 
     void seed_actor(const std::string& who, Money amount) {
         ensure(stage_ == -1 && commit_id_ == 0, "actor seed after simulation start");
