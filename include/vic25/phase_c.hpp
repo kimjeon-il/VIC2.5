@@ -1155,6 +1155,13 @@ public:
     [[nodiscard]] const GovernmentState& government(const std::string& country) const {
         return governments_.at(country);
     }
+    [[nodiscard]] const std::map<std::string,GovernmentState>&
+            governments()const {return governments_;}
+    [[nodiscard]] bool has_pending_country_tax(const std::string& country)const {
+        const auto scheduled=scheduled_country_income_tax_.find(month()+1);
+        return scheduled!=scheduled_country_income_tax_.end() &&
+               scheduled->second.contains(country);
+    }
     // Optional explicit country->treasury binding. The wallet remains in the
     // original C FinancialLedger; no sovereign cash/debt is duplicated.
     void seed_country_treasury(const std::string& country,
@@ -1212,8 +1219,9 @@ public:
         const auto& result=legislature_for(country);
         ensure(g.prime_minister == proposer && result.total_seats == g.chamber_seats,
                "unauthorized tax bill or missing national legislature");
-        ensure(coalition_seats(supporting_parties,result) >= g.quorum,
-               "insufficient national legislative votes");
+        ensure(coalition_seats(supporting_parties,result) >= g.quorum &&
+               !has_pending_country_tax(country),
+               "insufficient votes or country tax law already scheduled");
         scheduled_country_income_tax_[month()+1][country]=ppm;
         events_.push_back("constitutional-tax-law:"+country);
     }
