@@ -141,6 +141,16 @@ struct ElectionTermReform {
     std::vector<std::string> supporting_parties;
     daily::Date decision_date{};
 };
+enum class LegislativeAction :std::uint8_t {
+    introduce, approve, promulgate
+};
+struct LegislativeOrder {
+    daily::Date date{};
+    LegislativeAction action{LegislativeAction::introduce};
+    phasec::P2Bill bill; // populated for introduction only
+    std::string bill_id,head;
+    std::vector<std::string> supporting_parties;
+};
 struct CountryAI {
     std::string country,prime_minister,domestic_region,good,domestic_seller;
     Money protect_below_price{};
@@ -274,6 +284,7 @@ struct Policies {
     std::vector<GovernmentFormation> government_formations; // append-only
     std::vector<ParliamentDissolution> dissolutions;
     std::vector<ElectionTermReform> election_term_reforms;
+    std::vector<LegislativeOrder> legislative_orders; // append-only
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -430,6 +441,21 @@ struct Policies {
                reform.amendment.effective_day<=
                    daily::to_day_index(reform.decision_date))
                 throw std::invalid_argument("P0_INVALID_P4_TERM_REFORM");
+        std::set<std::tuple<daily::DayIndex,std::string,LegislativeAction>>
+            p2_legislative_events;
+        for(const auto& order:legislative_orders) {
+            const auto day=daily::to_day_index(order.date);
+            const auto bill_id=(order.action==LegislativeAction::introduce)?
+                order.bill.id:order.bill_id;
+            if(bill_id.empty()||
+               static_cast<unsigned>(order.action)>
+                   static_cast<unsigned>(LegislativeAction::promulgate)||
+               !p2_legislative_events.insert({day,bill_id,order.action}).second||
+               (order.action==LegislativeAction::introduce&&
+                (order.bill.proposer.empty()||order.bill.country.empty()))||
+               (order.action==LegislativeAction::promulgate&&order.head.empty()))
+                throw std::invalid_argument("P0_INVALID_P2_LEGISLATIVE_ORDER");
+        }
         for(const auto& e:elections)
             if(e.country.empty()||e.incumbent_party.empty()||e.reform_party.empty()||
                e.incumbent_party==e.reform_party||e.year<1||e.year>9999||
@@ -1014,9 +1040,16 @@ public:
                                 seats=n;
                             }
                         if(majority.empty())continue;
-                        const int next=std::min(ceiling,
-                            fiscal.income_tax_ppm+step);
-                        if(next>fiscal.income_tax_ppm)
+                        const auto legal_ceiling=c.p2_rule(
+                            country,country,phasec::P2ClauseKind::income_tax_max_ppm)
+                            .value_or(1'000'000);
+                        const auto legal_floor=c.p2_rule(
+                            country,country,phasec::P2ClauseKind::income_tax_min_ppm)
+                            .value_or(0);
+                        const int next=std::min({ceiling,
+                            static_cast<int>(legal_ceiling),
+                            fiscal.income_tax_ppm+step});
+                        if(next>fiscal.income_tax_ppm&&next>=legal_floor)
                             c.propose_tax_law(country,gov.prime_minister,
                                                {majority},next);
                     }
@@ -1433,7 +1466,7 @@ public:
                     if(c.sovereignty(d.region)!=election.country||d.citizenship!="citizen"||
                        d.service==phaseb::Service::active||d.service==phaseb::Service::pow||
                        d.service==phaseb::Service::missing||
-                       pop.age_months_slice(id)<static_cast<std::int64_t>(c.voting_age())*12)
+                       pop.age_months_slice(id)<static_cast<std::int64_t>(c.p2_voting_age(election.country))*12)
                         continue;
                     const People voters=times(s.count,election.turnout_ppm)/1'000'000;
                     const People unemployed=s.count-pop.employed(id);
@@ -1452,6 +1485,28 @@ public:
                     c.hold_country_election(election.country,registered,0,
                          {{election.incumbent_party,incumbent},
                           {election.reform_party,reform}});
+            });
+        }
+        // P2 bills run through the same Stage9 government/legislative
+        // authority. An Act may be introduced, approved and promulgated in
+        // distinct political decisions without rewriting economic ledgers.
+        for(const auto& order:decisions.legislative_orders) {
+            if(date!=order.date)continue;
+            plan[9].push_back([order,today=world_.day_index()]
+                             (phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                switch(order.action) {
+                    case LegislativeAction::introduce:
+                        c.p2_submit_bill(order.bill,today);
+                        break;
+                    case LegislativeAction::approve:
+                        c.p2_approve_bill(order.bill_id,
+                                          order.supporting_parties);
+                        break;
+                    case LegislativeAction::promulgate:
+                        c.p2_promulgate_bill(order.bill_id,order.head,today);
+                        break;
+                }
             });
         }
         for(const auto& action:decisions.dissolutions) {
