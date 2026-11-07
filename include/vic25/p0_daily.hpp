@@ -170,6 +170,22 @@ struct PublicBudgetProgram {
 };
 // These bids represent real agents willing to buy bankrupt property. Assets
 // are transferred only with actual existing C cash, never at an invented price.
+// One national cash budget and bounded competitive bond auction. Quotes are
+// actual buyer mandates; an unclaimed issue cannot create treasury deposits.
+struct NationalBudgetEnvelope {
+    std::string country;
+    Money reserve_cash{},maximum_daily_spending{},target_cash{};
+    Money maximum_daily_new_bonds{},maximum_total_bond_principal{};
+    int minimum_coupon_ppm{},maximum_coupon_ppm{};
+    std::int64_t maturity_days{};
+    bool offer_to_operating_firms{true};
+    bool finance_real_public_services{true};
+};
+struct BondBuyerOrder {
+    std::string country,buyer;
+    Money max_daily_subscription{},cash_reserve{};
+    int minimum_coupon_ppm{};
+};
 struct LiquidationStockBid {
     std::string firm,buyer,region,good;
     Quantity maximum_daily_units{};
@@ -220,6 +236,8 @@ struct Policies {
     std::vector<LiquidationStockBid> liquidation_stock_bids;
     std::vector<LiquidationFactoryBid> liquidation_factory_bids;
     bool retire_bank_debt_after_wages{true};
+    std::vector<NationalBudgetEnvelope> national_budget_envelopes;
+    std::vector<BondBuyerOrder> bond_buyer_orders;
 
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
@@ -259,6 +277,24 @@ struct Policies {
             if(b.site.empty()||b.buyer.empty()||b.actual_bid_price<=0||
                !unique_liquidation_sites.insert(b.site).second)
                 throw std::invalid_argument("P0_INVALID_LIQUIDATION_SITE_BID");
+        std::set<std::string> unique_national_budgets;
+        for(const auto& b:national_budget_envelopes)
+            if(b.country.empty()||
+               !unique_national_budgets.insert(b.country).second||
+               b.reserve_cash<0||b.maximum_daily_spending<0||
+               b.target_cash<0||b.maximum_daily_new_bonds<=0||
+               b.maximum_total_bond_principal<=0||
+               b.minimum_coupon_ppm<0||b.maximum_coupon_ppm<0||
+               b.minimum_coupon_ppm>b.maximum_coupon_ppm||
+               b.maximum_coupon_ppm>1'000'000||b.maturity_days<=0)
+                throw std::invalid_argument("P0_INVALID_NATIONAL_BUDGET");
+        std::set<std::pair<std::string,std::string>> unique_bond_orders;
+        for(const auto& order:bond_buyer_orders)
+            if(order.country.empty()||order.buyer.empty()||
+               order.max_daily_subscription<=0||order.cash_reserve<0||
+               order.minimum_coupon_ppm<0||order.minimum_coupon_ppm>1'000'000||
+               !unique_bond_orders.insert({order.country,order.buyer}).second)
+                throw std::invalid_argument("P0_INVALID_BOND_MARKET_ORDER");
         std::set<std::pair<Id,std::string>> seen_pop_goods;
         std::set<std::string> engaged;
         for(const auto& f:manufacturers)
@@ -640,6 +676,87 @@ public:
                     financing.investor,face,financing.annual_coupon_ppm,
                     today,phaseb::add_checked(today,financing.maturity_days));
             });
+        // Each country's financing requirement is determined from its real
+        // C treasury, not a fictitious construction point budget. Private
+        // bids are sorted by required coupon and capped by actual cash.
+        for(const auto& national:decisions.national_budget_envelopes)
+            plan[1].push_back(
+                [national,orders=decisions.bond_buyer_orders,
+                 today=world_.day_index()](phasegh::Stage& gh) {
+                    auto& c=gh.phase_c();
+                    if(!c.has_country_treasury(national.country))return;
+                    const auto fiscal=c.country_fiscal(national.country);
+                    const Money desired=phaseb::add_checked(
+                        national.target_cash,national.maximum_daily_spending);
+                    if(fiscal.cash>=desired||
+                       fiscal.bond_principal>=
+                         national.maximum_total_bond_principal)return;
+                    Money want=std::min({
+                        desired-fiscal.cash,
+                        national.maximum_daily_new_bonds,
+                        national.maximum_total_bond_principal-
+                            fiscal.bond_principal});
+                    std::vector<BondBuyerOrder> bids;
+                    for(const auto& order:orders)
+                        if(order.country==national.country)
+                            bids.push_back(order);
+                    if(national.offer_to_operating_firms&&
+                       national.minimum_coupon_ppm>0&&
+                       national.maximum_coupon_ppm>=
+                         c.annual_bank_interest_ppm()) {
+                        std::set<std::string> contacted;
+                        for(const auto& [site,f]:c.facilities()) {
+                            (void)site;
+                            const auto& owner=f.owner;
+                            if(!contacted.insert(owner).second||
+                               c.firm_bankrupt(owner)||!c.has_actor(owner)||
+                               c.has_government(owner)||
+                               owner==fiscal.treasury ||
+                               std::any_of(bids.begin(),bids.end(),
+                                    [&](const auto& bid){
+                                        return bid.buyer==owner;
+                                    }))continue;
+                            const Money free=std::max<Money>(0,
+                                c.phase_d_cash_available(owner));
+                            if(free<=1)continue;
+                            const Money reserve=free-free/4;
+                            if(free-reserve<=0)continue;
+                            bids.push_back({national.country,owner,
+                                free-reserve,reserve,
+                                c.annual_bank_interest_ppm()});
+                        }
+                    }
+                    std::sort(bids.begin(),bids.end(),
+                        [](const auto& a,const auto& b) {
+                            return std::tuple{a.minimum_coupon_ppm,a.buyer}<
+                                   std::tuple{b.minimum_coupon_ppm,b.buyer};
+                        });
+                    for(const auto& bid:bids) {
+                        if(want<=0)break;
+                        if(!c.has_actor(bid.buyer)||
+                           c.firm_bankrupt(bid.buyer)||
+                           bid.buyer==fiscal.treasury)continue;
+                        const int coupon=std::max(
+                            national.minimum_coupon_ppm,
+                            bid.minimum_coupon_ppm);
+                        if(coupon>national.maximum_coupon_ppm)continue;
+                        const Money liquidity=c.phase_d_cash_available(
+                            bid.buyer);
+                        if(liquidity<=bid.cash_reserve)continue;
+                        const Money purchase=std::min({
+                            want,bid.max_daily_subscription,
+                            liquidity-bid.cash_reserve});
+                        if(purchase<=0)continue;
+                        const auto id="P0:AUCTION:"+national.country+":"+
+                            std::to_string(today)+":"+bid.buyer;
+                        const auto& prime=
+                            c.government(national.country).prime_minister;
+                        c.issue_sovereign_bond(id,national.country,prime,
+                                              bid.buyer,purchase,coupon,today,
+                            phaseb::add_checked(today,national.maturity_days));
+                        want-=purchase;
+                    }
+                });
         auto salary_shortfall=std::make_shared<std::set<std::string>>();
         // A real Employment contract can pay a real household wallet each
         // calendar day. The C bank/tax ledger remains the sole authority.
