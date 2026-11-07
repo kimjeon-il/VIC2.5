@@ -1483,6 +1483,7 @@ public:
     void p5_confirm_actual_control(
         const std::string&,const std::string&,std::int64_t);
     void p5_settle(P5Settlement);
+    void phase_time_apply_p5_settlement(std::int64_t);
     void seed_interest_group(std::string group) {
         ensure(stage_==-1 && commit_id_==0 && !group.empty() &&
                interest_groups_.insert(std::move(group)).second, "invalid interest group");
@@ -2995,6 +2996,21 @@ public:
                    n<=people_.employed(slice)&&
                    currently_striking(slice)<=people_.employed(slice),
                    "P5 daily worker shutdown exceeds real employment");
+        for(const auto& [when,changes]:p5_scheduled_control_reconciliation_) {
+            ensure(when>=0,"P5 invalid future settlement calendar day");
+            for(const auto& change:changes) {
+                ensure(p5_crises_.contains(change.crisis_id)&&
+                       p5_crises_.at(change.crisis_id).stage==
+                           P5CrisisStage::settled&&
+                       governments_.contains(change.country)&&
+                       !change.successor_head.empty()&&
+                       !change.verified_regions.empty(),
+                       "P5 future political command transition lacks actual settlement");
+                for(const auto& region:change.verified_regions)
+                    ensure(sovereignty_.contains(region),
+                           "P5 future military control references nonexisting territory");
+            }
+        }
         for(const auto& [when,allocations]:p5_scheduled_daily_strikes_) {
             ensure(when>=0,"P5 invalid dated labor action");
             for(const auto& [slice,n]:allocations)
@@ -3509,6 +3525,8 @@ private:
     std::vector<P5Settlement> p5_settlements_;
     // Only evidence of real C military control, not duplicate ownership.
     std::map<std::string,std::set<std::string>> p5_control_evidence_;
+    std::map<std::int64_t,std::vector<P5ControlReconciliation>>
+        p5_scheduled_control_reconciliation_;
     std::map<std::int64_t,std::map<Id,People>> p5_scheduled_daily_strikes_;
     std::map<Id,People> p5_active_daily_strikes_;
     std::map<Id, People> participation_this_month_, strike_active_;
