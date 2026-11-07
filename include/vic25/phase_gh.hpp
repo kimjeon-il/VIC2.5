@@ -587,19 +587,33 @@ public:
         const auto used=trade_.edge_usage[key];
         const auto capacity=daily_budget::cumulative(
             edge.monthly_capacity,day_of_month,days_in_month);
-        require(used<=capacity&&quantity<=capacity-used,
+        const auto booked=trade_.day_cargo_reservations.find(cargo_id);
+        const bool reserved=booked!=trade_.day_cargo_reservations.end();
+        require(used<=capacity&&
+                (reserved||quantity<=capacity-used),
                 "G_DAILY_MONTHLY_CAPACITY_EXCEEDED");
         require(!cargo_id.empty()&&
                 !trade_.executed.contains("DAY:"+cargo_id),
                 "F_ERR_DUPLICATE_DAILY_DISPATCH");
-        const Money freight=phaseb::mul_checked(quantity,edge.freight_per_unit);
-        // Freight is a real monetary transaction, not a shadow transport
-        // points balance. An own-carrier route needs no internal transfer.
-        if(freight>0&&sender!=edge.carrier)
+        const Money freight=sender==edge.carrier?0:
+            phaseb::mul_checked(quantity,edge.freight_per_unit);
+        if(reserved) {
+            const auto& entry=booked->second;
+            require(entry.edge==edge_id&&entry.sender==sender&&
+                    entry.origin==origin&&entry.good==good&&
+                    entry.quantity==quantity&&entry.freight==freight,
+                    "F_ERR_RESERVED_ROUTE_DISAGREES_WITH_DISPATCH");
+            phase_c().phase_g_release_reserved_goods(
+                sender,origin,good,"F:"+cargo_id,quantity);
+            if(freight>0)
+                phase_c().phase_d_release_cash(sender,"F:"+cargo_id,freight);
+        }
+        if(freight>0)
             phase_c().pay(sender,edge.carrier,freight);
         phase_c().phase_time_dispatch(cargo_id,sender,origin,good,quantity);
         trade_.executed.insert("DAY:"+cargo_id);
-        trade_.edge_usage[key]=phaseb::add_checked(used,quantity);
+        if(reserved)trade_.day_cargo_reservations.erase(booked);
+        else trade_.edge_usage[key]=phaseb::add_checked(used,quantity);
         ++trade_.revision;
     }
 
@@ -1175,7 +1189,8 @@ private:
                             "G_ERR_NATIVE_INTERMODAL_MISSING_EDGE");
             }
         }
-        require(g.pending.empty(), "G_ERR_UNSETTLED_RESERVATIONS");
+        require(g.pending.empty()&&g.day_cargo_reservations.empty(),
+                "G_ERR_UNSETTLED_RESERVATIONS");
     }
 public:
     explicit World(Month starting_month=24000):core_(starting_month){}
@@ -1394,7 +1409,8 @@ public:
                         cargo.quantity,
                     "G_ERR_NATIVE_CARGO_NOT_BACKED_BY_INVENTORY");
         }
-        require(trade_.pending.empty(),"G_ERR_PENDING_OUTSIDE_MONTH");
+        require(trade_.pending.empty()&&trade_.day_cargo_reservations.empty(),
+                "G_ERR_PENDING_OUTSIDE_MONTH");
     }
     phasec::AdvanceReport advance(const Plan& plan={}) {
         TradeState next_trade=trade_;
