@@ -48,6 +48,12 @@ struct WageArrearsClaim {
     Money accrued{},outstanding{};
     std::int64_t issued_day{};
 };
+struct SovereignBond {
+    std::string id,country,treasury;
+    Money original_face{};
+    int coupon_ppm{};
+    std::int64_t issue_day{},maturity_day{};
+};
 struct CabinetChange {
     std::string country, new_head, new_prime_minister;
     bool replace_head{}, replace_prime{};
@@ -464,6 +470,115 @@ public:
             {security_account(buyer, asset), face, 0},
             {account(buyer, "cash"), 0, face}}});
         events_.push_back("bond-issued-paid");
+    }
+    [[nodiscard]] Money sovereign_bond_principal(const std::string& country)const {
+        Money total=0;
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            if(bond.country!=country)continue;
+            for(const auto& [holder,units]:ownership_.holders("bond:"+id)) {
+                (void)holder;
+                total=phaseb::add_checked(total,units);
+            }
+        }
+        return total;
+    }
+    [[nodiscard]] const std::map<std::string,SovereignBond>& sovereign_bonds()const {
+        return sovereign_bonds_;
+    }
+    // The investor must have the actual cash. Signing a budget does not
+    // create fictitious bond demand or state funds.
+    void issue_sovereign_bond(const std::string& id,
+                              const std::string& country,
+                              const std::string& prime_minister,
+                              const std::string& buyer,Money face,
+                              int coupon_ppm,std::int64_t today,
+                              std::int64_t maturity_day) {
+        require_stage({1});
+        ensure(governments_.contains(country)&&
+               governments_.at(country).prime_minister==prime_minister&&
+               has_country_treasury(country)&&
+               !sovereign_bonds_.contains(id)&&coupon_ppm>=0&&
+               coupon_ppm<=1'000'000&&today>=0&&maturity_day>today,
+               "unlawful or unbacked sovereign bond offer");
+        const auto& treasury=country_treasury(country);
+        ensure(treasury!=buyer,"government cannot self-buy its bond");
+        issue_bond(id,treasury,buyer,face);
+        sovereign_bonds_.emplace(id,SovereignBond{
+            id,country,treasury,face,coupon_ppm,today,maturity_day});
+        events_.push_back("real-sovereign-bond-financed");
+    }
+    void phase_time_service_sovereign_bonds(std::int64_t today) {
+        require_stage({5});
+        ensure(today>=0,"invalid sovereign bond servicing day");
+        constexpr Money denominator=365'000'000;
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            if(today<=bond.issue_day)continue;
+            const auto holders=ownership_.holders("bond:"+id);
+            for(const auto& [holder,principal]:holders) {
+                if(principal<=0||bond.coupon_ppm<=0)continue;
+                const auto key=std::make_pair(id,holder);
+                const Money old=sovereign_coupon_fraction_[key];
+                const Money whole=phaseb::mul_checked(
+                    principal/denominator,bond.coupon_ppm);
+                const Money part=phaseb::add_checked(phaseb::mul_checked(
+                    principal%denominator,bond.coupon_ppm),old);
+                const Money coupon=phaseb::add_checked(whole,part/denominator);
+                sovereign_coupon_fraction_[key]=part%denominator;
+                if(coupon<=0)continue;
+                const auto payable=account(bond.treasury,"bond_coupon_payable");
+                const auto receivable=account(holder,"bond_coupon_receivable");
+                if(!money_.has_account(payable))
+                    money_.add_account(payable,bond.treasury,AccountType::liability);
+                if(!money_.has_account(receivable))
+                    money_.add_account(receivable,holder,AccountType::asset);
+                money_.post({unique("bond-coupon-accrual"),
+                    "interest on outstanding real government security",{
+                    {account(bond.treasury,"expense"),coupon,0},
+                    {payable,0,coupon},
+                    {receivable,coupon,0},
+                    {account(holder,"revenue"),0,coupon}}});
+                sovereign_coupon_due_[key]=phaseb::add_checked(
+                    sovereign_coupon_due_[key],coupon);
+            }
+        }
+        for(auto it=sovereign_coupon_due_.begin();
+            it!=sovereign_coupon_due_.end();) {
+            const auto& [id,holder]=it->first;
+            const auto& bond=sovereign_bonds_.at(id);
+            const Money free=std::max<Money>(0,
+                phase_d_cash_available(bond.treasury));
+            const Money paid=std::min(it->second,free);
+            if(paid<=0){++it;continue;}
+            money_.post({unique("bond-coupon-paid"),
+                         "interest paid from existing country cash",{
+                {account(bond.treasury,"bond_coupon_payable"),paid,0},
+                {account(bond.treasury,"cash"),0,paid},
+                {account(holder,"cash"),paid,0},
+                {account(holder,"bond_coupon_receivable"),0,paid}}});
+            it->second-=paid;
+            if(it->second==0)it=sovereign_coupon_due_.erase(it);
+            else ++it;
+        }
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            if(today<bond.maturity_day)continue;
+            const auto asset="bond:"+id;
+            const auto holders=ownership_.holders(asset);
+            for(const auto& [holder,principal]:holders) {
+                if(principal<=0)continue;
+                const Money free=std::max<Money>(0,
+                    phase_d_cash_available(bond.treasury));
+                const Money paid=std::min(principal,free);
+                if(paid<=0)continue; // valid unpaid maturing principal
+                money_.post({unique("sovereign-bond-redemption"),
+                    "cash-financed repayment of actual government bonds",{
+                    {account(bond.treasury,"debt"),paid,0},
+                    {account(bond.treasury,"cash"),0,paid},
+                    {account(holder,"cash"),paid,0},
+                    {security_account(holder,asset),0,paid}}});
+                ownership_.redeem(asset,holder,paid);
+                events_.push_back("sovereign-principal-actually-repaid");
+            }
+        }
     }
     void seed_public_institution(const std::string& id,const std::string& operator_id,
                                  const std::string& region,const std::string& medicine,
@@ -2360,6 +2475,9 @@ private:
     Money total_bad_debt_{};
     bool bank_insolvent_{};
     std::map<std::string,Money> bank_principal_by_borrower_;
+    std::map<std::string,SovereignBond> sovereign_bonds_;
+    std::map<std::pair<std::string,std::string>,Money> sovereign_coupon_due_;
+    std::map<std::pair<std::string,std::string>,Money> sovereign_coupon_fraction_;
     std::map<std::string,WageArrearsClaim> wage_arrears_;
     std::map<std::string,std::int64_t> bankrupt_firms_;
     std::map<std::string,People> regional_food_grievance_;
