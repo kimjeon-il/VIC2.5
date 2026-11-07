@@ -874,6 +874,10 @@ public:
                "invalid market seed");
         markets_[{region,good}]={price,floor,ceiling,target_stock,0,0,0,0};
     }
+    [[nodiscard]] bool has_market(const std::string& region,
+                                  const std::string& good)const {
+        return markets_.contains({region,good});
+    }
     [[nodiscard]] const MarketQuote& market(const std::string& region,const std::string& good) const {
         return markets_.at({region,good});
     }
