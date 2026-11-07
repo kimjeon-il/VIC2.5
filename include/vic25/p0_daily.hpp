@@ -200,13 +200,16 @@ struct Policies {
     Quantity monthly_clothing_units_per_person{1};
     std::vector<SovereignFinancing> sovereign_financing;
     std::vector<PublicBudgetProgram> public_budget;
+    bool allow_endogenous_factory_expansion{true};
+    Money autonomous_factory_cash_reserve{};
 
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
            autonomous_tax_ceiling_ppm>1'000'000||
            daily_food_units_per_person<0||
-           monthly_clothing_units_per_person<0)
+           monthly_clothing_units_per_person<0 ||
+           autonomous_factory_cash_reserve<0)
             throw std::invalid_argument("P0_INVALID_AUTONOMOUS_FISCAL_RULE");
         std::set<std::string> seen_firms,seen_projects,seen_countries;
         std::set<std::string> financed_countries;
@@ -1288,6 +1291,25 @@ public:
                                            free-program.treasury_cash_reserve);
                 if(amount>0)
                     c.spend_country_budget(program.country,program.recipient,amount);
+            });
+        // Only observed profitable-demand-shortfall industrial examples may
+        // open a new project. The D construction ledger will still require
+        // actual investor cash, materials, employees, payments and WIP before
+        // Stage0 creates the new facility on a later date.
+        if(decisions.allow_endogenous_factory_expansion && date.day==1)
+            plan[9].push_back([reserve=decisions.autonomous_factory_cash_reserve,
+                              today=world_.day_index()](phasegh::Stage& gh) {
+                const auto& domain=gh.phase_d().state();
+                for(const auto& [id,p]:domain.constructions) {
+                    if(!p.commissioned)continue;
+                    for(const auto& [recipe_id,recipe]:domain.recipes) {
+                        if(recipe.site!=p.target_site)continue;
+                        const auto expansion_key=id+":"+std::to_string(today);
+                        (void)gh.phase_d().propose_firm_expansion(
+                            id,recipe_id,expansion_key,reserve);
+                        break;
+                    }
+                }
             });
         // Actual creditor entries are settled only from available cash.
         // Any unpaid wages remain in C's balanced claim ledger for the next
