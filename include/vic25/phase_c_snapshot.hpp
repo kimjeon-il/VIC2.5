@@ -572,6 +572,9 @@ struct SnapshotCodec {
             }
         }
         if(w.stage_!=-1)throw std::runtime_error("staged month cannot be loaded");
+        // Negotiation's derived due index depends on the optional chamber
+        // decisions trailer, which may appear AFTER the P2 base-law trailer.
+        if(seen_p2)w.p2_rebuild_due_index();
         w.validate();
         return w;
     }
