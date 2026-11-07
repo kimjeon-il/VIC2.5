@@ -1674,6 +1674,46 @@ public:
     }
     [[nodiscard]] const std::map<std::string,std::int64_t>&
             bankrupt_firms()const{return bankrupt_firms_;}
+    [[nodiscard]] const std::map<std::string,std::int64_t>&
+            completed_liquidations()const{return completed_liquidations_;}
+    // Close only genuinely empty estates. Unpaid worker, lender, interest or
+    // other liabilities keep the estate open; no judicial discharge is forged.
+    void phase_time_close_empty_bankrupt_estates(std::int64_t today) {
+        require_stage({8});
+        ensure(today>=0,"invalid liquidation closing day");
+        for(const auto& [firm,declared]:bankrupt_firms_) {
+            (void)declared;
+            if(completed_liquidations_.contains(firm)||
+               outstanding_worker_wages(firm)>0||
+               outstanding_loan(firm)>0||cash(firm)!=0||
+               money_.balance(account(firm,"debt"))<0)
+                continue;
+            if(money_.has_account(account(firm,"interest_payable"))&&
+               money_.balance(account(firm,"interest_payable"))<0)
+                continue;
+            bool has_property=false;
+            for(const auto& [site,f]:facilities_)
+                if(f.owner==firm){(void)site;has_property=true;break;}
+            if(has_property)continue;
+            for(const auto& [key,qty]:goods_.holdings())
+                if(key.holder_id==firm&&qty>0){
+                    has_property=true;break;
+                }
+            if(has_property)continue;
+            for(const auto& [asset,holder]:security_accounts_)
+                if(holder==firm&&shares(asset,firm)>0){
+                    has_property=true;break;
+                }
+            if(has_property)continue;
+            for(const auto& [key,dividend]:dividends_)
+                if(dividend.payer==firm){
+                    (void)key;has_property=true;break;
+                }
+            if(has_property)continue;
+            completed_liquidations_[firm]=today;
+            events_.push_back("empty-real-bankrupt-estate-closed");
+        }
+    }
 
     // Accrued salaries are legal employer liabilities and employee receivables,
     // not fabricated cash. The existing C FinanceLedger holds all balances.
@@ -2548,6 +2588,10 @@ public:
         for(const auto& [firm,day]:bankrupt_firms_)
             ensure(actors_.contains(firm)&&day>=0,
                    "orphaned bankrupt firm");
+        for(const auto& [firm,day]:completed_liquidations_)
+            ensure(bankrupt_firms_.contains(firm)&&
+                   day>=bankrupt_firms_.at(firm),
+                   "invalid completed estate record");
         for(const auto& [unit,deploy]:army_deployments_)
             ensure(units_.contains(unit)&&deploy.unit==unit&&
                    governments_.contains(deploy.country)&&
@@ -2646,6 +2690,7 @@ private:
     std::map<std::pair<std::string,std::string>,Money> sovereign_coupon_fraction_;
     std::map<std::string,WageArrearsClaim> wage_arrears_;
     std::map<std::string,std::int64_t> bankrupt_firms_;
+    std::map<std::string,std::int64_t> completed_liquidations_;
     std::map<std::string,People> regional_food_grievance_;
     int bank_interest_annual_ppm_{}; // zero until historically configured
     std::map<std::string,Money> bank_interest_fraction_;
