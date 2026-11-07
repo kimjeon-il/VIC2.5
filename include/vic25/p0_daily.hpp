@@ -237,6 +237,7 @@ struct Policies {
     std::vector<LiquidationFactoryBid> liquidation_factory_bids;
     bool retire_bank_debt_after_wages{true};
     bool allow_market_liquidation_of_real_stock{true};
+    bool allow_autonomous_army_resupply{true};
     std::vector<NationalBudgetEnvelope> national_budget_envelopes;
     std::vector<BondBuyerOrder> bond_buyer_orders;
 
@@ -1742,6 +1743,36 @@ public:
         plan[8].push_back([today=world_.day_index()](phasegh::Stage& gh) {
             gh.phase_c().phase_time_close_empty_bankrupt_estates(today);
         });
+        // A stocked national arsenal in the exact same province-region as
+        // its deployed unit can issue ammunition without a fictional shipping
+        // trip. Transfer only physical C inventory, never free army supply.
+        if(decisions.allow_autonomous_army_resupply)
+            plan[7].push_back([](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::set<std::string> at_war;
+                for(const auto& [id,war]:gh.diplomacy().wars) {
+                    (void)id;
+                    if(war.active&&!war.armistice) {
+                        at_war.insert(war.attacker);
+                        at_war.insert(war.defender);
+                    }
+                }
+                for(const auto& [unit,d]:c.army_deployments()) {
+                    if(!at_war.contains(d.country)||
+                       !c.has_country_treasury(d.country))continue;
+                    const auto& treasury=c.country_treasury(d.country);
+                    if(treasury==unit)continue;
+                    const Quantity desired=c.active_strength(unit);
+                    const Quantity existing=c.stock(unit,d.region,"ammunition");
+                    if(desired<=existing)continue;
+                    const Quantity free=c.phase_d_material_available(
+                        treasury,d.region,"ammunition");
+                    const Quantity issued=std::min(desired-existing,free);
+                    if(issued>0)
+                        c.phase_g_transfer_goods(
+                            treasury,unit,d.region,"ammunition",issued);
+                }
+            });
         // Closing market observations is a daily accounting operation,
         // independent of whether a scenario supplied explicit household buyers.
         plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
@@ -1752,16 +1783,23 @@ public:
         for(std::size_t i=0;i<plan.size();++i)
             plan[i].insert(plan[i].end(),
                 additional_today[i].begin(),additional_today[i].end());
-        if(decisions.freight_lanes.empty())
-            return world_.advance_day(plan);
-        // Freight planning may enqueue several dated physical commands. They
-        // must be committed together with today's B/C/D/G/H events, never
-        // leave a stray queue entry when a carrier/insurance payment fails.
-        daily::World staged=world_;
+        // Build one provisional stock/cash/edge allocation for all civilian
+        // and military freight. Avoid copying an enormous 30k-province
+        // world on days with no new transport orders.
         phasef::DayPlanningReservations freight_plan;
+        std::vector<daily::Command> jobs;
         for(const auto& lane:decisions.freight_lanes)
-            if(auto job=phasef::plan_next_hop(staged,lane,freight_plan))
-                staged.enqueue(date,std::move(*job));
+            if(auto job=phasef::plan_next_hop(world_,lane,freight_plan))
+                jobs.push_back(std::move(*job));
+        if(decisions.allow_autonomous_army_resupply) {
+            auto supplies=phasef::plan_direct_army_supply(world_,freight_plan);
+            jobs.insert(jobs.end(),
+                        std::make_move_iterator(supplies.begin()),
+                        std::make_move_iterator(supplies.end()));
+        }
+        if(jobs.empty())return world_.advance_day(plan);
+        daily::World staged=world_;
+        for(auto& cargo:jobs)staged.enqueue(date,std::move(cargo));
         const auto report=staged.advance_day(plan);
         world_=std::move(staged);
         return report;
