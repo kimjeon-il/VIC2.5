@@ -1063,12 +1063,12 @@ public:
                  deployment.country==war.defender) &&
                 c.active_strength(unit)>0,
                 "H_ERR_UNAUTHORIZED_ARMY_WAR_MARCH");
-        const auto& geo=spatial_.spatial();
-        const auto contested=geo.provinces.at(
-            diplomacy_.crises.at(war.crisis).province).region;
-        // A foreign territory can be entered only as the documented front
-        // of this active war. Other moves stay inside own controlled lands.
-        require(destination==contested ||
+        const auto claimed_fronts=war_front_regions(war);
+        // A foreign territory can be entered only at a disputed province
+        // established by one of the belligerents' original E claims.
+        // Rear-area travel stays inside real friendly military control.
+        require(std::find(claimed_fronts.begin(),claimed_fronts.end(),
+                          destination)!=claimed_fronts.end()||
                 c.military_control(destination)==deployment.country,
                 "H_ERR_UNLAWFUL_FOREIGN_MILITARY_MOVE");
         const auto ammunition=std::min<Quantity>(
