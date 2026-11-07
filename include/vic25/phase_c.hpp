@@ -760,6 +760,13 @@ public:
                paid_staff_this_month_[service.operator_id]>0 &&
                stock(service.operator_id,service.region,service.good)>=patients,
                "public service cannot exceed actual paid staff facility and supplies");
+        if(const auto link=p1_institutions_.find(institution);
+           link!=p1_institutions_.end()&&
+           link->second.kind==P1InstitutionKind::healthcare) {
+            const auto capacity=p1_institution_capacity(institution);
+            ensure(service.provided+patients<=capacity.usable_slots,
+                   "P1 healthcare level, real payroll or staff capacity exhausted");
+        }
         if(phase_d_reservation_mode_)
             resources_.assert_goods_available({service.operator_id,service.region,service.good},
                                               patients,stock(service.operator_id,service.region,service.good));
@@ -1558,13 +1565,19 @@ public:
                          const std::vector<std::string>& supporting_parties, int ppm) {
         require_stage({9});
         ensure(ppm >= 0 && ppm <= 1'000'000, "invalid tax rate");
-        const auto& g = governments_.at(country);
-        const auto& result=legislature_for(country);
-        ensure(g.prime_minister == proposer && result.total_seats == g.chamber_seats,
-               "unauthorized tax bill or missing national legislature");
-        ensure(coalition_seats(supporting_parties,result) >= g.quorum &&
-               !has_pending_country_tax(country),
-               "insufficient votes or country tax law already scheduled");
+        const auto& g=governments_.at(country);
+        ensure(g.prime_minister==proposer&&!has_pending_country_tax(country),
+               "unauthorized or duplicate national income-tax bill");
+        if(p1_constitutions_.contains(country)&&
+           p1_authority(country).direct_executive) {
+            ensure(supporting_parties.empty(),
+                   "P1 direct executive may not invent parliamentary votes");
+        } else {
+            const auto& result=legislature_for(country);
+            ensure(result.total_seats==g.chamber_seats &&
+                   coalition_seats(supporting_parties,result)>=g.quorum,
+                   "insufficient lawful national parliamentary confidence");
+        }
         scheduled_country_income_tax_[month()+1][country]=ppm;
         events_.push_back("constitutional-tax-law:"+country);
     }
