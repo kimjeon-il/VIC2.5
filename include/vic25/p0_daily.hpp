@@ -1516,29 +1516,31 @@ public:
             });
         if(decisions.allow_autonomous_war_peace)
             plan[9].push_back([today=world_.day_index()](phasegh::Stage& gh) {
-                const auto& geo=gh.geography();
                 const auto& c=gh.phase_c();
                 for(const auto& [id,war]:gh.diplomacy().wars) {
                     if(war.ended_day>=0||
                        !c.has_government(war.attacker)||
                        !c.has_government(war.defender))continue;
-                    auto crisis=gh.diplomacy().crises.find(war.crisis);
-                    if(crisis==gh.diplomacy().crises.end() ||
-                       !geo.provinces.contains(crisis->second.province))
-                        continue;
-                    const auto& front=
-                        geo.provinces.at(crisis->second.province).region;
-                    bool armed_attacker=false,armed_defender=false;
-                    for(const auto& [unit,deployment]:c.army_deployments()) {
-                        if(deployment.region!=front||
-                           c.active_strength(unit)<=0||
-                           c.stock(unit,front,"ammunition")<=0)continue;
-                        if(deployment.country==war.attacker)
-                            armed_attacker=true;
-                        if(deployment.country==war.defender)
-                            armed_defender=true;
-                    }
-                    if(armed_attacker||armed_defender)continue;
+                    const auto fronts=gh.war_front_regions(war);
+                    if(fronts.empty())continue;
+                    // Do not call a ceasefire while either army is actively
+                    // armed on any of its documented real fronts. After a
+                    // legally effective armistice, continued non-combat is
+                    // sufficient for a later permanent peace proposal.
+                    bool fighting_capability=false;
+                    if(!war.armistice)
+                        for(const auto& [unit,deployment]:c.army_deployments()) {
+                            if(c.active_strength(unit)<=0||
+                               c.stock(unit,deployment.region,"ammunition")<=0||
+                               std::find(fronts.begin(),fronts.end(),
+                                   deployment.region)==fronts.end())continue;
+                            if(deployment.country==war.attacker||
+                               deployment.country==war.defender) {
+                                fighting_capability=true;
+                                break;
+                            }
+                        }
+                    if(fighting_capability)continue;
                     const auto treaty_id=
                         std::string(war.armistice?"AUTO:PEACE:":"AUTO:CEASEFIRE:")+id;
                     if(gh.diplomacy().treaties.contains(treaty_id))continue;
@@ -1588,13 +1590,8 @@ public:
                 auto& c=gh.phase_c();
                 std::set<std::string> used=manual_forces;
                 for(const auto& [id,war]:gh.diplomacy().wars) {
-                    if(!war.active)continue;
-                    const auto crisis=gh.diplomacy().crises.find(war.crisis);
-                    if(crisis==gh.diplomacy().crises.end())continue;
-                    const auto province=gh.geography().provinces.find(
-                        crisis->second.province);
-                    if(province==gh.geography().provinces.end())continue;
-                    const auto& front=province->second.region;
+                    if(!war.active||war.armistice)continue;
+                    for(const auto& front:gh.war_front_regions(war)) {
                     std::string attacker,defender;
                     for(const auto& [unit,deployment]:c.army_deployments()) {
                         if(deployment.region!=front||used.contains(unit)||
@@ -1624,6 +1621,7 @@ public:
                         gh.record_actual_war_engagement(id);
                     used.insert(attacker);
                     used.insert(defender);
+                    }
                 }
             });
         }
