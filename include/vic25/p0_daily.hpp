@@ -1308,9 +1308,9 @@ public:
                     if(!war.active)continue;
                     const auto crisis=gh.diplomacy().crises.find(war.crisis);
                     if(crisis==gh.diplomacy().crises.end())continue;
-                    const auto province=gh.spatial().spatial().provinces.find(
+                    const auto province=gh.geography().provinces.find(
                         crisis->second.province);
-                    if(province==gh.spatial().spatial().provinces.end())continue;
+                    if(province==gh.geography().provinces.end())continue;
                     const auto& front=province->second.region;
                     std::string attacker,defender;
                     for(const auto& [unit,deployment]:c.army_deployments()) {
