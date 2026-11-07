@@ -5,6 +5,7 @@
 // This deliberately does not claim all D-C/I/T acceptance cases are implemented.
 
 #include "vic25/phase_c.hpp"
+#include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -187,17 +188,8 @@ struct DomainState {
         opening_month=c.month();
         c.phase_d_enable_shared_resources();
         for(auto& [id,source]:resource_sites) {
-            if(source.renewable) {
-                require(source.carrying_capacity>=source.standing_biomass &&
-                        source.renewal_per_month>=0,"invalid renewable pool");
-                const auto grown=std::min(source.renewal_per_month,
-                     source.carrying_capacity-source.standing_biomass);
-                if(grown>0) {
-                    source.standing_biomass=phaseb::add_checked(source.standing_biomass,grown);
-                    append(opening_month,"natural-resource-regeneration",id);
-                }
-            } else if(source.produced_this_month>0 &&
-                      source.decline_ppm_active_month>0) {
+            if(!source.renewable && source.produced_this_month>0 &&
+               source.decline_ppm_active_month>0) {
                 // Throughput decline does not refer to a hidden finite reserve.
                 constexpr Quantity scale=1'000'000;
                 const auto whole=phaseb::mul_checked(source.monthly_capacity/scale,
@@ -251,6 +243,23 @@ struct DomainState {
                 append(c.month(),"technique-effective",a.site);
             }
             pending_adoptions.erase(it);
+        }
+    }
+    // Real renewable inflow becomes available incrementally each day, never
+    // as a free whole-month grant at month open. Nonrenewable throughput
+    // deterioration remains based on the preceding closed month's activity.
+    void regenerate_for_day(int day,int days_in_month) {
+        for(auto& [id,source]:resource_sites) {
+            if(!source.renewable)continue;
+            require(source.carrying_capacity>=source.standing_biomass &&
+                    source.renewal_per_month>=0,"invalid renewable pool");
+            const auto due=daily_budget::increment(
+                source.renewal_per_month,day,days_in_month);
+            const auto grown=std::min(
+                due,source.carrying_capacity-source.standing_biomass);
+            if(grown<=0)continue;
+            source.standing_biomass=phaseb::add_checked(source.standing_biomass,grown);
+            append(opening_month,"daily-resource-regeneration",id);
         }
     }
     void finalize(const phasec::IntegratedWorld& c) {
@@ -915,7 +924,9 @@ public:
     // monthly throughput. Those effects still happen only at MonthClose.
     phasec::AdvanceReport advance_daily(const Plan& tasks,
                                          bool first_calendar_day=false,
-                                         bool final_calendar_day=false) {
+                                         bool final_calendar_day=false,
+                                         int day_of_month=0,
+                                         int days_in_month=0) {
         DomainState next=domain_;
         phasec::IntegratedWorld::Plan bridge;
         for(int i=0;i<12;++i) {
@@ -928,6 +939,8 @@ public:
                         next.opening_month=live.month();
                         live.phase_d_enable_shared_resources();
                     }
+                    if(day_of_month>0)
+                        next.regenerate_for_day(day_of_month,days_in_month);
                     for(auto& [id,project]:next.constructions) {
                         if(!project.ready || project.commissioned)continue;
                         const auto cost=project.capitalized_value;
