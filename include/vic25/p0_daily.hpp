@@ -1,5 +1,6 @@
 #pragma once
 #include "vic25/phase_f.hpp"
+#include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -24,13 +25,12 @@ using Id=phaseb::Id;
 
 inline Quantity minimum(Quantity a,Quantity b) { return std::min(a,b); }
 inline Quantity proportional(Quantity n,std::int32_t day,std::int32_t days) {
-    if(n<=0||day<=0||days<28||days>31||day>days)
-        return 0;
-    // No multiplying n by day: integer quotient/remainder avoids overflow.
-    return (n/days)*day + ((n%days)*day)/days;
+    if(n<=0||day<=0||days<28||days>31||day>days)return 0;
+    return daily_budget::cumulative(n,day,days);
 }
 inline Quantity daily_increment(Quantity n,int day,int days) {
-    return proportional(n,day,days)-proportional(n,day-1,days);
+    if(n<=0||day<=0||days<28||days>31||day>days)return 0;
+    return daily_budget::increment(n,day,days);
 }
 inline Money times(Money a,Money b) {return phaseb::mul_checked(a,b);}
 
