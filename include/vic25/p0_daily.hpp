@@ -164,6 +164,10 @@ struct Engagement {
 };
 
 struct Policies {
+    // A restrained default state AI: one legally authorized fiscal proposal
+    // per month when real government borrowing exceeds available cash.
+    int autonomous_tax_step_ppm{5'000};
+    int autonomous_tax_ceiling_ppm{300'000};
     std::vector<Staffing> staffing;
     std::vector<Manufacturer> manufacturers;
     std::vector<Extractor> extractors;
@@ -183,6 +187,10 @@ struct Policies {
     std::vector<Engagement> engagements;
 
     void validate() const {
+        if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
+           autonomous_tax_ceiling_ppm<0||
+           autonomous_tax_ceiling_ppm>1'000'000)
+            throw std::invalid_argument("P0_INVALID_AUTONOMOUS_FISCAL_RULE");
         std::set<std::string> seen_firms,seen_projects,seen_countries;
         std::set<std::pair<Id,std::string>> seen_pop_goods;
         std::set<std::string> engaged;
@@ -597,6 +605,37 @@ public:
                                       c.has_government(sovereign)?sovereign:"");
                 });
         }
+        if(date.day==1 && decisions.autonomous_tax_step_ppm>0)
+            plan[9].push_back(
+                [step=decisions.autonomous_tax_step_ppm,
+                 ceiling=decisions.autonomous_tax_ceiling_ppm](phasegh::Stage& gh) {
+                    auto& c=gh.phase_c();
+                    for(const auto& [country,gov]:c.governments()) {
+                        if(!c.has_country_treasury(country) ||
+                           c.has_pending_country_tax(country))continue;
+                        const auto ballot=c.country_elections().find(country);
+                        if(ballot==c.country_elections().end())continue;
+                        const auto fiscal=c.country_fiscal(country);
+                        if(fiscal.bank_debt<=fiscal.cash ||
+                           fiscal.income_tax_ppm>=ceiling)continue;
+                        // Never presume that opposition parties will vote
+                        // together. Only a recorded single-party majority
+                        // may authorize this bounded default fiscal response.
+                        std::string majority;
+                        People seats=0;
+                        for(const auto& [party,n]:ballot->second.seats)
+                            if(n>=gov.quorum && (majority.empty()||n>seats)) {
+                                majority=party;
+                                seats=n;
+                            }
+                        if(majority.empty())continue;
+                        const int next=std::min(ceiling,
+                            fiscal.income_tax_ppm+step);
+                        if(next>fiscal.income_tax_ppm)
+                            c.propose_tax_law(country,gov.prime_minister,
+                                               {majority},next);
+                    }
+                });
         for(const auto& ai:decisions.countries) {
             plan[0].push_back([ai,date](phasegh::Stage& gh) {
                 const auto& c=gh.phase_c();
