@@ -1040,7 +1040,6 @@ static void p1_parliamentary_cabinet_next_day_and_save() {
     require_test(c.p1_authority("A").assembly_confidence_required,
                  "P1 parliamentary cabinet must require confidence");
     const auto original_population=c.people().population();
-    const auto original_cash=c.cash("A");
     p0::Policies policy;
     policy.elections.push_back({"A","INC","REF",2000,1,1,1'000'000});
     policy.government_formations.push_back({
@@ -1056,11 +1055,12 @@ static void p1_parliamentary_cabinet_next_day_and_save() {
     require_test(p.government("A").prime_minister=="PM_A" &&
                  p.has_due_p1_government(game.world().day_index()),
                  "P1 government changed before its next-day effective date");
+    const auto treasury_before_read=p.cash("A");
     const auto legitimacy=p.p1_legitimacy("A");
     require_test(legitimacy.observed_groups&&legitimacy.observed_election&&
                  legitimacy.score>=0&&legitimacy.score<=100 &&
                  p.people().population()==original_population &&
-                 p.cash("A")==original_cash,
+                 p.cash("A")==treasury_before_read,
                  "P1 legitimacy created people or money or lost P3/P4 evidence");
     const auto encoded=daily::SnapshotCodec::encode(game.world());
     auto saved=daily::SnapshotCodec::decode(encoded);
@@ -1106,6 +1106,13 @@ static void p1_autocracy_uses_real_institution_and_rejects_false_votes() {
     game.advance_day();
     require_test(::c(game).government("A").prime_minister=="PM_APPOINTED",
                  "P1 head-appointed government failed without fictitious election");
+    phasegh::World::Plan decree;
+    decree[9].push_back([](phasegh::Stage& gh) {
+        gh.phase_c().propose_tax_law("A","PM_APPOINTED",{},200'000);
+    });
+    game.advance_day(decree);
+    require_test(::c(game).has_pending_country_tax("A"),
+                 "P1 direct executive created fake parliament or rejected legal tax");
 
     auto false_election=fixture();
     auto& state=false_election.seed_geography().seed_core().seed_core();
