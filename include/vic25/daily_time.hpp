@@ -334,6 +334,7 @@ public:
         if(commands.empty()&&!close&&!first_calendar_day&&
            !native_actions&&!cargo_due&&!treaty_due&&!construction_due &&
            !engine_.base().core().core().daily_auto_demography_enabled()&&
+           engine_.base().core().core().annual_bank_interest_ppm()==0&&
            !engine_.has_autonomous_daily_trade()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
