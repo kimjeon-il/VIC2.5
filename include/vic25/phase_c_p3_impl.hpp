@@ -212,6 +212,16 @@ inline P3MovementView IntegratedWorld::p3_movement_view(
 inline bool IntegratedWorld::p3_needs_daily_tick()const {
     if(!p3_attitudes_.empty()||!p3_movements_.empty())return true;
     if(p3_groups_.empty())return false;
+    // Opt-in national group members have economically grounded attitudes
+    // even without a food shortage; membership is a real POP reference.
+    for(const auto& [key,n]:membership_) {
+        if(n<=0||!people_.has_slice(key.first))continue;
+        const auto& dem=people_.demographic(
+            people_.slice(key.first).key.demographic);
+        const auto nation=sovereignty_.find(dem.region);
+        if(nation!=sovereignty_.end()&&
+           p3_groups_.contains({nation->second,key.second}))return true;
+    }
     for(const auto& [region,unmet]:regional_food_grievance_) {
         (void)region;
         if(unmet>0)return true;
