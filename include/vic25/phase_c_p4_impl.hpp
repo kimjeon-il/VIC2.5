@@ -176,11 +176,9 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
                     {party->id,membership.second});
                 if(affinity==p4_affinities_.end())continue;
                 // Interests change relative preference, never headcount.
-                const auto bonus=p4_scaled(n,affinity->second,1'000'000);
-                const People weighted=p4_scaled(bonus,1'000'000,row.count);
+                const People weighted=p4_scaled(affinity->second,n,row.count);
                 weight=std::min<People>(5'000'000,
-                    phaseb::add_checked(weight,
-                        phaseb::mul_checked(weighted,1'000'000)));
+                    phaseb::add_checked(weight,weighted));
             }
             weights.emplace_back(party->id,weight);
             weight_sum=phaseb::add_checked(weight_sum,weight);
@@ -445,7 +443,7 @@ inline P4CompetitionView IntegratedWorld::p4_competition(
     if(chamber==0)return result;
     for(const auto& [party,seats]:latest.seats) {
         (void)party;
-        const auto basis=p4_scaled(seats,10'000,chamber);
+        const auto basis=p4_scaled(10'000,seats,chamber);
         concentration=phaseb::add_checked(concentration,
             phaseb::mul_checked(basis,basis));
     }
@@ -460,10 +458,16 @@ inline P4CompetitionView IntegratedWorld::p4_competition(
         return result;
     }
     bool sustained=recent.size()>=2&&result.leading_share_percent>=55;
-    for(const auto* previous:recent)
-        sustained=sustained&&
+    for(const auto* previous:recent) {
+        People total=0;
+        for(const auto& [party,seats]:previous->seats) {
+            (void)party;
+            total=phaseb::add_checked(total,seats);
+        }
+        sustained=sustained&&total>0&&
             previous->seats.contains(leading_party)&&
-            previous->seats.at(leading_party)*2>chamber;
+            previous->seats.at(leading_party)>total/2;
+    }
     if(sustained)result.pattern=P4Competition::dominant_party;
     else if(result.two_leaders_share_percent>=85&&
             latest.seats.size()>=2)
