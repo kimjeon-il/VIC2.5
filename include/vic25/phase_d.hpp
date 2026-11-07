@@ -245,6 +245,22 @@ struct DomainState {
             pending_adoptions.erase(it);
         }
     }
+    // Historical standalone monthly fixtures keep their existing one-month
+    // renewable allowance; the actual game never calls this legacy path.
+    void regenerate_for_legacy_month() {
+        for(auto& [id,source]:resource_sites) {
+            if(!source.renewable)continue;
+            require(source.carrying_capacity>=source.standing_biomass &&
+                    source.renewal_per_month>=0,"invalid renewable pool");
+            const auto grown=std::min(
+                source.renewal_per_month,
+                source.carrying_capacity-source.standing_biomass);
+            if(grown<=0)continue;
+            source.standing_biomass=phaseb::add_checked(
+                source.standing_biomass,grown);
+            append(opening_month,"natural-resource-regeneration",id);
+        }
+    }
     // Real renewable inflow becomes available incrementally each day, never
     // as a free whole-month grant at month open. Nonrenewable throughput
     // deterioration remains based on the preceding closed month's activity.
@@ -1160,7 +1176,10 @@ public:
         phasec::IntegratedWorld::Plan bridge;
         for(int i=0;i<12;++i) {
             bridge[static_cast<std::size_t>(i)].push_back([&,i](phasec::IntegratedWorld& live) {
-                if(i==0)next.begin_month(live);
+                if(i==0) {
+                    next.begin_month(live);
+                    next.regenerate_for_legacy_month();
+                }
                 Stage stage{live,next,i};
                 for(const auto& task:plan[static_cast<std::size_t>(i)])task(stage);
                 if(i==11)next.finalize(live);
