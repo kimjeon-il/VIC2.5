@@ -185,8 +185,14 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
     const bool funded=cash(service.operator_id)>0||
         (has_country_treasury(link.country)&&
          cash(country_treasury(link.country))>0);
+    // Irregular conflict can interrupt a real paid institution's reach;
+    // it neither destroys equipment nor creates fictional policing staff.
+    const People staffed_and_funded=funded?staffed:0;
+    const People accessible=p4_scaled(
+        staffed_and_funded,
+        1'000'000-p5_guerrilla_disruption_ppm(service.region),1'000'000);
     return {link.country,institution_id,link.kind,level,
-            staff,slots,staffed,funded?staffed:0,funded};
+            staff,slots,staffed,accessible,funded};
 }
 
 inline bool IntegratedWorld::has_due_p1_government(std::int64_t day)const {
