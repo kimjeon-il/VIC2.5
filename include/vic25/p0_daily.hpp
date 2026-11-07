@@ -1595,11 +1595,59 @@ public:
             plan[10].push_back([](phasegh::Stage& gh) {
                 frontai::occupy_decisive_fronts(gh);
             });
+        // Aggregate all policy categories under a single national cash
+        // envelope. Real health providers are funded from existing treasury
+        // deposits, actual medicines, and staffed operating facilities.
+        std::map<std::string,NationalBudgetEnvelope> national_envelopes;
+        for(const auto& b:decisions.national_budget_envelopes)
+            national_envelopes.emplace(b.country,b);
+        auto budget_spent_today=
+            std::make_shared<std::map<std::string,Money>>();
+        for(const auto& [country,budget]:national_envelopes) {
+            if(!budget.finance_real_public_services||
+               budget.maximum_daily_spending<=0)continue;
+            plan[5].push_back([budget,date,dim,budget_spent_today]
+                              (phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                if(!c.has_country_treasury(budget.country)||
+                   !c.has_public_healthcare_right())return;
+                const auto& treasury=c.country_treasury(budget.country);
+                for(const auto& [id,svc]:c.public_institutions()) {
+                    (void)id;
+                    if(c.sovereignty(svc.region)!=budget.country ||
+                       svc.operator_id==treasury||
+                       !c.has_market(svc.region,svc.good))continue;
+                    const auto available_slots=daily_budget::remaining(
+                        svc.monthly_slots,svc.provided,date.day,dim);
+                    if(available_slots<=0||c.phase_d_workforce(
+                            svc.operator_id)<=0||
+                       c.stock(svc.operator_id,svc.region,svc.good)<=0)
+                        continue;
+                    const Money unit=c.market(svc.region,svc.good).price;
+                    if(unit<=0)continue;
+                    const auto daily_left=budget.maximum_daily_spending-
+                        (*budget_spent_today)[budget.country];
+                    const auto cash_left=c.phase_d_cash_available(treasury)-
+                        budget.reserve_cash;
+                    if(daily_left<=0||cash_left<=0)break;
+                    const auto intended=phaseb::mul_checked(
+                        std::min<Quantity>(available_slots,
+                            c.stock(svc.operator_id,svc.region,svc.good)),unit);
+                    const Money paid=std::min({intended,daily_left,cash_left});
+                    if(paid<=0)continue;
+                    c.spend_country_budget(budget.country,svc.operator_id,paid);
+                    (*budget_spent_today)[budget.country]=
+                        phaseb::add_checked(
+                            (*budget_spent_today)[budget.country],paid);
+                }
+            });
+        }
         // Public obligations are paid directly from the real C fiscal
         // wallet to an existing service provider with a declared policy cap.
         // An absent provider or empty treasury cannot produce "free" output.
         for(const auto& program:decisions.public_budget)
-            plan[5].push_back([program](phasegh::Stage& gh) {
+            plan[5].push_back([program,national_envelopes,budget_spent_today]
+                              (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 if(!c.has_country_treasury(program.country)||
                    !c.has_actor(program.recipient))return;
@@ -1607,10 +1655,24 @@ public:
                 if(treasury==program.recipient)return;
                 const Money free=c.phase_d_cash_available(treasury);
                 if(free<=program.treasury_cash_reserve)return;
-                const Money amount=std::min(program.daily_spending_limit,
-                                           free-program.treasury_cash_reserve);
-                if(amount>0)
+                Money amount=std::min(program.daily_spending_limit,
+                                      free-program.treasury_cash_reserve);
+                auto budget=national_envelopes.find(program.country);
+                if(budget!=national_envelopes.end()) {
+                    const auto& envelope=budget->second;
+                    const auto remaining=envelope.maximum_daily_spending-
+                                           (*budget_spent_today)[program.country];
+                    const auto treasury_left=free-envelope.reserve_cash;
+                    amount=std::min({amount,
+                        std::max<Money>(0,remaining),
+                        std::max<Money>(0,treasury_left)});
+                }
+                if(amount>0) {
                     c.spend_country_budget(program.country,program.recipient,amount);
+                    (*budget_spent_today)[program.country]=
+                        phaseb::add_checked(
+                            (*budget_spent_today)[program.country],amount);
+                }
             });
         // Only observed profitable-demand-shortfall industrial examples may
         // open a new project. The D construction ledger will still require
