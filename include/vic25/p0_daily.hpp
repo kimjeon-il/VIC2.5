@@ -156,6 +156,17 @@ struct CouncilDecisionMandate {
     std::string organization,decision_id,subject,proposer,prime_minister;
     std::vector<CouncilMemberRule> member_rules;
 };
+struct SovereignFinancing {
+    std::string country,investor;
+    Money target_treasury_liquidity{},investor_reserve{};
+    Money max_daily_bond_issue{},max_total_bond_principal{};
+    int annual_coupon_ppm{};
+    std::int64_t maturity_days{};
+};
+struct PublicBudgetProgram {
+    std::string country,recipient;
+    Money daily_spending_limit{},treasury_cash_reserve{};
+};
 struct Engagement {
     std::string attacker,defender,region;
     Id attacker_slice{},defender_slice{};
@@ -187,6 +198,8 @@ struct Policies {
     int autonomous_tax_ceiling_ppm{300'000};
     Quantity daily_food_units_per_person{1};
     Quantity monthly_clothing_units_per_person{1};
+    std::vector<SovereignFinancing> sovereign_financing;
+    std::vector<PublicBudgetProgram> public_budget;
 
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
@@ -196,6 +209,21 @@ struct Policies {
            monthly_clothing_units_per_person<0)
             throw std::invalid_argument("P0_INVALID_AUTONOMOUS_FISCAL_RULE");
         std::set<std::string> seen_firms,seen_projects,seen_countries;
+        std::set<std::string> financed_countries;
+        for(const auto& b:sovereign_financing)
+            if(b.country.empty()||b.investor.empty()||
+               !financed_countries.insert(b.country).second||
+               b.target_treasury_liquidity<0||b.investor_reserve<0||
+               b.max_daily_bond_issue<=0||b.max_total_bond_principal<=0||
+               b.annual_coupon_ppm<0||b.annual_coupon_ppm>1'000'000||
+               b.maturity_days<=0)
+                throw std::invalid_argument("P0_INVALID_SOVEREIGN_FINANCING");
+        std::set<std::pair<std::string,std::string>> budget_programs;
+        for(const auto& p:public_budget)
+            if(p.country.empty()||p.recipient.empty()||
+               p.daily_spending_limit<=0||p.treasury_cash_reserve<0||
+               !budget_programs.insert({p.country,p.recipient}).second)
+                throw std::invalid_argument("P0_INVALID_PUBLIC_PROGRAM");
         std::set<std::pair<Id,std::string>> seen_pop_goods;
         std::set<std::string> engaged;
         for(const auto& f:manufacturers)
@@ -550,6 +578,33 @@ public:
             }
         }
         phasegh::World::Plan plan;
+        // A solvent private buyer must really fund each bond. Mere
+        // government demand for funds never creates an investor deposit.
+        for(const auto& financing:decisions.sovereign_financing)
+            plan[1].push_back([financing,today=world_.day_index()](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                if(!c.has_country_treasury(financing.country)||
+                   !c.has_actor(financing.investor))return;
+                const auto fiscal=c.country_fiscal(financing.country);
+                if(fiscal.cash>=financing.target_treasury_liquidity)return;
+                const Money live=c.sovereign_bond_principal(financing.country);
+                if(live>=financing.max_total_bond_principal)return;
+                const Money investor_free=std::max<Money>(0,
+                    c.phase_d_cash_available(financing.investor)-
+                    financing.investor_reserve);
+                const Money face=std::min({
+                    financing.target_treasury_liquidity-fiscal.cash,
+                    financing.max_daily_bond_issue,
+                    financing.max_total_bond_principal-live,
+                    investor_free});
+                if(face<=0)return;
+                const auto id="P0:SOVEREIGN:"+financing.country+":"+
+                              std::to_string(today);
+                const auto& prime=c.government(financing.country).prime_minister;
+                c.issue_sovereign_bond(id,financing.country,prime,
+                    financing.investor,face,financing.annual_coupon_ppm,
+                    today,phaseb::add_checked(today,financing.maturity_days));
+            });
         auto salary_shortfall=std::make_shared<std::set<std::string>>();
         // A real Employment contract can pay a real household wallet each
         // calendar day. The C bank/tax ledger remains the sole authority.
@@ -1216,6 +1271,23 @@ public:
         for(const auto& combat:decisions.engagements)
             plan[10].push_back([combat](phasegh::Stage& gh){
                 fight(gh.phase_c(),combat);
+            });
+        // Public obligations are paid directly from the real C fiscal
+        // wallet to an existing service provider with a declared policy cap.
+        // An absent provider or empty treasury cannot produce "free" output.
+        for(const auto& program:decisions.public_budget)
+            plan[5].push_back([program](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                if(!c.has_country_treasury(program.country)||
+                   !c.has_actor(program.recipient))return;
+                const auto& treasury=c.country_treasury(program.country);
+                if(treasury==program.recipient)return;
+                const Money free=c.phase_d_cash_available(treasury);
+                if(free<=program.treasury_cash_reserve)return;
+                const Money amount=std::min(program.daily_spending_limit,
+                                           free-program.treasury_cash_reserve);
+                if(amount>0)
+                    c.spend_country_budget(program.country,program.recipient,amount);
             });
         // Actual creditor entries are settled only from available cash.
         // Any unpaid wages remain in C's balanced claim ledger for the next
