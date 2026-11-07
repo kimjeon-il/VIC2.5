@@ -15,7 +15,10 @@ enum class P2NormTier : std::uint8_t {
 enum class P2ClauseKind : std::uint8_t {
     term_months, max_consecutive_terms, max_lifetime_terms,
     term_cycle_mode, dissolution_authorized, dissolution_max_delay_days,
-    voting_age_years, income_tax_min_ppm, income_tax_max_ppm
+    voting_age_years, income_tax_min_ppm, income_tax_max_ppm,
+    public_healthcare_right, conscription_authorized,
+    minimum_monthly_contract_wage, public_institution_level,
+    maximum_import_tariff_ppm
 };
 enum class P2BillAction : std::uint8_t {
     enact_or_replace_base, attach_amendment,
@@ -70,6 +73,22 @@ struct P2LawEvent {
     std::int64_t effective_day{};
 };
 
+struct P2GroupDemand {
+    std::string id,country,interest_group,law_domain;
+    P2Amendment amendment;
+    // Backed by actual P3 population; 0..1e6 of a sovereign's inhabitants.
+    std::int32_t min_population_support_ppm{50'000};
+};
+struct P2NegotiatedAmendment {
+    std::string bill_id,demand_id,group;
+    P2Amendment amendment;
+    std::int64_t support_population{},accepted_day{};
+};
+struct P2ChamberDecision {
+    std::string bill_id,upper_contest_id;
+    std::int64_t lower_poll_day{-1},upper_poll_day{-1};
+    bool lower_passed{},upper_passed{};
+};
 struct P2TermView {
     std::string contest_id, legal_basis;
     std::int32_t term_months{}, max_consecutive_terms{}, max_lifetime_terms{};
