@@ -11,7 +11,7 @@ inline P5RiskView IntegratedWorld::p5_risk(const std::string& movement_id)const 
     risk.country=movement.country;
     risk.support_ppm=observed.support_ppm;
     risk.activism_ppm=observed.activism_ppm;
-    risk.radical_ppm=observed.radicalism_ppm;
+    risk.radical_ppm=observed.radical_ppm;
     const auto constitution=p1_constitutions_.find(movement.country);
     risk.institutional_exit=(constitution!=p1_constitutions_.end()&&
                             constitution->second.legislature!=
