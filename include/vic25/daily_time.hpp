@@ -357,6 +357,7 @@ public:
            !engine_.base().core().core().p3_needs_daily_tick()&&
            !engine_.base().core().core().p5_needs_daily_tick()&&
            !engine_.base().core().core().p5_has_due_daily_strike(day_)&&
+           !engine_.base().core().core().p5_guerrilla_has_calendar_work(day_)&&
            engine_.base().core().core().p4_due_contests(day_).empty()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
@@ -478,6 +479,7 @@ public:
                 gh.phase_c().phase_time_apply_p4_amendments(today);
                 gh.phase_c().phase_time_apply_p2(today);
                 gh.phase_c().phase_time_apply_p5_strikes(today);
+                gh.phase_c().phase_time_apply_p5_guerrilla_access(today);
                 gh.enforce_p2_tariff_ceiling();
             });
         // P0 domain decisions run on the real calendar day, in the same
@@ -516,6 +518,12 @@ public:
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p5_needs_daily_tick())
                 gh.phase_c().p5_daily_advance(today);
+        });
+        // Only journal due dates run guerrilla review. No daily all-world
+        // militia battles or copied guerrilla population and supply ledgers.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p5_guerrilla_has_calendar_work(today))
+                gh.phase_c().p5_guerrilla_daily_review(today);
         });
         // Sovereign security obligations accrue and settle on their actual
         // calendar day even when no P0 AI/controller was explicitly attached.
