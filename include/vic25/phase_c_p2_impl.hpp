@@ -222,16 +222,27 @@ inline P2TermView IntegratedWorld::p2_term(
 inline bool IntegratedWorld::p2_candidate_eligible(
         const std::string& contest_id,const std::string& candidate)const {
     const auto& c=p4_contests_.at(contest_id);
-    if(c.office!=P4Office::head_of_state||candidate.empty())return true;
+    if(candidate.empty())return false;
     const auto rule=p2_term(contest_id);
     int cumulative=0,consecutive=0;
-    bool stopped=false;
-    for(auto it=p4_history_.rbegin();it!=p4_history_.rend();++it) {
-        if(it->contest_id!=contest_id)continue;
-        if(it->office_holder==candidate) {
-            ++cumulative;
-            if(!stopped)++consecutive;
-        } else stopped=true;
+    const auto personal=p4_person_terms_.find({contest_id,candidate});
+    if(personal!=p4_person_terms_.end()) {
+        // Named representatives, senators and local heads use the same
+        // persistent real-person counter, keyed by actual office contest.
+        cumulative=personal->second.total_terms;
+        consecutive=personal->second.incumbent?
+            personal->second.consecutive_terms:0;
+    } else if(c.office==P4Office::head_of_state||
+              c.office==P4Office::local_head) {
+        // Legacy unnamed-head saves did not have POP-anchored nominations.
+        bool stopped=false;
+        for(auto it=p4_history_.rbegin();it!=p4_history_.rend();++it) {
+            if(it->contest_id!=contest_id)continue;
+            if(it->office_holder==candidate) {
+                ++cumulative;
+                if(!stopped)++consecutive;
+            } else stopped=true;
+        }
     }
     return (rule.max_lifetime_terms==0||cumulative<rule.max_lifetime_terms)&&
            (rule.max_consecutive_terms==0||
