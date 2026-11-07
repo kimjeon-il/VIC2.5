@@ -287,6 +287,17 @@ inline void IntegratedWorld::p5_perform_action(P5CollectiveAction action) {
     events_.push_back("p5-actual-political-collective-action");
 }
 
+inline void IntegratedWorld::p5_seed_capital(
+        const std::string& country,const std::string& region) {
+    ensure(stage_==-1&&commit_id_==0&&
+           governments_.contains(country)&&
+           sovereignty_.contains(region)&&
+           sovereignty_.at(region)==country&&
+           !p5_capitals_.contains(country),
+           "P5 political capital must bind a sovereign region before start");
+    p5_capitals_.emplace(country,region);
+}
+
 inline void IntegratedWorld::p5_pledge_army_unit(
         const std::string& crisis_id,const std::string& unit) {
     require_stage({9});
@@ -459,10 +470,13 @@ inline void IntegratedWorld::p5_settle(P5Settlement settlement) {
         ensure((crisis.kind==P5CrisisKind::revolution||
                 crisis.kind==P5CrisisKind::coup)&&
                crisis.stage==P5CrisisStage::armed_conflict&&
-               crisis.verified_engagements>0&&
-               !p5_control_evidence_[crisis.id].empty()&&
+               (crisis.kind==P5CrisisKind::coup||
+                crisis.verified_engagements>0)&&
+               p5_capitals_.contains(crisis.country)&&
+               p5_control_evidence_[crisis.id].contains(
+                   p5_capitals_.at(crisis.country))&&
                !settlement.successor_head.empty(),
-               "P5 coup needs real armed clash and verified territorial control");
+               "P5 regime overthrow requires real armed control of actual capital");
         for(const auto& region:p5_control_evidence_[crisis.id])
             ensure(military_control_.at(region)=="P5:"+crisis.id,
                    "P5 outdated armed control evidence cannot replace government");
