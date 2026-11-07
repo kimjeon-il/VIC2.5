@@ -1723,6 +1723,7 @@ public:
             if(completed_liquidations_.contains(firm)||
                outstanding_worker_wages(firm)>0||
                outstanding_loan(firm)>0||cash(firm)!=0||
+               phase_d_wip(firm)>0||
                money_.balance(account(firm,"debt"))<0)
                 continue;
             if(money_.has_account(account(firm,"interest_payable"))&&
