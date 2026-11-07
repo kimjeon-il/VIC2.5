@@ -1598,7 +1598,8 @@ public:
     }
     void hire(Id slice, People count, const std::string& employer, Money wage) {
         require_stage({2});
-        ensure(actors_.contains(employer), "unknown employer");
+        ensure(actors_.contains(employer)&&!firm_bankrupt(employer),
+               "unknown or insolvent employer");
         people_.hire(slice, count, employer, "worker", wage, phaseb::JobRequirements{});
         events_.push_back("hire");
     }
@@ -2233,6 +2234,30 @@ public:
             ensure(receivables==money_.balance("BANK:interest_receivable"),
                    "bank and borrower interest balances diverged");
         }
+        std::map<std::string,Money> employer_wage_due,worker_wage_receivable;
+        for(const auto& [id,claim]:wage_arrears_) {
+            ensure(id==claim.id&&claim.accrued>0&&claim.outstanding>0&&
+                   claim.outstanding<=claim.accrued&&claim.issued_day>=0&&
+                   actors_.contains(claim.employer)&&
+                   actors_.contains(claim.worker)&&
+                   actors_.contains(claim.treasury),
+                   "invalid earned wage creditor record");
+            employer_wage_due[claim.employer]=phaseb::add_checked(
+                employer_wage_due[claim.employer],claim.outstanding);
+            worker_wage_receivable[claim.worker]=phaseb::add_checked(
+                worker_wage_receivable[claim.worker],claim.outstanding);
+        }
+        for(const auto& [employer,total]:employer_wage_due)
+            ensure(money_.has_account(account(employer,"wage_payable"))&&
+                   -money_.balance(account(employer,"wage_payable"))==total,
+                   "employer wage payables not backed by contracts");
+        for(const auto& [worker,total]:worker_wage_receivable)
+            ensure(money_.has_account(account(worker,"wage_receivable"))&&
+                   money_.balance(account(worker,"wage_receivable"))==total,
+                   "household earned wage receivables not backed by contracts");
+        for(const auto& [firm,day]:bankrupt_firms_)
+            ensure(actors_.contains(firm)&&day>=0,
+                   "orphaned bankrupt firm");
         ensure(money_.balanced(), "unbalanced financial ledger");
         for(const auto& [currency,l]:foreign_ledgers_){
             ensure(l.balanced(),"unbalanced foreign currency ledger");
