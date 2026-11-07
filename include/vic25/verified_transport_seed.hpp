@@ -108,8 +108,12 @@ inline void seed(phasegh::World& world,
         const auto last=required_number<phasegh::Month>(cols[10]);
         if(first<0||last<first)
             throw std::invalid_argument("GEO_ERR_UNDATED_TRANSPORT_SERVICE");
-        if(starting_month<first||starting_month>last)
-            continue; // No modern OSM routes retroactively in 19th century.
+        // Preseed verified future services as dormant E/G evidence so
+        // railways, roads and shipping can appear in their original month.
+        // The path oracle will never use one before valid_from_month.
+        // Services expired before the playable start need not consume memory.
+        if(last<starting_month)
+            continue;
         const auto cap=required_number<Quantity>(cols[6]);
         const auto fare=required_number<phasec::Money>(cols[7]);
         const auto days=required_number<std::int32_t>(cols[8]);
