@@ -693,8 +693,12 @@ public:
                 if(real_need<=0&&fiscal.unpaid_coupons<=0)continue;
                 const Money observed_receipts=std::max<Money>(
                     0,fiscal.realized_revenue);
-                const Money unsecured_ceiling=phaseb::add_checked(
-                    fiscal.bond_principal,observed_receipts);
+                // The cumulative borrowing ceiling is anchored to
+                // independently realized treasury receipts, NOT existing
+                // bond principal plus receipts. Adding existing principal
+                // here would create new unearned debt headroom every day.
+                const Money unsecured_ceiling=std::max<Money>(
+                    1,observed_receipts);
                 const Money daily_financing_need=phaseb::add_checked(
                     real_need,fiscal.unpaid_coupons);
                 NationalBudgetEnvelope envelope;
