@@ -173,13 +173,8 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
            "P4 requires legally registered real competing parties");
     if(p1_constitution(contest.country).power==P1PowerDistribution::single_party)
         ensure(candidates.size()==1,"P4 single-party law forbids multiple candidates");
-    for(const auto* party:candidates) {
-        if(contest.office==P4Office::head_of_state||
-           contest.office==P4Office::local_head)
-            ensure(!party->head_candidate.empty(),
-                   "P4 elected head must have named candidate");
+    for(const auto* party:candidates)
         ballot.votes.emplace(party->id,0);
-    }
     // Build a single index per election, not a world-wide membership scan
     // for every POP and party (the election is event-driven, not daily).
     std::map<Id,std::vector<std::pair<std::string,People>>> slice_groups;
