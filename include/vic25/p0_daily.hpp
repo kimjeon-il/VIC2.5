@@ -164,14 +164,6 @@ struct Engagement {
 };
 
 struct Policies {
-    // A restrained default state AI: one legally authorized fiscal proposal
-    // per month when real government borrowing exceeds available cash.
-    int autonomous_tax_step_ppm{5'000};
-    int autonomous_tax_ceiling_ppm{300'000};
-    // Scenario commodity lots are arbitrary until calibrated. Only food is
-    // a daily necessity by default; clothing is spread across each month.
-    Quantity daily_food_units_per_person{1};
-    Quantity monthly_clothing_units_per_person{1};
     std::vector<Staffing> staffing;
     std::vector<Manufacturer> manufacturers;
     std::vector<Extractor> extractors;
@@ -189,6 +181,12 @@ struct Policies {
     std::vector<CouncilDecisionMandate> council_decisions;
     std::vector<phasef::FreightLane> freight_lanes;
     std::vector<Engagement> engagements;
+    // Optional AI defaults follow the original aggregate-initialization
+    // fields, preserving the source layout of old campaign policy fixtures.
+    int autonomous_tax_step_ppm{5'000};
+    int autonomous_tax_ceiling_ppm{300'000};
+    Quantity daily_food_units_per_person{1};
+    Quantity monthly_clothing_units_per_person{1};
 
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
