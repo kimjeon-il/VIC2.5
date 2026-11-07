@@ -445,9 +445,21 @@ public:
         const auto good=recipe.outputs.front().good;
         if(!c_.has_market(model.region,good))return false;
         const auto& quote=c_.market(model.region,good);
-        // At least one real solvent demand shortfall must have appeared.
-        // Avoid speculative construction on a fictitious national score.
+        // Demand alone is not enough: the observed sales value of a real
+        // production recipe must exceed the quoted actual input costs.
         if(quote.unmet<=0)return false;
+        const auto& output=recipe.outputs.front();
+        const Money revenue=product(output.per_unit,quote.price);
+        Money inputs=0;
+        for(const auto& item:recipe.inputs) {
+            if(!c_.has_market(model.region,item.good))return false;
+            inputs=phaseb::add_checked(inputs,
+                product(item.per_unit,
+                        c_.market(model.region,item.good).price));
+        }
+        if(revenue<=inputs ||
+           c_.phase_d_workforce(model.contractor)<model.workers_per_work)
+            return false;
         const Money cost=product(model.work_required,model.cash_price_per_work);
         if(c_.phase_d_cash_available(model.client)<
            phaseb::add_checked(cost,minimum_untapped_cash))
