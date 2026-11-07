@@ -135,7 +135,9 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
     std::vector<const P4Party*> candidates;
     for(const auto& [id,party]:p4_parties_) {
         (void)id;
-        if(party.country==contest.country&&party.active&&party.registered)
+        if(party.country==contest.country&&party.active&&party.registered&&
+           (contest.office!=P4Office::head_of_state||
+            !party.head_candidate.empty()))
             candidates.push_back(&party);
     }
     ensure(!candidates.empty()&&candidates.size()<=128,
@@ -233,14 +235,18 @@ inline void IntegratedWorld::p4_hold_contest(
     const auto& order=p1_constitution(contest.country);
     std::size_t permitted=0;
     for(const auto& [pid,party]:p4_parties_)
-        if(party.country==contest.country&&party.registered&&party.active)
+        if(party.country==contest.country&&party.registered&&party.active&&
+           (contest.office!=P4Office::head_of_state||
+            !party.head_candidate.empty()))
             ++permitted;
     if(order.power==P1PowerDistribution::single_party)
         ensure(permitted==1,"P4 unlawful multi-party election");
     for(const auto& [party,votes]:ballot.votes) {
         ensure(votes>=0&&p4_parties_.contains(party)&&
                p4_parties_.at(party).country==contest.country&&
-               p4_parties_.at(party).active&&p4_parties_.at(party).registered,
+               p4_parties_.at(party).active&&p4_parties_.at(party).registered&&
+               (contest.office!=P4Office::head_of_state||
+                !p4_parties_.at(party).head_candidate.empty()),
                "P4 ballots for unregistered party or foreign contest");
         sum=phaseb::add_checked(sum,votes);
     }
