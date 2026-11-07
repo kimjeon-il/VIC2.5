@@ -57,10 +57,15 @@ template<class A>void route(A& a,Route& x) {
     a(x.origin);a(x.destination);a(x.maximum_quantity);
     a(x.travel_months);a(x.arrival_loss);
 }
-template<class A>void edge(A& a,TransportEdge& x) {
+template<class A>void edge(A& a,TransportEdge& x,bool day_fields=false) {
     a(x.id);a(x.carrier);a(x.from);a(x.to);
     a(x.monthly_capacity);a(x.freight_per_unit);
     a(x.transit_months);a(x.enabled);
+    if(day_fields)a(x.transit_days);
+}
+template<class A>void native_transit(A& a,DailyTradeTransit& x) {
+    a(x.id);a(x.buyer);a(x.destination);a(x.good);
+    a(x.quantity);a(x.loss);a(x.arrival_day);
 }
 template<class A>void fill(A& a,TradeFill& x) {
     a(x.execution_id);a(x.route_id);a(x.seller_country);a(x.buyer_country);
@@ -98,9 +103,10 @@ template<class A>void insurance(A& a,CargoInsurance& x) {
     a(x.premium);a(x.maximum_claim);a(x.claim_due);a(x.claim_paid);
     a(x.insured_quantity);a(x.premium_paid);a(x.claim_registered);
 }
-template<class A>void g_state(A& a,TradeState& x) {
+template<class A>void g_state(A& a,TradeState& x,bool day_fields=false) {
     checked_map(a,x.routes,route<A>);
-    checked_map(a,x.transport_edges,edge<A>);
+    checked_map(a,x.transport_edges,
+        [&](A& io,TransportEdge& value){edge(io,value,day_fields);});
     a(x.transport_adjacency);a(x.edge_usage);
     checked_map(a,x.contracts,contract<A>);
     checked_map(a,x.credit,credit<A>);
@@ -110,6 +116,7 @@ template<class A>void g_state(A& a,TradeState& x) {
     checked_vector(a,x.pending,planned<A>);
     checked_vector(a,x.fills,fill<A>);
     a(x.executed);a(x.revision);
+    if(day_fields)checked_map(a,x.daily_shipments,native_transit<A>);
 }
 template<class A>void tariff(A& a,Tariff& x) {
     a(x.importer_country);a(x.good);a(x.ppm);
@@ -207,7 +214,8 @@ template<class A>void h_state(A& a,DiplomacyState& x,bool include_daily=true) {
 
 struct SnapshotCodec {
     static constexpr const char* magic="VIC25_PHASE_GH_SNAPSHOT_1";
-    static constexpr const char* version="phase-gh-cpp/0.3";
+    static constexpr const char* version="phase-gh-cpp/0.4";
+    static constexpr const char* daily_treaty_version="phase-gh-cpp/0.3";
     static constexpr const char* legacy_version="phase-gh-cpp/0.2";
     static std::string encode(const World& w) {
         w.validate();
@@ -215,14 +223,20 @@ struct SnapshotCodec {
         persisted::Writer a{out};
         a(std::string(magic));
         const bool upgraded=!w.diplomacy_.daily_treaties.empty();
-        a(std::string(upgraded?version:legacy_version));
+        const bool native_transport=!w.trade_.daily_shipments.empty()||
+            std::any_of(w.trade_.transport_edges.begin(),
+                        w.trade_.transport_edges.end(),
+                [](const auto& row){return row.second.transit_days>0;});
+        a(std::string(native_transport?version:
+                      (upgraded?daily_treaty_version:legacy_version)));
         a(std::string(g_version));
         a(std::string(h_version));
         const std::string existing=phasee::SnapshotCodec::encode(w.core_);
         a(existing);
         auto g=w.trade_;
         auto h=w.diplomacy_;
-        persisted::g_state(a,g);persisted::h_state(a,h,upgraded);
+        persisted::g_state(a,g,native_transport);
+        persisted::h_state(a,h,upgraded||native_transport);
         const std::string payload=out.str();
         std::ostringstream end(std::ios::binary|std::ios::out);
         persisted::Writer check{end};
@@ -236,13 +250,14 @@ struct SnapshotCodec {
         persisted::Reader a{in};
         std::string m,v,g,h,base;
         a(m);a(v);a(g);a(h);
-        if(m!=magic||(v!=version&&v!=legacy_version)||g!=g_version||h!=h_version)
+        if(m!=magic||(v!=version&&v!=daily_treaty_version&&
+             v!=legacy_version)||g!=g_version||h!=h_version)
             throw std::runtime_error("G/H incompatible snapshot contract");
         a(base);
         World next;
         next.core_=phasee::SnapshotCodec::decode(base);
-        persisted::g_state(a,next.trade_);
-        persisted::h_state(a,next.diplomacy_,v==version);
+        persisted::g_state(a,next.trade_,v==version);
+        persisted::h_state(a,next.diplomacy_,v!=legacy_version);
         std::uint64_t crc{};a(crc);
         if(in.peek()!=std::char_traits<char>::eof()||
            crc!=phasec::persistence_detail::checksum(
