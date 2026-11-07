@@ -353,6 +353,7 @@ public:
            !engine_.base().core().core().has_due_p1_government(day_)&&
            !engine_.base().core().core().p4_has_due_amendment(day_)&&
            !engine_.base().core().core().p2_has_due(day_)&&
+           !engine_.base().core().core().p2_has_negotiable_bills()&&
            engine_.base().core().core().p4_due_contests(day_).empty()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
@@ -472,6 +473,7 @@ public:
                 gh.phase_c().phase_time_apply_p1_government(today);
                 gh.phase_c().phase_time_apply_p4_amendments(today);
                 gh.phase_c().phase_time_apply_p2(today);
+                gh.enforce_p2_tariff_ceiling();
             });
         // P0 domain decisions run on the real calendar day, in the same
         // C/D/E/G/H transaction as scheduled commands and POP dynamics.
@@ -490,6 +492,12 @@ public:
                 c.p4_hold_contest(contest_id,today,next,
                                   c.p4_autonomous_ballot(contest_id));
             }
+        });
+        // Stage9 interest-group bargaining is conditional on an actually
+        // submitted bill and historically/simulation-provided policy demands.
+        // It never creates POPs, votes or fictional proposal resources.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            gh.phase_c().p2_auto_negotiate_pending(today);
         });
         // Sovereign security obligations accrue and settle on their actual
         // calendar day even when no P0 AI/controller was explicitly attached.

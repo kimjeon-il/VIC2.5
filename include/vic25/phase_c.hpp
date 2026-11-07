@@ -751,10 +751,17 @@ public:
     [[nodiscard]] bool has_public_healthcare_right() const {return healthcare_right_;}
     void provide_public_healthcare(const std::string& institution,Id patient_slice,People patients) {
         require_stage({7});
-        ensure(healthcare_right_&&public_institutions_.contains(institution)&&
+        ensure(public_institutions_.contains(institution)&&
                people_.has_slice(patient_slice)&&patients>0,
-               "no legal entitlement or patient population");
+               "missing clinical institution or population");
         auto& service=public_institutions_.at(institution);
+        const auto sovereign=sovereignty_.find(service.region);
+        ensure(sovereign!=sovereignty_.end(),
+               "public healthcare requires real sovereign jurisdiction");
+        const bool entitled=p2_rule(sovereign->second,sovereign->second,
+             P2ClauseKind::public_healthcare_right)
+             .value_or(healthcare_right_?1:0)!=0;
+        ensure(entitled,"public healthcare lacks current legal entitlement");
         ensure(patients<=people_.slice(patient_slice).count &&
                service.provided+patients<=service.monthly_slots &&
                patients<=positive_product(employed_by(service.operator_id),
@@ -1435,6 +1442,12 @@ public:
         require_stage({9});
         ensure(people_.has_slice(slice) && interest_groups_.contains(group) &&
                n>0 && n<=people_.slice(slice).count, "invalid group membership");
+        const auto& d=people_.demographic(people_.slice(slice).key.demographic);
+        const auto country=sovereignty_.find(d.region);
+        if(country!=sovereignty_.end())
+            ensure(p2_rule(country->second,country->second,
+                   P2ClauseKind::political_association_allowed).value_or(1)!=0,
+                   "P2 lawful interest-group registration prohibited");
         membership_[{slice,group}]=n;
         events_.push_back("interest-group-membership");
     }
@@ -1451,6 +1464,15 @@ public:
                strikers<=participants && strikers<=people_.employed(slice) &&
                scheduled_strikes_[month()+1][slice]+strikers<=people_.employed(slice),
                "political action exceeds actual participants or workers");
+        if(strikers>0) {
+            const auto& d=people_.demographic(
+                people_.slice(slice).key.demographic);
+            const auto country=sovereignty_.find(d.region);
+            if(country!=sovereignty_.end())
+                ensure(p2_rule(country->second,country->second,
+                       P2ClauseKind::peaceful_strike_allowed).value_or(1)!=0,
+                       "P2 legal strike right does not permit this action");
+        }
         participation_this_month_[slice]+=participants;
         scheduled_strikes_[month()+1][slice]+=strikers;
         events_.push_back("verified-protest");
@@ -1502,6 +1524,16 @@ public:
     void p4_register_party(P4Party);
     void p4_set_group_affinity(const std::string&,const std::string&,int);
     void p4_seed_contest(P4Contest);
+    // Named nominees must bind to actual P1 PersonAnchor/POP, not phantom
+    // politician populations. Party-only legacy lists remain supported.
+    void p4_nominate(const std::string&,const std::string&,
+                     std::vector<std::string>);
+    [[nodiscard]] const std::map<std::pair<std::string,std::string>,
+          std::vector<std::string>>& p4_nominations()const {
+        return p4_nominations_;
+    }
+    [[nodiscard]] const std::map<std::pair<std::string,std::string>,
+          P4PersonTerm>& p4_person_terms()const {return p4_person_terms_;}
     [[nodiscard]] const std::map<std::string,P4Party>& p4_parties()const {
         return p4_parties_;
     }
@@ -1533,6 +1565,16 @@ public:
     // office, election, tax and demographic state and transaction ownership.
     void p2_seed_base(P2BaseLaw);
     void p2_seed_amendment(P2Amendment);
+    void p2_register_upper_chamber(const std::string&,const std::string&);
+    void p2_approve_upper_bill(const std::string&,
+                                const std::vector<std::string>&);
+    void p2_register_group_demand(P2GroupDemand);
+    void p2_auto_negotiate_pending(std::int64_t);
+    [[nodiscard]] bool p2_has_negotiable_bills()const;
+    [[nodiscard]] const std::map<std::string,
+          std::vector<P2NegotiatedAmendment>>& p2_negotiated()const {
+        return p2_negotiated_;
+    }
     [[nodiscard]] bool p2_is_active_base(const std::string&)const;
     [[nodiscard]] bool p2_amendment_active(const std::string&)const;
     [[nodiscard]] std::optional<std::int64_t> p2_rule(
@@ -2171,6 +2213,11 @@ public:
         ensure(people_.has_slice(slice)&&n>0&&interest_groups_.contains(group),
                "invalid political issue association");
         const auto& d=people_.demographic(people_.slice(slice).key.demographic);
+        const auto country=sovereignty_.find(d.region);
+        if(country!=sovereignty_.end())
+            ensure(p2_rule(country->second,country->second,
+                   P2ClauseKind::political_association_allowed).value_or(1)!=0,
+                   "P2 no legal political organization in this jurisdiction");
         ensure(n<=food_grievance(d.region)&&
                group_members(slice,group)+n<=people_.slice(slice).count,
                "political organization exceeds actual grievance or persons");
@@ -2204,8 +2251,18 @@ public:
     }
     void hire(Id slice, People count, const std::string& employer, Money wage) {
         require_stage({2});
-        ensure(actors_.contains(employer)&&!firm_bankrupt(employer),
-               "unknown or insolvent employer");
+        ensure(actors_.contains(employer)&&!firm_bankrupt(employer)&&
+               people_.has_slice(slice),
+               "unknown worker or insolvent employer");
+        const auto& dem=people_.demographic(
+            people_.slice(slice).key.demographic);
+        const auto country=sovereignty_.find(dem.region);
+        if(country!=sovereignty_.end()) {
+            const auto legal=p2_rule(country->second,country->second,
+                 P2ClauseKind::minimum_monthly_contract_wage).value_or(0);
+            ensure(wage>=legal,
+                   "P2 minimum wage law forbids underpaid new labor contracts");
+        }
         people_.hire(slice, count, employer, "worker", wage, phaseb::JobRequirements{});
         events_.push_back("hire");
     }
@@ -2388,6 +2445,9 @@ public:
                demo.service==phaseb::Service::active||
                demo.service==phaseb::Service::pow||
                demo.service==phaseb::Service::missing||
+               (demo.sex==phaseb::Sex::female&&
+                p2_rule(country,country,
+                  P2ClauseKind::female_suffrage_allowed).value_or(1)==0)||
                people_.age_months_slice(id)<
                    static_cast<std::int64_t>(p2_voting_age(country))*12)
                 continue;
@@ -2459,8 +2519,16 @@ public:
         ensure(units_.contains(unit) && n > 0 && people_.has_slice(source),
                "invalid mobilization");
         const auto s = people_.slice(source);
-        const auto service = people_.demographic(s.key.demographic).service;
-        ensure(conscription_enabled_, "conscription not currently authorized");
+        const auto& demo=people_.demographic(s.key.demographic);
+        const auto service=demo.service;
+        const auto jurisdiction=sovereignty_.find(demo.region);
+        bool permitted=conscription_enabled_;
+        if(jurisdiction!=sovereignty_.end()) {
+            permitted=p2_rule(jurisdiction->second,jurisdiction->second,
+                P2ClauseKind::conscription_authorized)
+                .value_or(conscription_enabled_?1:0)!=0;
+        }
+        ensure(permitted,"P2 military service law does not permit conscription");
         ensure(service == phaseb::Service::civilian || service == phaseb::Service::reserve,
                "not mobilizable");
         ensure(n <= s.count - assigned(source), "overallocated recruit");
@@ -2863,7 +2931,7 @@ public:
                    contest.seats>0&&contest.seats<=100'000&&
                    contest.next_poll_day>=0&&contest.regular_poll_day>=0&&
                    static_cast<unsigned>(contest.office)<=
-                       static_cast<unsigned>(P4Office::head_of_state)&&
+                       static_cast<unsigned>(P4Office::local_head)&&
                    static_cast<unsigned>(contest.method)<=
                        static_cast<unsigned>(P4BallotMethod::plurality)&&
                    static_cast<unsigned>(contest.term_mode)<=
@@ -2950,6 +3018,72 @@ public:
                        legal.dissolution_authorized==contest.dissolution_authorized,
                        "P2/P4 effective office term law differs from election state");
             }
+        }
+        for(const auto& [key,nominees]:p4_nominations_) {
+            ensure(p4_contests_.contains(key.first)&&
+                   p4_parties_.contains(key.second)&&
+                   p4_parties_.at(key.second).country==
+                       p4_contests_.at(key.first).country&&
+                   !nominees.empty()&&
+                   nominees.size()<=static_cast<std::size_t>(
+                       p4_contests_.at(key.first).seats),
+                   "P4 orphaned personal candidate nomination");
+            std::set<std::string> unique;
+            for(const auto& person:nominees)
+                ensure(person_anchors_.contains(person)&&
+                       unique.insert(person).second,
+                       "P4 nominee not backed by unique actual POP anchor");
+        }
+        for(const auto& [key,tenure]:p4_person_terms_) {
+            ensure(p4_contests_.contains(key.first)&&
+                   key.first==tenure.contest_id&&key.second==tenure.person_id&&
+                   person_anchors_.contains(key.second)&&
+                   tenure.total_terms>0&&tenure.consecutive_terms>=0&&
+                   tenure.consecutive_terms<=tenure.total_terms&&
+                   tenure.last_elected_day>=0,
+                   "P4 invalid individual mandate history");
+        }
+        for(const auto& [country,contest_id]:p2_upper_chambers_)
+            ensure(p1_constitutions_.contains(country)&&
+                   p1_constitutions_.at(country).legislature==
+                       P1LegislatureKind::bicameral&&
+                   p4_contests_.contains(contest_id)&&
+                   p4_contests_.at(contest_id).country==country&&
+                   p4_contests_.at(contest_id).office==
+                       P4Office::upper_chamber,
+                   "P2 upper chamber not backed by an actual P4 senate");
+        for(const auto& id:p2_negotiation_watch_)
+            ensure(p2_bills_.contains(id)&&
+                   p2_bills_.at(id).status==P2BillStatus::submitted&&
+                   p2_bills_.at(id).action==
+                       P2BillAction::enact_or_replace_base&&
+                   (!p2_chamber_decisions_.contains(id)||
+                    !p2_chamber_decisions_.at(id).lower_passed),
+                   "P2 stale submitted-bill negotiation index");
+        for(const auto& [id,decision]:p2_chamber_decisions_)
+            ensure(p2_bills_.contains(id)&&decision.bill_id==id&&
+                   p4_contests_.contains(decision.upper_contest_id)&&
+                   decision.lower_poll_day>=-1&&
+                   decision.upper_poll_day>=-1,
+                   "P2 invalid bicameral voting evidence");
+        for(const auto& [id,demand]:p2_group_demands_)
+            ensure(id==demand.id&&governments_.contains(demand.country)&&
+                   interest_groups_.contains(demand.interest_group)&&
+                   demand.min_population_support_ppm>=0&&
+                   demand.min_population_support_ppm<=1'000'000&&
+                   !demand.law_domain.empty()&&
+                   !demand.amendment.id.empty(),
+                   "P2 invalid real interest-group demand");
+        for(const auto& [id,agreements]:p2_negotiated_) {
+            ensure(p2_bills_.contains(id),"P2 negotiated clause lacks real bill");
+            std::set<std::string> seen;
+            for(const auto& agreement:agreements)
+                ensure(agreement.bill_id==id&&
+                       seen.insert(agreement.demand_id).second&&
+                       p2_group_demands_.contains(agreement.demand_id)&&
+                       agreement.support_population>=0&&
+                       agreement.accepted_day>=0,
+                       "P2 invalid or duplicated negotiated amendment");
         }
         for(const auto& [country,ppm]:country_income_tax_)
             ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
@@ -3191,6 +3325,9 @@ private:
     std::map<std::string,P4Party> p4_parties_;
     std::map<std::pair<std::string,std::string>,int> p4_affinities_;
     std::map<std::string,P4Contest> p4_contests_;
+    std::map<std::pair<std::string,std::string>,
+             std::vector<std::string>> p4_nominations_;
+    std::map<std::pair<std::string,std::string>,P4PersonTerm> p4_person_terms_;
     std::map<std::string,P4Result> p4_nonparliament_results_;
     std::vector<P4Result> p4_history_; // immutable election audit
     std::map<std::int64_t,std::vector<P4TermAmendment>> p4_amendments_;
@@ -3202,6 +3339,11 @@ private:
     std::map<std::string,P2Amendment> p2_amendments_;
     std::set<std::string> p2_active_amendments_;
     std::map<std::string,P2Bill> p2_bills_;
+    std::map<std::string,std::string> p2_upper_chambers_;
+    std::map<std::string,P2ChamberDecision> p2_chamber_decisions_;
+    std::map<std::string,P2GroupDemand> p2_group_demands_;
+    std::map<std::string,std::vector<P2NegotiatedAmendment>> p2_negotiated_;
+    std::set<std::string> p2_negotiation_watch_; // derived from submitted bills
     std::vector<P2LawEvent> p2_history_;
     std::map<std::int64_t,std::set<std::string>> p2_due_; // derived from P2 bills
     std::map<std::int64_t, std::vector<CabinetChange>> scheduled_cabinets_;
@@ -3235,6 +3377,7 @@ private:
     [[nodiscard]] static int p1_percent(People,People);
     [[nodiscard]] static People p4_scaled(People,People,People);
     void p4_rebuild_due_index();
+    void p4_record_elected_persons(const P4Result&);
     static bool p2_valid_clause(const P2Clause&);
     void p2_validate_clauses(
         const std::string&,const std::vector<P2Clause>&)const;
@@ -3484,4 +3627,6 @@ private:
 
 #include "vic25/phase_c_p1_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
+#include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
+#include "vic25/phase_c_p2_advanced_impl.hpp"

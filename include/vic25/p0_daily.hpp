@@ -142,7 +142,7 @@ struct ElectionTermReform {
     daily::Date decision_date{};
 };
 enum class LegislativeAction :std::uint8_t {
-    introduce, approve, promulgate
+    introduce, approve, promulgate, approve_upper
 };
 struct LegislativeOrder {
     daily::Date date{};
@@ -449,7 +449,7 @@ struct Policies {
                 order.bill.id:order.bill_id;
             if(bill_id.empty()||
                static_cast<unsigned>(order.action)>
-                   static_cast<unsigned>(LegislativeAction::promulgate)||
+                   static_cast<unsigned>(LegislativeAction::approve_upper)||
                !p2_legislative_events.insert({day,bill_id,order.action}).second||
                (order.action==LegislativeAction::introduce&&
                 (order.bill.proposer.empty()||order.bill.country.empty()))||
@@ -1423,7 +1423,11 @@ public:
                 const People existing=c.group_members(p.population_slice,p.interest_group);
                 const People new_members=std::min({p.max_new_members_per_day,
                                     shortage,total-existing});
-                if(new_members>0)c.organize_from_food_grievance(
+                if(new_members>0&&
+                   c.p2_rule(c.sovereignty(p.region),c.sovereignty(p.region),
+                        phasec::P2ClauseKind::political_association_allowed)
+                        .value_or(1)!=0)
+                    c.organize_from_food_grievance(
                                       p.population_slice,p.interest_group,new_members);
                 const People remaining=total-c.protest_participants(p.population_slice);
                 const People protest=std::min({remaining,
@@ -1466,6 +1470,10 @@ public:
                     if(c.sovereignty(d.region)!=election.country||d.citizenship!="citizen"||
                        d.service==phaseb::Service::active||d.service==phaseb::Service::pow||
                        d.service==phaseb::Service::missing||
+                       (d.sex==phaseb::Sex::female&&
+                        c.p2_rule(election.country,election.country,
+                           phasec::P2ClauseKind::female_suffrage_allowed)
+                           .value_or(1)==0)||
                        pop.age_months_slice(id)<static_cast<std::int64_t>(c.p2_voting_age(election.country))*12)
                         continue;
                     const People voters=times(s.count,election.turnout_ppm)/1'000'000;
@@ -1505,6 +1513,10 @@ public:
                         break;
                     case LegislativeAction::promulgate:
                         c.p2_promulgate_bill(order.bill_id,order.head,today);
+                        break;
+                    case LegislativeAction::approve_upper:
+                        c.p2_approve_upper_bill(order.bill_id,
+                                                order.supporting_parties);
                         break;
                 }
             });

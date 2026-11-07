@@ -7,7 +7,7 @@ namespace vic25::phasec {
 inline bool IntegratedWorld::p2_valid_clause(const P2Clause& c) {
     if(c.id.empty()||c.target.empty()||
        static_cast<unsigned>(c.kind)>
-           static_cast<unsigned>(P2ClauseKind::income_tax_max_ppm))
+           static_cast<unsigned>(P2ClauseKind::peaceful_strike_allowed))
         return false;
     switch(c.kind) {
       case P2ClauseKind::term_months:
@@ -17,13 +17,23 @@ inline bool IntegratedWorld::p2_valid_clause(const P2Clause& c) {
         return c.value>=0&&c.value<=20;
       case P2ClauseKind::term_cycle_mode:
       case P2ClauseKind::dissolution_authorized:
+      case P2ClauseKind::public_healthcare_right:
+      case P2ClauseKind::conscription_authorized:
+      case P2ClauseKind::female_suffrage_allowed:
+      case P2ClauseKind::political_association_allowed:
+      case P2ClauseKind::peaceful_strike_allowed:
         return c.value==0||c.value==1;
+      case P2ClauseKind::public_institution_level:
+        return c.value>=0&&c.value<=5;
+      case P2ClauseKind::minimum_monthly_contract_wage:
+        return c.value>=0&&c.value<=1'000'000'000;
       case P2ClauseKind::dissolution_max_delay_days:
         return c.value>=1&&c.value<=365;
       case P2ClauseKind::voting_age_years:
         return c.value>=0&&c.value<=120;
       case P2ClauseKind::income_tax_min_ppm:
       case P2ClauseKind::income_tax_max_ppm:
+      case P2ClauseKind::maximum_import_tariff_ppm:
         return c.value>=0&&c.value<=1'000'000;
     }
     return false;
@@ -39,8 +49,20 @@ inline void IntegratedWorld::p2_validate_clauses(
                "P2 invalid, duplicate or untyped legal provision");
         if(c.kind==P2ClauseKind::voting_age_years||
            c.kind==P2ClauseKind::income_tax_min_ppm||
-           c.kind==P2ClauseKind::income_tax_max_ppm) {
-            ensure(c.target==country,"P2 fiscal/citizenship law must name its country");
+           c.kind==P2ClauseKind::income_tax_max_ppm||
+           c.kind==P2ClauseKind::public_healthcare_right||
+           c.kind==P2ClauseKind::conscription_authorized||
+           c.kind==P2ClauseKind::minimum_monthly_contract_wage||
+           c.kind==P2ClauseKind::maximum_import_tariff_ppm||
+           c.kind==P2ClauseKind::female_suffrage_allowed||
+           c.kind==P2ClauseKind::political_association_allowed||
+           c.kind==P2ClauseKind::peaceful_strike_allowed) {
+            ensure(c.target==country,
+                   "P2 sovereign economic, civil or military rule needs its country");
+        } else if(c.kind==P2ClauseKind::public_institution_level) {
+            const auto it=p1_institutions_.find(c.target);
+            ensure(it!=p1_institutions_.end()&&it->second.country==country,
+                   "P2 institution level must reference real P1 public service");
         } else {
             const auto it=p4_contests_.find(c.target);
             ensure(it!=p4_contests_.end()&&it->second.country==country,
@@ -71,9 +93,13 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
             ensure(clause.target!=law.country,
                    "P2 local ordinance cannot legislate nationwide tax or suffrage");
             const auto it=p4_contests_.find(clause.target);
-            ensure(it!=p4_contests_.end()&&
-                   it->second.office==P4Office::local&&
-                   it->second.jurisdiction==law.scope,
+            ensure((clause.kind==P2ClauseKind::public_institution_level&&
+                    p1_institutions_.contains(clause.target)&&
+                    public_institutions_.at(clause.target).region==law.scope)||
+                   (it!=p4_contests_.end()&&
+                    (it->second.office==P4Office::local||
+                     it->second.office==P4Office::local_head)&&
+                    it->second.jurisdiction==law.scope),
                    "P2 local ordinance cannot change national elected offices");
         }
     }
@@ -222,16 +248,27 @@ inline P2TermView IntegratedWorld::p2_term(
 inline bool IntegratedWorld::p2_candidate_eligible(
         const std::string& contest_id,const std::string& candidate)const {
     const auto& c=p4_contests_.at(contest_id);
-    if(c.office!=P4Office::head_of_state||candidate.empty())return true;
+    if(candidate.empty())return false;
     const auto rule=p2_term(contest_id);
     int cumulative=0,consecutive=0;
-    bool stopped=false;
-    for(auto it=p4_history_.rbegin();it!=p4_history_.rend();++it) {
-        if(it->contest_id!=contest_id)continue;
-        if(it->office_holder==candidate) {
-            ++cumulative;
-            if(!stopped)++consecutive;
-        } else stopped=true;
+    const auto personal=p4_person_terms_.find({contest_id,candidate});
+    if(personal!=p4_person_terms_.end()) {
+        // Named representatives, senators and local heads use the same
+        // persistent real-person counter, keyed by actual office contest.
+        cumulative=personal->second.total_terms;
+        consecutive=personal->second.incumbent?
+            personal->second.consecutive_terms:0;
+    } else if(c.office==P4Office::head_of_state||
+              c.office==P4Office::local_head) {
+        // Legacy unnamed-head saves did not have POP-anchored nominations.
+        bool stopped=false;
+        for(auto it=p4_history_.rbegin();it!=p4_history_.rend();++it) {
+            if(it->contest_id!=contest_id)continue;
+            if(it->office_holder==candidate) {
+                ++cumulative;
+                if(!stopped)++consecutive;
+            } else stopped=true;
+        }
     }
     return (rule.max_lifetime_terms==0||cumulative<rule.max_lifetime_terms)&&
            (rule.max_consecutive_terms==0||
@@ -379,7 +416,10 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
         }
     }
     bill.introduced_day=today;
-    p2_bills_.emplace(bill.id,std::move(bill));
+    const auto id=bill.id;
+    if(bill.action==P2BillAction::enact_or_replace_base)
+        p2_negotiation_watch_.insert(id);
+    p2_bills_.emplace(id,std::move(bill));
     events_.push_back("p2-bill-introduced");
 }
 
@@ -412,8 +452,22 @@ inline void IntegratedWorld::p2_approve_bill(
         ensure(order.direct_executive&&voting_parties.empty(),
                "P2 no parliament and no legal direct authority");
     }
-    bill.status=P2BillStatus::approved;
-    events_.push_back("p2-law-approved:"+bill.id);
+    if(p1_constitutions_.at(bill.country).legislature==
+            P1LegislatureKind::bicameral) {
+        ensure(p2_upper_chambers_.contains(bill.country)&&
+               country_election_months_.contains(bill.country)&&
+               !p2_chamber_decisions_.contains(bill.id),
+               "P2 bicameral bill requires registered elected upper house");
+        p2_negotiation_watch_.erase(bill.id);
+        p2_chamber_decisions_[bill.id]=P2ChamberDecision{
+            bill.id,p2_upper_chambers_.at(bill.country),
+            country_election_months_.at(bill.country),-1,true,false};
+        events_.push_back("p2-lower-chamber-approved:"+bill.id);
+    } else {
+        p2_negotiation_watch_.erase(bill.id);
+        bill.status=P2BillStatus::approved;
+        events_.push_back("p2-law-approved:"+bill.id);
+    }
 }
 
 inline void IntegratedWorld::p2_promulgate_bill(
@@ -479,6 +533,20 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             law_id=next.id;
             p2_laws_.emplace(next.id,next);
             p2_active_base_[slot]=next.id;
+            if(const auto negotiated=p2_negotiated_.find(id);
+               negotiated!=p2_negotiated_.end()) {
+                for(const auto& accepted:negotiated->second) {
+                    const auto& amendment=accepted.amendment;
+                    ensure(!p2_amendments_.contains(amendment.id)&&
+                           amendment.law_id==next.id,
+                           "P2 negotiated provision missing its promised base");
+                    p2_check_amendment(amendment);
+                    p2_amendments_.emplace(amendment.id,amendment);
+                    p2_active_amendments_.insert(amendment.id);
+                    events_.push_back(
+                        "p2-group-compromise-effective:"+accepted.demand_id);
+                }
+            }
         } else if(bill.action==P2BillAction::attach_amendment) {
             const auto& amendment=bill.proposed_amendment;
             ensure(p2_is_active_base(amendment.law_id)&&
@@ -536,9 +604,16 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
 
 inline void IntegratedWorld::p2_rebuild_due_index() {
     p2_due_.clear();
-    for(const auto& [id,bill]:p2_bills_)
+    p2_negotiation_watch_.clear();
+    for(const auto& [id,bill]:p2_bills_) {
         if(bill.status==P2BillStatus::promulgated)
             p2_due_[bill.effective_day].insert(id);
+        if(bill.status==P2BillStatus::submitted&&
+           bill.action==P2BillAction::enact_or_replace_base&&
+           (!p2_chamber_decisions_.contains(id)||
+            !p2_chamber_decisions_.at(id).lower_passed))
+            p2_negotiation_watch_.insert(id);
+    }
 }
 
 } // namespace vic25::phasec

@@ -15,7 +15,7 @@ enum class P1PowerDistribution : std::uint8_t {
     autocracy, oligarchy, landed_vote, wealth_vote,
     universal_vote, single_party, technocracy
 };
-enum class P1LegislatureKind : std::uint8_t { none, unicameral };
+enum class P1LegislatureKind : std::uint8_t { none, unicameral, bicameral };
 enum class P1FormationRule : std::uint8_t {
     head_appointment, parliamentary_confidence, council_confidence
 };
@@ -77,7 +77,7 @@ struct P1InstitutionView {
        static_cast<unsigned>(c.power)>
            static_cast<unsigned>(P1PowerDistribution::technocracy)||
        static_cast<unsigned>(c.legislature)>
-           static_cast<unsigned>(P1LegislatureKind::unicameral)||
+           static_cast<unsigned>(P1LegislatureKind::bicameral)||
        c.legal_basis.empty())return false;
     if((c.governance==P1GovernancePrinciple::parliamentary_republic ||
         c.governance==P1GovernancePrinciple::council_republic) &&

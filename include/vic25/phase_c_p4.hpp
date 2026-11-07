@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace vic25::phasec {
-enum class P4Office : std::uint8_t { legislature, local, head_of_state };
+enum class P4Office : std::uint8_t { legislature, local, head_of_state, upper_chamber, local_head };
 enum class P4BallotMethod : std::uint8_t { list_dhondt, plurality };
 enum class P4TermMode : std::uint8_t { restart_after_poll, fixed_cycle };
 enum class P4Competition : std::uint8_t {
@@ -33,6 +33,12 @@ struct P4Contest {
     std::int64_t seats{1},next_poll_day{},regular_poll_day{};
     std::int64_t last_poll_day{-1};
     bool dissolution_authorized{},active{true},dissolved{};
+};
+struct P4PersonTerm {
+    std::string contest_id,person_id,party_id;
+    std::int32_t total_terms{},consecutive_terms{};
+    std::int64_t last_elected_day{-1};
+    bool incumbent{};
 };
 struct P4Ballot {
     std::int64_t eligible{},registered{},cast{},invalid{};
