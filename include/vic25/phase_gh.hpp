@@ -187,7 +187,7 @@ inline std::optional<PathQuote> quote_daily_freight_path(
             provisional_edges->at(edge.id):0;
         const Quantity used=phaseb::add_checked(committed,pending);
         const Quantity ceiling=day_of_month>0?
-            day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
+            daily_budget::cumulative(edge.monthly_capacity,day_of_month,days_in_month):edge.monthly_capacity;
         require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
         result.capacity=std::min(result.capacity,ceiling-used);
         result.edges.push_back(edge.id);
