@@ -1091,7 +1091,7 @@ public:
         const auto& dem=people_.demographic(people_.slice(slice).key.demographic);
         ensure(dem.citizenship=="citizen" && dem.service!=phaseb::Service::active &&
                dem.service!=phaseb::Service::pow && dem.service!=phaseb::Service::missing &&
-               people_.age_months(people_.slice(slice).key.demographic)>=
+               people_.age_months_slice(slice)>=
                    static_cast<std::int64_t>(voting_age_years_)*12,
                "ineligible voter");
         ensure(ballot_ids_.insert({election_id,anchor}).second, "duplicate ballot");
@@ -1112,7 +1112,7 @@ public:
                d.service!=phaseb::Service::active &&
                d.service!=phaseb::Service::pow &&
                d.service!=phaseb::Service::missing &&
-               people_.age_months(people_.slice(slice).key.demographic)>=
+               people_.age_months_slice(slice)>=
                    static_cast<std::int64_t>(voting_age_years_)*12)?
                people_.slice(slice).count:0;
     }
@@ -1315,7 +1315,7 @@ public:
                 d.service != phaseb::Service::active &&
                 d.service != phaseb::Service::pow &&
                 d.service != phaseb::Service::missing &&
-                people_.age_months(s.key.demographic) >= static_cast<std::int64_t>(voting_age_years_) * 12)
+                people_.age_months_slice(id) >= static_cast<std::int64_t>(voting_age_years_) * 12)
                 total = phaseb::add_checked(total, s.count);
         }
         return total;
@@ -1666,7 +1666,7 @@ public:
                demo.service==phaseb::Service::active||
                demo.service==phaseb::Service::pow||
                demo.service==phaseb::Service::missing||
-               people_.age_months(row.key.demographic)<
+               people_.age_months_slice(slice)<
                    static_cast<std::int64_t>(voting_age_years_)*12)
                 continue;
             eligible=phaseb::add_checked(eligible,row.count);
@@ -1835,7 +1835,7 @@ public:
         ensure(babies>0&&people_.has_slice(mother),"TIME_POP_INVALID_MOTHER");
         const auto& source=people_.slice(mother);
         const auto demographic=people_.demographic(source.key.demographic);
-        const auto age=people_.age_months(source.key.demographic);
+        const auto age=people_.age_months_slice(mother);
         ensure(demographic.sex==phaseb::Sex::female &&
                age>=18*12 && age<45*12 &&
                demographic.service==phaseb::Service::civilian,
@@ -1900,6 +1900,12 @@ public:
         require_stage({11});
         resources_.clear_month();
         phase_d_reservation_mode_=false;
+    }
+    void phase_time_set_calendar_day(int day_of_month) {
+        require_stage({0});
+        ensure(day_of_month>=1&&day_of_month<=31,
+               "invalid native day for POP birth/eligibility");
+        people_.set_native_calendar_day(day_of_month);
     }
     // Calendar day executes in the caller's one-day staging transaction.
     // This is the only routine that applies autonomous POP risk on a date.
