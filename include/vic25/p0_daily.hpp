@@ -836,6 +836,12 @@ public:
                         gross,today);
                 });
         }
+        // Earned wages are accrued by the preceding Stage5 employer
+        // commands. Creditors are now paid before optional public transfers,
+        // dividends or other discretionary local business expenditures.
+        plan[5].push_back([](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_settle_wage_arrears();
+        });
         if(date.day==1 && decisions.autonomous_tax_step_ppm>0)
             plan[9].push_back(
                 [step=decisions.autonomous_tax_step_ppm,
@@ -1732,12 +1738,9 @@ public:
                     }
                 }
             });
-        // Actual creditor entries are settled only from available cash.
-        // Any unpaid wages remain in C's balanced claim ledger for the next
-        // date; they are not silently deleted when production is suspended.
-        plan[5].push_back([](phasegh::Stage& gh) {
-            gh.phase_c().phase_time_settle_wage_arrears();
-        });
+        // Actual creditor entries remain in C's balance sheet until paid.
+        // No additional late-day payment pass is needed: employee wages
+        // are prioritized before discretionary spending in Stage5.
         plan[8].push_back([today=world_.day_index()](phasegh::Stage& gh) {
             gh.phase_c().phase_time_resolve_firm_insolvency(today);
         });
