@@ -1,5 +1,6 @@
 #pragma once
 #include "vic25/phase_b_world.hpp"
+#include "vic25/day_budget.hpp"
 #include "vic25/monthly.hpp"
 
 namespace vic25::phaseb {
@@ -71,8 +72,7 @@ public:
         require(days_in_month>=28&&days_in_month<=31&&day>=1&&
                 day<=days_in_month,"invalid autonomous POP calendar day");
         const auto per_day=[&](People monthly_ppm)->People {
-            return (monthly_ppm*day)/days_in_month-
-                   (monthly_ppm*(day-1))/days_in_month;
+            return daily_budget::increment(monthly_ppm,day,days_in_month);
         };
         DemographyRules today=rules_;
         today.fertility_ppm=per_day(rules_.fertility_ppm);
@@ -88,8 +88,7 @@ public:
         today.migration_ppm=per_day(rules_.migration_ppm);
         for(auto& vacancy:today.monthly_vacancies){
             const auto monthly=vacancy.slots;
-            vacancy.slots=(monthly*day)/days_in_month-
-                          (monthly*(day-1))/days_in_month;
+            vacancy.slots=daily_budget::increment(monthly,day,days_in_month);
         }
         std::erase_if(today.monthly_vacancies,
                       [](const Vacancy& v){return v.slots==0;});
