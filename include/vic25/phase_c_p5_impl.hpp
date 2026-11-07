@@ -434,6 +434,29 @@ inline void IntegratedWorld::p5_confirm_actual_control(
     events_.push_back("p5-real-rebel-military-control-confirmed:"+region);
 }
 
+inline void IntegratedWorld::phase_time_apply_p5_settlement(
+        std::int64_t today) {
+    require_stage({0});
+    const auto due=p5_scheduled_control_reconciliation_.find(today);
+    if(due==p5_scheduled_control_reconciliation_.end())return;
+    for(const auto& agreement:due->second) {
+        ensure(governments_.at(agreement.country).head_of_state==
+                   agreement.successor_head,
+               "P5 legitimate new commander must already be seated by P1");
+        for(const auto& region:agreement.verified_regions) {
+            ensure(sovereignty_.at(region)==agreement.country&&
+                   military_control_.at(region)==
+                       "P5:"+agreement.crisis_id,
+                   "P5 may normalize only previously rebel-controlled real territory");
+            military_control_[region]=agreement.country;
+        }
+        events_.push_back(
+            "p5-real-military-command-unified-after-settlement:"+
+            agreement.crisis_id);
+    }
+    p5_scheduled_control_reconciliation_.erase(due);
+}
+
 inline void IntegratedWorld::p5_settle(P5Settlement settlement) {
     require_stage({9});
     ensure(!settlement.id.empty()&&!settlement.legal_basis.empty()&&
@@ -488,6 +511,11 @@ inline void IntegratedWorld::p5_settle(P5Settlement settlement) {
         change.replace_head=true;
         change.legal_basis="p5-extraconstitutional:"+settlement.legal_basis;
         change.coalition=p1_coalitions_.at(crisis.country);
+        const auto& evidence=p5_control_evidence_.at(crisis.id);
+        p5_scheduled_control_reconciliation_[settlement.day+1].push_back({
+            crisis.id,crisis.country,settlement.successor_head,
+            {evidence.begin(),evidence.end()}
+        });
     } else {
         ensure(crisis.kind==P5CrisisKind::secession&&
                !settlement.region.empty()&&
