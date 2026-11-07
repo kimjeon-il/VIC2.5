@@ -751,10 +751,17 @@ public:
     [[nodiscard]] bool has_public_healthcare_right() const {return healthcare_right_;}
     void provide_public_healthcare(const std::string& institution,Id patient_slice,People patients) {
         require_stage({7});
-        ensure(healthcare_right_&&public_institutions_.contains(institution)&&
+        ensure(public_institutions_.contains(institution)&&
                people_.has_slice(patient_slice)&&patients>0,
-               "no legal entitlement or patient population");
+               "missing clinical institution or population");
         auto& service=public_institutions_.at(institution);
+        const auto sovereign=sovereignty_.find(service.region);
+        ensure(sovereign!=sovereignty_.end(),
+               "public healthcare requires real sovereign jurisdiction");
+        const bool entitled=p2_rule(sovereign->second,sovereign->second,
+             P2ClauseKind::public_healthcare_right)
+             .value_or(healthcare_right_?1:0)!=0;
+        ensure(entitled,"public healthcare lacks current legal entitlement");
         ensure(patients<=people_.slice(patient_slice).count &&
                service.provided+patients<=service.monthly_slots &&
                patients<=positive_product(employed_by(service.operator_id),
@@ -2224,8 +2231,18 @@ public:
     }
     void hire(Id slice, People count, const std::string& employer, Money wage) {
         require_stage({2});
-        ensure(actors_.contains(employer)&&!firm_bankrupt(employer),
-               "unknown or insolvent employer");
+        ensure(actors_.contains(employer)&&!firm_bankrupt(employer)&&
+               people_.has_slice(slice),
+               "unknown worker or insolvent employer");
+        const auto& dem=people_.demographic(
+            people_.slice(slice).key.demographic);
+        const auto country=sovereignty_.find(dem.region);
+        if(country!=sovereignty_.end()) {
+            const auto legal=p2_rule(country->second,country->second,
+                 P2ClauseKind::minimum_monthly_contract_wage).value_or(0);
+            ensure(wage>=legal,
+                   "P2 minimum wage law forbids underpaid new labor contracts");
+        }
         people_.hire(slice, count, employer, "worker", wage, phaseb::JobRequirements{});
         events_.push_back("hire");
     }
@@ -2479,8 +2496,16 @@ public:
         ensure(units_.contains(unit) && n > 0 && people_.has_slice(source),
                "invalid mobilization");
         const auto s = people_.slice(source);
-        const auto service = people_.demographic(s.key.demographic).service;
-        ensure(conscription_enabled_, "conscription not currently authorized");
+        const auto& demo=people_.demographic(s.key.demographic);
+        const auto service=demo.service;
+        const auto jurisdiction=sovereignty_.find(demo.region);
+        bool permitted=conscription_enabled_;
+        if(jurisdiction!=sovereignty_.end()) {
+            permitted=p2_rule(jurisdiction->second,jurisdiction->second,
+                P2ClauseKind::conscription_authorized)
+                .value_or(conscription_enabled_?1:0)!=0;
+        }
+        ensure(permitted,"P2 military service law does not permit conscription");
         ensure(service == phaseb::Service::civilian || service == phaseb::Service::reserve,
                "not mobilizable");
         ensure(n <= s.count - assigned(source), "overallocated recruit");
