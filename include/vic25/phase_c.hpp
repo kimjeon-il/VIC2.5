@@ -1946,7 +1946,11 @@ public:
             if(n==11&&final_calendar_day) {
                 staged.election_this_month_=false;
             }
-            staged.validate();
+            // Real daily events already enforce local preconditions. One
+            // full invariant pass at Stage 11 is sufficient for the single
+            // atomic day commit; avoid scanning every POP/financial account
+            // twelve times per calendar day.
+            if(n==11)staged.validate();
         }
         staged.stage_=-1;
         ensure(staged.month()==opening_month+(final_calendar_day?1:0),
