@@ -93,7 +93,8 @@ inline std::optional<daily::Command> plan_next_hop(
     const auto from=geo.regions.at(origin);
     const auto to=geo.regions.at(lane.destination_region);
     const auto route=phasegh::quote_daily_freight_path(
-        trade,from,to,gh.month(),current.day,dim,&provisional.edge_units);
+        trade,from,to,gh.month(),current.day,dim,&provisional.edge_units,
+        true,&lane.edge_transit_days);
     if(!route||route->edges.empty()||route->capacity<=0)
         return std::nullopt;
     const auto& edge=trade.transport_edges.at(route->edges.front());
