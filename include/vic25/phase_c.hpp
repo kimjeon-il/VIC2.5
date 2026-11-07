@@ -1472,6 +1472,7 @@ public:
     [[nodiscard]] bool p5_has_due_daily_strike(std::int64_t)const;
     void phase_time_apply_p5_strikes(std::int64_t);
     void p5_perform_action(P5CollectiveAction);
+    void p5_seed_capital(const std::string&,const std::string&);
     void p5_pledge_army_unit(const std::string&,const std::string&);
     void p5_designate_coup(const std::string&);
     void p5_begin_armed_conflict(const std::string&,std::int64_t);
@@ -2943,6 +2944,11 @@ public:
                p5_settlements_.size()<=1'000'000&&
                p5_crises_.size()<=100'000,
                "P5 oversized activity or conflict record");
+        for(const auto& [country,region]:p5_capitals_)
+            ensure(governments_.contains(country)&&
+                   sovereignty_.contains(region)&&
+                   sovereignty_.at(region)==country,
+                   "P5 national capital must reference true sovereign territory");
         std::set<std::string> occupied_units;
         for(const auto& [id,crisis]:p5_crises_) {
             ensure(id==crisis.id&&governments_.contains(crisis.country)&&
@@ -3496,6 +3502,8 @@ private:
     std::map<std::string,P3Movement> p3_movements_;
     std::int64_t p3_last_reaction_day_{-1};
     std::map<std::string,P5Crisis> p5_crises_;
+    // Political capital is a reference into the existing C sovereignty map.
+    std::map<std::string,std::string> p5_capitals_;
     std::vector<P5CollectiveAction> p5_actions_;
     std::set<std::string> p5_action_ids_; // derived from action journal
     std::vector<P5Settlement> p5_settlements_;
