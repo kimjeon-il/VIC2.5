@@ -9,6 +9,7 @@
 #include "vic25/phase_c_p4.hpp"
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
+#include "vic25/phase_c_p5.hpp"
 #include "vic25/ledgers.hpp"
 #include "vic25/shared_reservations.hpp"
 #include <algorithm>
@@ -1454,6 +1455,31 @@ public:
     [[nodiscard]] bool p3_needs_daily_tick()const;
     void p3_daily_react(std::int64_t);
     void p3_reconcile_population();
+    // P5's political actions and civil-conflict evidence must bind real POP
+    // participation, institutional capacity, and already-deployed C armies.
+    [[nodiscard]] P5RiskView p5_risk(const std::string&)const;
+    [[nodiscard]] const std::map<std::string,P5Crisis>& p5_crises()const {
+        return p5_crises_;
+    }
+    [[nodiscard]] const std::vector<P5CollectiveAction>& p5_actions()const {
+        return p5_actions_;
+    }
+    [[nodiscard]] const std::vector<P5Settlement>& p5_settlements()const {
+        return p5_settlements_;
+    }
+    [[nodiscard]] bool p5_needs_daily_tick()const;
+    void p5_daily_advance(std::int64_t);
+    void p5_perform_action(P5CollectiveAction);
+    void p5_pledge_army_unit(const std::string&,const std::string&);
+    void p5_designate_coup(const std::string&);
+    void p5_begin_armed_conflict(const std::string&,std::int64_t);
+    void p5_record_real_engagement(
+        const std::string&,const std::string&,Id,
+        const std::string&,Id,const std::string&,
+        CombatLoss,CombatLoss,std::int64_t);
+    void p5_confirm_actual_control(
+        const std::string&,const std::string&,std::int64_t);
+    void p5_settle(P5Settlement);
     void seed_interest_group(std::string group) {
         ensure(stage_==-1 && commit_id_==0 && !group.empty() &&
                interest_groups_.insert(std::move(group)).second, "invalid interest group");
@@ -2896,6 +2922,55 @@ public:
                        p4_parties_.at(party).country==movement.country,
                        "P3 movement party belongs to foreign country");
         }
+        ensure(p5_actions_.size()<=1'000'000&&
+               p5_settlements_.size()<=1'000'000&&
+               p5_crises_.size()<=100'000,
+               "P5 oversized activity or conflict record");
+        std::set<std::string> occupied_units;
+        for(const auto& [id,crisis]:p5_crises_) {
+            ensure(id==crisis.id&&governments_.contains(crisis.country)&&
+                   p3_movements_.contains(crisis.movement)&&
+                   p3_movements_.at(crisis.movement).country==crisis.country&&
+                   static_cast<unsigned>(crisis.kind)<=
+                       static_cast<unsigned>(P5CrisisKind::secession)&&
+                   static_cast<unsigned>(crisis.stage)<=
+                       static_cast<unsigned>(P5CrisisStage::settled)&&
+                   crisis.pressure_days>=0&&crisis.calm_days>=0&&
+                   crisis.last_checked_day>=-1&&
+                   crisis.verified_engagements>=0,
+                   "P5 conflict without actual political movement");
+            for(const auto& unit:crisis.pledged_units) {
+                ensure(army_deployments_.contains(unit)&&
+                       army_deployments_.at(unit).country==crisis.country&&
+                       (crisis.stage==P5CrisisStage::settled||
+                        occupied_units.insert(unit).second),
+                       "P5 military unit duplicated in competing factions");
+            }
+            for(const auto& region:crisis.contested_regions)
+                ensure(sovereignty_.contains(region)&&
+                       !region.empty(),
+                       "P5 armed organization has fictitious territory");
+        }
+        for(const auto& action:p5_actions_) {
+            ensure(p3_movements_.contains(action.movement)&&
+                   action.day>=0&&action.participants>=0&&
+                   action.strikers>=0&&action.strikers<=action.participants&&
+                   static_cast<unsigned>(action.kind)<=
+                       static_cast<unsigned>(P5ActionKind::policing),
+                   "P5 invalid collective action journal");
+        }
+        for(const auto& outcome:p5_settlements_)
+            ensure(p5_crises_.contains(outcome.crisis_id)&&outcome.day>=0&&
+                   static_cast<unsigned>(outcome.kind)<=
+                       static_cast<unsigned>(P5SettlementKind::independence_recognized),
+                   "P5 settlement without real conflict");
+        for(const auto& [crisis,regions]:p5_control_evidence_) {
+            ensure(p5_crises_.contains(crisis),
+                   "P5 political control lacks crisis");
+            for(const auto& region:regions)
+                ensure(sovereignty_.contains(region),
+                       "P5 control evidence lacks real region");
+        }
         for (const auto& [slice,n]:strike_active_)
             ensure(people_.has_slice(slice)&&n<=people_.employed(slice),"invalid strike allocation");
         for(const auto& [id,t]:reparations_) {
@@ -3388,6 +3463,11 @@ private:
     std::map<std::pair<std::string,std::string>,P3Group> p3_groups_;
     std::map<std::string,P3Movement> p3_movements_;
     std::int64_t p3_last_reaction_day_{-1};
+    std::map<std::string,P5Crisis> p5_crises_;
+    std::vector<P5CollectiveAction> p5_actions_;
+    std::vector<P5Settlement> p5_settlements_;
+    // Only evidence of real C military control, not duplicate ownership.
+    std::map<std::string,std::set<std::string>> p5_control_evidence_;
     std::map<Id, People> participation_this_month_, strike_active_;
     std::map<std::int64_t,std::map<Id,People>> scheduled_strikes_;
     std::map<std::string, GovernmentState> governments_;
@@ -3708,3 +3788,4 @@ private:
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
+#include "vic25/phase_c_p5_impl.hpp"
