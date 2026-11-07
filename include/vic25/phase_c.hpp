@@ -1606,6 +1606,8 @@ public:
             ensure(supporting_parties.empty(),
                    "P1 direct executive may not invent parliamentary votes");
         } else {
+            ensure(!p4_parliament_dissolved(country),
+                   "P4 dissolved parliament cannot enact a new tax law");
             const auto& result=legislature_for(country);
             ensure(result.total_seats==g.chamber_seats &&
                    coalition_seats(supporting_parties,result)>=g.quorum,
