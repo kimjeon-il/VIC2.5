@@ -1592,7 +1592,7 @@ public:
                             if(current>=quote.target_stock)continue;
                             const Money free=c.phase_d_cash_available(buyer);
                             const Quantity affordable=free>0?
-                                free/(4*quote.price):0;
+                                (free/quote.price)/4:0;
                             const Quantity qty=std::min({
                                 quote.target_stock-current,affordable,
                                 c.phase_d_material_available(
