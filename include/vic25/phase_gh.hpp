@@ -991,6 +991,30 @@ public:
     void exchange_currencies(const std::string& a, const std::string& b,
                              const std::string& sold, Money sold_amount,
                              const std::string& bought, Money bought_amount);
+    // All provable disputed provinces of a belligerent pair are potential
+    // active fronts of the same war. Derive them from the single authoritative
+    // E claim and C sovereignty registries, not duplicated H front markers.
+    [[nodiscard]] std::vector<std::string> war_front_regions(
+            const WarState& war) {
+        const auto& geo=spatial_.spatial();
+        const auto& c=phase_c();
+        std::set<std::string> real_fronts;
+        const auto underlying=diplomacy_.crises.find(war.crisis);
+        if(underlying!=diplomacy_.crises.end()&&
+           geo.provinces.contains(underlying->second.province))
+            real_fronts.insert(geo.provinces.at(
+                underlying->second.province).region);
+        for(const auto& [province,claimants]:geo.claims) {
+            if(!geo.provinces.contains(province))continue;
+            const auto& region=geo.provinces.at(province).region;
+            const auto& owner=c.sovereignty(region);
+            if((owner==war.defender&&claimants.contains(war.attacker))||
+               (owner==war.attacker&&claimants.contains(war.defender)))
+                real_fronts.insert(region);
+        }
+        return {real_fronts.begin(),real_fronts.end()};
+    }
+
     // War starts only from a recorded unresolved crisis backed by actual
     // opposed, deployed and armed units at its documented disputed province.
     // No abstract belligerence points, free armies or automatic claims.
