@@ -1943,6 +1943,19 @@ public:
             if(bankrupt_firms_.contains(claim.employer) ||
                claim.issued_day>today || today-claim.issued_day<30)
                 continue;
+            // A sovereign treasury is never liquidated under the private
+            // company's thirty-day wage insolvency rule. Public defaults
+            // require national debt and fiscal law, not factory liquidation.
+            bool public_wallet=governments_.contains(claim.employer);
+            for(const auto& [country,gov]:governments_) {
+                (void)gov;
+                if(has_country_treasury(country)&&
+                   country_treasury(country)==claim.employer) {
+                    public_wallet=true;
+                    break;
+                }
+            }
+            if(public_wallet)continue;
             if(outstanding_worker_wages(claim.employer)<=
                cash(claim.employer))continue;
             bankrupt_firms_[claim.employer]=today;
