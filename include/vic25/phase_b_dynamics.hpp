@@ -71,6 +71,7 @@ public:
     MonthReport advance_day(World& w,int day,int days_in_month)const {
         require(days_in_month>=28&&days_in_month<=31&&day>=1&&
                 day<=days_in_month,"invalid autonomous POP calendar day");
+        w.set_native_calendar_day(day);
         const auto per_day=[&](People monthly_ppm)->People {
             return daily_budget::increment(monthly_ppm,day,days_in_month);
         };
@@ -130,7 +131,7 @@ private:
         return (jobs/s.count)*total + mul_checked(jobs%s.count,total)/s.count;
     }
     [[nodiscard]] People death_rate(const World& w,const Slice& s)const{
-        const auto age=w.age_months(s.key.demographic);
+        const auto age=w.age_months_slice(s.id);
         People rate= age<12?rules_.infant_death_ppm:age<15*12?rules_.child_death_ppm:
                      age<65*12?rules_.adult_death_ppm:age<85*12?rules_.senior_death_ppm:rules_.very_old_death_ppm;
         const auto& hp=w.health(w.demographic(s.key.demographic).health);
@@ -148,7 +149,7 @@ private:
             const auto econ=w.economic(initial.key.economic);
             const auto hp=w.health(d.health);
             const auto ed=w.education(econ.education);
-            const auto age=w.age_months(initial.key.demographic);
+            const auto age=w.age_months_slice(id);
             const auto deaths=w.allocate_rate(id,"mortality",initial.count,death_rate(w,initial));
             if(deaths){w.death(id,deaths,job_allocation(w,id,deaths));report.deaths=add_checked(report.deaths,deaths);}
             if(d.sex==Sex::female && age>=18*12 && age<45*12){
@@ -244,7 +245,7 @@ private:
             const auto current=w.slice(id);
             const auto& d=w.demographic(current.key.demographic);
             if(d.service!=Service::civilian && d.service!=Service::reserve)continue;
-            const auto age=w.age_months(current.key.demographic);
+            const auto age=w.age_months_slice(id);
             const auto& econ=w.economic(current.key.economic);
             if(age>=rules_.labor.minimum_age_months && age<rules_.labor.maximum_age_months &&
                econ.profession=="not_assigned" && econ.livelihood=="inactive"){
