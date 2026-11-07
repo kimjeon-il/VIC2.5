@@ -44,7 +44,7 @@ def read_optional_lifetimes(path):
     if not path.exists():
         return
     with path.open("r", encoding="utf-8", newline="") as inp:
-        rows=csv.reader(inp, delimiter="\\t")
+        rows=csv.reader(inp, delimiter="\t")
         header=tuple(next(rows, ()))
         if header!=LIFETIME_COLUMNS:
             raise ValueError(f"{path}: bad historical lifetime header")
@@ -168,7 +168,7 @@ def main():
         if life_count:
             with (args.output/"physical_line_lifetimes.tsv").open(
                     "w",encoding="utf-8",newline="") as out:
-                writer=csv.writer(out,delimiter="\\t",lineterminator="\\n")
+                writer=csv.writer(out,delimiter="\t",lineterminator="\n")
                 writer.writerow(LIFETIME_COLUMNS)
                 writer.writerows(connection.execute(
                     "SELECT id,first,last FROM lifetimes ORDER BY id"))
