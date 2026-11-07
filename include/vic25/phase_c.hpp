@@ -1116,6 +1116,12 @@ public:
         ensure(actors_.contains(country),"country treasury needs explicit binding");
         return governments_.at(country).country;
     }
+    [[nodiscard]] const std::string& customs_revenue_wallet(
+            const std::string& country)const {
+        if(governments_.contains(country))return country_treasury(country);
+        ensure(actors_.contains(country),"customs country wallet missing");
+        return country;
+    }
     [[nodiscard]] CountryFiscalView country_fiscal(
             const std::string& country)const {
         const auto& treasury=country_treasury(country);
