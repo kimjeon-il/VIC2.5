@@ -43,7 +43,7 @@ inline void IntegratedWorld::p4_seed_contest(P4Contest contest) {
            contest.last_poll_day==-1&&contest.seats>=1&&
            contest.seats<=100'000&&contest.active&&
            static_cast<unsigned>(contest.office)<=
-               static_cast<unsigned>(P4Office::head_of_state)&&
+               static_cast<unsigned>(P4Office::local_head)&&
            static_cast<unsigned>(contest.method)<=
                static_cast<unsigned>(P4BallotMethod::plurality)&&
            static_cast<unsigned>(contest.term_mode)<=
@@ -63,10 +63,25 @@ inline void IntegratedWorld::p4_seed_contest(P4Contest contest) {
                    existing.office!=P4Office::legislature,
                    "P4 duplicate national chamber without bicameral authority");
         }
-    } else if(contest.office==P4Office::local) {
+    } else if(contest.office==P4Office::upper_chamber) {
+        ensure(order.legislature==P1LegislatureKind::bicameral&&
+               (contest.jurisdiction.empty()||contest.jurisdiction=="national"),
+               "P4 upper election requires bicameral constitutional legislature");
+        for(const auto& [other_id,other]:p4_contests_) {
+            (void)other_id;
+            ensure(other.country!=contest.country||
+                   other.office!=P4Office::upper_chamber,
+                   "P4 duplicate upper chamber for one national constitution");
+        }
+    } else if(contest.office==P4Office::local ||
+              contest.office==P4Office::local_head) {
         ensure(sovereignty_.contains(contest.jurisdiction)&&
                sovereignty_.at(contest.jurisdiction)==contest.country,
-               "P4 local contest must use real sovereign region");
+               "P4 local election must use existing sovereign region");
+        if(contest.office==P4Office::local_head)
+            ensure(contest.seats==1&&
+                   contest.method==P4BallotMethod::plurality,
+                   "P4 local head has one elected office");
     } else {
         ensure(contest.seats==1&&
                contest.method==P4BallotMethod::plurality&&
@@ -145,7 +160,8 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
     for(const auto& [id,party]:p4_parties_) {
         (void)id;
         if(party.country==contest.country&&party.active&&party.registered&&
-           (contest.office!=P4Office::head_of_state||
+           (contest.office!=P4Office::head_of_state&&
+            contest.office!=P4Office::local_head||
             (!party.head_candidate.empty()&&
              p2_candidate_eligible(contest_id,party.head_candidate))))
             candidates.push_back(&party);
@@ -155,7 +171,8 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
     if(p1_constitution(contest.country).power==P1PowerDistribution::single_party)
         ensure(candidates.size()==1,"P4 single-party law forbids multiple candidates");
     for(const auto* party:candidates) {
-        if(contest.office==P4Office::head_of_state)
+        if(contest.office==P4Office::head_of_state||
+           contest.office==P4Office::local_head)
             ensure(!party->head_candidate.empty(),
                    "P4 elected head must have named candidate");
         ballot.votes.emplace(party->id,0);
@@ -252,7 +269,8 @@ inline void IntegratedWorld::p4_hold_contest(
     std::size_t permitted=0;
     for(const auto& [pid,party]:p4_parties_)
         if(party.country==contest.country&&party.registered&&party.active&&
-           (contest.office!=P4Office::head_of_state||
+           (contest.office!=P4Office::head_of_state&&
+            contest.office!=P4Office::local_head||
             (!party.head_candidate.empty()&&
              p2_candidate_eligible(id,party.head_candidate))))
             ++permitted;
@@ -262,7 +280,8 @@ inline void IntegratedWorld::p4_hold_contest(
         ensure(votes>=0&&p4_parties_.contains(party)&&
                p4_parties_.at(party).country==contest.country&&
                p4_parties_.at(party).active&&p4_parties_.at(party).registered&&
-               (contest.office!=P4Office::head_of_state||
+               (contest.office!=P4Office::head_of_state&&
+                contest.office!=P4Office::local_head||
                 (!p4_parties_.at(party).head_candidate.empty()&&
                  p2_candidate_eligible(
                      id,p4_parties_.at(party).head_candidate))),
@@ -334,6 +353,16 @@ inline void IntegratedWorld::p4_hold_contest(
         next.replace_head=true;
         next.new_head=result.office_holder;
     }
+    if(contest.office==P4Office::local_head) {
+        const auto& chosen=p4_parties_.at(result.winning_party);
+        const auto nomination=p4_nominations_.find({id,result.winning_party});
+        result.office_holder=(nomination!=p4_nominations_.end()&&
+                              !nomination->second.empty())?
+                            nomination->second.front():chosen.head_candidate;
+        ensure(!result.office_holder.empty(),
+               "P4 elected local head needs named nominee");
+    }
+    p4_record_elected_persons(result);
     // History is immutable audit. For national parliament, country_elections_
     // remains authoritative for current seats. Local/head results are held
     // separately by contest ID, never used as national legislative votes.
