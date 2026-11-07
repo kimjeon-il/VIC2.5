@@ -66,6 +66,17 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
                "P2 national law cannot impersonate regional sovereignty");
     }
     p2_validate_clauses(law.country,law.clauses);
+    if(law.tier==P2NormTier::local_ordinance) {
+        for(const auto& clause:law.clauses) {
+            ensure(clause.target!=law.country,
+                   "P2 local ordinance cannot legislate nationwide tax or suffrage");
+            const auto it=p4_contests_.find(clause.target);
+            ensure(it!=p4_contests_.end()&&
+                   it->second.office==P4Office::local&&
+                   it->second.jurisdiction==law.scope,
+                   "P2 local ordinance cannot change national elected offices");
+        }
+    }
 }
 
 inline void IntegratedWorld::p2_check_amendment(const P2Amendment& amendment)const {
@@ -232,6 +243,7 @@ inline void IntegratedWorld::p2_sync_country_rules(
         const std::vector<P2ElectionTransition>& transitions,
         std::int64_t today) {
     std::map<std::string,P2ElectionTransition> prescribed;
+    std::set<std::string> applied;
     for(const auto& transition:transitions) {
         const auto it=p4_contests_.find(transition.contest_id);
         ensure(it!=p4_contests_.end()&&it->second.country==country&&
@@ -250,6 +262,7 @@ inline void IntegratedWorld::p2_sync_country_rules(
         if(contest.country!=country)continue;
         const auto before=p2_term(id);
         if(before.has_legal_term) {
+            if(prescribed.contains(id))applied.insert(id);
             int best_rank=1000;
             std::string source_law;
             for(const auto& [slot,law_id]:p2_active_base_) {
@@ -296,6 +309,8 @@ inline void IntegratedWorld::p2_sync_country_rules(
             }
         }
     }
+    ensure(applied.size()==prescribed.size(),
+           "P2 incumbent transition must be grounded in active term law");
 }
 
 inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
@@ -310,6 +325,21 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
     ensure(static_cast<unsigned>(bill.action)<=
                static_cast<unsigned>(P2BillAction::repeal_base),
            "P2 invalid legal bill operation");
+    std::set<std::string> affected_contests;
+    for(const auto& transition:bill.transitions) {
+        const auto contest=p4_contests_.find(transition.contest_id);
+        ensure(contest!=p4_contests_.end()&&
+               contest->second.country==bill.country&&
+               affected_contests.insert(transition.contest_id).second&&
+               static_cast<unsigned>(transition.mode)<=
+                   static_cast<unsigned>(P2TermTransition::incumbent_as_well),
+               "P2 bill has invalid or duplicate elected office transition");
+        if(transition.mode==P2TermTransition::incumbent_as_well)
+            ensure(transition.next_poll_day>bill.effective_day,
+                   "P2 incumbent term cannot expire before law effectiveness");
+        else ensure(transition.next_poll_day==-1,
+                    "P2 future-only law must preserve incumbent election");
+    }
     if(bill.action==P2BillAction::enact_or_replace_base) {
         p2_validate_base(bill.proposed_base);
         ensure(bill.proposed_base.country==bill.country&&
