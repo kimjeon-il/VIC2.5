@@ -380,3 +380,11 @@ if(BUILD_TESTING)
     target_link_libraries(vic25_p2_advanced_tests PRIVATE vic25_core)
     add_test(NAME vic25_p2_advanced_tests COMMAND vic25_p2_advanced_tests)
 endif()
+
+# P3 and P5 opt-in daily politics: POP attitudes, institutional interest-group
+# clout, movements, actual one-day strikes, unrest and army-backed civil cases.
+if(BUILD_TESTING)
+    add_executable(vic25_p3_p5_politics_tests tests/test_p3_p5_politics.cpp)
+    target_link_libraries(vic25_p3_p5_politics_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p3_p5_politics_tests COMMAND vic25_p3_p5_politics_tests)
+endif()
