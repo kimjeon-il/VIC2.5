@@ -38,7 +38,7 @@ inline void validate(const FreightLane& lane) {
        lane.origin_region.empty()||lane.destination_region.empty()||
        lane.origin_region==lane.destination_region||
        lane.target_inventory<=0||lane.maximum_daily_units<=0||
-       lane.confirmed_loss_per_hop<0||lane.edge_transit_days.empty())
+       lane.confirmed_loss_per_hop<0)
         throw std::invalid_argument("F_INVALID_AUTONOMOUS_FREIGHT_LANE");
     for(const auto& [edge,days]:lane.edge_transit_days)
         if(edge.empty()||days<=0)
@@ -97,8 +97,14 @@ inline std::optional<daily::Command> plan_next_hop(
     if(!route||route->edges.empty()||route->capacity<=0)
         return std::nullopt;
     const auto& edge=trade.transport_edges.at(route->edges.front());
-    const auto duration=lane.edge_transit_days.find(edge.id);
-    if(duration==lane.edge_transit_days.end())
+    const auto configured=lane.edge_transit_days.find(edge.id);
+    std::int32_t transit_days=edge.transit_days;
+    if(configured!=lane.edge_transit_days.end()) {
+        if(transit_days>0&&configured->second!=transit_days)
+            throw std::invalid_argument("F_CONFLICTING_TRANSIT_DAY_SOURCES");
+        transit_days=configured->second;
+    }
+    if(transit_days<=0)
         throw std::invalid_argument("F_MISSING_VERIFIED_EDGE_DAYS");
     const auto& hop_region=geo.provinces.at(edge.to).region;
     const auto stock_key=std::make_tuple(shipper,origin,lane.good);
@@ -131,7 +137,7 @@ inline std::optional<daily::Command> plan_next_hop(
     command.good=lane.good;
     command.route_id=edge.id;
     command.amount=units;
-    command.unit_price=duration->second; // actual travel days
+    command.unit_price=transit_days; // actual travel days
     command.auxiliary=std::min(units,lane.confirmed_loss_per_hop);
     return command;
 }
