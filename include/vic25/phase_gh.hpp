@@ -120,6 +120,11 @@ struct DailyTradeTransit {
     std::uint32_t hop_index{};
     bool at_hub{};
 };
+struct DayCargoReservation {
+    std::string edge,sender,origin,good;
+    Quantity quantity{};
+    Money freight{};
+};
 struct TradeState {
     std::map<std::string, Route> routes;
     std::map<std::string, TransportEdge> transport_edges;
@@ -134,6 +139,8 @@ struct TradeState {
     std::vector<TradeFill> fills;
     // Only timing/recipient metadata: physical inventory is always in C.
     std::map<std::string,DailyTradeTransit> daily_shipments;
+    // Stage1->Stage7 only. A save is always taken outside the transaction.
+    std::map<std::string,DayCargoReservation> day_cargo_reservations;
     std::set<std::string> executed;
     std::uint64_t revision{};
 };
@@ -519,6 +526,41 @@ public:
             coverage.claim_registered=true;
         }
         ++trade_.revision;
+    }
+    // Reserve real seller stock, carrier fare and G edge capacity before
+    // autonomous merchants make competing Stage1 purchases that same day.
+    void reserve_daily_cargo(const std::string& cargo_id,
+                             const std::string& edge_id,
+                             const std::string& sender,
+                             const std::string& origin,
+                             const std::string& good,
+                             Quantity quantity,
+                             std::int32_t day,
+                             std::int32_t days) {
+        at(1);
+        require(day>0&&days>=28&&days<=31&&day<=days&&quantity>0&&
+                !trade_.day_cargo_reservations.contains(cargo_id),
+                "F_ERR_INVALID_CARGO_BOOKING");
+        const auto& edge=trade_.transport_edges.at(edge_id);
+        const auto& geo=spatial_.spatial();
+        require(edge.enabled&&geo.regions.contains(origin)&&
+                (edge.from==geo.regions.at(origin)||
+                 edge.to==geo.regions.at(origin)),
+                "F_ERR_ROUTE_NOT_CONNECTED");
+        const auto key=std::make_pair(phase_c().month(),edge_id);
+        const Quantity used=trade_.edge_usage[key];
+        require(quantity<=daily_budget::remaining(
+                    edge.monthly_capacity,used,day,days),
+                "F_ERR_DUPLICATE_FREIGHT_CAPACITY");
+        const std::string purpose="F:"+cargo_id;
+        phase_c().phase_d_reserve_material(
+            sender,origin,good,purpose,quantity);
+        const Money fare=sender==edge.carrier?0:
+                           phaseb::mul_checked(quantity,edge.freight_per_unit);
+        if(fare>0)phase_c().phase_d_reserve_cash(sender,purpose,fare);
+        trade_.edge_usage[key]=phaseb::add_checked(used,quantity);
+        trade_.day_cargo_reservations.emplace(cargo_id,
+            DayCargoReservation{edge_id,sender,origin,good,quantity,fare});
     }
     void dispatch_daily_cargo(const std::string& cargo_id,
                               const std::string& edge_id,
