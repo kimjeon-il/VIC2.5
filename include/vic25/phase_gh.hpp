@@ -103,9 +103,10 @@ struct PlannedTrade {
 
 struct PathQuote {
     Money freight_per_unit{};
-    Month travel_months{};
+    Month travel_months{}; // standalone legacy contract only
     Quantity capacity{};
     std::vector<std::string> edges;
+    std::int64_t travel_days{}; // native route, zero if timing unknown
 };
 struct DailyTradeTransit {
     std::string id, buyer, destination, good;
@@ -137,7 +138,8 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         const TradeState& trade,Id from,Id to,Month month,
         std::int32_t day_of_month=0,std::int32_t days_in_month=0,
         const std::map<std::string,Quantity>* provisional_edges=nullptr,
-        bool verified_day_edges_only=false) {
+        bool verified_day_edges_only=false,
+        const std::map<std::string,std::int32_t>* override_days=nullptr) {
     if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
     if(trade.transport_edges.empty())return std::nullopt;
     using Item=std::tuple<Money,Month,Id>;
@@ -156,7 +158,17 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         // World::seed_transport_edge inserts in deterministic ID order.
         for(const auto& edge_id:it->second) {
             const auto& edge=trade.transport_edges.at(edge_id);
-            if(verified_day_edges_only&&edge.transit_days<=0)continue;
+            std::int32_t actual_days=edge.transit_days;
+            if(override_days) {
+                const auto configured=override_days->find(edge_id);
+                if(configured!=override_days->end()) {
+                    require(configured->second>0 &&
+                            (actual_days==0||actual_days==configured->second),
+                            "F_ERR_CONFLICTING_VERIFIED_TRANSIT_DAYS");
+                    actual_days=configured->second;
+                }
+            }
+            if(verified_day_edges_only&&actual_days<=0)continue;
             const Quantity committed=trade.edge_usage.contains({month,edge_id})?
                                      trade.edge_usage.at({month,edge_id}):0;
             const Quantity pending=(provisional_edges&&
@@ -171,7 +183,9 @@ inline std::optional<PathQuote> quote_daily_freight_path(
             require(edge.from==node && used>=0,
                     "G_ERR_LOGISTICS_INDEX_CORRUPT");
             const Money next_cost=phaseb::add_checked(cost,edge.freight_per_unit);
-            const Month next_travel=phaseb::add_checked(travel,edge.transit_months);
+            const Month next_travel=phaseb::add_checked(travel,
+                day_of_month>0&&actual_days>0?
+                    static_cast<Month>(actual_days):edge.transit_months);
             const std::pair<Money,Month> candidate{next_cost,next_travel};
             auto old=best.find(edge.to);
             if(old==best.end() || candidate<old->second) {
@@ -184,7 +198,7 @@ inline std::optional<PathQuote> quote_daily_freight_path(
     if(!best.contains(to))return std::nullopt;
     PathQuote result;
     result.freight_per_unit=best.at(to).first;
-    result.travel_months=best.at(to).second;
+    result.travel_days=day_of_month>0?best.at(to).second:0;
     result.capacity=std::numeric_limits<Quantity>::max();
     for(Id p=to;p!=from;) {
         auto it=parent.find(p);
@@ -204,6 +218,9 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         p=it->second.first;
     }
     std::reverse(result.edges.begin(),result.edges.end());
+    for(const auto& edge_id:result.edges)
+        result.travel_months=phaseb::add_checked(result.travel_months,
+            trade.transport_edges.at(edge_id).transit_months);
     return result;
 }
 
