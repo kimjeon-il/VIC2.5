@@ -1741,7 +1741,9 @@ public:
                                 while(left<=right) {
                                     const Money mid=left+(right-left)/2;
                                     if(affordable(mid)) {
-                                        fill=mid;left=mid+1;
+                                        fill=mid;
+                                        if(mid==maximum)break; // no signed overflow
+                                        left=mid+1;
                                     } else right=mid-1;
                                 }
                                 if(fill<=0)continue;
