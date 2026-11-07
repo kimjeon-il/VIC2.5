@@ -177,9 +177,12 @@ inline void IntegratedWorld::schedule_p1_cabinet_daily(
     require_stage({9});
     ensure(p1_constitutions_.contains(country)&&effective_day>=0&&
            !legal_basis.empty()&&!successor_prime.empty()&&
-           governments_.at(country).head_of_state==incumbent_head&&
-           !p1_pending_[effective_day].contains(country),
-           "P1 invalid or duplicate cabinet formation");
+           governments_.at(country).head_of_state==incumbent_head,
+           "P1 invalid cabinet formation");
+    const auto existing=p1_pending_[effective_day].find(country);
+    ensure(existing==p1_pending_[effective_day].end()||
+           !existing->second.replace_prime,
+           "P1 duplicate same-day cabinet transition");
     p1_check_coalition(coalition);
     const auto authority=p1_authority(country);
     if(authority.assembly_confidence_required) {
@@ -189,9 +192,12 @@ inline void IntegratedWorld::schedule_p1_cabinet_daily(
                    governments_.at(country).quorum,
                "P1 parliamentary cabinet lacks recorded confidence");
     }
-    p1_pending_[effective_day].emplace(country,P1GovernmentChange{
-        country,"",std::move(successor_prime),std::move(coalition),
-        legal_basis,false,true});
+    auto& change=p1_pending_[effective_day][country];
+    change.country=country;
+    change.new_prime=std::move(successor_prime);
+    change.coalition=std::move(coalition);
+    if(change.legal_basis.empty())change.legal_basis=legal_basis;
+    change.replace_prime=true;
     events_.push_back("p1-daily-cabinet-authorized:"+country);
 }
 
