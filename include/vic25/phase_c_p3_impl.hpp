@@ -177,7 +177,6 @@ inline P3MovementView IntegratedWorld::p3_movement_view(
            (!movement.region.empty()&&
             dem.region!=movement.region))continue;
         population=phaseb::add_checked(population,row.count);
-        support[slice]=0;
         const auto att=p3_attitudes_.find(slice);
         if(att!=p3_attitudes_.end()) {
             const auto pref=att->second.issues.find(movement.issue_domain);
@@ -185,19 +184,25 @@ inline P3MovementView IntegratedWorld::p3_movement_view(
                pref->second.preference_ppm>0) {
                 const auto interested=p4_scaled(
                     row.count,pref->second.preference_ppm,1'000'000);
-                support[slice]=p4_scaled(interested,
+                const auto intended=p4_scaled(interested,
                     pref->second.importance_ppm,1'000'000);
+                if(intended>0)support[slice]=intended;
             }
         }
     }
     // Multiple organizational affiliations overlap. Count each actual POP
     // slice only up to the largest single available support allocation.
     for(const auto& [key,n]:membership_) {
-        const auto it=support.find(key.first);
-        if(it==support.end()||n<=0)continue;
-        if(std::find(movement.groups.begin(),movement.groups.end(),
-                     key.second)!=movement.groups.end())
-            it->second=std::max(it->second,n);
+        if(n<=0||!people_.has_slice(key.first)||
+           std::find(movement.groups.begin(),movement.groups.end(),
+                     key.second)==movement.groups.end())continue;
+        const auto& demo=people_.demographic(
+            people_.slice(key.first).key.demographic);
+        const auto nation=sovereignty_.find(demo.region);
+        if(nation==sovereignty_.end()||nation->second!=movement.country||
+           (!movement.region.empty()&&movement.region!=demo.region))continue;
+        auto& already=support[key.first];
+        already=std::max(already,n);
     }
     for(const auto& [slice,n]:support) {
         (void)slice;
@@ -254,23 +259,17 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
         (void)region;
         if(n>0){shortage=true;break;}
     }
-    if(shortage||!p3_movements_.empty()) {
+    if(shortage) {
         for(const auto& [id,row]:people_.slices()) {
             const auto& dem=people_.demographic(row.key.demographic);
-            const auto country=sovereignty_.find(dem.region);
-            if(country==sovereignty_.end())continue;
-            const bool affected=food_grievance(dem.region)>0;
-            bool movement_country=false;
-            for(const auto& [mid,m]:p3_movements_) {
-                (void)mid;
-                if(m.active&&m.country==country->second&&
-                   (m.region.empty()||m.region==dem.region)) {
-                    movement_country=true;break;
-                }
-            }
-            if(affected||movement_country)candidates.insert(id);
+            if(food_grievance(dem.region)>0)
+                candidates.insert(id);
         }
     }
+    // Unaffiliated, unshocked POPs keep their aggregate existing profile.
+    // One national movement cannot allocate millions of duplicate, mostly
+    // neutral per-slice records on every tick. Explicit issue opinions and
+    // actual organization membership remain the political contact surface.
     for(const auto id:candidates) {
         if(!people_.has_slice(id))continue;
         const auto& row=people_.slice(id);
