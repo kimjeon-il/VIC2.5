@@ -123,6 +123,9 @@ public:
     [[nodiscard]] Quantity stock(const InventoryKey& key) const {
         auto it = stock_.find(key); return it == stock_.end() ? 0 : it->second;
     }
+    [[nodiscard]] const std::map<InventoryKey,Quantity>& holdings()const {
+        return stock_;
+    }
     [[nodiscard]] bool conserved(const std::string& good) const {
         Quantity in_stock = 0;
         for (const auto& [key, quantity] : stock_) if (key.good_id == good) in_stock = checked_add(in_stock, quantity);
