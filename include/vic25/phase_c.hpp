@@ -3320,6 +3320,7 @@ private:
     [[nodiscard]] static int p1_percent(People,People);
     [[nodiscard]] static People p4_scaled(People,People,People);
     void p4_rebuild_due_index();
+    void p4_record_elected_persons(const P4Result&);
     static bool p2_valid_clause(const P2Clause&);
     void p2_validate_clauses(
         const std::string&,const std::vector<P2Clause>&)const;
