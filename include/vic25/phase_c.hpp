@@ -2063,6 +2063,23 @@ public:
                 ensure(resources_.cash_held(actor)<=cash(actor),
                        "reserved cash exceeds realized available balance");
         }
+        ensure(bank_interest_annual_ppm_>=0&&bank_interest_annual_ppm_<=1'000'000,
+               "invalid ACT/365 bank interest rate");
+        for(const auto& [borrower,carry]:bank_interest_fraction_)
+            ensure(actors_.contains(borrower)&&carry>=0&&carry<365'000'000,
+                   "invalid bank interest carry");
+        if(money_.has_account("BANK:interest_receivable")) {
+            Money receivables=0;
+            for(const auto& actor:actors_) {
+                const auto id=account(actor,"interest_payable");
+                if(!money_.has_account(id))continue;
+                const Money owed=-money_.balance(id);
+                ensure(owed>=0,"negative recognized interest payable");
+                receivables=phaseb::add_checked(receivables,owed);
+            }
+            ensure(receivables==money_.balance("BANK:interest_receivable"),
+                   "bank and borrower interest balances diverged");
+        }
         ensure(money_.balanced(), "unbalanced financial ledger");
         for(const auto& [currency,l]:foreign_ledgers_){
             ensure(l.balanced(),"unbalanced foreign currency ledger");
