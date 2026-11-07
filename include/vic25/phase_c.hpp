@@ -1717,6 +1717,87 @@ public:
             completed_liquidations()const{return completed_liquidations_;}
     // Close only genuinely empty estates. Unpaid worker, lender, interest or
     // other liabilities keep the estate open; no judicial discharge is forged.
+    // Bankruptcy liquidator follows an actual claims waterfall. Verified
+    // historical court reparations are paid only after wage creditors and
+    // before unsecured bank retirement. No new legal claims are fabricated.
+    void phase_time_settle_bankrupt_reparations() {
+        require_stage({5});
+        for(const auto& [id,claim]:reparations_) {
+            if(!bankrupt_firms_.contains(claim.payer)||
+               !claim.recognized||claim.remaining<=0||
+               outstanding_worker_wages(claim.payer)>0)continue;
+            const Money free=std::max<Money>(0,
+                phase_d_cash_available(claim.payer));
+            const Money amount=std::min(free,claim.remaining);
+            if(amount>0)pay_reparation(id,amount);
+        }
+    }
+    // Equity receives only leftover *actual cash*, after every recognized
+    // creditor has been satisfied and the business has no residual goods,
+    // facilities, investment WIP, financial securities or public debt.
+    // A documented 'company:<firm>' share registry is the only beneficiary
+    // authority; never guess private owners or pay fictitious dividends.
+    void phase_time_distribute_liquidation_equity() {
+        require_stage({8});
+        for(const auto& [firm,declared]:bankrupt_firms_) {
+            (void)declared;
+            if(completed_liquidations_.contains(firm)||
+               outstanding_worker_wages(firm)>0||
+               outstanding_loan(firm)>0||
+               phase_d_wip(firm)>0)continue;
+            if(money_.balance(account(firm,"debt"))<0)continue;
+            if(money_.has_account(account(firm,"interest_payable"))&&
+               money_.balance(account(firm,"interest_payable"))<0)continue;
+            bool creditors=false,property=false;
+            for(const auto& [id,t]:reparations_) {
+                (void)id;
+                if(t.payer==firm&&t.remaining>0){creditors=true;break;}
+            }
+            if(creditors)continue;
+            for(const auto& [site,record]:facilities_)
+                if(record.owner==firm){(void)site;property=true;break;}
+            if(property)continue;
+            for(const auto& [key,qty]:goods_.holdings())
+                if(key.holder_id==firm&&qty>0){property=true;break;}
+            if(property)continue;
+            for(const auto& [holder,asset]:security_accounts_)
+                if(holder==firm&&shares(asset,firm)>0){
+                    property=true;break;
+                }
+            if(property)continue;
+            for(const auto& [key,claim]:dividends_) {
+                (void)key;
+                if(claim.payer==firm){creditors=true;break;}
+            }
+            if(creditors)continue;
+            const Money available=std::max<Money>(0,
+                phase_d_cash_available(firm));
+            if(available<=0)continue;
+            const auto asset="company:"+firm;
+            if(!tracked_assets_.contains(asset))continue;
+            const auto holders=ownership_.holders(asset);
+            Money total_shares=0;
+            for(const auto& [owner,shares]:holders) {
+                if(owner==firm){property=true;break;}
+                total_shares=phaseb::add_checked(total_shares,shares);
+            }
+            if(property||total_shares<=0)continue;
+            Money remainder=available;
+            for(auto it=holders.begin();it!=holders.end();++it) {
+                const auto& [owner,shares]=*it;
+                const Money amount=std::next(it)==holders.end()?remainder:
+                    phaseb::add_checked(
+                        phaseb::mul_checked(available/total_shares,shares),
+                        phaseb::mul_checked(available%total_shares,shares)/
+                        total_shares);
+                if(amount<=0)continue;
+                pay(firm,owner,amount);
+                remainder-=amount;
+            }
+            events_.push_back("actual-liquidation-equity-cash-distribution");
+        }
+    }
+
     void phase_time_close_empty_bankrupt_estates(std::int64_t today) {
         require_stage({8});
         ensure(today>=0,"invalid liquidation closing day");
@@ -1731,6 +1812,15 @@ public:
             if(money_.has_account(account(firm,"interest_payable"))&&
                money_.balance(account(firm,"interest_payable"))<0)
                 continue;
+            bool has_open_reparations=false;
+            for(const auto& [id,t]:reparations_) {
+                (void)id;
+                if(t.payer==firm&&t.remaining>0) {
+                    has_open_reparations=true;
+                    break;
+                }
+            }
+            if(has_open_reparations)continue;
             bool has_property=false;
             for(const auto& [site,f]:facilities_)
                 if(f.owner==firm){(void)site;has_property=true;break;}
