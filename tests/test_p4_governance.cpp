@@ -215,13 +215,30 @@ static void fixed_cycle_early_poll_preserves_original_regular_date(){
           "fixed-cycle early election must preserve old regular polling date");
 }
 
+static void native_base_world_counts_due_ballot_without_p0(){
+    Scenario fixture;
+    auto world=daily::World::adopt(std::move(fixture.gh),45);
+    world.advance_day();
+    world.advance_day(); // P4 due on January 2, no P0 controller present
+    const auto& c=world.engine().base().core().core();
+    check(c.p4_history().size()==3&&
+          c.country_election("A").registered==60&&
+          c.p4_due_contests(day({2000,1,2})).empty(),
+          "base daily world must not silently skip or double-count P4 election");
+    world.advance_day();
+    check(world.engine().base().core().core().government("A").head_of_state==
+              "PRESIDENT_A",
+          "P4 executive transition must work in native world without P0");
+}
+
 int main(){
     try{
         distinct_elections_party_affinity_and_checkpoint();
         dissolve_then_early_poll_restarts_only_one_calendar();
         constitutional_reform_changes_date_on_effective_day_only();
         fixed_cycle_early_poll_preserves_original_regular_date();
-        std::cout<<"P4 election governance: four integration scenarios PASS\n";
+        native_base_world_counts_due_ballot_without_p0();
+        std::cout<<"P4 election governance: five integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& ex){
         std::cerr<<"P4 GOVERNANCE FAILED: "<<ex.what()<<"\n";
