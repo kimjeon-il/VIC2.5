@@ -920,9 +920,7 @@ private:
             require(id==cargo.id&&!id.empty()&&!cargo.buyer.empty()&&
                     !cargo.destination.empty()&&!cargo.good.empty()&&
                     cargo.quantity>0&&cargo.loss>=0&&cargo.loss<=cargo.quantity&&
-                    cargo.arrival_day>0&&
-                    s.phase_c().stock("TRANSIT:DAY:"+id,"in_transit",cargo.good)==
-                        cargo.quantity,
+                    cargo.arrival_day>0,
                     "G_ERR_NATIVE_CARGO_INVARIANT");
         }
         require(g.pending.empty(), "G_ERR_UNSETTLED_RESERVATIONS");
@@ -1112,6 +1110,11 @@ public:
             require(id==r.id && core_.spatial().provinces.contains(r.origin)&&
                     core_.spatial().provinces.contains(r.destination),
                     "G_ERR_INVALID_ROUTE");
+        const auto& inventory=core_.core().core();
+        for(const auto& [id,cargo]:trade_.daily_shipments)
+            require(inventory.stock("TRANSIT:DAY:"+id,"in_transit",cargo.good)==
+                        cargo.quantity,
+                    "G_ERR_NATIVE_CARGO_NOT_BACKED_BY_INVENTORY");
         require(trade_.pending.empty(),"G_ERR_PENDING_OUTSIDE_MONTH");
     }
     phasec::AdvanceReport advance(const Plan& plan={}) {
