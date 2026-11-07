@@ -1702,6 +1702,9 @@ public:
         plan[8].push_back([today=world_.day_index()](phasegh::Stage& gh) {
             gh.phase_c().phase_time_resolve_firm_insolvency(today);
         });
+        plan[8].push_back([today=world_.day_index()](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_close_empty_bankrupt_estates(today);
+        });
         // Closing market observations is a daily accounting operation,
         // independent of whether a scenario supplied explicit household buyers.
         plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
