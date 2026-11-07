@@ -673,6 +673,11 @@ public:
                 "H_ERR_DAILY_TARIFF_POLICY");
         leader(phase_c(),importer,authorized_prime);
         allow_foreign_policy(importer);
+        require(ppm<=phase_c().p2_rule(
+                   importer,importer,
+                   phasec::P2ClauseKind::maximum_import_tariff_ppm)
+                   .value_or(1'000'000),
+                "P2 current tariff law forbids excessive import duties");
         diplomacy_.commands.insert("DAY_TARIFF:"+command);
         diplomacy_.tariffs[{importer,good}]={importer,good,ppm};
         ++diplomacy_.revision;
@@ -686,6 +691,11 @@ public:
                 "H_ERR_TARIFF_POLICY");
         leader(phase_c(), importer, authorized_prime);
         allow_foreign_policy(importer);
+        require(ppm<=phase_c().p2_rule(
+                   importer,importer,
+                   phasec::P2ClauseKind::maximum_import_tariff_ppm)
+                   .value_or(1'000'000),
+                "P2 legal tariff ceiling exceeded");
         // A tariff adopted now has no effect on earlier trades. Pilot policies
         // are carried as next-month schedule by the pending tariff table.
         diplomacy_.commands.insert(command);
