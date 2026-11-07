@@ -905,11 +905,31 @@ public:
     [[nodiscard]] const MarketQuote& market(const std::string& region,const std::string& good) const {
         return markets_.at({region,good});
     }
-    // Select all real sellers deterministically. This is a query over the
-    // authoritative goods ledger, not a separate market-inventory cache.
+    // An ephemeral regional seller index derived from actual C Inventory.
+    // It is built once per active market day, not once per POP household.
+    using MarketSellerIndex=std::map<
+        std::pair<std::string,std::string>,std::vector<std::string>>;
+    [[nodiscard]] MarketSellerIndex market_seller_index()const {
+        MarketSellerIndex result;
+        for(const auto& [key,stock_now]:goods_.holdings()) {
+            if(stock_now<=0||!actors_.contains(key.holder_id)||
+               !markets_.contains({key.region_id,key.good_id}))continue;
+            result[{key.region_id,key.good_id}].push_back(key.holder_id);
+        }
+        for(auto& [key,sellers]:result) {
+            (void)key;
+            std::sort(sellers.begin(),sellers.end());
+            sellers.erase(std::unique(sellers.begin(),sellers.end()),
+                          sellers.end());
+        }
+        return result;
+    }
+    // One household demand is cleared against real current remaining stock,
+    // never the sum of stale seller offers captured earlier in the day.
     Quantity clear_household_market(const std::string& buyer,
                                     const std::string& region,
-                                    const std::string& good,Quantity requested) {
+                                    const std::string& good,Quantity requested,
+                                    const std::vector<std::string>& seller_ids) {
         require_stage({7});
         ensure(requested>=0 && markets_.contains({region,good}) &&
                actors_.contains(buyer),"invalid household market request");
@@ -917,20 +937,13 @@ public:
         const Quantity solvent=std::min(requested,cash(buyer)/quote.price);
         Quantity total_offered=0;
         std::vector<std::pair<std::string,Quantity>> sellers;
-        for(const auto& [key,stock_now]:goods_.holdings()) {
-            if(key.region_id!=region||key.good_id!=good ||
-               key.holder_id==buyer||stock_now<=0||
-               !actors_.contains(key.holder_id))continue;
-            const Quantity free=phase_d_material_available(
-                key.holder_id,region,good);
+        for(const auto& seller:seller_ids) {
+            if(seller==buyer||!actors_.contains(seller))continue;
+            const Quantity free=phase_d_material_available(seller,region,good);
             if(free<=0)continue;
-            sellers.push_back({key.holder_id,free});
+            sellers.push_back({seller,free});
             total_offered=phaseb::add_checked(total_offered,free);
         }
-        std::sort(sellers.begin(),sellers.end(),
-            [](const auto& a,const auto& b) {
-                return a.first<b.first;
-            });
         quote.stock_offered=std::max(quote.stock_offered,
             phaseb::add_checked(quote.delivered,total_offered));
         quote.solvent_demand=phaseb::add_checked(quote.solvent_demand,solvent);
@@ -947,6 +960,14 @@ public:
         quote.unmet=phaseb::add_checked(quote.unmet,remaining);
         events_.push_back("daily-household-market-clearing");
         return fulfilled;
+    }
+    Quantity clear_household_market(const std::string& buyer,
+                                    const std::string& region,
+                                    const std::string& good,Quantity requested) {
+        const auto index=market_seller_index();
+        const auto it=index.find({region,good});
+        return clear_household_market(buyer,region,good,requested,
+                   it==index.end()?std::vector<std::string>{}:it->second);
     }
     Quantity clear_consumer_market(const std::string& seller,const std::string& buyer,
                                   const std::string& region,const std::string& good,
