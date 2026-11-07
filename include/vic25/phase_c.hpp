@@ -2978,8 +2978,8 @@ public:
             ensure(when>=0,"P5 invalid dated labor action");
             for(const auto& [slice,n]:allocations)
                 ensure(people_.has_slice(slice)&&n>0&&
-                       n<=people_.employed(slice),
-                       "P5 future strike requires actually contracted workers");
+                       n<=people_.slice(slice).count,
+                       "P5 future strike requires living non-duplicated POP allocation");
         }
         for(const auto& [crisis,regions]:p5_control_evidence_) {
             ensure(p5_crises_.contains(crisis),
