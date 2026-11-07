@@ -1624,7 +1624,13 @@ public:
     void propose_tax_law(const std::string& country, const std::string& proposer,
                          const std::vector<std::string>& supporting_parties, int ppm) {
         require_stage({9});
-        ensure(ppm >= 0 && ppm <= 1'000'000, "invalid tax rate");
+        ensure(ppm>=0&&ppm<=1'000'000,"invalid tax rate");
+        const auto lower=p2_rule(country,country,
+                                 P2ClauseKind::income_tax_min_ppm).value_or(0);
+        const auto upper=p2_rule(country,country,
+                                 P2ClauseKind::income_tax_max_ppm).value_or(1'000'000);
+        ensure(lower<=upper&&ppm>=lower&&ppm<=upper,
+               "P2 national tax proposal outside binding legal rate limits");
         const auto& g=governments_.at(country);
         ensure(g.prime_minister==proposer&&!has_pending_country_tax(country),
                "unauthorized or duplicate national income-tax bill");
@@ -2383,7 +2389,7 @@ public:
                demo.service==phaseb::Service::pow||
                demo.service==phaseb::Service::missing||
                people_.age_months_slice(id)<
-                   static_cast<std::int64_t>(voting_age_years_)*12)
+                   static_cast<std::int64_t>(p2_voting_age(country))*12)
                 continue;
             eligible=phaseb::add_checked(eligible,row.count);
         }
