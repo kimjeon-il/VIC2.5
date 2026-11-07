@@ -1552,11 +1552,12 @@ public:
                outstanding_loan(borrower)>=amount &&
                money_.balance("BANK:loan")>=amount,
                "invalid defaulted loan debt forgiveness");
+        const Money bank_prior=outstanding_loan(borrower);
         money_.post({unique("loan-loss"),"bank recognizes loss, borrower released from debt",{
             {"BANK:loan_loss",amount,0},{"BANK:loan",0,amount},
             {account(borrower,"debt"),amount,0},
             {account(borrower,"revenue"),0,amount}}});
-        bank_principal_by_borrower_[borrower]=outstanding_loan(borrower)-amount;
+        bank_principal_by_borrower_[borrower]=bank_prior-amount;
         total_bad_debt_=phaseb::add_checked(total_bad_debt_,amount);
         const Money loans=money_.balance("BANK:loan");
         const Money deposits=-money_.balance("BANK:deposit");
