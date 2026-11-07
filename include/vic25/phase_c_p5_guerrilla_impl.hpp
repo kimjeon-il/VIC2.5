@@ -228,6 +228,26 @@ inline void IntegratedWorld::p5_guerrilla_extend(
     events_.push_back("p5-guerrilla-really-armed-region-expanded:"+region);
 }
 
+inline bool IntegratedWorld::p5_guerrilla_is_insurgent_unit(
+        const std::string& unit)const {
+    for(const auto& [id,campaign]:p5_guerrilla_campaigns_) {
+        (void)id;
+        if(campaign.stage==P5GuerrillaStage::resolved)continue;
+        if(std::find(campaign.units.begin(),campaign.units.end(),unit)!=
+               campaign.units.end())
+            return true;
+    }
+    for(const auto& [id,crisis]:p5_crises_) {
+        (void)id;
+        if(crisis.stage==P5CrisisStage::settled)continue;
+        if(std::find(crisis.pledged_units.begin(),
+                     crisis.pledged_units.end(),unit)!=
+               crisis.pledged_units.end())
+            return true;
+    }
+    return false;
+}
+
 inline int IntegratedWorld::p5_guerrilla_disruption_ppm(
         const std::string& region)const {
     const auto it=p5_guerrilla_region_penalty_ppm_.find(region);
