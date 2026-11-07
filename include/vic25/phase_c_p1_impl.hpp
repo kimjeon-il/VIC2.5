@@ -156,14 +156,18 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
     const auto& link=p1_institutions_.at(institution_id);
     const auto& service=public_institutions_.at(institution_id);
     const People staff=employed_by(service.operator_id);
-    const People slots=(service.monthly_slots/5)*link.level+
-                       ((service.monthly_slots%5)*link.level)/5;
+    const auto law_level=p2_rule(link.country,institution_id,
+         P2ClauseKind::public_institution_level);
+    const auto level=law_level?
+        static_cast<std::uint8_t>(*law_level):link.level;
+    const People slots=(service.monthly_slots/5)*level+
+                       ((service.monthly_slots%5)*level)/5;
     const People staffed=std::min(slots,
         positive_product(staff,service.patients_per_worker));
     const bool funded=cash(service.operator_id)>0||
         (has_country_treasury(link.country)&&
          cash(country_treasury(link.country))>0);
-    return {link.country,institution_id,link.kind,link.level,
+    return {link.country,institution_id,link.kind,level,
             staff,slots,staffed,funded?staffed:0,funded};
 }
 
