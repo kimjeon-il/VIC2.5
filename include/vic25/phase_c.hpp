@@ -8,6 +8,7 @@
 #include "vic25/phase_c_p1.hpp"
 #include "vic25/phase_c_p4.hpp"
 #include "vic25/phase_c_p2.hpp"
+#include "vic25/phase_c_p3.hpp"
 #include "vic25/ledgers.hpp"
 #include "vic25/shared_reservations.hpp"
 #include <algorithm>
@@ -1434,6 +1435,25 @@ public:
         for(const auto& [party, count]:it->second){(void)party;n=phaseb::add_checked(n,count);}
         return n;
     }
+    // P3 opt-in layer over Phase B real POP and existing C memberships.
+    // Names and evidence are scenario data, not fixed social-class bonuses.
+    void p3_seed_group(P3Group);
+    void p3_seed_movement(P3Movement);
+    void p3_set_stance(Id,const std::string&,P3Stance);
+    [[nodiscard]] const std::map<Id,P3Attitude>& p3_attitudes()const {
+        return p3_attitudes_;
+    }
+    [[nodiscard]] const std::map<std::pair<std::string,std::string>,P3Group>&
+            p3_groups()const {return p3_groups_;}
+    [[nodiscard]] const std::map<std::string,P3Movement>& p3_movements()const {
+        return p3_movements_;
+    }
+    [[nodiscard]] P3GroupView p3_group_view(
+        const std::string&,const std::string&)const;
+    [[nodiscard]] P3MovementView p3_movement_view(const std::string&)const;
+    [[nodiscard]] bool p3_needs_daily_tick()const;
+    void p3_daily_react(std::int64_t);
+    void p3_reconcile_population();
     void seed_interest_group(std::string group) {
         ensure(stage_==-1 && commit_id_==0 && !group.empty() &&
                interest_groups_.insert(std::move(group)).second, "invalid interest group");
@@ -2826,6 +2846,56 @@ public:
             ensure(interest_groups_.contains(key.second) && people_.has_slice(key.first) &&
                    n>=0 && n<=people_.slice(key.first).count,"unbacked interest-group membership");
         }
+        for(const auto& [slice,attitude]:p3_attitudes_) {
+            ensure(people_.has_slice(slice)&&attitude.slice==slice&&
+                   attitude.radical_ppm>=0&&attitude.radical_ppm<=1'000'000&&
+                   attitude.loyal_ppm>=0&&attitude.loyal_ppm<=1'000'000&&
+                   attitude.radical_ppm+attitude.loyal_ppm<=1'000'000&&
+                   attitude.engagement_ppm>=0&&
+                   attitude.engagement_ppm<=1'000'000,
+                   "P3 political attitudes lack living POP backing");
+            for(const auto& [issue,stance]:attitude.issues)
+                ensure(!issue.empty()&&stance.preference_ppm>=-1'000'000&&
+                       stance.preference_ppm<=1'000'000&&
+                       stance.importance_ppm>=0&&
+                       stance.importance_ppm<=1'000'000,
+                       "P3 invalid issue-specific POP preference");
+        }
+        for(const auto& [key,group]:p3_groups_) {
+            ensure(key.first==group.country&&key.second==group.id&&
+                   governments_.contains(group.country)&&
+                   interest_groups_.contains(group.id)&&
+                   static_cast<unsigned>(group.type)<=
+                       static_cast<unsigned>(P3GroupType::custom)&&
+                   group.organization_ppm>=0&&
+                   group.organization_ppm<=1'000'000&&
+                   group.institutional_access_ppm>=0&&
+                   group.institutional_access_ppm<=1'000'000&&
+                   (group.leader_anchor.empty()||
+                    person_anchors_.contains(group.leader_anchor)),
+                   "P3 illegal interest-group identity/leader");
+        }
+        for(const auto& [id,movement]:p3_movements_) {
+            ensure(id==movement.id&&governments_.contains(movement.country)&&
+                   static_cast<unsigned>(movement.goal)<=
+                       static_cast<unsigned>(P3MovementGoal::secession)&&
+                   !movement.issue_domain.empty()&&
+                   movement.activism_ppm>=0&&
+                   movement.activism_ppm<=1'000'000&&
+                   movement.radical_ppm>=0&&
+                   movement.radical_ppm<=1'000'000&&
+                   (movement.region.empty()||
+                    (sovereignty_.contains(movement.region)&&
+                     sovereignty_.at(movement.region)==movement.country)),
+                   "P3 invalid political movement state");
+            for(const auto& group:movement.groups)
+                ensure(p3_groups_.contains({movement.country,group}),
+                       "P3 movement group lacks real national profile");
+            for(const auto& party:movement.parties)
+                ensure(p4_parties_.contains(party)&&
+                       p4_parties_.at(party).country==movement.country,
+                       "P3 movement party belongs to foreign country");
+        }
         for (const auto& [slice,n]:strike_active_)
             ensure(people_.has_slice(slice)&&n<=people_.employed(slice),"invalid strike allocation");
         for(const auto& [id,t]:reparations_) {
@@ -3312,6 +3382,12 @@ private:
     std::map<std::string,std::map<std::string,People>> ballot_votes_;
     std::set<std::string> interest_groups_;
     std::map<std::pair<Id,std::string>, People> membership_;
+    // P3: POP political attributes are preferences over existing real
+    // people, never an independent count or financial account.
+    std::map<Id,P3Attitude> p3_attitudes_;
+    std::map<std::pair<std::string,std::string>,P3Group> p3_groups_;
+    std::map<std::string,P3Movement> p3_movements_;
+    std::int64_t p3_last_reaction_day_{-1};
     std::map<Id, People> participation_this_month_, strike_active_;
     std::map<std::int64_t,std::map<Id,People>> scheduled_strikes_;
     std::map<std::string, GovernmentState> governments_;
@@ -3375,6 +3451,7 @@ private:
     // no 128-bit GNU extension, overflow or floating-point ties (MSVC friendly).
     void p1_check_coalition(const P1Coalition&)const;
     [[nodiscard]] static int p1_percent(People,People);
+    [[nodiscard]] static std::int32_t p3_fraction(People,People);
     [[nodiscard]] static People p4_scaled(People,People,People);
     void p4_rebuild_due_index();
     void p4_record_elected_persons(const P4Result&);
@@ -3630,3 +3707,4 @@ private:
 #include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
+#include "vic25/phase_c_p3_impl.hpp"
