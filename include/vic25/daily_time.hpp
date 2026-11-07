@@ -437,6 +437,12 @@ public:
                 });
             }
         }
+        // Exact birth day and age eligibility must be known at Stage0,
+        // before any same-day labor, election or explicit birth command.
+        real_actions[0].insert(real_actions[0].begin(),
+            [day=current.day](phasegh::Stage& gh) {
+                gh.phase_c().phase_time_set_calendar_day(day);
+            });
         // P0 domain decisions run on the real calendar day, in the same
         // C/D/E/G/H transaction as scheduled commands and POP dynamics.
         for(std::size_t n=0;n<native_day_plan.size();++n)
