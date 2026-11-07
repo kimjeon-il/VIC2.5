@@ -982,7 +982,8 @@ public:
         static_assert(std::is_nothrow_move_assignable_v<TradeState>);
         static_assert(std::is_nothrow_move_assignable_v<DiplomacyState>);
         const auto result=core_.advance_daily(bridge,first_calendar_day,
-                                               final_calendar_day);
+                                               final_calendar_day,
+                                               day_of_month,days_in_month);
         trade_=std::move(new_trade);
         diplomacy_=std::move(new_diplomacy);
         return result;
