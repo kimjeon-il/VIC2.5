@@ -66,8 +66,7 @@ inline P5GuerrillaRegionView IntegratedWorld::p5_guerrilla_region_view(
     }
     for(const auto& [unit,army]:army_deployments_) {
         if(army.region!=region||army.country!=campaign.country||
-           std::find(campaign.units.begin(),campaign.units.end(),unit)!=
-               campaign.units.end())continue;
+           p5_guerrilla_is_insurgent_unit(unit))continue;
         result.government_strength=phaseb::add_checked(
             result.government_strength,active_strength(unit));
     }
