@@ -570,7 +570,9 @@ public:
     // day of its effective month; MonthClose never applies it twice.
     phasec::AdvanceReport advance_daily(const Plan& tasks,
                                          bool first_calendar_day=false,
-                                         bool final_calendar_day=false) {
+                                         bool final_calendar_day=false,
+                                         int day_of_month=0,
+                                         int days_in_month=0) {
         SpatialState staged=spatial_;
         phased::World::Plan bridge;
         for(int i=0;i<12;++i)
@@ -584,7 +586,8 @@ public:
                 });
         static_assert(std::is_nothrow_move_assignable_v<SpatialState>);
         const auto report=core_.advance_daily(bridge,first_calendar_day,
-                                               final_calendar_day);
+                                               final_calendar_day,
+                                               day_of_month,days_in_month);
         spatial_=std::move(staged);
         return report;
     }
