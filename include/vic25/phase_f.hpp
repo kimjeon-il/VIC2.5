@@ -181,8 +181,19 @@ inline std::vector<daily::Command> plan_direct_army_supply(
         const Quantity desired=c.active_strength(unit);
         if(desired<=0)continue;
         const Quantity current_ammo=c.stock(unit,deployment.region,"ammunition");
-        if(current_ammo>=desired)continue;
-        Quantity lacking=desired-current_ammo;
+        Quantity in_transit=0;
+        for(const auto& [shipment_id,cargo]:world.cargo()) {
+            (void)shipment_id;
+            if(cargo.arrived||cargo.recipient!=unit||
+               cargo.destination!=deployment.region||
+               cargo.good!="ammunition")continue;
+            in_transit=phaseb::add_checked(in_transit,
+                                           cargo.quantity-cargo.loss);
+        }
+        const Quantity already_supplied=phaseb::add_checked(
+            current_ammo,in_transit);
+        if(already_supplied>=desired)continue;
+        Quantity lacking=desired-already_supplied;
         const auto destination=geography.regions.at(deployment.region);
         const std::string id="F:ARMY:"+unit+":"+std::to_string(world.day_index());
         for(const auto& [stock_key,real_qty]:c.physical_inventory()) {
