@@ -42,6 +42,7 @@ struct CountryFiscalView {
     std::string country, treasury;
     Money cash{}, bank_debt{};
     int income_tax_ppm{};
+    Money bond_principal{},unpaid_coupons{};
 };
 struct WageArrearsClaim {
     std::string id,employer,worker,treasury,country;
@@ -484,6 +485,17 @@ public:
     }
     [[nodiscard]] const std::map<std::string,SovereignBond>& sovereign_bonds()const {
         return sovereign_bonds_;
+    }
+    [[nodiscard]] bool has_active_sovereign_bonds()const {
+        if(!sovereign_coupon_due_.empty())return true;
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            (void)bond;
+            for(const auto& [owner,units]:ownership_.holders("bond:"+id)) {
+                (void)owner;
+                if(units>0)return true;
+            }
+        }
+        return false;
     }
     // The investor must have the actual cash. Signing a budget does not
     // create fictitious bond demand or state funds.
@@ -1342,8 +1354,13 @@ public:
     [[nodiscard]] CountryFiscalView country_fiscal(
             const std::string& country)const {
         const auto& treasury=country_treasury(country);
+        Money due=0;
+        for(const auto& [key,amount]:sovereign_coupon_due_)
+            if(sovereign_bonds_.at(key.first).country==country)
+                due=phaseb::add_checked(due,amount);
         return {country,treasury,cash(treasury),
-                outstanding_loan(treasury),income_tax_ppm(country)};
+                outstanding_loan(treasury),income_tax_ppm(country),
+                sovereign_bond_principal(country),due};
     }
     void spend_country_budget(const std::string& country,
                               const std::string& recipient,Money amount) {
@@ -2365,6 +2382,51 @@ public:
                    "bank and borrower interest balances diverged");
         }
         std::map<std::string,Money> employer_wage_due,worker_wage_receivable;
+        for(const auto& [debtor,principal]:bank_principal_by_borrower_)
+            ensure(actors_.contains(debtor)&&principal>=0&&
+                   principal<=-money_.balance(account(debtor,"debt")),
+                   "bank loan principal exceeds actual finance debt");
+        std::map<std::string,Money> coupons_payable,coupons_receivable;
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            ensure(id==bond.id&&governments_.contains(bond.country)&&
+                   bond.treasury==country_treasury(bond.country)&&
+                   bond.original_face>0&&bond.coupon_ppm>=0&&
+                   bond.coupon_ppm<=1'000'000&&bond.issue_day>=0&&
+                   bond.maturity_day>bond.issue_day&&
+                   tracked_assets_.contains("bond:"+id),
+                   "invalid sovereign bond owner or issue");
+            Money live_face=0;
+            for(const auto& [owner,n]:ownership_.holders("bond:"+id)) {
+                ensure(actors_.contains(owner)&&n>0,
+                       "invalid live sovereign bond owner");
+                live_face=phaseb::add_checked(live_face,n);
+            }
+            ensure(live_face<=bond.original_face,
+                   "sovereign bond share principal exceeds issue");
+        }
+        for(const auto& [key,amount]:sovereign_coupon_due_) {
+            ensure(sovereign_bonds_.contains(key.first)&&
+                   actors_.contains(key.second)&&amount>0,
+                   "invalid unpaid bond interest claim");
+            const auto& treasury=sovereign_bonds_.at(key.first).treasury;
+            coupons_payable[treasury]=phaseb::add_checked(
+                coupons_payable[treasury],amount);
+            coupons_receivable[key.second]=phaseb::add_checked(
+                coupons_receivable[key.second],amount);
+        }
+        for(const auto& [key,carry]:sovereign_coupon_fraction_)
+            ensure(sovereign_bonds_.contains(key.first)&&
+                   actors_.contains(key.second)&&
+                   carry>=0&&carry<365'000'000,
+                   "invalid sovereign coupon fraction");
+        for(const auto& [treasury,amount]:coupons_payable)
+            ensure(money_.has_account(account(treasury,"bond_coupon_payable"))&&
+                   -money_.balance(account(treasury,"bond_coupon_payable"))==
+                     amount,"sovereign bond coupon liability not backed");
+        for(const auto& [holder,amount]:coupons_receivable)
+            ensure(money_.has_account(account(holder,"bond_coupon_receivable"))&&
+                   money_.balance(account(holder,"bond_coupon_receivable"))==
+                     amount,"sovereign bond coupon creditor not backed");
         for(const auto& [id,claim]:wage_arrears_) {
             ensure(id==claim.id&&claim.accrued>0&&claim.outstanding>0&&
                    claim.outstanding<=claim.accrued&&claim.issued_day>=0&&
