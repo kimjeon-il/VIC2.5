@@ -2982,6 +2982,112 @@ public:
                p5_settlements_.size()<=1'000'000&&
                p5_crises_.size()<=100'000,
                "P5 oversized activity or conflict record");
+        ensure(p5_guerrilla_campaigns_.size()<=100'000&&
+               p5_guerrilla_incidents_.size()<=1'000'000&&
+               p5_guerrilla_outcomes_.size()<=1'000'000&&
+               p5_guerrilla_incident_ids_.size()==
+                   p5_guerrilla_incidents_.size(),
+               "P5-G guerrilla historical state exceeds bounds or lacks index");
+        std::map<std::int64_t,std::set<std::string>> expected_reviews;
+        std::map<std::string,std::string> guerrilla_unit_owner;
+        for(const auto& [id,campaign]:p5_guerrilla_campaigns_) {
+            ensure(id==campaign.id&&governments_.contains(campaign.country)&&
+                   p3_movements_.contains(campaign.movement)&&
+                   p3_movements_.at(campaign.movement).country==
+                       campaign.country&&
+                   campaign.started_day>=0&&
+                   campaign.next_review_day>=campaign.started_day&&
+                   static_cast<unsigned>(campaign.stage)<=
+                       static_cast<unsigned>(P5GuerrillaStage::resolved)&&
+                   campaign.regions.size()>0&&
+                   campaign.verified_skirmishes>=0,
+                   "P5-G campaign lacks actual sovereign or political source");
+            if(campaign.stage==P5GuerrillaStage::organizing||
+               campaign.stage==P5GuerrillaStage::active||
+               campaign.stage==P5GuerrillaStage::supply_exhausted)
+                expected_reviews[campaign.next_review_day].insert(id);
+            if(campaign.stage==P5GuerrillaStage::ceasefire||
+               campaign.stage==P5GuerrillaStage::resolved)
+                ensure(campaign.ended_day>=campaign.started_day,
+                       "P5-G concluded campaign lacks dated resolution");
+            std::set<std::string> real_regions;
+            for(const auto& region:campaign.regions) {
+                ensure(real_regions.insert(region).second&&
+                       sovereignty_.contains(region),
+                       "P5-G regional activity has fictitious or duplicate land");
+                if(campaign.stage!=P5GuerrillaStage::resolved)
+                    ensure(sovereignty_.at(region)==campaign.country,
+                           "P5-G active territorial campaign changed sovereignty");
+            }
+            std::set<std::string> real_units;
+            for(const auto& unit:campaign.units) {
+                ensure(real_units.insert(unit).second&&
+                       units_.contains(unit)&&
+                       army_deployments_.contains(unit)&&
+                       army_deployments_.at(unit).country==campaign.country,
+                       "P5-G guerrilla army duplicates or invents C unit");
+                if(campaign.stage!=P5GuerrillaStage::resolved&&
+                   campaign.stage!=P5GuerrillaStage::ceasefire)
+                    ensure(guerrilla_unit_owner.emplace(unit,id).second,
+                           "P5-G active campaigns share the same C military unit");
+            }
+            if(campaign.stage==P5GuerrillaStage::conventional)
+                ensure(p5_crises_.contains(campaign.crisis_id)&&
+                       p5_crises_.at(campaign.crisis_id).movement==
+                           campaign.movement,
+                       "P5-G conventional escalation lacks same real P5 crisis");
+        }
+        ensure(expected_reviews==p5_guerrilla_review_due_,
+               "P5-G seven-day campaign review index not reconstructible");
+        for(const auto& incident:p5_guerrilla_incidents_)
+            ensure(p5_guerrilla_campaigns_.contains(incident.campaign)&&
+                   p5_guerrilla_incident_ids_.contains(incident.id)&&
+                   incident.day>=
+                       p5_guerrilla_campaigns_.at(incident.campaign).started_day&&
+                   incident.ammunition_spent>=0&&
+                   incident.access_disruption_ppm>=0&&
+                   incident.access_disruption_ppm<=250'000&&
+                   static_cast<unsigned>(incident.kind)<=
+                       static_cast<unsigned>(P5GuerrillaIncidentKind::resolution),
+                   "P5-G incident without physical or historical source");
+        for(const auto& outcome:p5_guerrilla_outcomes_)
+            ensure(p5_guerrilla_campaigns_.contains(outcome.campaign)&&
+                   !outcome.legal_basis.empty()&&
+                   outcome.day>=
+                       p5_guerrilla_campaigns_.at(outcome.campaign).started_day&&
+                   static_cast<unsigned>(outcome.kind)<=
+                       static_cast<unsigned>(P5GuerrillaResolution::disarmed),
+                   "P5-G unverified campaign settlement");
+        for(const auto& [day,effects]:p5_guerrilla_effect_due_)
+            for(const auto& effect:effects)
+                ensure(day==effect.from_day&&
+                       effect.through_day>=day&&
+                       p5_guerrilla_campaigns_.contains(effect.campaign)&&
+                       sovereignty_.contains(effect.region)&&
+                       p5_guerrilla_incident_ids_.contains(effect.incident_id)&&
+                       effect.penalty_ppm>0&&effect.penalty_ppm<=250'000,
+                       "P5-G future access effect without real recorded event");
+        std::map<std::string,std::int32_t> expected_penalty;
+        for(const auto& [region,effects]:p5_guerrilla_effect_active_) {
+            ensure(!effects.empty()&&sovereignty_.contains(region),
+                   "P5-G active disruption references missing geography");
+            std::int64_t penalty=0;
+            for(const auto& effect:effects) {
+                ensure(effect.region==region&&
+                       effect.from_day<=effect.through_day&&
+                       p5_guerrilla_campaigns_.contains(effect.campaign)&&
+                       p5_guerrilla_incident_ids_.contains(effect.incident_id)&&
+                       effect.penalty_ppm>0&&effect.penalty_ppm<=250'000,
+                       "P5-G malformed real access disruption");
+                penalty=std::min<std::int64_t>(
+                    500'000,penalty+effect.penalty_ppm);
+            }
+            if(penalty>0)
+                expected_penalty[region]=
+                    static_cast<std::int32_t>(penalty);
+        }
+        ensure(expected_penalty==p5_guerrilla_region_penalty_ppm_,
+               "P5-G derived access cannot exceed verified incident evidence");
         for(const auto& [country,region]:p5_capitals_)
             ensure(governments_.contains(country)&&
                    sovereignty_.contains(region)&&
