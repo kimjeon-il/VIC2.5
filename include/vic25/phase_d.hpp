@@ -417,6 +417,72 @@ public:
             [&](phasec::IntegratedWorld&){operation(*this);});
     }
 
+    // Endogenous enterprise investment reuses an existing fully paid and
+    // commissioned construction design. The new project is merely a plan:
+    // no factory, labor, money or inventory appears until real work is paid.
+    // Permit-sensitive or unsupported high-tech replicas cannot silently
+    // acquire regulatory permissions or technology.
+    bool propose_firm_expansion(const std::string& template_project,
+                                const std::string& template_recipe,
+                                const std::string& new_id,
+                                Quantity minimum_untapped_cash) {
+        must(9);
+        auto old=d_.constructions.find(template_project);
+        auto ri=d_.recipes.find(template_recipe);
+        if(old==d_.constructions.end()||ri==d_.recipes.end()||
+           !old->second.commissioned||old->second.permit_required||
+           old->second.inspection_required||old->second.allow_accrued_invoice_commission||
+           !ri->second.tech_id.empty()||ri->second.needs_retrofit||
+           ri->second.requires_same_stage_nonstorable_energy||
+           ri->second.site!=old->second.target_site||
+           c_.firm_bankrupt(old->second.client)||
+           c_.firm_bankrupt(old->second.contractor))return false;
+        const auto& model=old->second;
+        const auto& recipe=ri->second;
+        if(model.work_required<=0||model.cash_price_per_work<=0||
+           recipe.outputs.empty()||model.material_per_work<=0||
+           model.workers_per_work<=0)return false;
+        const auto good=recipe.outputs.front().good;
+        if(!c_.has_market(model.region,good))return false;
+        const auto& quote=c_.market(model.region,good);
+        // At least one real solvent demand shortfall must have appeared.
+        // Avoid speculative construction on a fictitious national score.
+        if(quote.unmet<=0)return false;
+        const Money cost=product(model.work_required,model.cash_price_per_work);
+        if(c_.phase_d_cash_available(model.client)<
+           phaseb::add_checked(cost,minimum_untapped_cash))
+            return false;
+        const Quantity stock=c_.phase_d_material_available(
+            model.contractor,model.region,model.material_good);
+        if(stock<model.material_per_work)return false;
+        // The work model is copied, but no old payment, ownership, permit or
+        // financed progress is inherited.
+        const auto id="AUTO:PROJECT:"+new_id;
+        const auto site="AUTO:SITE:"+new_id;
+        const auto recipe_id="AUTO:RECIPE:"+new_id;
+        if(d_.constructions.contains(id)||d_.recipes.contains(recipe_id))
+            return false;
+        for(const auto& [project_id,p]:d_.constructions) {
+            (void)project_id;
+            if(!p.commissioned&&p.client==model.client&&
+               p.region==model.region&&p.target_site!=model.target_site)
+                return false; // one outstanding expansion per region/owner
+        }
+        auto project=model;
+        project.id=id;project.target_site=site;
+        project.accepted_work=0;project.paid_work=0;
+        project.capitalized_work=0;project.planned_work=0;
+        project.capitalized_value=0;project.ready=false;
+        project.commissioned=false;project.ready_month=-1;
+        project.permit_valid=true;project.inspected=true;
+        auto production=recipe;
+        production.id=recipe_id;production.site=site;
+        d_.constructions.emplace(id,std::move(project));
+        d_.recipes.emplace(recipe_id,std::move(production));
+        d_.append(c_.month(),"endogenous-funded-factory-project",id);
+        return true;
+    }
+
     // Cash reservation is now owned by the SAME Phase C authority used by
     // legacy payments, wages, transactions and Phase D activity planning.
     // Payments must actually settle before capitalisation or validation.
