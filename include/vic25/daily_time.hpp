@@ -335,6 +335,7 @@ public:
            !native_actions&&!cargo_due&&!treaty_due&&!construction_due &&
            !engine_.base().core().core().daily_auto_demography_enabled()&&
            engine_.base().core().core().annual_bank_interest_ppm()==0&&
+           !engine_.base().core().core().has_active_sovereign_bonds()&&
            !engine_.has_autonomous_daily_trade()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
@@ -448,6 +449,11 @@ public:
         for(std::size_t n=0;n<native_day_plan.size();++n)
             for(const auto& action:native_day_plan[n])
                 real_actions[n].push_back(action);
+        // Sovereign security obligations accrue and settle on their actual
+        // calendar day even when no P0 AI/controller was explicitly attached.
+        real_actions[5].push_back([today=day_](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_service_sovereign_bonds(today);
+        });
         // The autonomous population hazard is calendar-day resolved, even
         // without user actions. The existing monthly rate is NOT replayed
         // at MonthClose.
