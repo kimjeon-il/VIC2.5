@@ -285,6 +285,14 @@ struct SnapshotCodec {
             ar(w.country_elections_);
             ar(w.country_election_months_);
         }
+        if(!w.country_income_tax_.empty()||
+           !w.scheduled_country_income_tax_.empty()||
+           !w.country_treasuries_.empty()) {
+            ar(std::string("VIC25_PHASEC_COUNTRY_FISCAL_1"));
+            ar(w.country_income_tax_);
+            ar(w.scheduled_country_income_tax_);
+            ar(w.country_treasuries_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -292,20 +300,31 @@ struct SnapshotCodec {
         persistence_detail::BinaryReader ar{is};
         IntegratedWorld w;
         all(ar,w);
-        if(is.peek()!=std::char_traits<char>::eof()) {
+        bool seen_elections=false,seen_fiscal=false;
+        while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
-            if(extension!="VIC25_PHASEC_COUNTRY_ELECTIONS_1")
-                throw std::runtime_error("unknown Phase C election extension");
-            ar(w.country_elections_);
-            ar(w.country_election_months_);
-            if(w.country_elections_.empty() ||
-               w.country_elections_.size()!=w.country_election_months_.size() ||
-               w.country_elections_.size()>100'000)
-                throw std::runtime_error("invalid serialized national elections");
+            if(extension=="VIC25_PHASEC_COUNTRY_ELECTIONS_1"&&!seen_elections) {
+                seen_elections=true;
+                ar(w.country_elections_);
+                ar(w.country_election_months_);
+                if(w.country_elections_.empty() ||
+                   w.country_elections_.size()!=w.country_election_months_.size() ||
+                   w.country_elections_.size()>100'000)
+                    throw std::runtime_error("invalid national elections extension");
+            } else if(extension=="VIC25_PHASEC_COUNTRY_FISCAL_1"&&!seen_fiscal) {
+                seen_fiscal=true;
+                ar(w.country_income_tax_);
+                ar(w.scheduled_country_income_tax_);
+                ar(w.country_treasuries_);
+                if(w.country_income_tax_.size()>100'000 ||
+                   w.scheduled_country_income_tax_.size()>1'000'000 ||
+                   w.country_treasuries_.size()>100'000)
+                    throw std::runtime_error("oversized country fiscal extension");
+            } else {
+                throw std::runtime_error("unknown or duplicate Phase C extension");
+            }
         }
-        if(is.peek()!=std::char_traits<char>::eof())
-            throw std::runtime_error("trailing data in snapshot");
         if(w.stage_!=-1)throw std::runtime_error("staged month cannot be loaded");
         w.validate();
         return w;
