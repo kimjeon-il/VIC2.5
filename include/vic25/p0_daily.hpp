@@ -142,7 +142,7 @@ struct ElectionTermReform {
     daily::Date decision_date{};
 };
 enum class LegislativeAction :std::uint8_t {
-    introduce, approve, promulgate
+    introduce, approve, promulgate, approve_upper
 };
 struct LegislativeOrder {
     daily::Date date{};
@@ -449,7 +449,7 @@ struct Policies {
                 order.bill.id:order.bill_id;
             if(bill_id.empty()||
                static_cast<unsigned>(order.action)>
-                   static_cast<unsigned>(LegislativeAction::promulgate)||
+                   static_cast<unsigned>(LegislativeAction::approve_upper)||
                !p2_legislative_events.insert({day,bill_id,order.action}).second||
                (order.action==LegislativeAction::introduce&&
                 (order.bill.proposer.empty()||order.bill.country.empty()))||
@@ -1505,6 +1505,10 @@ public:
                         break;
                     case LegislativeAction::promulgate:
                         c.p2_promulgate_bill(order.bill_id,order.head,today);
+                        break;
+                    case LegislativeAction::approve_upper:
+                        c.p2_approve_upper_bill(order.bill_id,
+                                                order.supporting_parties);
                         break;
                 }
             });
