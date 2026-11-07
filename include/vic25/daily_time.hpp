@@ -354,6 +354,7 @@ public:
            !engine_.base().core().core().p4_has_due_amendment(day_)&&
            !engine_.base().core().core().p2_has_due(day_)&&
            !engine_.base().core().core().p2_has_negotiable_bills()&&
+           !engine_.base().core().core().p3_needs_daily_tick()&&
            engine_.base().core().core().p4_due_contests(day_).empty()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
@@ -480,6 +481,13 @@ public:
         for(std::size_t n=0;n<native_day_plan.size();++n)
             for(const auto& action:native_day_plan[n])
                 real_actions[n].push_back(action);
+        // Opt-in political reaction consumes the real economic results and
+        // membership changes completed earlier in this same native day.
+        // It is not a second population or political-money simulation.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p3_needs_daily_tick())
+                gh.phase_c().p3_daily_react(today);
+        });
         // Native election fallback. P0 plans its contested election earlier
         // in Stage9 (after P3 political reactions); the due index is then
         // cleared, so the fallback does not count the same ballot twice.
@@ -510,6 +518,7 @@ public:
         real_actions[10].push_back([current](phasegh::Stage& gh) {
             gh.phase_c().phase_time_auto_demography(
                 current.day,days_in_month(current.year,current.month));
+            gh.phase_c().p3_reconcile_population();
         });
         // One atomic C/D/E/G/H commit for native events AND calendar
         // rollover. No second mutable month-close pass or event replay.
