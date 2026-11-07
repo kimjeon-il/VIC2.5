@@ -1700,7 +1700,7 @@ public:
                     has_property=true;break;
                 }
             if(has_property)continue;
-            for(const auto& [asset,holder]:security_accounts_)
+            for(const auto& [holder,asset]:security_accounts_)
                 if(holder==firm&&shares(asset,firm)>0){
                     has_property=true;break;
                 }
