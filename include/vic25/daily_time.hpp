@@ -89,6 +89,19 @@ inline Date from_legacy_month(std::int64_t month) {
     const auto m=static_cast<std::int32_t>(month%12+1);
     return {y,m,1};
 }
+// The effective law decides the term length. Calendar arithmetic stays
+// in the shared date engine, not in political domain-specific shortcuts.
+inline Date add_calendar_months(Date date,std::int32_t months) {
+    (void)to_day_index(date);
+    require(months>=1&&months<=240,"TIME_ERR_INVALID_ELECTION_TERM");
+    const std::int64_t zero_based=
+        (static_cast<std::int64_t>(date.year)-1)*12+date.month-1+months;
+    require(zero_based<(9999LL*12),
+            "TIME_ERR_ELECTION_TERM_CALENDAR_OVERFLOW");
+    const auto year=static_cast<std::int32_t>(zero_based/12+1);
+    const auto month=static_cast<std::int32_t>(zero_based%12+1);
+    return {year,month,std::min(date.day,days_in_month(year,month))};
+}
 inline bool is_month_end(Date d) {
     return d.day==days_in_month(d.year,d.month);
 }
@@ -337,7 +350,8 @@ public:
            engine_.base().core().core().annual_bank_interest_ppm()==0&&
            !engine_.base().core().core().has_active_sovereign_bonds()&&
            !engine_.has_autonomous_daily_trade()&&
-           !engine_.base().core().core().has_due_p1_government(day_)) {
+           !engine_.base().core().core().has_due_p1_government(day_)&&
+           !engine_.base().core().core().p4_has_due_amendment(day_)) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
         }
@@ -454,6 +468,7 @@ public:
                 // A lawful change enters on its scheduled calendar day even
                 // if no P0 controller, battle or economic command is active.
                 gh.phase_c().phase_time_apply_p1_government(today);
+                gh.phase_c().phase_time_apply_p4_amendments(today);
             });
         // P0 domain decisions run on the real calendar day, in the same
         // C/D/E/G/H transaction as scheduled commands and POP dynamics.
