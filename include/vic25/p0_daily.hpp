@@ -1,5 +1,6 @@
 #pragma once
 #include "vic25/phase_f.hpp"
+#include "vic25/phase_h_front_ai.hpp"
 #include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <cstdint>
@@ -1370,6 +1371,16 @@ public:
                         war.defender,second_pm);
                 }
             });
+        if(decisions.allow_operational_battle_ai) {
+            std::set<std::string> manual;
+            for(const auto& battle:decisions.engagements) {
+                manual.insert(battle.attacker);
+                manual.insert(battle.defender);
+            }
+            plan[10].push_back([manual](phasegh::Stage& gh) {
+                frontai::allocate_marches(gh,manual);
+            });
+        }
         for(const auto& combat:decisions.engagements)
             plan[10].push_back([combat](phasegh::Stage& gh){
                 fight(gh.phase_c(),combat);
@@ -1462,6 +1473,10 @@ public:
                     }
                     if(affordable>0)c.repay(firm,affordable);
                 }
+            });
+        if(decisions.allow_operational_battle_ai)
+            plan[10].push_back([](phasegh::Stage& gh) {
+                frontai::occupy_decisive_fronts(gh);
             });
         // Public obligations are paid directly from the real C fiscal
         // wallet to an existing service provider with a declared policy cap.
