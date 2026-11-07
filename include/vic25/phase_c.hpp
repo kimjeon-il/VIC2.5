@@ -43,6 +43,11 @@ struct CountryFiscalView {
     Money cash{}, bank_debt{};
     int income_tax_ppm{};
 };
+struct WageArrearsClaim {
+    std::string id,employer,worker,treasury,country;
+    Money accrued{},outstanding{};
+    std::int64_t issued_day{};
+};
 struct CabinetChange {
     std::string country, new_head, new_prime_minister;
     bool replace_head{}, replace_prime{};
@@ -1421,6 +1426,111 @@ public:
             events_.push_back("daily-bank-interest-paid");
         }
     }
+    [[nodiscard]] bool firm_bankrupt(const std::string& firm)const {
+        return bankrupt_firms_.contains(firm);
+    }
+    [[nodiscard]] Money outstanding_worker_wages(const std::string& employer)const {
+        Money due=0;
+        for(const auto& [id,claim]:wage_arrears_) {
+            (void)id;
+            if(claim.employer==employer)
+                due=phaseb::add_checked(due,claim.outstanding);
+        }
+        return due;
+    }
+    [[nodiscard]] const std::map<std::string,WageArrearsClaim>&
+            wage_arrears()const{return wage_arrears_;}
+    [[nodiscard]] const std::map<std::string,std::int64_t>&
+            bankrupt_firms()const{return bankrupt_firms_;}
+
+    // Accrued salaries are legal employer liabilities and employee receivables,
+    // not fabricated cash. The existing C FinanceLedger holds all balances.
+    void phase_time_accrue_contract_wage(const std::string& claim_id,
+                                          const std::string& employer,
+                                          const std::string& worker,
+                                          const std::string& treasury,
+                                          const std::string& country,
+                                          Money gross,std::int64_t today) {
+        require_stage({5});
+        ensure(!claim_id.empty()&&today>=0&&gross>0&&
+               actors_.contains(employer)&&actors_.contains(worker)&&
+               actors_.contains(treasury)&&employer!=worker&&
+               worker!=treasury&&employer!=treasury&&
+               !bankrupt_firms_.contains(employer)&&
+               !wage_arrears_.contains(claim_id),
+               "invalid or duplicate wage debt");
+        if(!country.empty()&&governments_.contains(country))
+            ensure(country_treasury(country)==treasury,
+                   "wage debt foreign treasury");
+        const auto employer_payable=account(employer,"wage_payable");
+        const auto worker_receivable=account(worker,"wage_receivable");
+        if(!money_.has_account(employer_payable))
+            money_.add_account(employer_payable,employer,AccountType::liability);
+        if(!money_.has_account(worker_receivable))
+            money_.add_account(worker_receivable,worker,AccountType::asset);
+        money_.post({unique("wage-claim"),
+            "earned wages become an employer debt",{
+            {account(employer,"expense"),gross,0},
+            {employer_payable,0,gross},
+            {worker_receivable,gross,0},
+            {account(worker,"revenue"),0,gross}}});
+        wage_arrears_.emplace(claim_id,WageArrearsClaim{
+            claim_id,employer,worker,treasury,country,gross,gross,today});
+        events_.push_back("earned-daily-wages-owed");
+    }
+    void phase_time_settle_wage_arrears() {
+        require_stage({5});
+        for(auto it=wage_arrears_.begin();it!=wage_arrears_.end();) {
+            auto& claim=it->second;
+            const Money free=std::max<Money>(0,
+                phase_d_cash_available(claim.employer));
+            const Money paid=std::min(free,claim.outstanding);
+            if(paid<=0){++it;continue;}
+            const int tax=claim.country.empty()?income_tax_ppm_:
+                (governments_.contains(claim.country)?
+                    income_tax_ppm(claim.country):income_tax_ppm_);
+            const Money withholding=positive_product(paid,tax)/1'000'000;
+            const Money net=paid-withholding;
+            std::vector<Posting> journal{
+                {account(claim.employer,"wage_payable"),paid,0},
+                {account(claim.employer,"cash"),0,paid},
+                {account(claim.worker,"wage_receivable"),0,paid}};
+            if(net)journal.push_back({account(claim.worker,"cash"),net,0});
+            if(withholding) {
+                journal.push_back({account(claim.worker,"expense"),withholding,0});
+                journal.push_back({account(claim.treasury,"cash"),withholding,0});
+                journal.push_back({account(claim.treasury,"revenue"),0,withholding});
+            }
+            money_.post({unique("wage-claim-paid"),
+                         "settlement of previously earned wages",journal});
+            claim.outstanding-=paid;
+            events_.push_back("earned-wage-arrears-paid");
+            if(claim.outstanding==0)it=wage_arrears_.erase(it);
+            else ++it;
+        }
+    }
+    // A firm is insolvent only after actual salary debt remains unpaid for at
+    // least 30 real days. Its contracts end; assets, inventory and creditor
+    // claims remain in C, rather than being erased or assigned fictional value.
+    void phase_time_resolve_firm_insolvency(std::int64_t today) {
+        require_stage({8});
+        ensure(today>=0,"invalid insolvency day");
+        for(const auto& [id,claim]:wage_arrears_) {
+            (void)id;
+            if(bankrupt_firms_.contains(claim.employer) ||
+               claim.issued_day>today || today-claim.issued_day<30)
+                continue;
+            if(outstanding_worker_wages(claim.employer)<=
+               cash(claim.employer))continue;
+            bankrupt_firms_[claim.employer]=today;
+            std::vector<Id> layoffs;
+            for(const auto& [slice,job]:people_.jobs())
+                if(job.employer==claim.employer)layoffs.push_back(slice);
+            for(Id slice:layoffs)
+                people_.release(slice,people_.employed(slice));
+            events_.push_back("firm-insolvency-creditor-claims-preserved");
+        }
+    }
     void lend(const std::string& borrower, Money amount) {
         require_stage({1});
         ensure(amount > 0 && actors_.contains(borrower) && !bank_insolvent_,
@@ -2209,6 +2319,8 @@ private:
     std::map<std::string,Money> paid_staff_this_month_;
     Money total_bad_debt_{};
     bool bank_insolvent_{};
+    std::map<std::string,WageArrearsClaim> wage_arrears_;
+    std::map<std::string,std::int64_t> bankrupt_firms_;
     std::map<std::string,People> regional_food_grievance_;
     int bank_interest_annual_ppm_{}; // zero until historically configured
     std::map<std::string,Money> bank_interest_fraction_;
