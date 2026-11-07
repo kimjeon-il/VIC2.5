@@ -1155,7 +1155,7 @@ int main(){
         autonomous_f_congestion_uses_actual_alternate_edge();
         autonomous_daily_bank_debt_service_and_liquidity_floor();
         native_cg_credit_service_keeps_trade_facility_in_sync();
-        std::cout<<"P0 daily grand strategy: 20 bounded integration scenarios PASS\n";
+        std::cout<<"P0 daily grand strategy: 22 bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P0 DAILY TEST FAILED: "<<e.what()<<"\n";
