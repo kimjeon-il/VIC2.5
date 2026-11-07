@@ -530,7 +530,7 @@ public:
                 continue;
             const auto sovereign=game_c.sovereignty(dem.region);
             if(game_c.has_government(sovereign)&&
-               !game_c.has_actor(game_c.country_treasury(sovereign)))
+               !game_c.has_country_treasury(sovereign))
                 continue;
             if(!game_c.has_government(sovereign)&&
                !game_c.has_actor(sovereign))continue;
