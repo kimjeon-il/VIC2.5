@@ -7,7 +7,8 @@ namespace vic25::phasegh {
 inline std::optional<PathQuote> Stage::quote_path(
         Id from,Id to,Month month) const {
     return quote_daily_freight_path(
-        trade_,from,to,month,day_of_month_,days_in_month_);
+        trade_,from,to,month,day_of_month_,days_in_month_,
+        nullptr,day_of_month_>0);
 }
 inline void Stage::create_trade_contract(TradeContract c) {
     at(9);
