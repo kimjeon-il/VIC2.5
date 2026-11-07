@@ -2883,7 +2883,7 @@ public:
                    contest.seats>0&&contest.seats<=100'000&&
                    contest.next_poll_day>=0&&contest.regular_poll_day>=0&&
                    static_cast<unsigned>(contest.office)<=
-                       static_cast<unsigned>(P4Office::head_of_state)&&
+                       static_cast<unsigned>(P4Office::local_head)&&
                    static_cast<unsigned>(contest.method)<=
                        static_cast<unsigned>(P4BallotMethod::plurality)&&
                    static_cast<unsigned>(contest.term_mode)<=
@@ -3570,4 +3570,5 @@ private:
 
 #include "vic25/phase_c_p1_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
+#include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
