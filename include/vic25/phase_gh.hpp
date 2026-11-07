@@ -113,6 +113,12 @@ struct DailyTradeTransit {
     std::string id, buyer, destination, good;
     Quantity quantity{}, loss{};
     std::int64_t arrival_day{};
+    // Native multi-hop extension. The physical item is held by C only;
+    // these fields record its currently active segment or staging hub.
+    std::vector<std::string> path_edges;
+    std::string current_leg_id,hub_region;
+    std::uint32_t hop_index{};
+    bool at_hub{};
 };
 struct TradeState {
     std::map<std::string, Route> routes;
@@ -782,13 +788,87 @@ public:
     void settle_due_daily_trade_cargo() {
         at(0);
         if(day_index_<0)return;
-        for(auto it=trade_.daily_shipments.begin();it!=trade_.daily_shipments.end();) {
-            const auto cargo=it->second;
-            if(cargo.arrival_day>day_index_) {++it;continue;}
-            phase_c().phase_time_arrive(cargo.id,cargo.buyer,cargo.destination,
-                                       cargo.good,cargo.quantity,cargo.loss);
-            acknowledge_daily_cargo_arrival(cargo.id,cargo.quantity,cargo.loss);
-            it=trade_.daily_shipments.erase(it);
+        const auto& geo=spatial_.spatial();
+        for(auto it=trade_.daily_shipments.begin();
+            it!=trade_.daily_shipments.end();) {
+            auto& cargo=it->second;
+            if(cargo.at_hub||cargo.arrival_day>day_index_) {
+                ++it;continue;
+            }
+            if(cargo.path_edges.empty()) {
+                // A saved 0.4-0.6 single-leg cargo remains byte-compatible.
+                phase_c().phase_time_arrive(cargo.id,cargo.buyer,
+                    cargo.destination,cargo.good,cargo.quantity,cargo.loss);
+                acknowledge_daily_cargo_arrival(cargo.id,cargo.quantity,cargo.loss);
+                it=trade_.daily_shipments.erase(it);
+                continue;
+            }
+            require(cargo.hop_index<cargo.path_edges.size(),
+                    "G_ERR_INVALID_CURRENT_INTERMODAL_HOP");
+            const auto& edge=trade_.transport_edges.at(
+                cargo.path_edges[cargo.hop_index]);
+            const auto hub=geo.provinces.at(edge.to).region;
+            const bool final=cargo.hop_index+1==cargo.path_edges.size();
+            phase_c().phase_time_arrive(cargo.current_leg_id,
+                final?cargo.buyer:"TRANSIT:HUB:"+cargo.id,
+                hub,cargo.good,cargo.quantity,final?cargo.loss:0);
+            if(final) {
+                acknowledge_daily_cargo_arrival(
+                    cargo.id,cargo.quantity,cargo.loss);
+                it=trade_.daily_shipments.erase(it);
+            } else {
+                cargo.at_hub=true;
+                cargo.hub_region=hub;
+                ++trade_.revision;
+                ++it;
+            }
+        }
+    }
+    // Later legs use only goods actually at the hub, current-day available
+    // carrier capacity and real buyer cash. Congestion keeps the lot at the
+    // real transit hub; no automatic teleport or pre-charged future carrier.
+    void dispatch_pending_trade_hops() {
+        at(7);
+        if(day_index_<0||day_of_month_<=0)return;
+        const auto& geo=spatial_.spatial();
+        auto& c=phase_c();
+        for(auto& [id,cargo]:trade_.daily_shipments) {
+            if(!cargo.at_hub||cargo.path_edges.empty()||
+               cargo.hop_index+1>=cargo.path_edges.size())continue;
+            const std::string edge_id=
+                cargo.path_edges[cargo.hop_index+1];
+            const auto& edge=trade_.transport_edges.at(edge_id);
+            if(!edge.enabled||edge.transit_days<=0||
+               geo.provinces.at(edge.from).region!=cargo.hub_region)
+                continue;
+            const auto key=std::make_pair(c.month(),edge_id);
+            const Quantity used=trade_.edge_usage[key];
+            const Quantity free=daily_budget::remaining(
+                edge.monthly_capacity,used,day_of_month_,days_in_month_);
+            if(free<cargo.quantity)continue;
+            const Money price=phaseb::mul_checked(
+                cargo.quantity,edge.freight_per_unit);
+            if(edge.carrier!=cargo.buyer&&
+               c.phase_d_cash_available(cargo.buyer)<price)
+                continue;
+            if(c.stock("TRANSIT:HUB:"+id,cargo.hub_region,
+                       cargo.good)<cargo.quantity)
+                continue;
+            const auto next_leg=id+":H"+std::to_string(cargo.hop_index+1);
+            if(trade_.executed.contains("DAY:"+next_leg))continue;
+            if(price>0&&edge.carrier!=cargo.buyer)
+                c.pay(cargo.buyer,edge.carrier,price);
+            c.phase_time_dispatch(next_leg,"TRANSIT:HUB:"+id,
+                                  cargo.hub_region,cargo.good,cargo.quantity);
+            trade_.executed.insert("DAY:"+next_leg);
+            trade_.edge_usage[key]=phaseb::add_checked(used,cargo.quantity);
+            ++cargo.hop_index;
+            cargo.current_leg_id=next_leg;
+            cargo.hub_region.clear();
+            cargo.at_hub=false;
+            cargo.arrival_day=phaseb::add_checked(
+                day_index_,edge.transit_days);
+            ++trade_.revision;
         }
     }
     [[nodiscard]] bool verified_day_route(const PathQuote& path)const {
