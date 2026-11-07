@@ -58,9 +58,9 @@ inline std::optional<std::pair<std::string,std::size_t>> next_step(
     }
     return std::nullopt;
 }
-inline std::vector<March> choices(const phasegh::Stage& gh) {
+inline std::vector<March> choices(phasegh::Stage& gh) {
     const auto& geo=gh.geography();
-    const auto& c=const_cast<phasegh::Stage&>(gh).phase_c();
+    const auto& c=gh.phase_c();
     const auto& diplomatic=gh.diplomacy();
     std::vector<March> candidates;
     for(const auto& [war_id,war]:diplomatic.wars) {
