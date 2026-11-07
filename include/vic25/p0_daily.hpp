@@ -34,6 +34,32 @@ inline Quantity daily_increment(Quantity n,int day,int days) {
 }
 inline Money times(Money a,Money b) {return phaseb::mul_checked(a,b);}
 
+// A site has one physical capacity across manufacturing, mining and research.
+// All three owner policies must see the same already-used monthly allowance.
+inline Quantity used_site_capacity(const phased::DomainState& domain,
+                                   const std::string& site,std::int64_t month) {
+    Quantity used=0;
+    for(const auto& run:domain.actual_production_runs) {
+        if(run.month!=month)continue;
+        const auto& recipe=domain.recipes.at(run.recipe);
+        if(recipe.site==site)
+            used=phaseb::add_checked(used,
+                times(run.batches,recipe.capacity_per_batch));
+    }
+    for(const auto& [id,source]:domain.resource_sites) {
+        (void)id;
+        if(source.site==site)
+            used=phaseb::add_checked(used,
+                times(source.produced_this_month,source.site_service_per_unit));
+    }
+    for(const auto& evidence:domain.research_evidence) {
+        if(evidence.month!=month)continue;
+        if(domain.researches.at(evidence.project).lab_site==site)
+            used=phaseb::add_checked(used,evidence.units);
+    }
+    return used;
+}
+
 struct Staffing {
     std::string employer,region;
     People wanted{};
@@ -345,13 +371,7 @@ inline Quantity available_production(const phased::Stage& d,
     const Quantity stock_shortfall=policy.target_inventory-c.stock(f.owner,f.region,primary.good);
     Quantity batches=stock_shortfall/primary.per_unit+
         (stock_shortfall%primary.per_unit!=0?1:0);
-    Quantity used=0;
-    for(const auto& run:state.actual_production_runs) {
-        if(run.month!=d.month())continue;
-        const auto& past=state.recipes.at(run.recipe);
-        if(past.site==r.site)
-            used=phaseb::add_checked(used,times(run.batches,past.capacity_per_batch));
-    }
+    const Quantity used=used_site_capacity(state,r.site,d.month());
     const Quantity allowed=proportional(f.capacity-f.damaged,day,days);
     if(allowed<=used)return 0;
     batches=std::min(batches,(allowed-used)/r.capacity_per_batch);
@@ -564,21 +584,8 @@ public:
                 if(workers<=0)return;
                 available=std::min(available,
                                   static_cast<Quantity>(workers/src.workers_per_unit));
-                Quantity already_site=0;
-                for(const auto& run:ds.actual_production_runs) {
-                    if(run.month!=gh.phase_d().month())continue;
-                    const auto& recipe=ds.recipes.at(run.recipe);
-                    if(recipe.site==src.site)
-                        already_site=phaseb::add_checked(already_site,
-                             times(run.batches,recipe.capacity_per_batch));
-                }
-                for(const auto& [id,other]:ds.resource_sites) {
-                    (void)id;
-                    if(other.site==src.site)
-                        already_site=phaseb::add_checked(already_site,
-                             times(other.produced_this_month,
-                                   other.site_service_per_unit));
-                }
+                const Quantity already_site=used_site_capacity(
+                    ds,src.site,gh.phase_d().month());
                 const Quantity facility_limit=proportional(
                        facility.capacity-facility.damaged,date.day,dim);
                 if(already_site>=facility_limit)return;
@@ -616,26 +623,8 @@ public:
                 auto& c=gh.phase_c();
                 const auto& lab=c.facility(p.lab_site);
                 if(lab.capacity<=lab.damaged)return;
-                Quantity used=0;
-                for(const auto& run:ds.actual_production_runs) {
-                    if(run.month!=gh.phase_d().month())continue;
-                    const auto& recipe=ds.recipes.at(run.recipe);
-                    if(recipe.site==p.lab_site)
-                        used=phaseb::add_checked(used,
-                                  times(run.batches,recipe.capacity_per_batch));
-                }
-                for(const auto& [id,source]:ds.resource_sites) {
-                    (void)id;
-                    if(source.site==p.lab_site)
-                        used=phaseb::add_checked(used,
-                                  times(source.produced_this_month,
-                                        source.site_service_per_unit));
-                }
-                for(const auto& evidence:ds.research_evidence) {
-                    if(evidence.month!=gh.phase_d().month())continue;
-                    if(ds.researches.at(evidence.project).lab_site==p.lab_site)
-                        used=phaseb::add_checked(used,evidence.units);
-                }
+                const Quantity used=used_site_capacity(
+                    ds,p.lab_site,gh.phase_d().month());
                 const Quantity cap=proportional(lab.capacity-lab.damaged,
                                                 date.day,dim);
                 if(used>=cap)return;
