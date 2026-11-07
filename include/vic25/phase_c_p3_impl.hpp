@@ -85,21 +85,28 @@ inline P3GroupView IntegratedWorld::p3_group_view(
     const auto& profile=p3_groups_.at({country,group});
     P3GroupView view{country,group};
     People country_group_members=0;
-    People affiliated=0;
+    People affiliated_weight=0,group_weight=0;
     for(const auto& [key,n]:membership_) {
-        if(n<=0||!people_.has_slice(key.first)||
-           !p3_groups_.contains({country,key.second}))continue;
+        if(n<=0||!people_.has_slice(key.first))continue;
+        const auto organization=p3_groups_.find({country,key.second});
+        if(organization==p3_groups_.end())continue;
         const auto& dem=people_.demographic(
             people_.slice(key.first).key.demographic);
-        auto nation=sovereignty_.find(dem.region);
+        const auto nation=sovereignty_.find(dem.region);
         if(nation==sovereignty_.end()||nation->second!=country)continue;
-        affiliated=phaseb::add_checked(affiliated,n);
-        if(key.second==group)
+        // Organizational efficiency is applied to REAL affiliated people,
+        // not minted into a separate political-point or membership ledger.
+        const People weighted=phaseb::add_checked(n,
+             p4_scaled(n,organization->second.organization_ppm,1'000'000));
+        affiliated_weight=phaseb::add_checked(affiliated_weight,weighted);
+        if(key.second==group) {
             country_group_members=phaseb::add_checked(country_group_members,n);
+            group_weight=phaseb::add_checked(group_weight,weighted);
+        }
     }
     view.members=country_group_members;
-    if(affiliated>0&&country_group_members>0) {
-        const auto share=p3_fraction(country_group_members,affiliated);
+    if(affiliated_weight>0&&group_weight>0) {
+        const auto share=p3_fraction(group_weight,affiliated_weight);
         bool government_access=false;
         if(const auto coalition=p1_coalitions_.find(country);
            coalition!=p1_coalitions_.end())
@@ -107,12 +114,12 @@ inline P3GroupView IntegratedWorld::p3_group_view(
                coalition->second.ruling_groups.begin(),
                coalition->second.ruling_groups.end(),group)!=
                coalition->second.ruling_groups.end();
-        // Organizational backing is weighted by actual P3 memberships;
-        // constitutional cabinet access is an explicitly existing channel.
+        // Cabinet access only applies when this group ACTUALLY governs.
+        const auto institutional=government_access?
+            profile.institutional_access_ppm/10:0;
         view.clout_ppm=static_cast<std::int32_t>(
              std::min<std::int64_t>(1'000'000,
-                 static_cast<std::int64_t>(share)*9/10+
-                 (government_access?100'000:0)));
+                 static_cast<std::int64_t>(share)*9/10+institutional));
     }
     int approval=50;
     if(!profile.issue_domain.empty()&&!profile.preferred_choice.empty()) {
