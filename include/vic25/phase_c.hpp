@@ -910,8 +910,11 @@ public:
             if(key.region_id!=region||key.good_id!=good ||
                key.holder_id==buyer||stock_now<=0||
                !actors_.contains(key.holder_id))continue;
-            sellers.push_back({key.holder_id,stock_now});
-            total_offered=phaseb::add_checked(total_offered,stock_now);
+            const Quantity free=phase_d_material_available(
+                key.holder_id,region,good);
+            if(free<=0)continue;
+            sellers.push_back({key.holder_id,free});
+            total_offered=phaseb::add_checked(total_offered,free);
         }
         std::sort(sellers.begin(),sellers.end(),
             [](const auto& a,const auto& b) {
