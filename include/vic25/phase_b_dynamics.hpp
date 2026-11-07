@@ -92,16 +92,16 @@ public:
         }
         std::erase_if(today.monthly_vacancies,
                       [](const Vacancy& v){return v.slots==0;});
-        // Educational access, certification and labor age transitions are
-        // performed on the due day only; they must not fire 28-31 times.
+        // Educational opportunity and occupational training are genuine
+        // daily hazards, using the same cumulative integer allowance as
+        // births and mortality. The birth-month eligibility window is not
+        // mistaken for a known individual birthday.
+        today.primary_access_ppm=per_day(rules_.primary_access_ppm);
+        today.secondary_access_ppm=per_day(rules_.secondary_access_ppm);
+        today.tertiary_access_ppm=per_day(rules_.tertiary_access_ppm);
+        today.adult_literacy_access_ppm=per_day(rules_.adult_literacy_access_ppm);
+        today.training_ppm=per_day(rules_.training_ppm);
         const bool month_end=day==days_in_month;
-        if(!month_end){
-            today.primary_access_ppm=0;
-            today.secondary_access_ppm=0;
-            today.tertiary_access_ppm=0;
-            today.adult_literacy_access_ppm=0;
-            today.training_ppm=0;
-        }
         Engine engine{today};
         MonthReport report;
         report.month_index=w.month();
@@ -109,7 +109,7 @@ public:
         const auto prior=w.events().size();
         if(!today.monthly_vacancies.empty())
             (void)w.match_jobs(today.monthly_vacancies,today.labor);
-        engine.do_demography(w,report,month_end);
+        engine.do_demography(w,report,true,month_end);
         w.release_ineligible(today.labor);
         w.prune_residuals();
         require(w.validate(today.labor),"autonomous daily demographic invariant");
@@ -139,7 +139,8 @@ private:
         return rate;
     }
     void do_demography(World& w,MonthReport& report,
-                       bool monthly_milestones=true)const{
+                       bool education_milestones=true,
+                       bool lifecycle_due=true)const{
         const auto original=w.slices();
         for(const auto& [id,initial]:original){
             if(!w.has_slice(id))continue;
@@ -206,7 +207,7 @@ private:
             }
             if(!w.has_slice(id))continue;
             remaining=w.slice(id).count;
-            if(monthly_milestones && age >= 0 && age%12==0){
+            if(education_milestones && age >= 0 && age%12==0){
                 Education next=ed;People rate=0;
                 if(ed.school==School::none && age>=8*12 && age<65*12){
                     rate=age<18*12?rules_.primary_access_ppm:rules_.adult_literacy_access_ppm;
@@ -226,7 +227,7 @@ private:
             }
             if(!w.has_slice(id))continue;
             remaining=w.slice(id).count;
-            if(monthly_milestones && age >= 18*12 && age%12==0 &&
+            if(education_milestones && age >= 18*12 && age%12==0 &&
                w.employed(id)>0 && ed.occupational_skill<100){
                 const auto n=w.allocate_rate(id,"training",w.employed(id),rules_.training_ppm);
                 if(n){Education next=ed;next.occupational_skill=static_cast<std::uint8_t>(std::min(100,static_cast<int>(next.occupational_skill)+10));
@@ -237,7 +238,7 @@ private:
         // Entering and leaving civilian working age is a real economic status
         // transition; it must not be inferred solely from a family POP's trade.
         // Retirement preserves occupational identity/history while changing livelihood.
-        const auto life_course=monthly_milestones?w.slices():std::map<Id,Slice>{};
+        const auto life_course=lifecycle_due?w.slices():std::map<Id,Slice>{};
         for(const auto& [id,snapshot]:life_course){
             if(!w.has_slice(id))continue;
             const auto current=w.slice(id);
