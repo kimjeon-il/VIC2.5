@@ -138,7 +138,7 @@ static void exact_day_law_enactment_amendment_and_repeal() {
         bill.target_id="AMEND-HOUSE";
         c.p2_submit_bill(bill,today);
         c.p2_approve_bill("REVOKE-HOUSE",{"PARTY_A"});
-        c.p2_promulgate_bill("REVOKE-HOUSE","HEAD_A",today);
+        c.p2_promulgate_bill("REVOKE-HOUSE","CANDIDATE_A",today);
     });
     world.advance_day(revoke); // Jan 4
     world.advance_day(); // Jan 5
@@ -162,7 +162,7 @@ static void elected_head_term_limit_and_scheduled_law() {
     world.advance_day(); // Jan 3: A takes office
     need(actual(world).government("A").head_of_state=="CANDIDATE_A",
          "P1 must apply election result to the real government");
-    while(world.date()<daily::Date{2000,2,3})world.advance_day();
+    while(world.date()<daily::Date{2000,2,4})world.advance_day();
     need(actual(world).p4_nonparliament_results().at("A-HEAD").office_holder==
              "CANDIDATE_B"&&
          actual(world).government("A").head_of_state=="CANDIDATE_B",
