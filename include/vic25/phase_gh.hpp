@@ -660,6 +660,22 @@ public:
         approval=true;
         ++diplomacy_.revision;
     }
+    // When an effective P2 statute lowers the legal ceiling, pre-existing
+    // tariff commands remain historical but cannot keep applying an unlawful
+    // higher rate. This is a policy projection, not tax revenue creation.
+    void enforce_p2_tariff_ceiling() {
+        at(0);
+        for(auto& [key,tariff]:diplomacy_.tariffs) {
+            const auto limit=phase_c().p2_rule(
+                key.first,key.first,
+                phasec::P2ClauseKind::maximum_import_tariff_ppm)
+                .value_or(1'000'000);
+            if(tariff.ppm>limit) {
+                tariff.ppm=limit;
+                ++diplomacy_.revision;
+            }
+        }
+    }
     // Time-specific, authenticated policy using the canonical H tariff
     // registry. Existing monthly adopt_tariff() keeps its old semantics.
     void adopt_tariff_daily(const std::string& command,
