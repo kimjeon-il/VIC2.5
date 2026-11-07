@@ -34,6 +34,10 @@ struct P4Contest {
     std::int64_t last_poll_day{-1};
     bool dissolution_authorized{},active{true},dissolved{};
 };
+struct P4Ballot {
+    std::int64_t eligible{},registered{},cast{},invalid{};
+    std::map<std::string,std::int64_t> votes;
+};
 struct P4Result {
     std::string contest_id,law_id;
     std::int64_t day{};
