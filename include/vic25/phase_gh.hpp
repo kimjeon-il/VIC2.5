@@ -667,7 +667,8 @@ public:
         require(total<=org.dues_per_member &&
                 amount<=org.dues_per_member-total,
                 "H_ERR_CONTRIBUTION_OVERPAY");
-        phase_c().pay(member,"ORG:"+id,amount);
+        phase_c().pay(phase_c().country_financial_wallet(member),
+                      "ORG:"+id,amount);
         total=phaseb::add_checked(total,amount);
         ++diplomacy_.revision;
     }
@@ -679,7 +680,9 @@ public:
         leader(phase_c(),payer,prime);
         require(!diplomacy_.reparation_links.contains(id),
                 "H_ERR_DUPLICATE_REPARATION");
-        phase_c().sign_reparation_treaty(id,payer,recipient,amount);
+        phase_c().sign_reparation_treaty(id,
+            phase_c().country_financial_wallet(payer),
+            phase_c().country_financial_wallet(recipient),amount);
         diplomacy_.reparation_links.insert(id);
         ++diplomacy_.revision;
     }
@@ -1375,7 +1378,7 @@ inline void Stage::execute_autonomous_trade() {
                     "G_ERR_FREIGHT_ACCOUNTING_MISMATCH");
         }
         if(order.duty>0) {
-            const auto& treasury=core.customs_revenue_wallet(order.buyer_country);
+            const auto& treasury=core.country_financial_wallet(order.buyer_country);
             core.phase_g_pay_customs(order.buyer,treasury,order.duty);
             trade_.customs.push_back({order.execution_id,order.buyer_country,
                  treasury,order.good,"H:effective-domestic-policy",
