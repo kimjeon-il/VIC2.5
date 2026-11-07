@@ -12,8 +12,9 @@ inline void IntegratedWorld::p4_register_party(P4Party party) {
            party.organization_ppm>=1&&party.organization_ppm<=1'000'000&&
            !p4_parties_.contains(party.id),
            "P4 invalid or duplicate real party");
-    events_.push_back("p4-party-registered:"+party.id);
-    p4_parties_.emplace(party.id,std::move(party));
+    const auto id=party.id;
+    p4_parties_.emplace(id,std::move(party));
+    events_.push_back("p4-party-registered:"+id);
 }
 
 inline void IntegratedWorld::p4_set_group_affinity(
