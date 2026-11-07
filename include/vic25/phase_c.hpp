@@ -6,6 +6,7 @@
 // separate future modules (see docs/phase-c/integration/).
 #include "vic25/phase_b.hpp"
 #include "vic25/phase_c_p1.hpp"
+#include "vic25/phase_c_p4.hpp"
 #include "vic25/ledgers.hpp"
 #include "vic25/shared_reservations.hpp"
 #include <algorithm>
@@ -1495,6 +1496,38 @@ public:
                                           const std::string&,std::string,
                                           std::int64_t,const std::string&);
     void phase_time_apply_p1_government(std::int64_t);
+    // P4's real electoral calendar: each elected institution/region has
+    // its own contest, legal term, outcome and due date.
+    void p4_register_party(P4Party);
+    void p4_set_group_affinity(const std::string&,const std::string&,int);
+    void p4_seed_contest(P4Contest);
+    [[nodiscard]] const std::map<std::string,P4Party>& p4_parties()const {
+        return p4_parties_;
+    }
+    [[nodiscard]] const std::map<std::string,P4Contest>& p4_contests()const {
+        return p4_contests_;
+    }
+    [[nodiscard]] const P4Contest& p4_contest(const std::string& id)const {
+        return p4_contests_.at(id);
+    }
+    [[nodiscard]] const std::map<std::string,P4Result>& p4_nonparliament_results()const {
+        return p4_nonparliament_results_;
+    }
+    [[nodiscard]] const std::vector<P4Result>& p4_history()const {
+        return p4_history_;
+    }
+    [[nodiscard]] std::vector<std::string> p4_due_contests(std::int64_t)const;
+    [[nodiscard]] bool p4_has_due_amendment(std::int64_t)const;
+    [[nodiscard]] bool p4_parliament_dissolved(const std::string&)const;
+    [[nodiscard]] People p4_eligible(const std::string&)const;
+    [[nodiscard]] P4Ballot p4_autonomous_ballot(const std::string&)const;
+    void p4_hold_contest(const std::string&,std::int64_t,std::int64_t,P4Ballot);
+    void p4_dissolve(const std::string&,const std::string&,const std::string&,
+                     std::int64_t,std::int64_t);
+    void p4_schedule_term_amendment(P4TermAmendment,const std::string&,
+                                    const std::vector<std::string>&,std::int64_t);
+    void phase_time_apply_p4_amendments(std::int64_t);
+    [[nodiscard]] P4CompetitionView p4_competition(const std::string&)const;
     [[nodiscard]] const GovernmentState& government(const std::string& country) const {
         return governments_.at(country);
     }
@@ -2774,6 +2807,56 @@ public:
                 p1_check_coalition(change.coalition);
             }
         }
+        ensure(p4_parties_.size()<=100'000&&p4_contests_.size()<=100'000&&
+               p4_history_.size()<=1'000'000&&
+               p4_nonparliament_results_.size()<=p4_contests_.size(),
+               "P4 oversized party or electoral registry");
+        for(const auto& [id,party]:p4_parties_)
+            ensure(id==party.id&&governments_.contains(party.country)&&
+                   party.organization_ppm>=1&&party.organization_ppm<=1'000'000,
+                   "P4 invalid party record");
+        for(const auto& [key,affinity]:p4_affinities_)
+            ensure(p4_parties_.contains(key.first)&&
+                   interest_groups_.contains(key.second)&&
+                   affinity>=1&&affinity<=1'000'000,
+                   "P4 affiliation without real party or interest group");
+        for(const auto& [id,contest]:p4_contests_) {
+            ensure(id==contest.id&&p1_constitutions_.contains(contest.country)&&
+                   !contest.law_id.empty()&&contest.term_months>=1&&
+                   contest.term_months<=240&&
+                   contest.turnout_ppm>=0&&contest.turnout_ppm<=1'000'000&&
+                   contest.seats>0&&contest.seats<=100'000&&
+                   contest.next_poll_day>=0&&contest.regular_poll_day>=0&&
+                   static_cast<unsigned>(contest.office)<=
+                       static_cast<unsigned>(P4Office::head_of_state)&&
+                   static_cast<unsigned>(contest.method)<=
+                       static_cast<unsigned>(P4BallotMethod::plurality)&&
+                   static_cast<unsigned>(contest.term_mode)<=
+                       static_cast<unsigned>(P4TermMode::fixed_cycle),
+                   "P4 invalid contest/term/electoral law");
+            if(contest.active)
+                ensure(p4_due_days_.contains(contest.next_poll_day)&&
+                       p4_due_days_.at(contest.next_poll_day).contains(id),
+                       "P4 missing real election schedule");
+        }
+        for(const auto& [day,ids]:p4_due_days_)
+            for(const auto& id:ids)
+                ensure(p4_contests_.contains(id)&&
+                       p4_contests_.at(id).active&&
+                       p4_contests_.at(id).next_poll_day==day,
+                       "P4 stale or duplicate election due index");
+        for(const auto& [id,result]:p4_nonparliament_results_)
+            ensure(p4_contests_.contains(id)&&
+                   result.contest_id==id&&
+                   p4_contests_.at(id).office!=P4Office::legislature,
+                   "P4 invalid non-parliament result");
+        for(const auto& [day,amendments]:p4_amendments_)
+            for(const auto& amendment:amendments)
+                ensure(day==amendment.effective_day&&
+                       p4_contests_.contains(amendment.contest_id)&&
+                       amendment.next_poll_day>day&&
+                       !amendment.law_id.empty(),
+                       "P4 invalid pending constitutional amendment");
         for(const auto& [country,ppm]:country_income_tax_)
             ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
                    "invalid country tax state");
@@ -3009,6 +3092,15 @@ private:
     std::map<std::string,P1Coalition> p1_coalitions_;
     std::map<std::string,P1Institution> p1_institutions_;
     std::map<std::int64_t,std::map<std::string,P1GovernmentChange>> p1_pending_;
+    // P4 party relationships are many-to-many; political headcount stays in
+    // P3 memberships and the national chamber still uses country_elections_.
+    std::map<std::string,P4Party> p4_parties_;
+    std::map<std::pair<std::string,std::string>,int> p4_affinities_;
+    std::map<std::string,P4Contest> p4_contests_;
+    std::map<std::string,P4Result> p4_nonparliament_results_;
+    std::vector<P4Result> p4_history_; // immutable election audit
+    std::map<std::int64_t,std::vector<P4TermAmendment>> p4_amendments_;
+    std::map<std::int64_t,std::set<std::string>> p4_due_days_; // derived index
     std::map<std::int64_t, std::vector<CabinetChange>> scheduled_cabinets_;
     std::map<std::string, Shipment> shipments_;
     std::set<std::string> tracked_goods_;
@@ -3038,6 +3130,8 @@ private:
     // no 128-bit GNU extension, overflow or floating-point ties (MSVC friendly).
     void p1_check_coalition(const P1Coalition&)const;
     [[nodiscard]] static int p1_percent(People,People);
+    [[nodiscard]] static People p4_scaled(People,People,People);
+    void p4_rebuild_due_index();
     static int compare_nonnegative_ratios(std::uint64_t a, std::uint64_t b,
                                           std::uint64_t c, std::uint64_t d) {
         ensure(b != 0 && d != 0, "zero election divisor");
@@ -3277,3 +3371,4 @@ private:
 } // namespace vic25::phasec
 
 #include "vic25/phase_c_p1_impl.hpp"
+#include "vic25/phase_c_p4_impl.hpp"
