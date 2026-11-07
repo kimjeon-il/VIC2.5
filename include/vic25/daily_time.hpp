@@ -527,7 +527,8 @@ public:
         real_actions[10].push_back([current](phasegh::Stage& gh) {
             gh.phase_c().phase_time_auto_demography(
                 current.day,days_in_month(current.year,current.month));
-            gh.phase_c().p3_reconcile_population();
+            // Phase C's Stage10 finalization reconciles P3/P5 POP refs
+            // exactly once after all demographic and combat actions.
         });
         // One atomic C/D/E/G/H commit for native events AND calendar
         // rollover. No second mutable month-close pass or event replay.
