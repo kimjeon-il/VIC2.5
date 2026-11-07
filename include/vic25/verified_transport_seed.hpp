@@ -7,6 +7,8 @@
 #include <charconv>
 #include <cstdint>
 #include <istream>
+#include <map>
+#include <tuple>
 #include <set>
 #include <stdexcept>
 #include <string>
