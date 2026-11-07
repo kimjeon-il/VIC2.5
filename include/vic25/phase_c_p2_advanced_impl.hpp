@@ -126,7 +126,10 @@ inline void IntegratedWorld::p2_auto_negotiate_pending(
     }
     for(const auto& [bill_id,bill]:p2_bills_) {
         if(bill.status!=P2BillStatus::submitted||
-           bill.action!=P2BillAction::enact_or_replace_base)continue;
+           bill.action!=P2BillAction::enact_or_replace_base||
+           (p2_chamber_decisions_.contains(bill_id)&&
+            p2_chamber_decisions_.at(bill_id).lower_passed))
+            continue;
         const People total=population[bill.country];
         if(total<=0)continue;
         auto& negotiations=p2_negotiated_[bill_id];
