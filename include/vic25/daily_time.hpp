@@ -89,6 +89,19 @@ inline Date from_legacy_month(std::int64_t month) {
     const auto m=static_cast<std::int32_t>(month%12+1);
     return {y,m,1};
 }
+// The effective law decides the term length. Calendar arithmetic stays
+// in the shared date engine, not in political domain-specific shortcuts.
+inline Date add_calendar_months(Date date,std::int32_t months) {
+    (void)to_day_index(date);
+    require(months>=1&&months<=240,"TIME_ERR_INVALID_ELECTION_TERM");
+    const std::int64_t zero_based=
+        (static_cast<std::int64_t>(date.year)-1)*12+date.month-1+months;
+    require(zero_based<(9999LL*12),
+            "TIME_ERR_ELECTION_TERM_CALENDAR_OVERFLOW");
+    const auto year=static_cast<std::int32_t>(zero_based/12+1);
+    const auto month=static_cast<std::int32_t>(zero_based%12+1);
+    return {year,month,std::min(date.day,days_in_month(year,month))};
+}
 inline bool is_month_end(Date d) {
     return d.day==days_in_month(d.year,d.month);
 }
@@ -337,7 +350,9 @@ public:
            engine_.base().core().core().annual_bank_interest_ppm()==0&&
            !engine_.base().core().core().has_active_sovereign_bonds()&&
            !engine_.has_autonomous_daily_trade()&&
-           !engine_.base().core().core().has_due_p1_government(day_)) {
+           !engine_.base().core().core().has_due_p1_government(day_)&&
+           !engine_.base().core().core().p4_has_due_amendment(day_)&&
+           engine_.base().core().core().p4_due_contests(day_).empty()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
         }
@@ -454,12 +469,26 @@ public:
                 // A lawful change enters on its scheduled calendar day even
                 // if no P0 controller, battle or economic command is active.
                 gh.phase_c().phase_time_apply_p1_government(today);
+                gh.phase_c().phase_time_apply_p4_amendments(today);
             });
         // P0 domain decisions run on the real calendar day, in the same
         // C/D/E/G/H transaction as scheduled commands and POP dynamics.
         for(std::size_t n=0;n<native_day_plan.size();++n)
             for(const auto& action:native_day_plan[n])
                 real_actions[n].push_back(action);
+        // Native election fallback. P0 plans its contested election earlier
+        // in Stage9 (after P3 political reactions); the due index is then
+        // cleared, so the fallback does not count the same ballot twice.
+        // A base daily::World without P0 still holds all lawful due elections.
+        real_actions[9].push_back([today=day_,current](phasegh::Stage& gh) {
+            auto& c=gh.phase_c();
+            for(const auto& contest_id:c.p4_due_contests(today)) {
+                const auto months=c.p4_contest(contest_id).term_months;
+                const auto next=to_day_index(add_calendar_months(current,months));
+                c.p4_hold_contest(contest_id,today,next,
+                                  c.p4_autonomous_ballot(contest_id));
+            }
+        });
         // Sovereign security obligations accrue and settle on their actual
         // calendar day even when no P0 AI/controller was explicitly attached.
         real_actions[5].push_back([today=day_](phasegh::Stage& gh) {

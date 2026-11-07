@@ -83,6 +83,21 @@ void fields(Archive& a,T& x) {
         V(legal_basis);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,P1Institution>){
         V(country);V(public_institution_id);V(kind);V(level);
+    } else if constexpr(std::is_same_v<X,P4Party>){
+        V(id);V(country);V(head_candidate);V(organization_ppm);
+        V(registered);V(active);
+    } else if constexpr(std::is_same_v<X,P4Contest>){
+        V(id);V(country);V(jurisdiction);V(law_id);
+        V(office);V(method);V(term_mode);V(term_months);
+        V(turnout_ppm);V(seats);V(next_poll_day);V(regular_poll_day);
+        V(last_poll_day);V(dissolution_authorized);V(active);V(dissolved);
+    } else if constexpr(std::is_same_v<X,P4Result>){
+        V(contest_id);V(law_id);V(day);V(eligible);V(registered);
+        V(cast);V(invalid);V(valid);V(votes);V(seats);
+        V(winning_party);V(office_holder);V(early);
+    } else if constexpr(std::is_same_v<X,P4TermAmendment>){
+        V(contest_id);V(law_id);V(effective_day);V(next_poll_day);
+        V(term_months);V(applies_to_incumbent);V(term_mode);
     } else if constexpr(std::is_same_v<X,CabinetChange>){
         V(country);V(new_head);V(new_prime_minister);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,TypedEntityId>){
@@ -350,6 +365,15 @@ struct SnapshotCodec {
             ar(w.p1_institutions_);
             ar(w.p1_pending_);
         }
+        if(!w.p4_parties_.empty()||!w.p4_contests_.empty()) {
+            ar(std::string("VIC25_PHASEC_P4_ELECTIONS_1"));
+            ar(w.p4_parties_);
+            ar(w.p4_affinities_);
+            ar(w.p4_contests_);
+            ar(w.p4_nonparliament_results_);
+            ar(w.p4_history_);
+            ar(w.p4_amendments_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -359,7 +383,7 @@ struct SnapshotCodec {
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
-             seen_armies=false,seen_estates=false,seen_p1=false;
+             seen_armies=false,seen_estates=false,seen_p1=false,seen_p4=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -437,6 +461,22 @@ struct SnapshotCodec {
                    w.p1_institutions_.size()>1'000'000||
                    w.p1_pending_.size()>1'000'000)
                     throw std::runtime_error("invalid P1 constitutional extension");
+            } else if(extension=="VIC25_PHASEC_P4_ELECTIONS_1"&&!seen_p4) {
+                seen_p4=true;
+                ar(w.p4_parties_);
+                ar(w.p4_affinities_);
+                ar(w.p4_contests_);
+                ar(w.p4_nonparliament_results_);
+                ar(w.p4_history_);
+                ar(w.p4_amendments_);
+                if(w.p4_parties_.size()>100'000||
+                   w.p4_affinities_.size()>2'000'000||
+                   w.p4_contests_.size()>100'000||
+                   w.p4_nonparliament_results_.size()>100'000||
+                   w.p4_history_.size()>1'000'000||
+                   w.p4_amendments_.size()>1'000'000)
+                    throw std::runtime_error("oversized P4 election extension");
+                w.p4_rebuild_due_index();
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
