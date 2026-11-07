@@ -1024,6 +1024,29 @@ public:
                 if(gh.phase_c().phase_d_cash_available(gh.phase_c().country_financial_wallet(dues.country))<due)return;
                 gh.pay_dues(dues.organization,dues.country,due);
             });
+        // Ordinary member governments honour an already-active real treaty
+        // obligation when their actual treasury can pay. This does not vote
+        // for new charters, grant memberships or fabricate an organization.
+        plan[5].push_back([](phasegh::Stage& gh) {
+            auto& c=gh.phase_c();
+            for(const auto& [id,org]:gh.diplomacy().organizations) {
+                if(!org.active||org.dues_per_member<=0||
+                   !c.has_actor("ORG:"+id))continue;
+                for(const auto& member:org.members) {
+                    if(!c.has_country_treasury(member))continue;
+                    const auto key=std::make_pair(c.month(),member);
+                    const auto it=org.paid.find(key);
+                    const Money prior=it==org.paid.end()?0:it->second;
+                    if(prior>=org.dues_per_member)continue;
+                    const Money free=std::max<Money>(0,
+                        c.phase_d_cash_available(
+                            c.country_financial_wallet(member)));
+                    const Money payable=std::min(
+                        org.dues_per_member-prior,free);
+                    if(payable>0)gh.pay_dues(id,member,payable);
+                }
+            }
+        });
         for(const auto& ai:decisions.crisis_mandates)
             plan[9].push_back([ai](phasegh::Stage& gh) {
                 if(gh.phase_c().government(ai.country).prime_minister!=
