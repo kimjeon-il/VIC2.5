@@ -84,7 +84,10 @@ inline bool IntegratedWorld::p2_has_negotiable_bills()const {
     if(p2_group_demands_.empty())return false;
     for(const auto& [id,bill]:p2_bills_) {
         if(bill.status!=P2BillStatus::submitted||
-           bill.action!=P2BillAction::enact_or_replace_base)continue;
+           bill.action!=P2BillAction::enact_or_replace_base||
+           (p2_chamber_decisions_.contains(id)&&
+            p2_chamber_decisions_.at(id).lower_passed))
+            continue;
         for(const auto& [demand_id,demand]:p2_group_demands_) {
             if(bill.country!=demand.country||
                bill.proposed_base.domain!=demand.law_domain)continue;
