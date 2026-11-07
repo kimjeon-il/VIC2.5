@@ -1512,6 +1512,8 @@ public:
         const std::string&,const std::string&)const;
     [[nodiscard]] int p5_guerrilla_disruption_ppm(
         const std::string&)const;
+    [[nodiscard]] bool p5_guerrilla_is_insurgent_unit(
+        const std::string&)const;
     [[nodiscard]] bool p5_guerrilla_has_calendar_work(std::int64_t)const;
     void phase_time_apply_p5_guerrilla_access(std::int64_t);
     void p5_guerrilla_daily_review(std::int64_t);
