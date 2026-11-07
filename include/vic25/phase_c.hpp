@@ -2735,9 +2735,14 @@ public:
                    "national election votes/seats not conserved");
         }
         for (const auto& [id,g] : governments_) {
+            const auto order=p1_constitutions_.find(id);
+            const bool no_parliament=order!=p1_constitutions_.end()&&
+                order->second.legislature==P1LegislatureKind::none;
             ensure(id==g.country && !g.head_of_state.empty() && !g.prime_minister.empty() &&
-                   g.chamber_seats>0 && g.quorum>0 && g.quorum<=g.chamber_seats,
-                   "invalid government institution");
+                   (no_parliament?
+                      (g.chamber_seats==0&&g.quorum==0):
+                      (g.chamber_seats>0&&g.quorum>0&&g.quorum<=g.chamber_seats)),
+                   "invalid legal P1 or legacy government institution");
         }
         ensure(p1_constitutions_.size()==p1_coalitions_.size(),
                "P1 constitution/coalition mismatch");
