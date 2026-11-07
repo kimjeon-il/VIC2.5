@@ -87,6 +87,10 @@ struct PoliticalFixture {
 
 static void real_pop_attitudes_and_national_clout() {
     PoliticalFixture fixture;
+    fixture.gh.seed_geography().seed_core().seed_core().p3_seed_movement({
+        "DORMANT","A","political_reform","reform","",
+        P3MovementGoal::legal_reform,{"WORKERS"},{"REFORM"},
+        250'000,50'000,false});
     auto world=daily::World::adopt(std::move(fixture.gh),301);
     auto base_pop=c(world).people().population();
     auto cash=c(world).cash("A");
@@ -101,6 +105,7 @@ static void real_pop_attitudes_and_national_clout() {
          observed.p3_group_view("A","WORKERS").clout_ppm>0&&
          observed.p3_movement_view("MOV").supporters>=30&&
          observed.p3_movement_view("MOV").supporters<=base_pop&&
+         observed.p3_movements().at("DORMANT").active&&
          observed.p1_legitimacy("A").observed_groups,
          "P3 actual POP unemployment, clout or movement support missing");
     need(observed.people().population()==base_pop&&
