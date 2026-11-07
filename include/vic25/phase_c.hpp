@@ -55,6 +55,9 @@ struct SovereignBond {
     int coupon_ppm{};
     std::int64_t issue_day{},maturity_day{};
 };
+struct ArmyDeployment {
+    std::string unit,country,region;
+};
 struct CabinetChange {
     std::string country, new_head, new_prime_minister;
     bool replace_head{}, replace_prime{};
@@ -378,6 +381,37 @@ public:
         ensure(stage_ == -1 && commit_id_ == 0 && !unit.empty() && !units_.contains(unit), "bad unit");
         register_typed(EntityKind::unit,unit);
         units_.emplace(std::move(unit), std::map<Id, People>{});
+    }
+    // Army national command and actual location are separate from the
+    // civilian sovereignty of the province containing its soldiers.
+    void seed_army_deployment(const std::string& unit,
+                              const std::string& country,
+                              const std::string& region) {
+        ensure(stage_==-1&&commit_id_==0&&units_.contains(unit)&&
+               governments_.contains(country)&&
+               sovereignty_.contains(region)&&
+               !army_deployments_.contains(unit),
+               "invalid historical military deployment");
+        ensure(sovereignty_.at(region)==country||
+               military_control_.at(region)==country,
+               "initial army not on its country's controlled territory");
+        army_deployments_.emplace(unit,ArmyDeployment{unit,country,region});
+    }
+    [[nodiscard]] const std::map<std::string,ArmyDeployment>&
+            army_deployments()const{return army_deployments_;}
+    [[nodiscard]] const std::map<Id,People>& unit_slices(
+            const std::string& unit)const {
+        return units_.at(unit);
+    }
+    void phase_time_move_army(const std::string& unit,
+                              const std::string& destination) {
+        require_stage({10});
+        auto it=army_deployments_.find(unit);
+        ensure(it!=army_deployments_.end()&&
+               sovereignty_.contains(destination)&&
+               active_strength(unit)>0,"invalid real army move");
+        it->second.region=destination;
+        events_.push_back("dated-army-relocation");
     }
     void seed_active(std::string unit, Id slice) {
         ensure(stage_ == -1 && commit_id_ == 0, "seed active after start");
@@ -2450,6 +2484,11 @@ public:
         for(const auto& [firm,day]:bankrupt_firms_)
             ensure(actors_.contains(firm)&&day>=0,
                    "orphaned bankrupt firm");
+        for(const auto& [unit,deploy]:army_deployments_)
+            ensure(units_.contains(unit)&&deploy.unit==unit&&
+                   governments_.contains(deploy.country)&&
+                   sovereignty_.contains(deploy.region),
+                   "orphaned real national army deployment");
         ensure(money_.balanced(), "unbalanced financial ledger");
         for(const auto& [currency,l]:foreign_ledgers_){
             ensure(l.balanced(),"unbalanced foreign currency ledger");
@@ -2517,6 +2556,7 @@ private:
     std::set<std::string> actors_;
     std::set<std::string> processed_commands_;
     std::map<std::string, std::map<Id, People>> units_;
+    std::map<std::string,ArmyDeployment> army_deployments_;
     std::uint64_t next_typed_id_{1};
     std::map<std::pair<EntityKind,std::string>,TypedEntityId> typed_entities_;
     std::map<std::uint64_t,EntityKind> typed_active_ids_;
