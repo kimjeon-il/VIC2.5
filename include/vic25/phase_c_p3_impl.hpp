@@ -209,8 +209,27 @@ inline P3MovementView IntegratedWorld::p3_movement_view(
         view.supporters=phaseb::add_checked(view.supporters,n);
     }
     if(population>0)view.support_ppm=p3_fraction(view.supporters,population);
+    std::int64_t observed_radical=0,observed_engagement=0;
+    if(view.supporters>0)
+        for(const auto& [slice,n]:support) {
+            const auto opinion=p3_attitudes_.find(slice);
+            if(opinion==p3_attitudes_.end()||n<=0)continue;
+            const auto share=p3_fraction(n,view.supporters);
+            observed_radical+=static_cast<std::int64_t>(share)*
+                    opinion->second.radical_ppm/1'000'000;
+            observed_engagement+=static_cast<std::int64_t>(share)*
+                    opinion->second.engagement_ppm/1'000'000;
+        }
+    // Persistent organizational ideology defines a floor, not a fixed
+    // national radicalism tag. Observed POP hardship can exceed that floor.
+    view.radicalism_ppm=std::max(movement.radical_ppm,
+        static_cast<std::int32_t>(
+            std::clamp<std::int64_t>(observed_radical,0,1'000'000)));
+    view.activism_ppm=std::max(movement.activism_ppm,
+        static_cast<std::int32_t>(
+            std::clamp<std::int64_t>(observed_engagement,0,1'000'000)));
     view.potential_activists=p4_scaled(
-        view.supporters,movement.activism_ppm,1'000'000);
+        view.supporters,view.activism_ppm,1'000'000);
     return view;
 }
 
