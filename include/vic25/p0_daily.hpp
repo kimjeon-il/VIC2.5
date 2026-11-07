@@ -829,7 +829,7 @@ public:
                 const Money already=it==org.paid.end()?0:it->second;
                 if(already>=org.dues_per_member)return;
                 const Money due=org.dues_per_member-already;
-                if(gh.phase_c().phase_d_cash_available(dues.country)<due)return;
+                if(gh.phase_c().phase_d_cash_available(gh.phase_c().country_financial_wallet(dues.country))<due)return;
                 gh.pay_dues(dues.organization,dues.country,due);
             });
         for(const auto& ai:decisions.crisis_mandates)
@@ -864,7 +864,7 @@ public:
                         if(offer.compensation>0&&offer.payer==ai.country &&
                            (offer.compensation>ai.maximum_cash_settlement ||
                             offer.compensation>
-                              gh.phase_c().phase_d_cash_available(ai.country)))
+                              gh.phase_c().phase_d_cash_available(gh.phase_c().country_financial_wallet(ai.country))))
                             continue;
                         if(!selected||offer.compensation<selected->compensation||
                            (offer.compensation==selected->compensation&&
@@ -910,7 +910,7 @@ public:
                     }
                     if(!eligible||
                        fiscal_exposure>rule.maximum_new_fiscal_obligation||
-                       fiscal_exposure>c.phase_d_cash_available(rule.country))
+                       fiscal_exposure>c.phase_d_cash_available(c.country_financial_wallet(rule.country)))
                         continue;
                     gh.ratify_package_member(id,rule.country,rule.prime_minister);
                 }
@@ -930,7 +930,7 @@ public:
                        gh.phase_c().government(m.country).prime_minister!=
                             m.prime_minister)
                         throw std::invalid_argument("P0_H_COUNCIL_UNAUTHORIZED_MEMBER");
-                    const Money actual=gh.phase_c().phase_d_cash_available(m.country);
+                    const Money actual=gh.phase_c().phase_d_cash_available(gh.phase_c().country_financial_wallet(m.country));
                     votes.emplace(m.country,actual>=m.minimum_free_treasury_for_yes?
                         phasegh::VoteChoice::yes:phasegh::VoteChoice::no);
                 }
