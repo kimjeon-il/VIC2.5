@@ -231,7 +231,6 @@ struct Policies {
     std::vector<Investment> investments;
     std::vector<PoliticalReaction> political_reactions;
     std::vector<Election> elections;
-    std::vector<GovernmentFormation> government_formations;
     std::vector<CountryAI> countries;
     std::vector<CrisisMandate> crisis_mandates;
     std::vector<OrganizationDuesMandate> organization_dues;
@@ -262,7 +261,7 @@ struct Policies {
     std::vector<BondBuyerOrder> bond_buyer_orders;
     std::vector<BondSecondaryAsk> bond_secondary_asks;
     std::vector<BondSecondaryBid> bond_secondary_bids;
-
+    std::vector<GovernmentFormation> government_formations; // append-only
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
