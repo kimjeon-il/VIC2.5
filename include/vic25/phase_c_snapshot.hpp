@@ -293,6 +293,12 @@ struct SnapshotCodec {
             ar(w.scheduled_country_income_tax_);
             ar(w.country_treasuries_);
         }
+        if(w.bank_interest_annual_ppm_!=0||
+           !w.bank_interest_fraction_.empty()) {
+            ar(std::string("VIC25_PHASEC_BANK_INTEREST_1"));
+            ar(w.bank_interest_annual_ppm_);
+            ar(w.bank_interest_fraction_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -300,7 +306,7 @@ struct SnapshotCodec {
         persistence_detail::BinaryReader ar{is};
         IntegratedWorld w;
         all(ar,w);
-        bool seen_elections=false,seen_fiscal=false;
+        bool seen_elections=false,seen_fiscal=false,seen_interest=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -321,6 +327,14 @@ struct SnapshotCodec {
                    w.scheduled_country_income_tax_.size()>1'000'000 ||
                    w.country_treasuries_.size()>100'000)
                     throw std::runtime_error("oversized country fiscal extension");
+            } else if(extension=="VIC25_PHASEC_BANK_INTEREST_1"&&!seen_interest) {
+                seen_interest=true;
+                ar(w.bank_interest_annual_ppm_);
+                ar(w.bank_interest_fraction_);
+                if(w.bank_interest_annual_ppm_<0||
+                   w.bank_interest_annual_ppm_>1'000'000||
+                   w.bank_interest_fraction_.size()>1'000'000)
+                    throw std::runtime_error("invalid bank interest extension");
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
