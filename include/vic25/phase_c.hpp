@@ -436,7 +436,21 @@ public:
                 carried_equipment.emplace_back(good,units);
         }
         for(const auto& [good,units]:carried_equipment) {
-            ensure(stock(unit,old,good)>=units&&units<=active_strength(unit),
+            if(good=="ammunition") {
+                // Ammunition was already physically transferred above; moving
+                // its issued-accounting tag must not transfer it a second time.
+                const Quantity tagged=std::min(units,carried_ammunition);
+                if(tagged>0) {
+                    const auto next=std::make_tuple(unit,destination,good);
+                    equipment_assignment_[next]=phaseb::add_checked(
+                        equipment_assignment_[next],tagged);
+                    if(tagged==units)
+                        equipment_assignment_.erase({unit,old,good});
+                    else equipment_assignment_[{unit,old,good}]-=tagged;
+                }
+                continue;
+            }
+            ensure(stock(unit,old,good)>=units,
                    "army has no documented physical issued equipment");
             if(phase_d_reservation_mode_)
                 resources_.assert_goods_available({unit,old,good},units,
