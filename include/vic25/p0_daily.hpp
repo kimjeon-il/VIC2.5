@@ -533,7 +533,8 @@ public:
                     const auto& f=gh.phase_c().facility(r.site);
                     const Money gross=times(*workers,firm.wage_per_worker_per_day);
                     gh.phase_c().wages_under_law(f.owner,firm.employee_wallet,
-                                                  firm.treasury_wallet,gross);
+                                                  firm.treasury_wallet,gross,
+                                                  gh.phase_c().sovereignty(f.region));
                 });
         }
         // A site operator chooses a real output quantity from target stock,
@@ -598,7 +599,8 @@ public:
                                               policy.resource_site);
                     gh.phase_c().wages_under_law(src.owner,policy.employee_wallet,
                                   policy.treasury_wallet,
-                                  times(*completed,policy.wage_per_unit));
+                                  times(*completed,policy.wage_per_unit),
+                                  gh.phase_c().sovereignty(src.region));
                 });
         }
         // Funded, self-scheduling research is an actual D work order:
@@ -704,7 +706,8 @@ public:
                           maintenance.wage_per_worker_per_day);
                     gh.phase_c().wages_under_law(site.owner,
                           maintenance.employee_wallet,
-                          maintenance.treasury_wallet,gross);
+                          maintenance.treasury_wallet,gross,
+                          gh.phase_c().sovereignty(site.region));
                 });
         }
         for(const auto& credit:decisions.debt_service)
@@ -789,7 +792,7 @@ public:
                     // drive reform support. No arbitrary political point ledger.
                     const People joblessness=times(unemployed,500'000)/1'000'000;
                     const People scarcity=c.food_grievance(d.region)>0?voters/5:0;
-                    const People taxes=times(voters,c.income_tax_ppm())/4'000'000;
+                    const People taxes=times(voters,c.income_tax_ppm(election.country))/4'000'000;
                     const People preference=std::min(voters,
                        phaseb::add_checked(joblessness,phaseb::add_checked(scarcity,taxes)));
                     reform=phaseb::add_checked(reform,preference);
