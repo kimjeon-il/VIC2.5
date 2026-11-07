@@ -96,6 +96,9 @@ void fields(Archive& a,T& x) {
         V(quantity);V(loss);V(arrival_month);V(delivered);
     } else if constexpr(std::is_same_v<X,DividendDue>){
         V(asset);V(payer);V(holder);V(amount);V(due);
+    } else if constexpr(std::is_same_v<X,WageArrearsClaim>) {
+        V(id);V(employer);V(worker);V(treasury);V(country);
+        V(accrued);V(outstanding);V(issued_day);
     } else {
         static_assert(sizeof(X)==0,"SnapshotCodec needs an explicit struct layout");
     }
@@ -303,6 +306,11 @@ struct SnapshotCodec {
             ar(std::string("VIC25_PHASEC_EXACT_BIRTH_DAYS_1"));
             ar(w.people_.exact_birth_days_);
         }
+        if(!w.wage_arrears_.empty()||!w.bankrupt_firms_.empty()) {
+            ar(std::string("VIC25_PHASEC_WAGE_INSOLVENCY_1"));
+            ar(w.wage_arrears_);
+            ar(w.bankrupt_firms_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -311,7 +319,7 @@ struct SnapshotCodec {
         IntegratedWorld w;
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
-             seen_birth_days=false;
+             seen_birth_days=false,seen_wages=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -346,6 +354,13 @@ struct SnapshotCodec {
                 ar(w.people_.exact_birth_days_);
                 if(w.people_.exact_birth_days_.size()>5'000'000)
                     throw std::runtime_error("oversized POP exact birth extension");
+            } else if(extension=="VIC25_PHASEC_WAGE_INSOLVENCY_1"&&!seen_wages) {
+                seen_wages=true;
+                ar(w.wage_arrears_);
+                ar(w.bankrupt_firms_);
+                if(w.wage_arrears_.size()>5'000'000||
+                   w.bankrupt_firms_.size()>1'000'000)
+                    throw std::runtime_error("oversized real wage debt state");
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
