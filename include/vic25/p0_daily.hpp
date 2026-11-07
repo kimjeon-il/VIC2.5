@@ -1030,7 +1030,7 @@ public:
                     if(c.sovereignty(d.region)!=election.country||d.citizenship!="citizen"||
                        d.service==phaseb::Service::active||d.service==phaseb::Service::pow||
                        d.service==phaseb::Service::missing||
-                       pop.age_months(s.key.demographic)<static_cast<std::int64_t>(c.voting_age())*12)
+                       pop.age_months_slice(id)<static_cast<std::int64_t>(c.voting_age())*12)
                         continue;
                     const People voters=times(s.count,election.turnout_ppm)/1'000'000;
                     const People unemployed=s.count-pop.employed(id);
