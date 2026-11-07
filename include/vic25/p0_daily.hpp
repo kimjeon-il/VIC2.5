@@ -452,8 +452,16 @@ public:
         const auto& industry=world_.engine().base().core().state();
         std::set<std::string> payroll_needs_explicit_placement;
         for(const auto& [id,job]:game_c.people().jobs()) {
-            (void)id;
-            if(job.count>0&&job.wage_per_month>0)
+            if(job.count<=0||job.wage_per_month<=0)continue;
+            const auto& pop=game_c.people().slice(id);
+            const auto& dem=game_c.people().demographic(pop.key.demographic);
+            const auto household="HH:"+std::to_string(pop.key.household);
+            const auto& country=game_c.sovereignty(dem.region);
+            const bool treasury_ready=game_c.has_government(country)?
+                game_c.has_country_treasury(country):
+                (!game_c.has_any_government()&&game_c.has_actor(country));
+            if(!game_c.has_actor(job.employer)||!game_c.has_actor(household)||
+               !treasury_ready)
                 payroll_needs_explicit_placement.insert(job.employer);
         }
         for(const auto& [id,recipe]:industry.recipes) {
@@ -505,6 +513,7 @@ public:
             }
         }
         phasegh::World::Plan plan;
+        auto salary_shortfall=std::make_shared<std::set<std::string>>();
         // A real Employment contract can pay a real household wallet each
         // calendar day. The C bank/tax ledger remains the sole authority.
         // P0 scenario payroll, when explicitly configured, owns that firm's
@@ -533,7 +542,8 @@ public:
                !game_c.has_country_treasury(sovereign))
                 continue;
             if(!game_c.has_government(sovereign)&&
-               !game_c.has_actor(sovereign))continue;
+               (game_c.has_any_government()||!game_c.has_actor(sovereign)))
+                continue;
             const auto treasury=game_c.has_government(sovereign)?
                                  game_c.country_treasury(sovereign):sovereign;
             if(contract.employer==wallet||contract.employer==treasury||
@@ -543,7 +553,8 @@ public:
                                ":"+std::to_string(slice_id);
             auto reserved=std::make_shared<Money>(0);
             plan[1].push_back(
-                [slice_id,employer,purpose,date,dim,reserved](phasegh::Stage& gh) {
+                [slice_id,employer,purpose,date,dim,reserved,
+                 salary_shortfall](phasegh::Stage& gh) {
                     auto& c=gh.phase_c();
                     const auto* now=c.people().job(slice_id);
                     if(!now||now->employer!=employer||now->count<=0||
@@ -552,6 +563,7 @@ public:
                     const Money today=daily_increment(full_month,date.day,dim);
                     const Money available=c.phase_d_cash_available(employer);
                     const Money payable=std::min(today,std::max<Money>(0,available));
+                    if(payable<today)salary_shortfall->insert(employer);
                     if(payable<=0)return;
                     c.phase_d_reserve_cash(employer,purpose,payable);
                     *reserved=payable;
@@ -620,8 +632,12 @@ public:
             });
         for(const auto& firm:decisions.manufacturers) {
             auto workers=std::make_shared<People>(0);
-            plan[4].push_back([firm,date,dim,workers](phasegh::Stage& gh) {
+            plan[4].push_back([firm,date,dim,workers,
+                               salary_shortfall](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
+                const auto& recipe=gh.phase_d().state().recipes.at(firm.recipe);
+                if(salary_shortfall->contains(c.facility(recipe.site).owner))
+                    return;
                 const Quantity batches=available_production(gh.phase_d(),c,firm,date.day,dim);
                 if(batches<=0)return;
                 const auto& r=gh.phase_d().state().recipes.at(firm.recipe);
@@ -644,10 +660,12 @@ public:
         // plus site throughput. No underground reserve counter is created.
         for(const auto& policy:decisions.extractors) {
             auto completed=std::make_shared<Quantity>(0);
-            plan[4].push_back([policy,date,dim,completed](phasegh::Stage& gh) {
+            plan[4].push_back([policy,date,dim,completed,
+                               salary_shortfall](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 const auto& ds=gh.phase_d().state();
                 const auto& src=ds.resource_sites.at(policy.resource_site);
+                if(salary_shortfall->contains(src.owner))return;
                 const auto& facility=c.facility(src.site);
                 const auto& quote=c.market(src.region,src.good);
                 if(quote.price<=policy.wage_per_unit ||
