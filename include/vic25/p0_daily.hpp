@@ -124,6 +124,13 @@ struct Election {
     std::int32_t year{},month{1},day{1};
     People turnout_ppm{900'000};
 };
+// Player/campaign cabinet choice takes effect the following real day.
+struct GovernmentFormation {
+    std::string country, incumbent_head, new_prime, legal_basis;
+    std::vector<std::string> ruling_groups, ruling_parties;
+    std::int32_t year{},month{1},day{1};
+    bool caretaker{};
+};
 struct CountryAI {
     std::string country,prime_minister,domestic_region,good,domestic_seller;
     Money protect_below_price{};
@@ -224,6 +231,7 @@ struct Policies {
     std::vector<Investment> investments;
     std::vector<PoliticalReaction> political_reactions;
     std::vector<Election> elections;
+    std::vector<GovernmentFormation> government_formations;
     std::vector<CountryAI> countries;
     std::vector<CrisisMandate> crisis_mandates;
     std::vector<OrganizationDuesMandate> organization_dues;
@@ -383,6 +391,15 @@ struct Policies {
                p.max_new_members_per_day<0||p.max_protesters_per_day<0)
                 throw std::invalid_argument("P0_INVALID_POLITICS");
         std::set<std::tuple<std::string,int,int>> election_months;
+        std::set<std::tuple<std::string,int,int,int>> government_decision_days;
+        for(const auto& change:government_formations) {
+            if(change.country.empty()||change.incumbent_head.empty()||
+               change.new_prime.empty()||change.legal_basis.empty()||
+               !government_decision_days.insert({change.country,change.year,
+                                                 change.month,change.day}).second)
+                throw std::invalid_argument("P0_INVALID_P1_GOVERNMENT_FORMATION");
+            (void)daily::to_day_index({change.year,change.month,change.day});
+        }
         for(const auto& e:elections)
             if(e.country.empty()||e.incumbent_party.empty()||e.reform_party.empty()||
                e.incumbent_party==e.reform_party||e.year<1||e.year>9999||
@@ -1384,6 +1401,20 @@ public:
                          {{election.incumbent_party,incumbent},
                           {election.reform_party,reform}});
             });
+        }
+        for(const auto& formation:decisions.government_formations) {
+            if(date.year!=formation.year||date.month!=formation.month||
+               date.day!=formation.day)continue;
+            plan[9].push_back(
+                [formation,tomorrow=world_.day_index()+1](phasegh::Stage& gh) {
+                    gh.phase_c().schedule_p1_cabinet_daily(
+                        formation.country,formation.incumbent_head,
+                        formation.new_prime,
+                        phasec::P1Coalition{formation.ruling_groups,
+                                           formation.ruling_parties,
+                                           formation.caretaker},
+                        tomorrow,formation.legal_basis);
+                });
         }
         for(const auto& dues:decisions.organization_dues)
             plan[5].push_back([dues](phasegh::Stage& gh) {
