@@ -61,6 +61,7 @@ struct TransportEdge {
     Month transit_months{}; // historical standalone monthly input
     bool enabled{true};
     std::int32_t transit_days{}; // native game: verified days, zero = unknown
+    std::string mode{"legacy"}; // road, rail, sea, river, air or old map link
 };
 struct CustomsRecord {
     std::string execution_id, importer, treasury, good, policy_source;
@@ -1043,7 +1044,11 @@ public:
         require(core_.commit_id()==0 && !edge.id.empty() &&
                 edge.from>0 && edge.to>0 && edge.from!=edge.to &&
                 edge.monthly_capacity>0 && edge.freight_per_unit>=0 &&
-                edge.transit_months>0 && edge.transit_days>=0 &&
+                (edge.transit_months>0||edge.transit_days>0) &&
+                edge.transit_days>=0 &&
+                (edge.mode=="legacy"||edge.mode=="road"||
+                 edge.mode=="rail"||edge.mode=="sea"||
+                 edge.mode=="river"||edge.mode=="air")&&
                 !edge.carrier.empty() &&
                 core_.spatial().provinces.contains(edge.from) &&
                 core_.spatial().provinces.contains(edge.to) &&
@@ -1053,8 +1058,21 @@ public:
         const auto& b=core_.spatial().provinces.at(edge.to);
         bool coastal=false;
         for(Id sea:a.coastal_seas)if(b.coastal_seas.contains(sea))coastal=true;
-        require(a.neighbors.contains(edge.to)||coastal,
-                "G_ERR_UNCONNECTED_LOGISTICS_EDGE");
+        bool documented_link=false;
+        for(const auto& [key,link]:core_.spatial().geographic_links) {
+            (void)key;
+            if(link.from==edge.from&&link.to==edge.to&&
+               link.mode==edge.mode) {
+                documented_link=true;
+                break;
+            }
+        }
+        const bool adjacent=a.neighbors.contains(edge.to);
+        const bool connected=edge.mode=="legacy"?(adjacent||coastal):
+            edge.mode=="road"?adjacent:
+            edge.mode=="sea"?coastal:documented_link;
+        require(connected,
+                "G_ERR_UNVERIFIED_INTERMODAL_CONNECTIVITY");
         (void)core_.core().core().cash(edge.carrier);
         trade_.transport_adjacency[edge.from].push_back(edge.id);
         trade_.transport_edges.emplace(edge.id,std::move(edge));
