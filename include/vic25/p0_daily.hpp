@@ -337,6 +337,7 @@ inline Money actual_daily_worker_wage(const phasec::IntegratedWorld& c,
 }
 
 inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
+    if(c.firm_bankrupt(p.employer))return;
     // Count actual employment contracts in this region, NOT effective workers:
     // a strike is lost production for a day, not a vacant permanent job.
     People contracted=0;
@@ -504,7 +505,8 @@ public:
                 continue;
             const auto& facility=game_c.facility(recipe.site);
             const auto& output=recipe.outputs.front();
-            if(payroll_needs_explicit_placement.contains(facility.owner) ||
+            if(game_c.firm_bankrupt(facility.owner) ||
+               payroll_needs_explicit_placement.contains(facility.owner) ||
                !game_c.has_market(facility.region,output.good))
                 continue; // Do not invent a household wage recipient.
             const auto& quote=game_c.market(facility.region,output.good);
@@ -516,21 +518,24 @@ public:
                            decisions.extractors.end(),
                     [&](const Extractor& p){return p.resource_site==id;}))
                 continue;
-            if(payroll_needs_explicit_placement.contains(site.owner) ||
+            if(game_c.firm_bankrupt(site.owner) ||
+               payroll_needs_explicit_placement.contains(site.owner) ||
                !game_c.has_market(site.region,site.good))continue;
             const auto& quote=game_c.market(site.region,site.good);
             decisions.extractors.push_back(Extractor{
                 id,std::max<Quantity>(1,quote.target_stock)});
         }
         for(const auto& [id,research]:industry.researches) {
-            if(research.reviewed||research.verified_work>=research.required_evidence||
+            if(game_c.firm_bankrupt(research.sponsor) ||
+               research.reviewed||research.verified_work>=research.required_evidence||
                std::any_of(decisions.researches.begin(),decisions.researches.end(),
                     [&](const ResearchPolicy& p){return p.project==id;}))
                 continue;
             decisions.researches.push_back(ResearchPolicy{id,1});
         }
         for(const auto& [id,project]:industry.constructions) {
-            if(project.ready||project.commissioned||
+            if(game_c.firm_bankrupt(project.client) ||
+               project.ready||project.commissioned||
                project.accepted_work>=project.work_required||
                std::any_of(decisions.investments.begin(),decisions.investments.end(),
                     [&](const Investment& p){return p.construction_project==id;}))
@@ -563,7 +568,8 @@ public:
                 scenario_payroll.insert(game_c.facility(p.facility).owner);
         for(const auto& [slice_id,contract]:game_c.people().jobs()) {
             if(contract.count<=0||contract.wage_per_month<=0||
-               scenario_payroll.contains(contract.employer))continue;
+               scenario_payroll.contains(contract.employer)||
+               game_c.firm_bankrupt(contract.employer))continue;
             const auto& slice=game_c.people().slice(slice_id);
             const auto& dem=game_c.people().demographic(slice.key.demographic);
             const auto wallet="HH:"+std::to_string(slice.key.household);
@@ -590,7 +596,7 @@ public:
                     auto& c=gh.phase_c();
                     const auto* now=c.people().job(slice_id);
                     if(!now||now->employer!=employer||now->count<=0||
-                       now->wage_per_month<=0)return;
+                       now->wage_per_month<=0||c.firm_bankrupt(employer))return;
                     const Money full_month=times(now->count,now->wage_per_month);
                     const Money today=daily_increment(full_month,date.day,dim);
                     const Money available=c.phase_d_cash_available(employer);
@@ -601,12 +607,23 @@ public:
                     *reserved=payable;
                 });
             plan[5].push_back(
-                [employer,wallet,treasury,sovereign,purpose,reserved](phasegh::Stage& gh) {
-                    if(*reserved<=0)return;
+                [slice_id,employer,wallet,treasury,sovereign,purpose,
+                 date,dim,reserved,today=world_.day_index()](phasegh::Stage& gh) {
                     auto& c=gh.phase_c();
-                    c.phase_d_release_cash(employer,purpose,*reserved);
-                    c.wages_under_law(employer,wallet,treasury,*reserved,
-                                      c.has_government(sovereign)?sovereign:"");
+                    if(*reserved>0)
+                        c.phase_d_release_cash(employer,purpose,*reserved);
+                    const auto* actual=c.people().job(slice_id);
+                    if(!actual||actual->employer!=employer||
+                       actual->count<=0||actual->wage_per_month<=0||
+                       c.firm_bankrupt(employer))return;
+                    const Money gross=daily_increment(
+                        times(actual->count,actual->wage_per_month),
+                        date.day,dim);
+                    if(gross<=0)return;
+                    c.phase_time_accrue_contract_wage(
+                        purpose,employer,wallet,treasury,
+                        c.has_government(sovereign)?sovereign:"",
+                        gross,today);
                 });
         }
         if(date.day==1 && decisions.autonomous_tax_step_ppm>0)
@@ -1200,6 +1217,15 @@ public:
             plan[10].push_back([combat](phasegh::Stage& gh){
                 fight(gh.phase_c(),combat);
             });
+        // Actual creditor entries are settled only from available cash.
+        // Any unpaid wages remain in C's balanced claim ledger for the next
+        // date; they are not silently deleted when production is suspended.
+        plan[5].push_back([](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_settle_wage_arrears();
+        });
+        plan[8].push_back([today=world_.day_index()](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_resolve_firm_insolvency(today);
+        });
         // Closing market observations is a daily accounting operation,
         // independent of whether a scenario supplied explicit household buyers.
         plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
