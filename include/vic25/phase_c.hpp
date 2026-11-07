@@ -1261,7 +1261,12 @@ public:
         quote.stock_offered=std::max(quote.stock_offered,
             phaseb::add_checked(quote.delivered,total_offered));
         quote.solvent_demand=phaseb::add_checked(quote.solvent_demand,solvent);
-        Quantity remaining=solvent;
+        // A physically evidenced regional guerrilla disruption limits
+        // civilian market access. Goods and buyer funds stay in canonical
+        // inventory/treasury until a real trade is delivered.
+        const Quantity accessible=p4_scaled(
+            solvent,1'000'000-p5_guerrilla_disruption_ppm(region),1'000'000);
+        Quantity remaining=accessible;
         for(const auto& [seller,available]:sellers) {
             if(remaining<=0)break;
             const Quantity quantity=std::min(remaining,available);
@@ -1269,9 +1274,9 @@ public:
             trade(seller,buyer,region,good,quantity,quote.price);
             remaining-=quantity;
         }
-        const Quantity fulfilled=solvent-remaining;
+        const Quantity fulfilled=accessible-remaining;
         quote.delivered=phaseb::add_checked(quote.delivered,fulfilled);
-        quote.unmet=phaseb::add_checked(quote.unmet,remaining);
+        quote.unmet=phaseb::add_checked(quote.unmet,solvent-fulfilled);
         events_.push_back("daily-household-market-clearing");
         return fulfilled;
     }
@@ -1293,7 +1298,9 @@ public:
         auto& m=markets_.at({region,good});
         const Quantity solvent=std::min(requested,cash(buyer)/m.price);
         const Quantity available=stock(seller,region,good);
-        const Quantity fulfilled=std::min(solvent,available);
+        const Quantity accessible=p4_scaled(
+            solvent,1'000'000-p5_guerrilla_disruption_ppm(region),1'000'000);
+        const Quantity fulfilled=std::min(accessible,available);
         m.solvent_demand=phaseb::add_checked(m.solvent_demand,solvent);
         // A second household viewing the same seller's remaining inventory
         // must not count the same physical stock as newly offered supply.
