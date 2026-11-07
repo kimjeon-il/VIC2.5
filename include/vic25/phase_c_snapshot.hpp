@@ -109,6 +109,18 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,P5Settlement>){
         V(id);V(crisis_id);V(legal_basis);V(successor_head);
         V(new_sovereign);V(region);V(kind);V(day);
+    } else if constexpr(std::is_same_v<X,P5GuerrillaCampaign>){
+        V(id);V(country);V(movement);V(crisis_id);V(stage);
+        V(started_day);V(next_review_day);V(ended_day);
+        V(regions);V(units);V(verified_skirmishes);
+    } else if constexpr(std::is_same_v<X,P5GuerrillaIncident>){
+        V(id);V(campaign);V(region);V(irregular_unit);V(government_unit);
+        V(kind);V(day);V(ammunition_spent);V(access_disruption_ppm);
+    } else if constexpr(std::is_same_v<X,P5GuerrillaAccessEffect>){
+        V(incident_id);V(campaign);V(region);V(from_day);
+        V(through_day);V(penalty_ppm);
+    } else if constexpr(std::is_same_v<X,P5GuerrillaOutcome>){
+        V(campaign);V(legal_basis);V(kind);V(day);
     } else if constexpr(std::is_same_v<X,P4Party>){
         V(id);V(country);V(head_candidate);V(organization_ppm);
         V(registered);V(active);
@@ -477,6 +489,20 @@ struct SnapshotCodec {
             ar(w.p5_scheduled_daily_strikes_);
             ar(w.p5_active_daily_strikes_);
         }
+        if(!w.p5_guerrilla_campaigns_.empty()||
+           !w.p5_guerrilla_incidents_.empty()||
+           !w.p5_guerrilla_outcomes_.empty()||
+           !w.p5_guerrilla_effect_due_.empty()||
+           !w.p5_guerrilla_effect_active_.empty()) {
+            ar(std::string("VIC25_PHASEC_P5_GUERRILLA_1"));
+            ar(w.p5_guerrilla_campaigns_);
+            ar(w.p5_guerrilla_incidents_);
+            ar(w.p5_guerrilla_outcomes_);
+            ar(w.p5_guerrilla_effect_due_);
+            ar(w.p5_guerrilla_effect_active_);
+            // The active regional penalty, the journal's incident identity
+            // set and 7-day due index are all reconstructed on load.
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -488,7 +514,7 @@ struct SnapshotCodec {
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
-             seen_p3=false,seen_p5=false;
+             seen_p3=false,seen_p5=false,seen_guerrilla=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -652,6 +678,22 @@ struct SnapshotCodec {
                    w.p5_scheduled_daily_strikes_.size()>1'000'000||
                    w.p5_active_daily_strikes_.size()>5'000'000)
                     throw std::runtime_error("oversized P5 real civic/crisis state");
+            } else if(extension=="VIC25_PHASEC_P5_GUERRILLA_1"&&
+                      !seen_guerrilla) {
+                seen_guerrilla=true;
+                ar(w.p5_guerrilla_campaigns_);
+                ar(w.p5_guerrilla_incidents_);
+                ar(w.p5_guerrilla_outcomes_);
+                ar(w.p5_guerrilla_effect_due_);
+                ar(w.p5_guerrilla_effect_active_);
+                if(w.p5_guerrilla_campaigns_.size()>100'000||
+                   w.p5_guerrilla_incidents_.size()>1'000'000||
+                   w.p5_guerrilla_outcomes_.size()>1'000'000||
+                   w.p5_guerrilla_effect_due_.size()>1'000'000||
+                   w.p5_guerrilla_effect_active_.size()>100'000)
+                    throw std::runtime_error(
+                        "oversized P5-G regional guerrilla extension");
+                w.p5_guerrilla_rebuild_indexes();
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
