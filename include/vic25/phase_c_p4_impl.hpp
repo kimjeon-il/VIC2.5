@@ -219,6 +219,28 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
                     weight=std::min<People>(5'000'000,
                         phaseb::add_checked(weight,weighted));
                 }
+            // Persistent movements and issue salience affect relative
+            // party selection, but never create votes or enforce 1 IG=1 party.
+            const auto opinion=p3_attitudes_.find(slice);
+            if(opinion!=p3_attitudes_.end()) {
+                for(const auto& [movement_id,movement]:p3_movements_) {
+                    (void)movement_id;
+                    if(!movement.active||movement.country!=contest.country||
+                       (!movement.region.empty()&&movement.region!=d.region)||
+                       std::find(movement.parties.begin(),
+                                 movement.parties.end(),party->id)==
+                                 movement.parties.end())continue;
+                    const auto stance=opinion->second.issues.find(
+                        movement.issue_domain);
+                    if(stance==opinion->second.issues.end()||
+                       stance->second.preference_ppm<=0)continue;
+                    const auto interest=static_cast<People>(
+                        stance->second.preference_ppm)*
+                        stance->second.importance_ppm/1'000'000;
+                    weight=std::min<People>(5'000'000,
+                        phaseb::add_checked(weight,interest/4));
+                }
+            }
             weights.emplace_back(party->id,weight);
             weight_sum=phaseb::add_checked(weight_sum,weight);
         }
