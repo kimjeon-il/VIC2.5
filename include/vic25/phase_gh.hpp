@@ -198,7 +198,11 @@ inline std::optional<PathQuote> quote_daily_freight_path(
                 daily_budget::cumulative(edge.monthly_capacity,
                                          day_of_month,days_in_month):
                 edge.monthly_capacity;
-            if(!edge.enabled || used>=ceiling)continue;
+            // Actual native cargo occupies only its departing segment
+            // today. Future segments are capacity-checked when the lot
+            // physically reaches their hub, not months prematurely.
+            const bool due_now=day_of_month<=0 || node==from;
+            if(!edge.enabled||(due_now&&used>=ceiling))continue;
             require(edge.from==node && used>=0,
                     "G_ERR_LOGISTICS_INDEX_CORRUPT");
             const Money next_cost=phaseb::add_checked(cost,edge.freight_per_unit);
@@ -231,8 +235,10 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         const Quantity used=phaseb::add_checked(committed,pending);
         const Quantity ceiling=day_of_month>0?
             daily_budget::cumulative(edge.monthly_capacity,day_of_month,days_in_month):edge.monthly_capacity;
-        require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
-        result.capacity=std::min(result.capacity,ceiling-used);
+        if(day_of_month<=0||edge.from==from) {
+            require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
+            result.capacity=std::min(result.capacity,ceiling-used);
+        }
         result.edges.push_back(edge.id);
         p=it->second.first;
     }
