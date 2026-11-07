@@ -167,6 +167,17 @@ struct PublicBudgetProgram {
     std::string country,recipient;
     Money daily_spending_limit{},treasury_cash_reserve{};
 };
+// These bids represent real agents willing to buy bankrupt property. Assets
+// are transferred only with actual existing C cash, never at an invented price.
+struct LiquidationStockBid {
+    std::string firm,buyer,region,good;
+    Quantity maximum_daily_units{};
+    Money maximum_unit_price{};
+};
+struct LiquidationFactoryBid {
+    std::string site,buyer;
+    Money actual_bid_price{};
+};
 struct Engagement {
     std::string attacker,defender,region;
     Id attacker_slice{},defender_slice{};
@@ -205,6 +216,9 @@ struct Policies {
     bool allow_endogenous_crisis_wars{true};
     bool allow_operational_battle_ai{true};
     bool allow_autonomous_war_peace{true};
+    std::vector<LiquidationStockBid> liquidation_stock_bids;
+    std::vector<LiquidationFactoryBid> liquidation_factory_bids;
+    bool retire_bank_debt_after_wages{true};
 
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
@@ -230,6 +244,20 @@ struct Policies {
                p.daily_spending_limit<=0||p.treasury_cash_reserve<0||
                !budget_programs.insert({p.country,p.recipient}).second)
                 throw std::invalid_argument("P0_INVALID_PUBLIC_PROGRAM");
+        std::set<std::tuple<std::string,std::string,std::string,std::string>>
+            unique_liquidation_lots;
+        for(const auto& b:liquidation_stock_bids)
+            if(b.firm.empty()||b.buyer.empty()||b.firm==b.buyer||
+               b.region.empty()||b.good.empty()||b.maximum_daily_units<=0||
+               b.maximum_unit_price<=0||
+               !unique_liquidation_lots.insert(
+                    {b.firm,b.buyer,b.region,b.good}).second)
+                throw std::invalid_argument("P0_INVALID_LIQUIDATION_GOODS_BID");
+        std::set<std::string> unique_liquidation_sites;
+        for(const auto& b:liquidation_factory_bids)
+            if(b.site.empty()||b.buyer.empty()||b.actual_bid_price<=0||
+               !unique_liquidation_sites.insert(b.site).second)
+                throw std::invalid_argument("P0_INVALID_LIQUIDATION_SITE_BID");
         std::set<std::pair<Id,std::string>> seen_pop_goods;
         std::set<std::string> engaged;
         for(const auto& f:manufacturers)
@@ -1395,6 +1423,46 @@ public:
                 }
             });
         }
+        // Liquidation buyers commit real cash against quoted goods and
+        // commissioned plant. These actions precede final Stage8 creditor
+        // retirement; employees have already received the Stage5 payments.
+        for(const auto& bid:decisions.liquidation_stock_bids)
+            plan[7].push_back([bid](phasegh::Stage& gh) {
+                const auto& c=gh.phase_c();
+                if(!c.firm_bankrupt(bid.firm)||!c.has_actor(bid.buyer)||
+                   !c.has_market(bid.region,bid.good))return;
+                (void)gh.phase_c().sell_bankrupt_inventory(
+                    bid.firm,bid.buyer,bid.region,bid.good,
+                    bid.maximum_daily_units,bid.maximum_unit_price);
+            });
+        for(const auto& bid:decisions.liquidation_factory_bids)
+            plan[7].push_back([bid](phasegh::Stage& gh) {
+                (void)gh.phase_d().liquidate_commissioned_factory(
+                    bid.site,bid.buyer,bid.actual_bid_price);
+            });
+        // Outstanding wages take precedence over unsecured bank principal.
+        // Credits backed by G are retired through their actual facility first,
+        // so G drawn balances cannot silently diverge from C loan principal.
+        if(decisions.retire_bank_debt_after_wages)
+            plan[8].push_back([](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                for(const auto& [firm,day]:c.bankrupt_firms()) {
+                    (void)day;
+                    if(c.outstanding_worker_wages(firm)>0)continue;
+                    Money affordable=std::min(c.outstanding_loan(firm),
+                        std::max<Money>(0,c.phase_d_cash_available(firm)));
+                    if(affordable<=0)continue;
+                    for(const auto& [id,line]:gh.commerce().credit) {
+                        if(affordable<=0)break;
+                        if(!line.active||line.borrower!=firm||
+                           line.drawn<=0)continue;
+                        const Money paid=std::min(affordable,line.drawn);
+                        gh.repay_trade_credit(id,paid);
+                        affordable-=paid;
+                    }
+                    if(affordable>0)c.repay(firm,affordable);
+                }
+            });
         // Public obligations are paid directly from the real C fiscal
         // wallet to an existing service provider with a declared policy cap.
         // An absent provider or empty treasury cannot produce "free" output.
