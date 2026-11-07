@@ -86,6 +86,9 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,P4Party>){
         V(id);V(country);V(head_candidate);V(organization_ppm);
         V(registered);V(active);
+    } else if constexpr(std::is_same_v<X,P4PersonTerm>){
+        V(contest_id);V(person_id);V(party_id);V(total_terms);
+        V(consecutive_terms);V(last_elected_day);V(incumbent);
     } else if constexpr(std::is_same_v<X,P4Contest>){
         V(id);V(country);V(jurisdiction);V(law_id);
         V(office);V(method);V(term_mode);V(term_months);
@@ -114,6 +117,15 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,P2LawEvent>){
         V(bill_id);V(country);V(law_id);V(amendment_id);V(legal_basis);
         V(action);V(effective_day);
+    } else if constexpr(std::is_same_v<X,P2GroupDemand>){
+        V(id);V(country);V(interest_group);V(law_domain);
+        V(amendment);V(min_population_support_ppm);
+    } else if constexpr(std::is_same_v<X,P2NegotiatedAmendment>){
+        V(bill_id);V(demand_id);V(group);V(amendment);
+        V(support_population);V(accepted_day);
+    } else if constexpr(std::is_same_v<X,P2ChamberDecision>){
+        V(bill_id);V(upper_contest_id);V(lower_poll_day);
+        V(upper_poll_day);V(lower_passed);V(upper_passed);
     } else if constexpr(std::is_same_v<X,CabinetChange>){
         V(country);V(new_head);V(new_prime_minister);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,TypedEntityId>){
@@ -399,6 +411,22 @@ struct SnapshotCodec {
             ar(w.p2_bills_);
             ar(w.p2_history_);
         }
+        // Keep old P4/P2 schema signatures byte-identical. Extra contracts
+        // are optional trailers, never new writable population/seat ledgers.
+        if(!w.p4_nominations_.empty()||!w.p4_person_terms_.empty()) {
+            ar(std::string("VIC25_PHASEC_P4_PERSONAL_MANDATES_1"));
+            ar(w.p4_nominations_);
+            ar(w.p4_person_terms_);
+        }
+        if(!w.p2_upper_chambers_.empty()||
+           !w.p2_chamber_decisions_.empty()||
+           !w.p2_group_demands_.empty()||!w.p2_negotiated_.empty()) {
+            ar(std::string("VIC25_PHASEC_P2_POLITICAL_PROCEDURES_1"));
+            ar(w.p2_upper_chambers_);
+            ar(w.p2_chamber_decisions_);
+            ar(w.p2_group_demands_);
+            ar(w.p2_negotiated_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -408,7 +436,8 @@ struct SnapshotCodec {
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
-             seen_armies=false,seen_estates=false,seen_p1=false,seen_p4=false,seen_p2=false;
+             seen_armies=false,seen_estates=false,seen_p1=false,
+             seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -518,6 +547,26 @@ struct SnapshotCodec {
                    w.p2_history_.size()>1'000'000)
                     throw std::runtime_error("oversized P2 legislation extension");
                 w.p2_rebuild_due_index();
+            } else if(extension=="VIC25_PHASEC_P4_PERSONAL_MANDATES_1"&&
+                      !seen_people) {
+                seen_people=true;
+                ar(w.p4_nominations_);
+                ar(w.p4_person_terms_);
+                if(w.p4_nominations_.size()>1'000'000||
+                   w.p4_person_terms_.size()>5'000'000)
+                    throw std::runtime_error("oversized P4 named mandate records");
+            } else if(extension=="VIC25_PHASEC_P2_POLITICAL_PROCEDURES_1"&&
+                      !seen_procedures) {
+                seen_procedures=true;
+                ar(w.p2_upper_chambers_);
+                ar(w.p2_chamber_decisions_);
+                ar(w.p2_group_demands_);
+                ar(w.p2_negotiated_);
+                if(w.p2_upper_chambers_.size()>100'000||
+                   w.p2_chamber_decisions_.size()>1'000'000||
+                   w.p2_group_demands_.size()>1'000'000||
+                   w.p2_negotiated_.size()>1'000'000)
+                    throw std::runtime_error("oversized P2 parliamentary record");
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
