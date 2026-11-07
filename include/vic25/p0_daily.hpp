@@ -636,6 +636,36 @@ public:
                                                {majority},next);
                     }
                 });
+        // Keep this default state reaction deliberately defensive:
+        // when residents already lacked real food, an existing food import
+        // tariff can be removed. It cannot create a free subsidy, goods,
+        // policies for unrelated commodities, or override an explicit
+        // campaign CountryAI directive.
+        std::set<std::string> scripted_food_tariffs;
+        for(const auto& p:decisions.countries)
+            if(p.good=="food")scripted_food_tariffs.insert(p.country);
+        plan[0].push_back(
+            [date,scripted_food_tariffs](phasegh::Stage& gh) {
+                const auto& c=gh.phase_c();
+                std::set<std::string> treated;
+                for(const auto& [region,unmet]:c.regional_food_grievances()) {
+                    if(unmet<=0||!c.has_market(region,"food"))continue;
+                    const auto& country=c.sovereignty(region);
+                    if(scripted_food_tariffs.contains(country) ||
+                       !c.has_government(country) ||
+                       !treated.insert(country).second)continue;
+                    const auto key=std::make_pair(country,std::string("food"));
+                    auto it=gh.diplomacy().tariffs.find(key);
+                    if(it==gh.diplomacy().tariffs.end()||it->second.ppm==0)
+                        continue;
+                    const auto& prime=c.government(country).prime_minister;
+                    gh.adopt_tariff_daily(
+                        "P0:auto-food-import-relief:"+country+":"+
+                        std::to_string(date.year)+"-"+std::to_string(date.month)+
+                        "-"+std::to_string(date.day),
+                        country,"food",0,prime);
+                }
+            });
         for(const auto& ai:decisions.countries) {
             plan[0].push_back([ai,date](phasegh::Stage& gh) {
                 const auto& c=gh.phase_c();
