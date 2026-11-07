@@ -9,7 +9,7 @@
 namespace vic25::phasec {
 
 enum class P5GuerrillaStage : std::uint8_t {
-    active, supply_exhausted, conventional, ceasefire, resolved
+    organizing, active, supply_exhausted, conventional, ceasefire, resolved
 };
 enum class P5GuerrillaIncidentKind : std::uint8_t {
     disruption, skirmish, region_expansion, conventional_transition,
@@ -23,7 +23,7 @@ struct P5GuerrillaCampaign {
     // A conventional escalation must reference the *same* P5 political
     // crisis and the already pledged C units, never spawn an extra army.
     std::string crisis_id;
-    P5GuerrillaStage stage{P5GuerrillaStage::active};
+    P5GuerrillaStage stage{P5GuerrillaStage::organizing};
     std::int64_t started_day{}, next_review_day{}, ended_day{-1};
     std::vector<std::string> regions, units; // real C region/deployment IDs
     std::int32_t verified_skirmishes{};
