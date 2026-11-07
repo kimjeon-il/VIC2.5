@@ -202,6 +202,8 @@ struct Policies {
     std::vector<PublicBudgetProgram> public_budget;
     bool allow_endogenous_factory_expansion{true};
     Money autonomous_factory_cash_reserve{};
+    bool allow_endogenous_crisis_wars{true};
+    bool allow_operational_battle_ai{true};
 
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
@@ -1271,10 +1273,77 @@ public:
                 gh.hold_organization_vote(rule.organization,rule.decision_id,
                        rule.subject,votes,rule.proposer,rule.prime_minister);
             });
+        // A claim does not itself declare war. Only an unresolved
+        // documented crisis with both sides' real, armed deployed units at
+        // the same contested province may create this state's lawful war.
+        // The actual prime minister is read from the current government.
+        if(decisions.allow_endogenous_crisis_wars)
+            plan[9].push_back([](phasegh::Stage& gh) {
+                const auto& d=gh.diplomacy();
+                const auto& c=gh.phase_c();
+                for(const auto& [id,crisis]:d.crises) {
+                    if(crisis.status!=phasegh::CrisisStatus::active||
+                       crisis.effective_month>=c.month() ||
+                       !c.has_government(crisis.claimant)||
+                       !c.has_government(crisis.respondent))
+                        continue;
+                    const auto& pm=c.government(crisis.claimant).prime_minister;
+                    (void)gh.begin_war_from_crisis(id,crisis.claimant,pm);
+                }
+            });
         for(const auto& combat:decisions.engagements)
             plan[10].push_back([combat](phasegh::Stage& gh){
                 fight(gh.phase_c(),combat);
             });
+        if(decisions.allow_operational_battle_ai) {
+            std::set<std::string> manual_forces;
+            for(const auto& combat:decisions.engagements) {
+                manual_forces.insert(combat.attacker);
+                manual_forces.insert(combat.defender);
+            }
+            plan[10].push_back([manual_forces](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::set<std::string> used=manual_forces;
+                for(const auto& [id,war]:gh.diplomacy().wars) {
+                    if(!war.active)continue;
+                    const auto crisis=gh.diplomacy().crises.find(war.crisis);
+                    if(crisis==gh.diplomacy().crises.end())continue;
+                    const auto province=gh.spatial().spatial().provinces.find(
+                        crisis->second.province);
+                    if(province==gh.spatial().spatial().provinces.end())continue;
+                    const auto& front=province->second.region;
+                    std::string attacker,defender;
+                    for(const auto& [unit,deployment]:c.army_deployments()) {
+                        if(deployment.region!=front||used.contains(unit)||
+                           c.active_strength(unit)<=0||
+                           c.stock(unit,front,"ammunition")<=0)continue;
+                        if(deployment.country==war.attacker&&attacker.empty())
+                            attacker=unit;
+                        else if(deployment.country==war.defender&&defender.empty())
+                            defender=unit;
+                    }
+                    if(attacker.empty()||defender.empty())continue;
+                    const auto first_active=[&](const std::string& unit)->Id {
+                        for(const auto& [slice,count]:c.unit_slices(unit))
+                            if(c.people().has_slice(slice)&&
+                               c.people().slice(slice).count==count&&count>0)
+                                return slice;
+                        return 0;
+                    };
+                    const Id a=first_active(attacker);
+                    const Id b=first_active(defender);
+                    if(!a||!b)continue;
+                    const auto ammo_before=c.stock(attacker,front,"ammunition");
+                    const Engagement engagement{attacker,defender,front,a,b,
+                                                1'000'000};
+                    fight(c,engagement);
+                    if(c.stock(attacker,front,"ammunition")<ammo_before)
+                        gh.record_actual_war_engagement(id);
+                    used.insert(attacker);
+                    used.insert(defender);
+                }
+            });
+        }
         // Public obligations are paid directly from the real C fiscal
         // wallet to an existing service provider with a declared policy cap.
         // An absent provider or empty treasury cannot produce "free" output.
