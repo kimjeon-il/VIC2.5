@@ -187,6 +187,16 @@ struct BondBuyerOrder {
     Money max_daily_subscription{},cash_reserve{};
     int minimum_coupon_ppm{};
 };
+struct BondSecondaryAsk {
+    std::string order_id,bond_id,seller;
+    Money face_units{};
+    int minimum_price_ppm{1'000'000};
+};
+struct BondSecondaryBid {
+    std::string order_id,bond_id,buyer;
+    Money max_face_units{};
+    int maximum_price_ppm{1'000'000};
+};
 struct LiquidationStockBid {
     std::string firm,buyer,region,good;
     Quantity maximum_daily_units{};
@@ -242,6 +252,8 @@ struct Policies {
     bool auto_national_budgets_from_actual_services{true};
     std::vector<NationalBudgetEnvelope> national_budget_envelopes;
     std::vector<BondBuyerOrder> bond_buyer_orders;
+    std::vector<BondSecondaryAsk> bond_secondary_asks;
+    std::vector<BondSecondaryBid> bond_secondary_bids;
 
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
@@ -299,6 +311,23 @@ struct Policies {
                order.minimum_coupon_ppm<0||order.minimum_coupon_ppm>1'000'000||
                !unique_bond_orders.insert({order.country,order.buyer}).second)
                 throw std::invalid_argument("P0_INVALID_BOND_MARKET_ORDER");
+        std::set<std::string> seen_bond_secondary_orders;
+        for(const auto& order:bond_secondary_asks)
+            if(order.order_id.empty()||
+               order.order_id.find(':')!=std::string::npos||
+               !seen_bond_secondary_orders.insert("ASK:"+order.order_id).second||
+               order.bond_id.empty()||order.seller.empty()||
+               order.face_units<=0||order.minimum_price_ppm<=0||
+               order.minimum_price_ppm>5'000'000)
+                throw std::invalid_argument("P0_INVALID_SECONDARY_ASK");
+        for(const auto& order:bond_secondary_bids)
+            if(order.order_id.empty()||
+               order.order_id.find(':')!=std::string::npos||
+               !seen_bond_secondary_orders.insert("BID:"+order.order_id).second||
+               order.bond_id.empty()||order.buyer.empty()||
+               order.max_face_units<=0||order.maximum_price_ppm<=0||
+               order.maximum_price_ppm>5'000'000)
+                throw std::invalid_argument("P0_INVALID_SECONDARY_BID");
         std::set<std::pair<Id,std::string>> seen_pop_goods;
         std::set<std::string> engaged;
         for(const auto& f:manufacturers)
@@ -1633,6 +1662,107 @@ public:
                 }
             });
         }
+        // Secondary order book for already-issued sovereign securities.
+        // Ask minimums and bid maximums are actual actor policies; matching
+        // transfers existing cash and registered face value, not reserves
+        // printed by an invented dealer or a synthetic market-clearing price.
+        if(!decisions.bond_secondary_asks.empty()&&
+           !decisions.bond_secondary_bids.empty())
+            plan[7].push_back(
+                [asks=decisions.bond_secondary_asks,
+                 bids=decisions.bond_secondary_bids](phasegh::Stage& gh) {
+                    auto& c=gh.phase_c();
+                    struct Ask {
+                        BondSecondaryAsk limit;
+                        Money left{};
+                    };
+                    struct Bid {
+                        BondSecondaryBid limit;
+                        Money left{};
+                    };
+                    std::map<std::string,std::vector<Ask>> offers;
+                    std::map<std::string,std::vector<Bid>> demands;
+                    for(const auto& ask:asks)
+                        offers[ask.bond_id].push_back({ask,ask.face_units});
+                    for(const auto& bid:bids)
+                        demands[bid.bond_id].push_back({bid,bid.max_face_units});
+                    for(auto& [bond_id,book]:offers) {
+                        if(!c.sovereign_bonds().contains(bond_id)||
+                           !demands.contains(bond_id))continue;
+                        auto& take=demands.at(bond_id);
+                        std::sort(book.begin(),book.end(),
+                            [](const Ask& a,const Ask& b){
+                                return std::tuple{a.limit.minimum_price_ppm,
+                                                  a.limit.order_id}<
+                                       std::tuple{b.limit.minimum_price_ppm,
+                                                  b.limit.order_id};
+                            });
+                        std::sort(take.begin(),take.end(),
+                            [](const Bid& a,const Bid& b){
+                                return std::tuple{-a.limit.maximum_price_ppm,
+                                                  a.limit.order_id}<
+                                       std::tuple{-b.limit.maximum_price_ppm,
+                                                  b.limit.order_id};
+                            });
+                        for(auto& ask:book) {
+                            if(!c.has_actor(ask.limit.seller))continue;
+                            for(auto& bid:take) {
+                                if(ask.left<=0)break;
+                                if(bid.left<=0||
+                                   bid.limit.buyer==ask.limit.seller||
+                                   bid.limit.maximum_price_ppm<
+                                       ask.limit.minimum_price_ppm||
+                                   !c.has_actor(bid.limit.buyer)||
+                                   c.firm_bankrupt(bid.limit.buyer))continue;
+                                const auto command="P0:BOND-SECONDARY:"+
+                                    ask.limit.order_id+":"+
+                                    bid.limit.order_id;
+                                if(c.command_processed(command))continue;
+                                const auto asset="bond:"+bond_id;
+                                const Money available=c.shares(
+                                    asset,ask.limit.seller);
+                                Money maximum=std::min({ask.left,bid.left,
+                                                        available});
+                                if(maximum<=0)continue;
+                                const Money free=std::max<Money>(0,
+                                    c.phase_d_cash_available(bid.limit.buyer));
+                                if(free<=0)continue;
+                                const Money rate=ask.limit.minimum_price_ppm;
+                                const auto affordable=[&](Money qty)->bool {
+                                    if(qty<=0)return false;
+                                    const Money major=qty/1'000'000;
+                                    if(major>free/rate)return false;
+                                    const Money hi=major*rate;
+                                    const Money lo=(qty%1'000'000)*rate/1'000'000;
+                                    return lo<=free-hi;
+                                };
+                                Money left=1,right=maximum;
+                                Money fill=0;
+                                while(left<=right) {
+                                    const Money mid=left+(right-left)/2;
+                                    if(affordable(mid)) {
+                                        fill=mid;left=mid+1;
+                                    } else right=mid-1;
+                                }
+                                if(fill<=0)continue;
+                                const Money gross=phaseb::add_checked(
+                                    phaseb::mul_checked(fill/1'000'000,rate),
+                                    phaseb::mul_checked(fill%1'000'000,rate)/
+                                    1'000'000);
+                                if(gross<=0)continue;
+                                c.command_once(command,
+                                    [&](phasec::IntegratedWorld& state) {
+                                        state.exchange_sovereign_bond(
+                                            bond_id,ask.limit.seller,
+                                            bid.limit.buyer,fill,
+                                            static_cast<int>(rate));
+                                    });
+                                ask.left-=fill;
+                                bid.left-=fill;
+                            }
+                        }
+                    }
+                });
         // Liquidation buyers commit real cash against quoted goods and
         // commissioned plant. These actions precede final Stage8 creditor
         // retirement; employees have already received the Stage5 payments.
