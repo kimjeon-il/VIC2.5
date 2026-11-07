@@ -48,12 +48,14 @@ inline void IntegratedWorld::p4_record_elected_persons(
         if(seats<=0)continue;
         const auto nominations=p4_nominations_.find({result.contest_id,party});
         if(nominations==p4_nominations_.end())continue; // legacy party-only list
-        ensure(seats<=static_cast<People>(nominations->second.size()),
-               "P4 winning party lacks real named candidates for awarded seats");
+        std::vector<std::string> eligible;
+        for(const auto& nominee:nominations->second)
+            if(p2_candidate_eligible(result.contest_id,nominee))
+                eligible.push_back(nominee);
+        ensure(seats<=static_cast<People>(eligible.size()),
+               "P4 winning list lacks enough eligible named candidates");
         for(People index=0;index<seats;++index) {
-            const auto& person=nominations->second.at(static_cast<std::size_t>(index));
-            ensure(p2_candidate_eligible(result.contest_id,person),
-                   "P2 consecutive or lifetime office term limit exceeded");
+            const auto& person=eligible.at(static_cast<std::size_t>(index));
             ensure(winners.emplace(person,party).second,
                    "P4 individual may occupy only one seat in a contest");
             for(const auto& [key,record]:p4_person_terms_)
