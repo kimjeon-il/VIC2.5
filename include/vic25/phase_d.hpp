@@ -495,6 +495,40 @@ public:
         return true;
     }
 
+    // Only a commissioned industry site without a separate extraction
+    // concession, active laboratory contract or unfinished development may
+    // change hands through a simple cash sale. All others require their
+    // dedicated legal transfer process, not silent ownership substitution.
+    bool liquidate_commissioned_factory(const std::string& site,
+                                       const std::string& buyer,Money price) {
+        must(7);
+        if(price<=0||!c_.has_actor(buyer)||!d_.constructions.size())return false;
+        const auto& facility=c_.facility(site);
+        if(!c_.firm_bankrupt(facility.owner)||
+           buyer==facility.owner||c_.firm_bankrupt(buyer))return false;
+        std::string project_id;
+        for(const auto& [id,project]:d_.constructions) {
+            if(project.target_site!=site)continue;
+            if(!project.commissioned||!project_id.empty())
+                return false;
+            project_id=id;
+        }
+        if(project_id.empty())return false;
+        for(const auto& [id,source]:d_.resource_sites) {
+            (void)id;
+            if(source.site==site)return false;
+        }
+        for(const auto& [id,research]:d_.researches) {
+            (void)id;
+            if(research.lab_site==site&&!research.reviewed)return false;
+        }
+        if(c_.phase_d_cash_available(buyer)<price)return false;
+        c_.sell_bankrupt_facility(site,buyer,price);
+        d_.constructions.at(project_id).client=buyer;
+        d_.append(c_.month(),"cash-real-factory-liquidation",site);
+        return true;
+    }
+
     // Cash reservation is now owned by the SAME Phase C authority used by
     // legacy payments, wages, transactions and Phase D activity planning.
     // Payments must actually settle before capitalisation or validation.
