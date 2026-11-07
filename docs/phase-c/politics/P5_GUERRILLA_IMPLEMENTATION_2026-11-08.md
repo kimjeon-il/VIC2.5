@@ -57,7 +57,7 @@
 - 신규 `include/vic25/phase_c_p5_guerrilla_impl.hpp`: 실제 등록·조회·탄약/전투·시장접근·정규전 전환·종결 및 색인.
 - 변경 `phase_c.hpp` / `phase_c_p1_impl.hpp` / `phase_c_p5_impl.hpp` / `daily_time.hpp`: 기존 POP·시장·기관·군사·P5 정치위기와 연결.
 - `phase_c_snapshot.hpp`의 신규 **선택적** `VIC25_PHASEC_P5_GUERRILLA_1` 꼬리표에 캠페인·사건·휴전·지속효과를 기록. 구형 P1/P2/P3/P4/P5 본문과 꼬리표 구조를 변경하지 않고 내부의 사건 ID 색인, 점검 일정, 접근효과는 저장자료로부터 재구성.
-- `tests/test_p5_guerrilla.cpp` 및 CMake/CTest 타깃: 가상 병력·인구 증가 차단, 실제 보급 소비와 다음날 시장/세이브, 실전 기존 `battle`, 유격전↔정규전과 휴전 등 4개 집중 통합 시나리오.
+- `tests/test_p5_guerrilla.cpp` 및 CMake/CTest 타깃: 가상 병력·인구 증가 차단, 실제 보급 소비와 다음날 시장/세이브, 실전 기존 `battle`, 유격전↔정규전과 휴전 및 실제 P2 입법에 근거한 종결 등 5개 집중 통합 시나리오.
 
 ## 잔여 작업과 인수 제한
 
