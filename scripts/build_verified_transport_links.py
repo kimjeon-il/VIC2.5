@@ -103,6 +103,7 @@ def make_links(province_path, line_path):
     if len(ids) != len(set(ids)):
         raise ValueError("Duplicate province identifier")
     spatial_index = STRtree(polygons)
+    province_by_id = dict(zip(ids, polygons))
     links = {}
     for feature in features(line_path):
         props = feature.get("properties") or {}
@@ -133,6 +134,15 @@ def make_links(province_path, line_path):
             for origin, destination in zip(ordered, ordered[1:]):
                 if origin == destination:
                     continue
+                if mode in ("road", "rail", "river"):
+                    # Road/rail/river cannot skip an intermediate province.
+                    # A physical line must actually cross the two polygons'
+                    # common frontier, not just pass near both centroids.
+                    from_poly, to_poly = (province_by_id[origin],
+                                          province_by_id[destination])
+                    common = from_poly.boundary.intersection(to_poly.boundary)
+                    if common.is_empty or not line.intersects(common):
+                        continue
                 source = "%s:%s" % (mode, sid)
                 key = (source, origin, destination, mode)
                 link_id = "GIS:" + hashlib.sha256(
