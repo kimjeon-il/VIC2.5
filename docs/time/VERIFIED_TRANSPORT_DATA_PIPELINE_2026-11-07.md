@@ -49,6 +49,21 @@ python scripts/build_verified_transport_links.py \
 
 C++는 `vic25::verified_transport::seed(gh_world, link_stream, service_stream, starting_month)`를 Phase E/G 초기화 후 첫 일별 커밋 전에 호출한다. `gh_world`에는 Province와 운송사업자 Actor가 이미 등록되어 있어야 한다.
 
+## 2026-11-07 후속: 지역 통합·역사적 연월일 엄격 처리
+
+- 추가 원본: [OpenHistoricalMap](https://www.openhistoricalmap.org/)의 역사적 교통선·철도와 `start_date`/`end_date`. 태그는 `YYYY`, `YYYY-MM`, `YYYY-MM-DD`의 다양한 정밀도를 허용하므로 **모르는 월·일을 만들어서는 안 된다**. 연도만 명시된 개통일은 해당 해 내부의 임의 월이 아니라 **다음 해부터 존재가 확실한 완전한 월**, 종료 연도만 명시된 폐쇄일은 **전년도까지 존재가 확실한 완전한 월**로 보수 처리한다.
+- `scripts/build_verified_transport_links.py`는 OHM의 확실한 존속기간을 `physical_line_lifetimes.tsv`로 기록하고, 서비스 운행 날짜가 선형의 역사적 존속 범위 밖이면 자료 입력을 거부한다.
+- `scripts/merge_verified_transport_regions.py`는 같은 인게임 Province ID를 공유하는 여러 대륙·국가별 파일을 연결하고, 실측 링크 ID 충돌·서비스 소유권·물리적인 연결이 없는 항로·역사 날짜 불일치를 확인한다.
+- `vic25::verified_transport::seed`에는 필요시 다섯 번째 인수 `std::istream* historical_line_lifetimes`를 제공한다. 인게임 시작 이후 개통하는 증거 있는 운송서비스도 사전에 보존되며, 실제 유효 월에만 G 경로가 활성화된다.
+
+```bash
+python scripts/merge_verified_transport_regions.py \
+  prepared-transport/region1 prepared-transport/region2 \
+  --output prepared-transport/world-verified
+```
+
+지역별 지리선이 실제 노선을 공유하지 않는 곳을 입력기가 **임의로 연결하지 않는다**. 공개 자료의 링크와 기록 유효성을 검사할 뿐, 개별 기록의 역사적 진위나 시설 수송량이 모두 검증됐다고 보증하지 않는다. 공개 현행 OSM의 과거 운송망 정확성은 별도 실측·문헌 조사에 의존한다.
+
 ## 완성 기준과 현재 미달 사유
 
 - [ ] 실제 Phase E Province 폴리곤의 세계 전역 커버리지 확보 및 원본 버전/해시 확인
