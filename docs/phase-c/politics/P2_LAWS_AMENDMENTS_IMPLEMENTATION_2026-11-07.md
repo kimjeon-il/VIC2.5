@@ -79,7 +79,7 @@ P0 `LegislativeOrder`는 세 단계를 서로 다른 날짜에 제출할 수 있
 - `include/vic25/phase_c_snapshot.hpp`: P2 선택적 세이브·미래 이벤트 복원
 - `include/vic25/daily_time.hpp`: Stage0 정확한 날짜 효력
 - `include/vic25/p0_daily.hpp`: 입법 결정과 국가 AI의 합법적 세율 제한
-- `tests/test_p2_governance.cpp` + `CMakeLists.txt`: 증보 추가/폐지·경과규정·재선거 제한·부적법 법안 롤백 등 4개 회귀 사례
+- `tests/test_p2_governance.cpp` + `CMakeLists.txt`: 증보 추가/폐지·경과규정·재선거 제한·부적법 법안 롤백 등 5개 회귀 사례
 
 ## 6. 명시적 미완료
 
