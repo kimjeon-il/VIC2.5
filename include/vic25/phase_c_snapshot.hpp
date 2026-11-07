@@ -330,6 +330,10 @@ struct SnapshotCodec {
             ar(std::string("VIC25_PHASEC_ARMY_DEPLOYMENTS_1"));
             ar(w.army_deployments_);
         }
+        if(!w.completed_liquidations_.empty()) {
+            ar(std::string("VIC25_PHASEC_ESTATE_CLOSURES_1"));
+            ar(w.completed_liquidations_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -339,7 +343,7 @@ struct SnapshotCodec {
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
-             seen_armies=false;
+             seen_armies=false,seen_estates=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -399,6 +403,12 @@ struct SnapshotCodec {
                 ar(w.army_deployments_);
                 if(w.army_deployments_.size()>1'000'000)
                     throw std::runtime_error("oversized army deployment records");
+            } else if(extension=="VIC25_PHASEC_ESTATE_CLOSURES_1"&&
+                      !seen_estates) {
+                seen_estates=true;
+                ar(w.completed_liquidations_);
+                if(w.completed_liquidations_.size()>1'000'000)
+                    throw std::runtime_error("oversized closed estate records");
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
