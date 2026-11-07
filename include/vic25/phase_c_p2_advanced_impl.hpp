@@ -82,12 +82,8 @@ inline void IntegratedWorld::p2_register_group_demand(P2GroupDemand demand) {
 
 inline bool IntegratedWorld::p2_has_negotiable_bills()const {
     if(p2_group_demands_.empty())return false;
-    for(const auto& [id,bill]:p2_bills_) {
-        if(bill.status!=P2BillStatus::submitted||
-           bill.action!=P2BillAction::enact_or_replace_base||
-           (p2_chamber_decisions_.contains(id)&&
-            p2_chamber_decisions_.at(id).lower_passed))
-            continue;
+    for(const auto& id:p2_negotiation_watch_) {
+        const auto& bill=p2_bills_.at(id);
         for(const auto& [demand_id,demand]:p2_group_demands_) {
             if(bill.country!=demand.country||
                bill.proposed_base.domain!=demand.law_domain)continue;
@@ -127,12 +123,8 @@ inline void IntegratedWorld::p2_auto_negotiate_pending(
         auto& count=members[{sovereign->second,key.second}];
         count=phaseb::add_checked(count,n);
     }
-    for(const auto& [bill_id,bill]:p2_bills_) {
-        if(bill.status!=P2BillStatus::submitted||
-           bill.action!=P2BillAction::enact_or_replace_base||
-           (p2_chamber_decisions_.contains(bill_id)&&
-            p2_chamber_decisions_.at(bill_id).lower_passed))
-            continue;
+    for(const auto& bill_id:p2_negotiation_watch_) {
+        const auto& bill=p2_bills_.at(bill_id);
         const People total=population[bill.country];
         if(total<=0)continue;
         auto& negotiations=p2_negotiated_[bill_id];
