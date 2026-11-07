@@ -37,6 +37,12 @@ struct GovernmentState {
     People chamber_seats{}, quorum{};
     std::uint64_t revision{1};
 };
+// A query projection over C's existing financial accounts; not another ledger.
+struct CountryFiscalView {
+    std::string country, treasury;
+    Money cash{}, bank_debt{};
+    int income_tax_ppm{};
+};
 struct CabinetChange {
     std::string country, new_head, new_prime_minister;
     bool replace_head{}, replace_prime{};
@@ -1088,6 +1094,45 @@ public:
     [[nodiscard]] const GovernmentState& government(const std::string& country) const {
         return governments_.at(country);
     }
+    // Optional explicit country->treasury binding. The wallet remains in the
+    // original C FinancialLedger; no sovereign cash/debt is duplicated.
+    void seed_country_treasury(const std::string& country,
+                               const std::string& wallet) {
+        ensure(stage_==-1&&commit_id_==0&&governments_.contains(country)&&
+               actors_.contains(wallet)&&!country_treasuries_.contains(country),
+               "invalid country treasury binding");
+        for(const auto& [other,actor]:country_treasuries_)
+            ensure(actor!=wallet||other==country,
+                   "shared treasury across sovereign countries");
+        country_treasuries_.emplace(country,wallet);
+    }
+    [[nodiscard]] const std::string& country_treasury(
+            const std::string& country)const {
+        ensure(governments_.contains(country),"unknown fiscal country");
+        const auto bound=country_treasuries_.find(country);
+        if(bound!=country_treasuries_.end())return bound->second;
+        // Explicit country wallet is the only safe convention, never infer a
+        // treasury from a random company or another state's wallet.
+        ensure(actors_.contains(country),"country treasury needs explicit binding");
+        return governments_.at(country).country;
+    }
+    [[nodiscard]] CountryFiscalView country_fiscal(
+            const std::string& country)const {
+        const auto& treasury=country_treasury(country);
+        return {country,treasury,cash(treasury),
+                outstanding_loan(treasury),income_tax_ppm(country)};
+    }
+    void spend_country_budget(const std::string& country,
+                              const std::string& recipient,Money amount) {
+        require_stage({5,7,8});
+        pay(country_treasury(country),recipient,amount);
+        events_.push_back("country-budget-paid:"+country);
+    }
+    void borrow_country_budget_from_bank(const std::string& country,Money amount) {
+        require_stage({1});
+        lend(country_treasury(country),amount);
+        events_.push_back("country-bank-credit:"+country);
+    }
     void propose_tax_law(const std::string& country, const std::string& proposer,
                          const std::vector<std::string>& supporting_parties, int ppm) {
         require_stage({9});
@@ -1098,8 +1143,8 @@ public:
                "unauthorized tax bill or missing national legislature");
         ensure(coalition_seats(supporting_parties,result) >= g.quorum,
                "insufficient national legislative votes");
-        scheduled_income_tax_[month()+1] = ppm;
-        events_.push_back("constitutional-tax-law");
+        scheduled_country_income_tax_[month()+1][country]=ppm;
+        events_.push_back("constitutional-tax-law:"+country);
     }
     void appoint_cabinet(const std::string& country, const std::string& head,
                         std::string minister, const std::vector<std::string>& supporting_parties) {
@@ -1350,7 +1395,12 @@ public:
         return shipments_.at(id);
     }
     [[nodiscard]] bool conscription_enabled() const { return conscription_enabled_; }
-    [[nodiscard]] int income_tax_ppm() const { return income_tax_ppm_; }
+    [[nodiscard]] int income_tax_ppm() const { return income_tax_ppm_; } // legacy only
+    [[nodiscard]] int income_tax_ppm(const std::string& country)const {
+        ensure(governments_.contains(country),"unknown tax jurisdiction");
+        const auto found=country_income_tax_.find(country);
+        return found==country_income_tax_.end()?income_tax_ppm_:found->second;
+    }
     void enact_conscription(bool enabled) {
         require_stage({9});
         ensure(governments_.empty(), "constitutional government requires authorized policy procedure");
@@ -1364,12 +1414,29 @@ public:
         scheduled_income_tax_[month() + 1] = ppm;
         events_.push_back("income-tax-law-scheduled");
     }
-    void wages_under_law(const std::string& payer, const std::string& worker,
-                         const std::string& treasury, Money gross) {
+    void wages_under_law(const std::string& payer,const std::string& worker,
+                         const std::string& treasury,Money gross,
+                         const std::string& country="") {
         require_stage({5});
-        ensure(gross > 0, "invalid gross wage");
-        const auto withholding = positive_product(gross, income_tax_ppm_) / 1'000'000;
-        wages(payer, worker, treasury, gross, withholding);
+        ensure(gross>0,"invalid gross wage");
+        std::string authority=country;
+        if(authority.empty()&&!governments_.empty()) {
+            if(governments_.contains(treasury))authority=treasury;
+            else if(governments_.size()==1)
+                authority=governments_.begin()->first; // historical fixture
+            else throw std::invalid_argument("ambiguous national tax authority");
+        }
+        const int rate=authority.empty()?income_tax_ppm_:
+                        income_tax_ppm(authority);
+        if(!authority.empty()) {
+            auto bound=country_treasuries_.find(authority);
+            if(bound!=country_treasuries_.end())
+                ensure(bound->second==treasury,"foreign treasury withholding");
+            else if(governments_.size()>1)
+                ensure(treasury==authority,"national treasury binding required");
+        }
+        const auto withholding=positive_product(gross,rate)/1'000'000;
+        wages(payer,worker,treasury,gross,withholding);
     }
     void enact_voting_age(int new_age) {
         require_stage({9});
@@ -1848,6 +1915,21 @@ public:
                    g.chamber_seats>0 && g.quorum>0 && g.quorum<=g.chamber_seats,
                    "invalid government institution");
         }
+        for(const auto& [country,ppm]:country_income_tax_)
+            ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
+                   "invalid country tax state");
+        for(const auto& [effective,policies]:scheduled_country_income_tax_) {
+            ensure(effective>0,"invalid scheduled country tax date");
+            for(const auto& [country,ppm]:policies)
+                ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
+                       "invalid scheduled country tax rate");
+        }
+        std::set<std::string> assigned_treasuries;
+        for(const auto& [country,wallet]:country_treasuries_)
+            ensure(governments_.contains(country)&&actors_.contains(wallet)&&
+                   assigned_treasuries.insert(wallet).second,
+                   "invalid or shared country treasury");
+
         ensure(resources_.valid(), "shared resource reservation journal inconsistent");
         if(phase_d_reservation_mode_) {
             for(const auto& actor:actors_)
@@ -1963,8 +2045,13 @@ private:
     std::set<std::string> tracked_goods_;
     std::map<std::string, std::string> sovereignty_, military_control_;
     std::map<std::int64_t, bool> scheduled_conscription_;
-    std::map<std::int64_t, int> scheduled_income_tax_;
+    std::map<std::int64_t, int> scheduled_income_tax_; // legacy-only world
     int income_tax_ppm_{100'000};
+    // Country-scoped tax policies and treasury identities only; country cash,
+    // loans and spending remain authoritative in the C financial ledger.
+    std::map<std::string,int> country_income_tax_;
+    std::map<std::int64_t,std::map<std::string,int>> scheduled_country_income_tax_;
+    std::map<std::string,std::string> country_treasuries_;
     bool conscription_enabled_{true};
     std::map<std::int64_t, int> scheduled_voting_age_;
     ElectionResult last_election_;
@@ -2162,9 +2249,20 @@ private:
             conscription_enabled_ = c->second;
             scheduled_conscription_.erase(c);
         }
-        if (auto t = scheduled_income_tax_.find(month()); t != scheduled_income_tax_.end()) {
-            income_tax_ppm_ = t->second;
+        if (auto t=scheduled_income_tax_.find(month());t!=scheduled_income_tax_.end()) {
+            // No constitutional country ever reads this global legacy change.
+            ensure(governments_.empty(),"global income tax in multi-country world");
+            income_tax_ppm_=t->second;
             scheduled_income_tax_.erase(t);
+        }
+        if(auto taxes=scheduled_country_income_tax_.find(month());
+           taxes!=scheduled_country_income_tax_.end()) {
+            for(const auto& [country,ppm]:taxes->second) {
+                ensure(governments_.contains(country),
+                       "country tax effective without government");
+                country_income_tax_[country]=ppm;
+            }
+            scheduled_country_income_tax_.erase(taxes);
         }
         for (auto& [key, cargo] : shipments_) {
             (void)key;
