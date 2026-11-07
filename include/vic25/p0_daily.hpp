@@ -821,6 +821,57 @@ public:
                 }
             });
         }
+        // All canonical households make endogenous daily essential-goods
+        // decisions after wages and actual production.  A household wallet is
+        // required to spend money; self-held food/clothing can be consumed
+        // in kind.  Explicit scenario Buyer policies take precedence per POP
+        // and good, so no duplicate consumption is created.
+        std::set<std::pair<Id,std::string>> explicitly_managed_demand;
+        for(const auto& buyer:decisions.buyers)
+            explicitly_managed_demand.insert({buyer.population_slice,buyer.good});
+        plan[7].push_back(
+            [explicitly_managed_demand](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto& people=c.people();
+                using NeedKey=std::tuple<std::string,Id,std::string>;
+                std::map<NeedKey,Quantity> needs;
+                for(const auto& [slice_id,pop]:people.slices()) {
+                    if(pop.count<=0)continue;
+                    const auto& d=people.demographic(pop.key.demographic);
+                    const auto age=people.age_months(pop.key.demographic);
+                    const std::array<std::pair<std::string,Quantity>,2> baskets{{
+                        {"food",age<10*12?2:3},{"clothing",1}
+                    }};
+                    for(const auto& [good,per_person]:baskets) {
+                        if(explicitly_managed_demand.contains({slice_id,good}))
+                            continue;
+                        auto& due=needs[{d.region,pop.key.household,good}];
+                        due=phaseb::add_checked(due,times(pop.count,per_person));
+                    }
+                }
+                for(const auto& [key,demand]:needs) {
+                    const auto& [region,household,good]=key;
+                    const std::string wallet="HH:"+std::to_string(household);
+                    Quantity still_due=demand;
+                    const Quantity in_kind=std::min(still_due,
+                        c.phase_d_material_available(wallet,region,good));
+                    if(in_kind>0) {
+                        c.consume(wallet,region,good,in_kind);
+                        still_due-=in_kind;
+                    }
+                    if(still_due>0 && c.has_actor(wallet) &&
+                       c.has_market(region,good)) {
+                        const Quantity purchased=c.clear_household_market(
+                            wallet,region,good,still_due);
+                        if(purchased>0) {
+                            c.consume(wallet,region,good,purchased);
+                            still_due-=purchased;
+                        }
+                    }
+                    if(good=="food" && still_due>0)
+                        c.phase_time_record_food_need_gap(region,still_due);
+                }
+            });
         for(const auto& p:decisions.political_reactions) {
             plan[9].push_back([p](phasegh::Stage& gh){
                 auto& c=gh.phase_c();
