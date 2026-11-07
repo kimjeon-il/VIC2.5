@@ -509,6 +509,9 @@ inline void IntegratedWorld::p5_guerrilla_resume(
                "P5-G conventional campaign lost parent political crisis");
     }
     campaign.stage=P5GuerrillaStage::active;
+    campaign.ended_day=-1;
+    ensure(today<=std::numeric_limits<std::int64_t>::max()-7,
+           "P5-G calendar exhausted");
     campaign.next_review_day=today+7;
     p5_guerrilla_review_due_[campaign.next_review_day].insert(id);
     P5GuerrillaIncident entry;
