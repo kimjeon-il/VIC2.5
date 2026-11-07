@@ -75,6 +75,18 @@ inline void IntegratedWorld::p2_check_amendment(const P2Amendment& amendment)con
            !amendment.clauses.empty(),
            "P2 amendment must belong to existing base law");
     p2_validate_clauses(it->second.country,amendment.clauses);
+    // Mirrored P4 mandate fields need a base value to restore on repeal.
+    for(const auto& clause:amendment.clauses) {
+        if(clause.kind!=P2ClauseKind::term_months&&
+           clause.kind!=P2ClauseKind::term_cycle_mode&&
+           clause.kind!=P2ClauseKind::dissolution_authorized)continue;
+        const bool rooted=std::any_of(it->second.clauses.begin(),
+            it->second.clauses.end(),[&](const P2Clause& base){
+                return base.target==clause.target&&base.kind==clause.kind;
+            });
+        ensure(rooted,
+               "P2 office amendment requires underlying base provision");
+    }
     for(const auto& other_id:p2_active_amendments_) {
         if(other_id==amendment.id)continue;
         const auto& other=p2_amendments_.at(other_id);
@@ -238,6 +250,31 @@ inline void IntegratedWorld::p2_sync_country_rules(
         if(contest.country!=country)continue;
         const auto before=p2_term(id);
         if(before.has_legal_term) {
+            int best_rank=1000;
+            std::string source_law;
+            for(const auto& [slot,law_id]:p2_active_base_) {
+                (void)slot;
+                const auto& law=p2_laws_.at(law_id);
+                if(law.country!=country)continue;
+                bool supplies_office=false;
+                const auto inspect=[&](const std::vector<P2Clause>& rules) {
+                    for(const auto& rule:rules)
+                        if(rule.target==id&&
+                           (rule.kind==P2ClauseKind::term_months||
+                            rule.kind==P2ClauseKind::term_cycle_mode||
+                            rule.kind==P2ClauseKind::dissolution_authorized))
+                            supplies_office=true;
+                };
+                inspect(law.clauses);
+                for(const auto& amendment_id:p2_active_amendments_)
+                    if(p2_amendments_.at(amendment_id).law_id==law_id)
+                        inspect(p2_amendments_.at(amendment_id).clauses);
+                if(supplies_office&&static_cast<int>(law.tier)<best_rank) {
+                    best_rank=static_cast<int>(law.tier);
+                    source_law=law_id;
+                }
+            }
+            if(!source_law.empty())contest.law_id=source_law;
             contest.term_months=before.term_months;
             contest.term_mode=before.cycle_mode;
             contest.dissolution_authorized=before.dissolution_authorized;
@@ -385,6 +422,19 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             const auto slot=std::make_tuple(next.country,next.domain,next.scope);
             const auto old=p2_active_base_.find(slot);
             if(old!=p2_active_base_.end()) {
+                const auto& previous=p2_laws_.at(old->second);
+                for(const auto& clause:previous.clauses) {
+                    if(clause.kind!=P2ClauseKind::term_months&&
+                       clause.kind!=P2ClauseKind::term_cycle_mode&&
+                       clause.kind!=P2ClauseKind::dissolution_authorized)continue;
+                    const bool retained=std::any_of(next.clauses.begin(),
+                        next.clauses.end(),[&](const P2Clause& replacement){
+                            return replacement.target==clause.target&&
+                                   replacement.kind==clause.kind;
+                        });
+                    ensure(retained,
+                           "P2 replacement must specify continuing office rules");
+                }
                 // Prior amendments remain in the historical registry, not
                 // silently attached to a different base law.
                 for(auto it=p2_active_amendments_.begin();
@@ -422,7 +472,8 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             const auto& base=p2_laws_.at(law_id);
             for(const auto& clause:base.clauses)
                 if(clause.kind==P2ClauseKind::term_months||
-                   clause.kind==P2ClauseKind::term_cycle_mode)
+                   clause.kind==P2ClauseKind::term_cycle_mode||
+                   clause.kind==P2ClauseKind::dissolution_authorized)
                     throw std::invalid_argument(
                         "P2 election mandate requires replacement law, not a vacuum");
             for(auto it=p2_active_amendments_.begin();
