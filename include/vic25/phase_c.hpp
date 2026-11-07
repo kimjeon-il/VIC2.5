@@ -5,6 +5,12 @@
 // Implements actual staged transactions; high-detail political/war models remain
 // separate future modules (see docs/phase-c/integration/).
 #include "vic25/phase_b.hpp"
+#include "vic25/phase_c_p1.hpp"
+#include "vic25/phase_c_p4.hpp"
+#include "vic25/phase_c_p2.hpp"
+#include "vic25/phase_c_p3.hpp"
+#include "vic25/phase_c_p5.hpp"
+#include "vic25/phase_c_p5_guerrilla.hpp"
 #include "vic25/ledgers.hpp"
 #include "vic25/shared_reservations.hpp"
 #include <algorithm>
@@ -748,10 +754,17 @@ public:
     [[nodiscard]] bool has_public_healthcare_right() const {return healthcare_right_;}
     void provide_public_healthcare(const std::string& institution,Id patient_slice,People patients) {
         require_stage({7});
-        ensure(healthcare_right_&&public_institutions_.contains(institution)&&
+        ensure(public_institutions_.contains(institution)&&
                people_.has_slice(patient_slice)&&patients>0,
-               "no legal entitlement or patient population");
+               "missing clinical institution or population");
         auto& service=public_institutions_.at(institution);
+        const auto sovereign=sovereignty_.find(service.region);
+        ensure(sovereign!=sovereignty_.end(),
+               "public healthcare requires real sovereign jurisdiction");
+        const bool entitled=p2_rule(sovereign->second,sovereign->second,
+             P2ClauseKind::public_healthcare_right)
+             .value_or(healthcare_right_?1:0)!=0;
+        ensure(entitled,"public healthcare lacks current legal entitlement");
         ensure(patients<=people_.slice(patient_slice).count &&
                service.provided+patients<=service.monthly_slots &&
                patients<=positive_product(employed_by(service.operator_id),
@@ -759,6 +772,13 @@ public:
                paid_staff_this_month_[service.operator_id]>0 &&
                stock(service.operator_id,service.region,service.good)>=patients,
                "public service cannot exceed actual paid staff facility and supplies");
+        if(const auto link=p1_institutions_.find(institution);
+           link!=p1_institutions_.end()&&
+           link->second.kind==P1InstitutionKind::healthcare) {
+            const auto capacity=p1_institution_capacity(institution);
+            ensure(service.provided+patients<=capacity.usable_slots,
+                   "P1 healthcare level, real payroll or staff capacity exhausted");
+        }
         if(phase_d_reservation_mode_)
             resources_.assert_goods_available({service.operator_id,service.region,service.good},
                                               patients,stock(service.operator_id,service.region,service.good));
@@ -1241,7 +1261,12 @@ public:
         quote.stock_offered=std::max(quote.stock_offered,
             phaseb::add_checked(quote.delivered,total_offered));
         quote.solvent_demand=phaseb::add_checked(quote.solvent_demand,solvent);
-        Quantity remaining=solvent;
+        // A physically evidenced regional guerrilla disruption limits
+        // civilian market access. Goods and buyer funds stay in canonical
+        // inventory/treasury until a real trade is delivered.
+        const Quantity accessible=p4_scaled(
+            solvent,1'000'000-p5_guerrilla_disruption_ppm(region),1'000'000);
+        Quantity remaining=accessible;
         for(const auto& [seller,available]:sellers) {
             if(remaining<=0)break;
             const Quantity quantity=std::min(remaining,available);
@@ -1249,9 +1274,9 @@ public:
             trade(seller,buyer,region,good,quantity,quote.price);
             remaining-=quantity;
         }
-        const Quantity fulfilled=solvent-remaining;
+        const Quantity fulfilled=accessible-remaining;
         quote.delivered=phaseb::add_checked(quote.delivered,fulfilled);
-        quote.unmet=phaseb::add_checked(quote.unmet,remaining);
+        quote.unmet=phaseb::add_checked(quote.unmet,solvent-fulfilled);
         events_.push_back("daily-household-market-clearing");
         return fulfilled;
     }
@@ -1273,7 +1298,9 @@ public:
         auto& m=markets_.at({region,good});
         const Quantity solvent=std::min(requested,cash(buyer)/m.price);
         const Quantity available=stock(seller,region,good);
-        const Quantity fulfilled=std::min(solvent,available);
+        const Quantity accessible=p4_scaled(
+            solvent,1'000'000-p5_guerrilla_disruption_ppm(region),1'000'000);
+        const Quantity fulfilled=std::min(accessible,available);
         m.solvent_demand=phaseb::add_checked(m.solvent_demand,solvent);
         // A second household viewing the same seller's remaining inventory
         // must not count the same physical stock as newly offered supply.
@@ -1417,6 +1444,85 @@ public:
         for(const auto& [party, count]:it->second){(void)party;n=phaseb::add_checked(n,count);}
         return n;
     }
+    // P3 opt-in layer over Phase B real POP and existing C memberships.
+    // Names and evidence are scenario data, not fixed social-class bonuses.
+    void p3_seed_group(P3Group);
+    void p3_seed_movement(P3Movement);
+    void p3_set_stance(Id,const std::string&,P3Stance);
+    [[nodiscard]] const std::map<Id,P3Attitude>& p3_attitudes()const {
+        return p3_attitudes_;
+    }
+    [[nodiscard]] const std::map<std::pair<std::string,std::string>,P3Group>&
+            p3_groups()const {return p3_groups_;}
+    [[nodiscard]] const std::map<std::string,P3Movement>& p3_movements()const {
+        return p3_movements_;
+    }
+    [[nodiscard]] P3GroupView p3_group_view(
+        const std::string&,const std::string&)const;
+    [[nodiscard]] P3MovementView p3_movement_view(const std::string&)const;
+    [[nodiscard]] bool p3_needs_daily_tick()const;
+    void p3_daily_react(std::int64_t);
+    void p3_reconcile_population();
+    // P5's political actions and civil-conflict evidence must bind real POP
+    // participation, institutional capacity, and already-deployed C armies.
+    [[nodiscard]] P5RiskView p5_risk(const std::string&)const;
+    [[nodiscard]] const std::map<std::string,P5Crisis>& p5_crises()const {
+        return p5_crises_;
+    }
+    [[nodiscard]] const std::vector<P5CollectiveAction>& p5_actions()const {
+        return p5_actions_;
+    }
+    [[nodiscard]] const std::vector<P5Settlement>& p5_settlements()const {
+        return p5_settlements_;
+    }
+    [[nodiscard]] bool p5_needs_daily_tick()const;
+    void p5_daily_advance(std::int64_t);
+    [[nodiscard]] bool p5_has_due_daily_strike(std::int64_t)const;
+    void phase_time_apply_p5_strikes(std::int64_t);
+    void p5_perform_action(P5CollectiveAction);
+    void p5_seed_capital(const std::string&,const std::string&);
+    void p5_pledge_army_unit(const std::string&,const std::string&);
+    void p5_designate_coup(const std::string&);
+    void p5_begin_armed_conflict(const std::string&,std::int64_t);
+    void p5_record_real_engagement(
+        const std::string&,const std::string&,Id,
+        const std::string&,Id,const std::string&,
+        CombatLoss,CombatLoss,std::int64_t);
+    void p5_confirm_actual_control(
+        const std::string&,const std::string&,std::int64_t);
+    void p5_settle(P5Settlement);
+    void phase_time_apply_p5_settlement(std::int64_t);
+    // P5-G: guerrilla war is a regional political-military journal,
+    // independent of a national civil-war front or sovereign state creation.
+    void p5_begin_guerrilla(P5GuerrillaCampaign);
+    void p5_guerrilla_extend(const std::string&,const std::string&,
+                            const std::string&,std::int64_t);
+    void p5_guerrilla_disrupt(const std::string&,const std::string&,
+                             const std::string&,const std::string&,
+                             Quantity,std::int64_t);
+    void p5_guerrilla_skirmish(
+        const std::string&,const std::string&,
+        const std::string&,Id,const std::string&,Id,
+        const std::string&,CombatLoss,CombatLoss,std::int64_t);
+    void p5_guerrilla_to_conventional(const std::string&,
+                                     const std::string&,std::int64_t);
+    void p5_guerrilla_resume(const std::string&,std::int64_t);
+    void p5_guerrilla_end(P5GuerrillaOutcome);
+    [[nodiscard]] P5GuerrillaRegionView p5_guerrilla_region_view(
+        const std::string&,const std::string&)const;
+    [[nodiscard]] int p5_guerrilla_disruption_ppm(
+        const std::string&)const;
+    [[nodiscard]] bool p5_guerrilla_is_insurgent_unit(
+        const std::string&)const;
+    [[nodiscard]] bool p5_guerrilla_has_calendar_work(std::int64_t)const;
+    void phase_time_apply_p5_guerrilla_access(std::int64_t);
+    void p5_guerrilla_daily_review(std::int64_t);
+    [[nodiscard]] const std::map<std::string,P5GuerrillaCampaign>&
+        p5_guerrilla_campaigns()const {return p5_guerrilla_campaigns_;}
+    [[nodiscard]] const std::vector<P5GuerrillaIncident>&
+        p5_guerrilla_incidents()const {return p5_guerrilla_incidents_;}
+    [[nodiscard]] const std::vector<P5GuerrillaOutcome>&
+        p5_guerrilla_outcomes()const {return p5_guerrilla_outcomes_;}
     void seed_interest_group(std::string group) {
         ensure(stage_==-1 && commit_id_==0 && !group.empty() &&
                interest_groups_.insert(std::move(group)).second, "invalid interest group");
@@ -1425,6 +1531,12 @@ public:
         require_stage({9});
         ensure(people_.has_slice(slice) && interest_groups_.contains(group) &&
                n>0 && n<=people_.slice(slice).count, "invalid group membership");
+        const auto& d=people_.demographic(people_.slice(slice).key.demographic);
+        const auto country=sovereignty_.find(d.region);
+        if(country!=sovereignty_.end())
+            ensure(p2_rule(country->second,country->second,
+                   P2ClauseKind::political_association_allowed).value_or(1)!=0,
+                   "P2 lawful interest-group registration prohibited");
         membership_[{slice,group}]=n;
         events_.push_back("interest-group-membership");
     }
@@ -1441,6 +1553,15 @@ public:
                strikers<=participants && strikers<=people_.employed(slice) &&
                scheduled_strikes_[month()+1][slice]+strikers<=people_.employed(slice),
                "political action exceeds actual participants or workers");
+        if(strikers>0) {
+            const auto& d=people_.demographic(
+                people_.slice(slice).key.demographic);
+            const auto country=sovereignty_.find(d.region);
+            if(country!=sovereignty_.end())
+                ensure(p2_rule(country->second,country->second,
+                       P2ClauseKind::peaceful_strike_allowed).value_or(1)!=0,
+                       "P2 legal strike right does not permit this action");
+        }
         participation_this_month_[slice]+=participants;
         scheduled_strikes_[month()+1][slice]+=strikers;
         events_.push_back("verified-protest");
@@ -1450,8 +1571,11 @@ public:
         return it==participation_this_month_.end()?0:it->second;
     }
     [[nodiscard]] People currently_striking(Id slice) const {
-        auto it=strike_active_.find(slice);
-        return it==strike_active_.end()?0:it->second;
+        const auto monthly=strike_active_.find(slice);
+        const auto today=p5_active_daily_strikes_.find(slice);
+        return phaseb::add_checked(
+            monthly==strike_active_.end()?0:monthly->second,
+            today==p5_active_daily_strikes_.end()?0:today->second);
     }
     void seed_government(std::string country, std::string head,
                          std::string prime, People chamber_seats, People quorum) {
@@ -1466,6 +1590,104 @@ public:
         }
         ensure(sovereign_exists, "country has no region");
         governments_.emplace(country, GovernmentState{country, head, prime, chamber_seats, quorum, 1});
+    }
+    // P1 exposes legally configured country government, not a second
+    // electorate, public sector payroll, political-power or treasury ledger.
+    void seed_p1_constitution(const std::string&,P1Constitution);
+    [[nodiscard]] const P1Constitution& p1_constitution(const std::string&)const;
+    [[nodiscard]] const P1Coalition& p1_coalition(const std::string&)const;
+    [[nodiscard]] P1AuthorityView p1_authority(const std::string&)const;
+    void seed_p1_coalition(const std::string&,P1Coalition);
+    [[nodiscard]] P1LegitimacyView p1_legitimacy(const std::string&)const;
+    void seed_p1_institution(const std::string&,const std::string&,
+                             P1InstitutionKind,std::uint8_t);
+    [[nodiscard]] P1InstitutionView p1_institution_capacity(
+                             const std::string&)const;
+    [[nodiscard]] bool has_due_p1_government(std::int64_t)const;
+    void schedule_p1_cabinet_daily(const std::string&,const std::string&,
+                                  std::string,P1Coalition,std::int64_t,
+                                  const std::string&);
+    void schedule_p1_head_succession_daily(const std::string&,
+                                          const std::string&,std::string,
+                                          std::int64_t,const std::string&);
+    void phase_time_apply_p1_government(std::int64_t);
+    // P4's real electoral calendar: each elected institution/region has
+    // its own contest, legal term, outcome and due date.
+    void p4_register_party(P4Party);
+    void p4_set_group_affinity(const std::string&,const std::string&,int);
+    void p4_seed_contest(P4Contest);
+    // Named nominees must bind to actual P1 PersonAnchor/POP, not phantom
+    // politician populations. Party-only legacy lists remain supported.
+    void p4_nominate(const std::string&,const std::string&,
+                     std::vector<std::string>);
+    [[nodiscard]] const std::map<std::pair<std::string,std::string>,
+          std::vector<std::string>>& p4_nominations()const {
+        return p4_nominations_;
+    }
+    [[nodiscard]] const std::map<std::pair<std::string,std::string>,
+          P4PersonTerm>& p4_person_terms()const {return p4_person_terms_;}
+    [[nodiscard]] const std::map<std::string,P4Party>& p4_parties()const {
+        return p4_parties_;
+    }
+    [[nodiscard]] const std::map<std::string,P4Contest>& p4_contests()const {
+        return p4_contests_;
+    }
+    [[nodiscard]] const P4Contest& p4_contest(const std::string& id)const {
+        return p4_contests_.at(id);
+    }
+    [[nodiscard]] const std::map<std::string,P4Result>& p4_nonparliament_results()const {
+        return p4_nonparliament_results_;
+    }
+    [[nodiscard]] const std::vector<P4Result>& p4_history()const {
+        return p4_history_;
+    }
+    [[nodiscard]] std::vector<std::string> p4_due_contests(std::int64_t)const;
+    [[nodiscard]] bool p4_has_due_amendment(std::int64_t)const;
+    [[nodiscard]] bool p4_parliament_dissolved(const std::string&)const;
+    [[nodiscard]] People p4_eligible(const std::string&)const;
+    [[nodiscard]] P4Ballot p4_autonomous_ballot(const std::string&)const;
+    void p4_hold_contest(const std::string&,std::int64_t,std::int64_t,P4Ballot);
+    void p4_dissolve(const std::string&,const std::string&,const std::string&,
+                     std::int64_t,std::int64_t);
+    void p4_schedule_term_amendment(P4TermAmendment,const std::string&,
+                                    const std::vector<std::string>&,std::int64_t);
+    void phase_time_apply_p4_amendments(std::int64_t);
+    [[nodiscard]] P4CompetitionView p4_competition(const std::string&)const;
+    // P2: legal authority and effective clauses; P1/P4/C retain their own
+    // office, election, tax and demographic state and transaction ownership.
+    void p2_seed_base(P2BaseLaw);
+    void p2_seed_amendment(P2Amendment);
+    void p2_register_upper_chamber(const std::string&,const std::string&);
+    void p2_approve_upper_bill(const std::string&,
+                                const std::vector<std::string>&);
+    void p2_register_group_demand(P2GroupDemand);
+    void p2_auto_negotiate_pending(std::int64_t);
+    [[nodiscard]] bool p2_has_negotiable_bills()const;
+    [[nodiscard]] const std::map<std::string,
+          std::vector<P2NegotiatedAmendment>>& p2_negotiated()const {
+        return p2_negotiated_;
+    }
+    [[nodiscard]] bool p2_is_active_base(const std::string&)const;
+    [[nodiscard]] bool p2_amendment_active(const std::string&)const;
+    [[nodiscard]] std::optional<std::int64_t> p2_rule(
+        const std::string&,const std::string&,P2ClauseKind)const;
+    [[nodiscard]] int p2_voting_age(const std::string&)const;
+    [[nodiscard]] P2TermView p2_term(const std::string&)const;
+    [[nodiscard]] bool p2_candidate_eligible(
+        const std::string&,const std::string&)const;
+    void p2_submit_bill(P2Bill,std::int64_t);
+    void p2_approve_bill(const std::string&,const std::vector<std::string>&);
+    void p2_promulgate_bill(const std::string&,const std::string&,std::int64_t);
+    [[nodiscard]] bool p2_has_due(std::int64_t)const;
+    void phase_time_apply_p2(std::int64_t);
+    [[nodiscard]] const std::map<std::string,P2BaseLaw>& p2_laws()const {
+        return p2_laws_;
+    }
+    [[nodiscard]] const std::map<std::string,P2Bill>& p2_bills()const {
+        return p2_bills_;
+    }
+    [[nodiscard]] const std::vector<P2LawEvent>& p2_history()const {
+        return p2_history_;
     }
     [[nodiscard]] const GovernmentState& government(const std::string& country) const {
         return governments_.at(country);
@@ -1536,20 +1758,36 @@ public:
     void propose_tax_law(const std::string& country, const std::string& proposer,
                          const std::vector<std::string>& supporting_parties, int ppm) {
         require_stage({9});
-        ensure(ppm >= 0 && ppm <= 1'000'000, "invalid tax rate");
-        const auto& g = governments_.at(country);
-        const auto& result=legislature_for(country);
-        ensure(g.prime_minister == proposer && result.total_seats == g.chamber_seats,
-               "unauthorized tax bill or missing national legislature");
-        ensure(coalition_seats(supporting_parties,result) >= g.quorum &&
-               !has_pending_country_tax(country),
-               "insufficient votes or country tax law already scheduled");
+        ensure(ppm>=0&&ppm<=1'000'000,"invalid tax rate");
+        const auto lower=p2_rule(country,country,
+                                 P2ClauseKind::income_tax_min_ppm).value_or(0);
+        const auto upper=p2_rule(country,country,
+                                 P2ClauseKind::income_tax_max_ppm).value_or(1'000'000);
+        ensure(lower<=upper&&ppm>=lower&&ppm<=upper,
+               "P2 national tax proposal outside binding legal rate limits");
+        const auto& g=governments_.at(country);
+        ensure(g.prime_minister==proposer&&!has_pending_country_tax(country),
+               "unauthorized or duplicate national income-tax bill");
+        if(p1_constitutions_.contains(country)&&
+           p1_authority(country).direct_executive) {
+            ensure(supporting_parties.empty(),
+                   "P1 direct executive may not invent parliamentary votes");
+        } else {
+            ensure(!p4_parliament_dissolved(country),
+                   "P4 dissolved parliament cannot enact a new tax law");
+            const auto& result=legislature_for(country);
+            ensure(result.total_seats==g.chamber_seats &&
+                   coalition_seats(supporting_parties,result)>=g.quorum,
+                   "insufficient lawful national parliamentary confidence");
+        }
         scheduled_country_income_tax_[month()+1][country]=ppm;
         events_.push_back("constitutional-tax-law:"+country);
     }
     void appoint_cabinet(const std::string& country, const std::string& head,
                         std::string minister, const std::vector<std::string>& supporting_parties) {
         require_stage({9});
+        ensure(!p1_constitutions_.contains(country),
+               "P1 constitutional cabinet must use dated government formation");
         const auto& g=governments_.at(country);
         const auto& result=legislature_for(country);
         ensure(g.head_of_state == head && !minister.empty() &&
@@ -1563,6 +1801,8 @@ public:
                               const std::string& current_head,
                               std::string successor) {
         require_stage({9});
+        ensure(!p1_constitutions_.contains(country),
+               "P1 constitutional succession must use dated office transition");
         const auto& g=governments_.at(country);
         ensure(g.head_of_state == current_head && !successor.empty() &&
                current_head != successor, "invalid head-of-state succession");
@@ -2065,6 +2305,11 @@ public:
         ensure(people_.has_slice(slice)&&n>0&&interest_groups_.contains(group),
                "invalid political issue association");
         const auto& d=people_.demographic(people_.slice(slice).key.demographic);
+        const auto country=sovereignty_.find(d.region);
+        if(country!=sovereignty_.end())
+            ensure(p2_rule(country->second,country->second,
+                   P2ClauseKind::political_association_allowed).value_or(1)!=0,
+                   "P2 no legal political organization in this jurisdiction");
         ensure(n<=food_grievance(d.region)&&
                group_members(slice,group)+n<=people_.slice(slice).count,
                "political organization exceeds actual grievance or persons");
@@ -2098,8 +2343,18 @@ public:
     }
     void hire(Id slice, People count, const std::string& employer, Money wage) {
         require_stage({2});
-        ensure(actors_.contains(employer)&&!firm_bankrupt(employer),
-               "unknown or insolvent employer");
+        ensure(actors_.contains(employer)&&!firm_bankrupt(employer)&&
+               people_.has_slice(slice),
+               "unknown worker or insolvent employer");
+        const auto& dem=people_.demographic(
+            people_.slice(slice).key.demographic);
+        const auto country=sovereignty_.find(dem.region);
+        if(country!=sovereignty_.end()) {
+            const auto legal=p2_rule(country->second,country->second,
+                 P2ClauseKind::minimum_monthly_contract_wage).value_or(0);
+            ensure(wage>=legal,
+                   "P2 minimum wage law forbids underpaid new labor contracts");
+        }
         people_.hire(slice, count, employer, "worker", wage, phaseb::JobRequirements{});
         events_.push_back("hire");
     }
@@ -2218,6 +2473,8 @@ public:
     void hold_election(People registered, People invalid, People seats,
                        const std::map<std::string, People>& votes) {
         require_stage({9});
+        ensure(p1_constitutions_.empty(),
+               "P1 constitutional country requires national P4 election registry");
         ensure(!election_this_month_, "duplicate election this month");
         const People eligible = eligible_voters();
         ensure(registered >= 0 && registered <= eligible && invalid >= 0 &&
@@ -2264,6 +2521,9 @@ public:
             const std::map<std::string,People>& votes) {
         require_stage({9});
         const auto& g=governments_.at(country);
+        ensure(!p1_constitutions_.contains(country)||
+               p1_constitutions_.at(country).legislature!=P1LegislatureKind::none,
+               "P1 state without legislature cannot hold party election");
         ensure(!country_election_months_.contains(country)||
                country_election_months_.at(country)!=month(),
                "duplicate national election in calendar month");
@@ -2277,8 +2537,11 @@ public:
                demo.service==phaseb::Service::active||
                demo.service==phaseb::Service::pow||
                demo.service==phaseb::Service::missing||
-               people_.age_months_slice(slice)<
-                   static_cast<std::int64_t>(voting_age_years_)*12)
+               (demo.sex==phaseb::Sex::female&&
+                p2_rule(country,country,
+                  P2ClauseKind::female_suffrage_allowed).value_or(1)==0)||
+               people_.age_months_slice(id)<
+                   static_cast<std::int64_t>(p2_voting_age(country))*12)
                 continue;
             eligible=phaseb::add_checked(eligible,row.count);
         }
@@ -2348,8 +2611,16 @@ public:
         ensure(units_.contains(unit) && n > 0 && people_.has_slice(source),
                "invalid mobilization");
         const auto s = people_.slice(source);
-        const auto service = people_.demographic(s.key.demographic).service;
-        ensure(conscription_enabled_, "conscription not currently authorized");
+        const auto& demo=people_.demographic(s.key.demographic);
+        const auto service=demo.service;
+        const auto jurisdiction=sovereignty_.find(demo.region);
+        bool permitted=conscription_enabled_;
+        if(jurisdiction!=sovereignty_.end()) {
+            permitted=p2_rule(jurisdiction->second,jurisdiction->second,
+                P2ClauseKind::conscription_authorized)
+                .value_or(conscription_enabled_?1:0)!=0;
+        }
+        ensure(permitted,"P2 military service law does not permit conscription");
         ensure(service == phaseb::Service::civilian || service == phaseb::Service::reserve,
                "not mobilizable");
         ensure(n <= s.count - assigned(source), "overallocated recruit");
@@ -2560,6 +2831,12 @@ public:
                 staged.people_.finish_month();
                 staged.people_.release_ineligible();
             }
+            if(n==10&&(!staged.p3_groups_.empty()||
+                       !staged.p3_attitudes_.empty()||
+                       !staged.p3_movements_.empty()||
+                       !staged.p5_scheduled_daily_strikes_.empty()||
+                       !staged.p5_active_daily_strikes_.empty()))
+                staged.p3_reconcile_population();
             if(n==11&&final_calendar_day) {
                 staged.election_this_month_=false;
             }
@@ -2616,6 +2893,12 @@ public:
             if (n == 11) {
                 stage.reprice_markets();
             }
+            if(n==10&&(!stage.p3_groups_.empty()||
+                       !stage.p3_attitudes_.empty()||
+                       !stage.p3_movements_.empty()||
+                       !stage.p5_scheduled_daily_strikes_.empty()||
+                       !stage.p5_active_daily_strikes_.empty()))
+                stage.p3_reconcile_population();
             stage.validate();
             if (n == 11) {
                 stage.resources_.clear_month();
@@ -2646,6 +2929,246 @@ public:
         for (const auto& [key, n]:membership_) {
             ensure(interest_groups_.contains(key.second) && people_.has_slice(key.first) &&
                    n>=0 && n<=people_.slice(key.first).count,"unbacked interest-group membership");
+        }
+        for(const auto& [slice,attitude]:p3_attitudes_) {
+            ensure(people_.has_slice(slice)&&attitude.slice==slice&&
+                   attitude.radical_ppm>=0&&attitude.radical_ppm<=1'000'000&&
+                   attitude.loyal_ppm>=0&&attitude.loyal_ppm<=1'000'000&&
+                   attitude.radical_ppm+attitude.loyal_ppm<=1'000'000&&
+                   attitude.engagement_ppm>=0&&
+                   attitude.engagement_ppm<=1'000'000,
+                   "P3 political attitudes lack living POP backing");
+            for(const auto& [issue,stance]:attitude.issues)
+                ensure(!issue.empty()&&stance.preference_ppm>=-1'000'000&&
+                       stance.preference_ppm<=1'000'000&&
+                       stance.importance_ppm>=0&&
+                       stance.importance_ppm<=1'000'000,
+                       "P3 invalid issue-specific POP preference");
+        }
+        for(const auto& [key,group]:p3_groups_) {
+            ensure(key.first==group.country&&key.second==group.id&&
+                   governments_.contains(group.country)&&
+                   interest_groups_.contains(group.id)&&
+                   static_cast<unsigned>(group.type)<=
+                       static_cast<unsigned>(P3GroupType::custom)&&
+                   group.organization_ppm>=0&&
+                   group.organization_ppm<=1'000'000&&
+                   group.institutional_access_ppm>=0&&
+                   group.institutional_access_ppm<=1'000'000&&
+                   (group.leader_anchor.empty()||
+                    person_anchors_.contains(group.leader_anchor)),
+                   "P3 illegal interest-group identity/leader");
+        }
+        for(const auto& [id,movement]:p3_movements_) {
+            ensure(id==movement.id&&governments_.contains(movement.country)&&
+                   static_cast<unsigned>(movement.goal)<=
+                       static_cast<unsigned>(P3MovementGoal::secession)&&
+                   !movement.issue_domain.empty()&&
+                   movement.activism_ppm>=0&&
+                   movement.activism_ppm<=1'000'000&&
+                   movement.radical_ppm>=0&&
+                   movement.radical_ppm<=1'000'000&&
+                   (movement.region.empty()||
+                    (sovereignty_.contains(movement.region)&&
+                     sovereignty_.at(movement.region)==movement.country)),
+                   "P3 invalid political movement state");
+            for(const auto& group:movement.groups)
+                ensure(p3_groups_.contains({movement.country,group}),
+                       "P3 movement group lacks real national profile");
+            for(const auto& party:movement.parties)
+                ensure(p4_parties_.contains(party)&&
+                       p4_parties_.at(party).country==movement.country,
+                       "P3 movement party belongs to foreign country");
+        }
+        ensure(p5_actions_.size()<=1'000'000&&
+               p5_settlements_.size()<=1'000'000&&
+               p5_crises_.size()<=100'000,
+               "P5 oversized activity or conflict record");
+        ensure(p5_guerrilla_campaigns_.size()<=100'000&&
+               p5_guerrilla_incidents_.size()<=1'000'000&&
+               p5_guerrilla_outcomes_.size()<=1'000'000&&
+               p5_guerrilla_incident_ids_.size()==
+                   p5_guerrilla_incidents_.size(),
+               "P5-G guerrilla historical state exceeds bounds or lacks index");
+        std::map<std::int64_t,std::set<std::string>> expected_reviews;
+        std::map<std::string,std::string> guerrilla_unit_owner;
+        for(const auto& [id,campaign]:p5_guerrilla_campaigns_) {
+            ensure(id==campaign.id&&governments_.contains(campaign.country)&&
+                   p3_movements_.contains(campaign.movement)&&
+                   p3_movements_.at(campaign.movement).country==
+                       campaign.country&&
+                   campaign.started_day>=0&&
+                   campaign.next_review_day>=campaign.started_day&&
+                   static_cast<unsigned>(campaign.stage)<=
+                       static_cast<unsigned>(P5GuerrillaStage::resolved)&&
+                   campaign.regions.size()>0&&
+                   campaign.verified_skirmishes>=0,
+                   "P5-G campaign lacks actual sovereign or political source");
+            if(campaign.stage==P5GuerrillaStage::organizing||
+               campaign.stage==P5GuerrillaStage::active||
+               campaign.stage==P5GuerrillaStage::supply_exhausted)
+                expected_reviews[campaign.next_review_day].insert(id);
+            if(campaign.stage==P5GuerrillaStage::ceasefire||
+               campaign.stage==P5GuerrillaStage::resolved)
+                ensure(campaign.ended_day>=campaign.started_day,
+                       "P5-G concluded campaign lacks dated resolution");
+            std::set<std::string> real_regions;
+            for(const auto& region:campaign.regions) {
+                ensure(real_regions.insert(region).second&&
+                       sovereignty_.contains(region),
+                       "P5-G regional activity has fictitious or duplicate land");
+                if(campaign.stage!=P5GuerrillaStage::resolved)
+                    ensure(sovereignty_.at(region)==campaign.country,
+                           "P5-G active territorial campaign changed sovereignty");
+            }
+            std::set<std::string> real_units;
+            for(const auto& unit:campaign.units) {
+                ensure(real_units.insert(unit).second&&
+                       units_.contains(unit)&&
+                       army_deployments_.contains(unit)&&
+                       army_deployments_.at(unit).country==campaign.country,
+                       "P5-G guerrilla army duplicates or invents C unit");
+                if(campaign.stage!=P5GuerrillaStage::resolved&&
+                   campaign.stage!=P5GuerrillaStage::ceasefire)
+                    ensure(guerrilla_unit_owner.emplace(unit,id).second,
+                           "P5-G active campaigns share the same C military unit");
+            }
+            if(campaign.stage==P5GuerrillaStage::conventional)
+                ensure(p5_crises_.contains(campaign.crisis_id)&&
+                       p5_crises_.at(campaign.crisis_id).movement==
+                           campaign.movement,
+                       "P5-G conventional escalation lacks same real P5 crisis");
+        }
+        ensure(expected_reviews==p5_guerrilla_review_due_,
+               "P5-G seven-day campaign review index not reconstructible");
+        for(const auto& incident:p5_guerrilla_incidents_)
+            ensure(p5_guerrilla_campaigns_.contains(incident.campaign)&&
+                   p5_guerrilla_incident_ids_.contains(incident.id)&&
+                   incident.day>=
+                       p5_guerrilla_campaigns_.at(incident.campaign).started_day&&
+                   incident.ammunition_spent>=0&&
+                   incident.access_disruption_ppm>=0&&
+                   incident.access_disruption_ppm<=250'000&&
+                   static_cast<unsigned>(incident.kind)<=
+                       static_cast<unsigned>(P5GuerrillaIncidentKind::resolution),
+                   "P5-G incident without physical or historical source");
+        for(const auto& outcome:p5_guerrilla_outcomes_)
+            ensure(p5_guerrilla_campaigns_.contains(outcome.campaign)&&
+                   !outcome.legal_basis.empty()&&
+                   outcome.day>=
+                       p5_guerrilla_campaigns_.at(outcome.campaign).started_day&&
+                   static_cast<unsigned>(outcome.kind)<=
+                       static_cast<unsigned>(P5GuerrillaResolution::disarmed),
+                   "P5-G unverified campaign settlement");
+        for(const auto& [day,effects]:p5_guerrilla_effect_due_)
+            for(const auto& effect:effects)
+                ensure(day==effect.from_day&&
+                       effect.through_day>=day&&
+                       p5_guerrilla_campaigns_.contains(effect.campaign)&&
+                       sovereignty_.contains(effect.region)&&
+                       p5_guerrilla_incident_ids_.contains(effect.incident_id)&&
+                       effect.penalty_ppm>0&&effect.penalty_ppm<=250'000,
+                       "P5-G future access effect without real recorded event");
+        std::map<std::string,std::int32_t> expected_penalty;
+        for(const auto& [region,effects]:p5_guerrilla_effect_active_) {
+            ensure(!effects.empty()&&sovereignty_.contains(region),
+                   "P5-G active disruption references missing geography");
+            std::int64_t penalty=0;
+            for(const auto& effect:effects) {
+                ensure(effect.region==region&&
+                       effect.from_day<=effect.through_day&&
+                       p5_guerrilla_campaigns_.contains(effect.campaign)&&
+                       p5_guerrilla_incident_ids_.contains(effect.incident_id)&&
+                       effect.penalty_ppm>0&&effect.penalty_ppm<=250'000,
+                       "P5-G malformed real access disruption");
+                penalty=std::min<std::int64_t>(
+                    500'000,penalty+effect.penalty_ppm);
+            }
+            if(penalty>0)
+                expected_penalty[region]=
+                    static_cast<std::int32_t>(penalty);
+        }
+        ensure(expected_penalty==p5_guerrilla_region_penalty_ppm_,
+               "P5-G derived access cannot exceed verified incident evidence");
+        for(const auto& [country,region]:p5_capitals_)
+            ensure(governments_.contains(country)&&
+                   sovereignty_.contains(region)&&
+                   sovereignty_.at(region)==country,
+                   "P5 national capital must reference true sovereign territory");
+        std::set<std::string> occupied_units;
+        for(const auto& [id,crisis]:p5_crises_) {
+            ensure(id==crisis.id&&governments_.contains(crisis.country)&&
+                   p3_movements_.contains(crisis.movement)&&
+                   p3_movements_.at(crisis.movement).country==crisis.country&&
+                   static_cast<unsigned>(crisis.kind)<=
+                       static_cast<unsigned>(P5CrisisKind::secession)&&
+                   static_cast<unsigned>(crisis.stage)<=
+                       static_cast<unsigned>(P5CrisisStage::settled)&&
+                   crisis.pressure_days>=0&&crisis.calm_days>=0&&
+                   crisis.last_checked_day>=-1&&
+                   crisis.verified_engagements>=0,
+                   "P5 conflict without actual political movement");
+            for(const auto& unit:crisis.pledged_units) {
+                ensure(army_deployments_.contains(unit)&&
+                       army_deployments_.at(unit).country==crisis.country&&
+                       (crisis.stage==P5CrisisStage::settled||
+                        occupied_units.insert(unit).second),
+                       "P5 military unit duplicated in competing factions");
+            }
+            for(const auto& region:crisis.contested_regions)
+                ensure(sovereignty_.contains(region)&&
+                       !region.empty(),
+                       "P5 armed organization has fictitious territory");
+        }
+        ensure(p5_action_ids_.size()==p5_actions_.size(),
+               "P5 action identity registry out of sync");
+        for(const auto& action:p5_actions_) {
+            ensure(p5_action_ids_.contains(action.id)&&
+                   p3_movements_.contains(action.movement)&&
+                   action.day>=0&&action.participants>=0&&
+                   action.strikers>=0&&action.strikers<=action.participants&&
+                   static_cast<unsigned>(action.kind)<=
+                       static_cast<unsigned>(P5ActionKind::policing),
+                   "P5 invalid collective action journal");
+        }
+        for(const auto& outcome:p5_settlements_)
+            ensure(p5_crises_.contains(outcome.crisis_id)&&outcome.day>=0&&
+                   static_cast<unsigned>(outcome.kind)<=
+                       static_cast<unsigned>(P5SettlementKind::independence_recognized),
+                   "P5 settlement without real conflict");
+        for(const auto& [slice,n]:p5_active_daily_strikes_)
+            ensure(people_.has_slice(slice)&&n>=0&&
+                   n<=people_.employed(slice)&&
+                   currently_striking(slice)<=people_.employed(slice),
+                   "P5 daily worker shutdown exceeds real employment");
+        for(const auto& [when,changes]:p5_scheduled_control_reconciliation_) {
+            ensure(when>=0,"P5 invalid future settlement calendar day");
+            for(const auto& change:changes) {
+                ensure(p5_crises_.contains(change.crisis_id)&&
+                       p5_crises_.at(change.crisis_id).stage==
+                           P5CrisisStage::settled&&
+                       governments_.contains(change.country)&&
+                       !change.successor_head.empty()&&
+                       !change.verified_regions.empty(),
+                       "P5 future political command transition lacks actual settlement");
+                for(const auto& region:change.verified_regions)
+                    ensure(sovereignty_.contains(region),
+                           "P5 future military control references nonexisting territory");
+            }
+        }
+        for(const auto& [when,allocations]:p5_scheduled_daily_strikes_) {
+            ensure(when>=0,"P5 invalid dated labor action");
+            for(const auto& [slice,n]:allocations)
+                ensure(people_.has_slice(slice)&&n>0&&
+                       n<=people_.slice(slice).count,
+                       "P5 future strike requires living non-duplicated POP allocation");
+        }
+        for(const auto& [crisis,regions]:p5_control_evidence_) {
+            ensure(p5_crises_.contains(crisis),
+                   "P5 political control lacks crisis");
+            for(const auto& region:regions)
+                ensure(sovereignty_.contains(region),
+                       "P5 control evidence lacks real region");
         }
         for (const auto& [slice,n]:strike_active_)
             ensure(people_.has_slice(slice)&&n<=people_.employed(slice),"invalid strike allocation");
@@ -2692,9 +3215,219 @@ public:
                    "national election votes/seats not conserved");
         }
         for (const auto& [id,g] : governments_) {
+            const auto order=p1_constitutions_.find(id);
+            const bool no_parliament=order!=p1_constitutions_.end()&&
+                order->second.legislature==P1LegislatureKind::none;
             ensure(id==g.country && !g.head_of_state.empty() && !g.prime_minister.empty() &&
-                   g.chamber_seats>0 && g.quorum>0 && g.quorum<=g.chamber_seats,
-                   "invalid government institution");
+                   (no_parliament?
+                      (g.chamber_seats==0&&g.quorum==0):
+                      (g.chamber_seats>0&&g.quorum>0&&g.quorum<=g.chamber_seats)),
+                   "invalid legal P1 or legacy government institution");
+        }
+        ensure(p1_constitutions_.size()==p1_coalitions_.size(),
+               "P1 constitution/coalition mismatch");
+        for(const auto& [country,order]:p1_constitutions_) {
+            ensure(governments_.contains(country)&&
+                   valid_p1_constitution(order)&&p1_coalitions_.contains(country),
+                   "P1 constitution not backed by a legal government");
+            p1_check_coalition(p1_coalitions_.at(country));
+        }
+        for(const auto& [id,entry]:p1_institutions_) {
+            ensure(entry.public_institution_id==id&&
+                   p1_constitutions_.contains(entry.country)&&
+                   public_institutions_.contains(id)&&entry.level<=5&&
+                   static_cast<unsigned>(entry.kind)<=
+                      static_cast<unsigned>(P1InstitutionKind::elections)&&
+                   sovereignty_.contains(public_institutions_.at(id).region)&&
+                   sovereignty_.at(public_institutions_.at(id).region)==entry.country,
+                   "P1 invalid or foreign public institution");
+        }
+        for(const auto& [effective,changes]:p1_pending_) {
+            ensure(effective>=0&&!changes.empty(),"P1 invalid future effective day");
+            for(const auto& [country,change]:changes) {
+                ensure(p1_constitutions_.contains(country)&&
+                       change.country==country&&!change.legal_basis.empty()&&
+                       (change.replace_head||change.replace_prime)&&
+                       (!change.replace_head||!change.new_head.empty())&&
+                       (!change.replace_prime||!change.new_prime.empty()),
+                       "P1 invalid pending cabinet or succession");
+                p1_check_coalition(change.coalition);
+            }
+        }
+        ensure(p4_parties_.size()<=100'000&&p4_contests_.size()<=100'000&&
+               p4_history_.size()<=1'000'000&&
+               p4_nonparliament_results_.size()<=p4_contests_.size(),
+               "P4 oversized party or electoral registry");
+        for(const auto& [id,party]:p4_parties_)
+            ensure(id==party.id&&governments_.contains(party.country)&&
+                   party.organization_ppm>=1&&party.organization_ppm<=1'000'000,
+                   "P4 invalid party record");
+        for(const auto& [key,affinity]:p4_affinities_)
+            ensure(p4_parties_.contains(key.first)&&
+                   interest_groups_.contains(key.second)&&
+                   affinity>=1&&affinity<=1'000'000,
+                   "P4 affiliation without real party or interest group");
+        for(const auto& [id,contest]:p4_contests_) {
+            ensure(id==contest.id&&p1_constitutions_.contains(contest.country)&&
+                   !contest.law_id.empty()&&contest.term_months>=1&&
+                   contest.term_months<=240&&
+                   contest.turnout_ppm>=0&&contest.turnout_ppm<=1'000'000&&
+                   contest.seats>0&&contest.seats<=100'000&&
+                   contest.next_poll_day>=0&&contest.regular_poll_day>=0&&
+                   static_cast<unsigned>(contest.office)<=
+                       static_cast<unsigned>(P4Office::local_head)&&
+                   static_cast<unsigned>(contest.method)<=
+                       static_cast<unsigned>(P4BallotMethod::plurality)&&
+                   static_cast<unsigned>(contest.term_mode)<=
+                       static_cast<unsigned>(P4TermMode::fixed_cycle),
+                   "P4 invalid contest/term/electoral law");
+            if(contest.active)
+                ensure(p4_due_days_.contains(contest.next_poll_day)&&
+                       p4_due_days_.at(contest.next_poll_day).contains(id),
+                       "P4 missing real election schedule");
+        }
+        for(const auto& [day,ids]:p4_due_days_)
+            for(const auto& id:ids)
+                ensure(p4_contests_.contains(id)&&
+                       p4_contests_.at(id).active&&
+                       p4_contests_.at(id).next_poll_day==day,
+                       "P4 stale or duplicate election due index");
+        for(const auto& [id,result]:p4_nonparliament_results_)
+            ensure(p4_contests_.contains(id)&&
+                   result.contest_id==id&&
+                   p4_contests_.at(id).office!=P4Office::legislature,
+                   "P4 invalid non-parliament result");
+        for(const auto& [day,amendments]:p4_amendments_)
+            for(const auto& amendment:amendments)
+                ensure(day==amendment.effective_day&&
+                       p4_contests_.contains(amendment.contest_id)&&
+                       amendment.next_poll_day>day&&
+                       !amendment.law_id.empty(),
+                       "P4 invalid pending constitutional amendment");
+        ensure(p2_laws_.size()<=100'000&&p2_bills_.size()<=1'000'000&&
+               p2_amendments_.size()<=1'000'000&&
+               p2_history_.size()<=1'000'000&&
+               p2_due_.size()<=1'000'000,
+               "P2 oversized law, amendment or bill registry");
+        for(const auto& [id,law]:p2_laws_) {
+            ensure(id==law.id,"P2 broken base law identity");
+            p2_validate_base(law);
+        }
+        for(const auto& [slot,law_id]:p2_active_base_) {
+            ensure(p2_laws_.contains(law_id)&&
+                   std::make_tuple(p2_laws_.at(law_id).country,
+                                   p2_laws_.at(law_id).domain,
+                                   p2_laws_.at(law_id).scope)==slot,
+                   "P2 broken unique active base law");
+        }
+        for(const auto& [id,amendment]:p2_amendments_) {
+            ensure(id==amendment.id&&p2_laws_.contains(amendment.law_id),
+                   "P2 orphan amendment");
+            p2_validate_clauses(p2_laws_.at(amendment.law_id).country,
+                                amendment.clauses);
+            if(p2_active_amendments_.contains(id)) {
+                ensure(p2_is_active_base(amendment.law_id),
+                       "P2 amendment active after parent base repeal");
+                p2_check_amendment(amendment);
+            }
+        }
+        for(const auto& id:p2_active_amendments_)
+            ensure(p2_amendments_.contains(id),
+                   "P2 amendment active without saved legal record");
+        for(const auto& [id,bill]:p2_bills_) {
+            ensure(id==bill.id&&governments_.contains(bill.country)&&
+                   bill.introduced_day>=0&&bill.effective_day>bill.introduced_day&&
+                   static_cast<unsigned>(bill.action)<=
+                     static_cast<unsigned>(P2BillAction::repeal_base)&&
+                   static_cast<unsigned>(bill.status)<=
+                     static_cast<unsigned>(P2BillStatus::rejected),
+                   "P2 corrupt legislative bill");
+            if(bill.status==P2BillStatus::promulgated)
+                ensure(p2_due_.contains(bill.effective_day)&&
+                       p2_due_.at(bill.effective_day).contains(id)&&
+                       bill.promulgated_day>=bill.introduced_day,
+                       "P2 promulgated law lacks future execution event");
+        }
+        for(const auto& [day,ids]:p2_due_)
+            for(const auto& id:ids)
+                ensure(p2_bills_.contains(id)&&
+                       p2_bills_.at(id).status==P2BillStatus::promulgated&&
+                       p2_bills_.at(id).effective_day==day,
+                       "P2 stale legal event index");
+        for(const auto& [id,contest]:p4_contests_) {
+            if(!p2_laws_.empty()) {
+                const auto legal=p2_term(id);
+                ensure(legal.term_months==contest.term_months&&
+                       legal.cycle_mode==contest.term_mode&&
+                       legal.dissolution_authorized==contest.dissolution_authorized,
+                       "P2/P4 effective office term law differs from election state");
+            }
+        }
+        for(const auto& [key,nominees]:p4_nominations_) {
+            ensure(p4_contests_.contains(key.first)&&
+                   p4_parties_.contains(key.second)&&
+                   p4_parties_.at(key.second).country==
+                       p4_contests_.at(key.first).country&&
+                   !nominees.empty()&&
+                   nominees.size()<=static_cast<std::size_t>(
+                       p4_contests_.at(key.first).seats),
+                   "P4 orphaned personal candidate nomination");
+            std::set<std::string> unique;
+            for(const auto& person:nominees)
+                ensure(person_anchors_.contains(person)&&
+                       unique.insert(person).second,
+                       "P4 nominee not backed by unique actual POP anchor");
+        }
+        for(const auto& [key,tenure]:p4_person_terms_) {
+            ensure(p4_contests_.contains(key.first)&&
+                   key.first==tenure.contest_id&&key.second==tenure.person_id&&
+                   person_anchors_.contains(key.second)&&
+                   tenure.total_terms>0&&tenure.consecutive_terms>=0&&
+                   tenure.consecutive_terms<=tenure.total_terms&&
+                   tenure.last_elected_day>=0,
+                   "P4 invalid individual mandate history");
+        }
+        for(const auto& [country,contest_id]:p2_upper_chambers_)
+            ensure(p1_constitutions_.contains(country)&&
+                   p1_constitutions_.at(country).legislature==
+                       P1LegislatureKind::bicameral&&
+                   p4_contests_.contains(contest_id)&&
+                   p4_contests_.at(contest_id).country==country&&
+                   p4_contests_.at(contest_id).office==
+                       P4Office::upper_chamber,
+                   "P2 upper chamber not backed by an actual P4 senate");
+        for(const auto& id:p2_negotiation_watch_)
+            ensure(p2_bills_.contains(id)&&
+                   p2_bills_.at(id).status==P2BillStatus::submitted&&
+                   p2_bills_.at(id).action==
+                       P2BillAction::enact_or_replace_base&&
+                   (!p2_chamber_decisions_.contains(id)||
+                    !p2_chamber_decisions_.at(id).lower_passed),
+                   "P2 stale submitted-bill negotiation index");
+        for(const auto& [id,decision]:p2_chamber_decisions_)
+            ensure(p2_bills_.contains(id)&&decision.bill_id==id&&
+                   p4_contests_.contains(decision.upper_contest_id)&&
+                   decision.lower_poll_day>=-1&&
+                   decision.upper_poll_day>=-1,
+                   "P2 invalid bicameral voting evidence");
+        for(const auto& [id,demand]:p2_group_demands_)
+            ensure(id==demand.id&&governments_.contains(demand.country)&&
+                   interest_groups_.contains(demand.interest_group)&&
+                   demand.min_population_support_ppm>=0&&
+                   demand.min_population_support_ppm<=1'000'000&&
+                   !demand.law_domain.empty()&&
+                   !demand.amendment.id.empty(),
+                   "P2 invalid real interest-group demand");
+        for(const auto& [id,agreements]:p2_negotiated_) {
+            ensure(p2_bills_.contains(id),"P2 negotiated clause lacks real bill");
+            std::set<std::string> seen;
+            for(const auto& agreement:agreements)
+                ensure(agreement.bill_id==id&&
+                       seen.insert(agreement.demand_id).second&&
+                       p2_group_demands_.contains(agreement.demand_id)&&
+                       agreement.support_population>=0&&
+                       agreement.accepted_day>=0,
+                       "P2 invalid or duplicated negotiated amendment");
         }
         for(const auto& [country,ppm]:country_income_tax_)
             ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
@@ -2923,9 +3656,71 @@ private:
     std::map<std::string,std::map<std::string,People>> ballot_votes_;
     std::set<std::string> interest_groups_;
     std::map<std::pair<Id,std::string>, People> membership_;
+    // P3: POP political attributes are preferences over existing real
+    // people, never an independent count or financial account.
+    std::map<Id,P3Attitude> p3_attitudes_;
+    std::map<std::pair<std::string,std::string>,P3Group> p3_groups_;
+    std::map<std::string,P3Movement> p3_movements_;
+    std::int64_t p3_last_reaction_day_{-1};
+    std::map<std::string,P5Crisis> p5_crises_;
+    // Political capital is a reference into the existing C sovereignty map.
+    std::map<std::string,std::string> p5_capitals_;
+    std::vector<P5CollectiveAction> p5_actions_;
+    std::set<std::string> p5_action_ids_; // derived from action journal
+    std::vector<P5Settlement> p5_settlements_;
+    // Only evidence of real C military control, not duplicate ownership.
+    std::map<std::string,std::set<std::string>> p5_control_evidence_;
+    std::map<std::int64_t,std::vector<P5ControlReconciliation>>
+        p5_scheduled_control_reconciliation_;
+    // P5-G campaign information is stored only as political references.
+    // Lasting armed strength, physical stocks and land titles remain in C.
+    std::map<std::string,P5GuerrillaCampaign> p5_guerrilla_campaigns_;
+    std::vector<P5GuerrillaIncident> p5_guerrilla_incidents_;
+    std::vector<P5GuerrillaOutcome> p5_guerrilla_outcomes_;
+    std::set<std::string> p5_guerrilla_incident_ids_; // derived index
+    std::map<std::int64_t,std::vector<P5GuerrillaAccessEffect>>
+        p5_guerrilla_effect_due_;
+    std::map<std::string,std::vector<P5GuerrillaAccessEffect>>
+        p5_guerrilla_effect_active_;
+    std::map<std::string,std::int32_t> p5_guerrilla_region_penalty_ppm_;
+    std::map<std::int64_t,std::set<std::string>>
+        p5_guerrilla_review_due_; // reconstructed from active campaign
+    std::map<std::int64_t,std::map<Id,People>> p5_scheduled_daily_strikes_;
+    std::map<Id,People> p5_active_daily_strikes_;
     std::map<Id, People> participation_this_month_, strike_active_;
     std::map<std::int64_t,std::map<Id,People>> scheduled_strikes_;
     std::map<std::string, GovernmentState> governments_;
+    // P1 stores constitutional choices and coalition identity only.
+    std::map<std::string,P1Constitution> p1_constitutions_;
+    std::map<std::string,P1Coalition> p1_coalitions_;
+    std::map<std::string,P1Institution> p1_institutions_;
+    std::map<std::int64_t,std::map<std::string,P1GovernmentChange>> p1_pending_;
+    // P4 party relationships are many-to-many; political headcount stays in
+    // P3 memberships and the national chamber still uses country_elections_.
+    std::map<std::string,P4Party> p4_parties_;
+    std::map<std::pair<std::string,std::string>,int> p4_affinities_;
+    std::map<std::string,P4Contest> p4_contests_;
+    std::map<std::pair<std::string,std::string>,
+             std::vector<std::string>> p4_nominations_;
+    std::map<std::pair<std::string,std::string>,P4PersonTerm> p4_person_terms_;
+    std::map<std::string,P4Result> p4_nonparliament_results_;
+    std::vector<P4Result> p4_history_; // immutable election audit
+    std::map<std::int64_t,std::vector<P4TermAmendment>> p4_amendments_;
+    std::map<std::int64_t,std::set<std::string>> p4_due_days_; // derived index
+    // P2 authoritative legal choices + amendments; historical originals stay
+    // readable and all current economic/POP/office effects remain downstream.
+    std::map<std::string,P2BaseLaw> p2_laws_;
+    std::map<std::tuple<std::string,std::string,std::string>,std::string> p2_active_base_;
+    std::map<std::string,P2Amendment> p2_amendments_;
+    std::set<std::string> p2_active_amendments_;
+    std::map<std::string,P2Bill> p2_bills_;
+    std::map<std::string,std::string> p2_upper_chambers_;
+    std::map<std::string,P2ChamberDecision> p2_chamber_decisions_;
+    std::map<std::string,P2GroupDemand> p2_group_demands_;
+    std::map<std::string,std::vector<P2NegotiatedAmendment>> p2_negotiated_;
+    std::set<std::string> p2_negotiation_watch_; // derived from submitted bills
+    std::vector<P2LawEvent> p2_history_;
+    std::map<std::int64_t,std::set<std::string>> p2_due_; // derived from P2 bills
     std::map<std::int64_t, std::vector<CabinetChange>> scheduled_cabinets_;
     std::map<std::string, Shipment> shipments_;
     std::set<std::string> tracked_goods_;
@@ -2953,6 +3748,22 @@ private:
 
     // Exact nonnegative fraction comparison using Euclid/continued fractions:
     // no 128-bit GNU extension, overflow or floating-point ties (MSVC friendly).
+    void p1_check_coalition(const P1Coalition&)const;
+    [[nodiscard]] static int p1_percent(People,People);
+    [[nodiscard]] static std::int32_t p3_fraction(People,People);
+    [[nodiscard]] static People p4_scaled(People,People,People);
+    void p4_rebuild_due_index();
+    void p4_record_elected_persons(const P4Result&);
+    void p5_guerrilla_rebuild_indexes();
+    static bool p2_valid_clause(const P2Clause&);
+    void p2_validate_clauses(
+        const std::string&,const std::vector<P2Clause>&)const;
+    void p2_validate_base(const P2BaseLaw&)const;
+    void p2_check_amendment(const P2Amendment&)const;
+    void p2_sync_country_rules(
+        const std::string&,const std::vector<P2ElectionTransition>&,
+        std::int64_t);
+    void p2_rebuild_due_index();
     static int compare_nonnegative_ratios(std::uint64_t a, std::uint64_t b,
                                           std::uint64_t c, std::uint64_t d) {
         ensure(b != 0 && d != 0, "zero election divisor");
@@ -3004,6 +3815,8 @@ private:
             const std::string& country) const {
         const auto it=country_elections_.find(country);
         if(it!=country_elections_.end())return it->second;
+        ensure(!p1_constitutions_.contains(country),
+               "P1 constitutional law needs the country's own election");
         // Legacy single-legislature fixtures retain their original meaning.
         // Once a modern country-specific election exists, other nations must
         // have their OWN election rather than reuse a neighbour's seats.
@@ -3188,3 +4001,12 @@ private:
     }
 };
 } // namespace vic25::phasec
+
+#include "vic25/phase_c_p1_impl.hpp"
+#include "vic25/phase_c_p4_impl.hpp"
+#include "vic25/phase_c_p4_personal_impl.hpp"
+#include "vic25/phase_c_p2_impl.hpp"
+#include "vic25/phase_c_p2_advanced_impl.hpp"
+#include "vic25/phase_c_p3_impl.hpp"
+#include "vic25/phase_c_p5_impl.hpp"
+#include "vic25/phase_c_p5_guerrilla_impl.hpp"

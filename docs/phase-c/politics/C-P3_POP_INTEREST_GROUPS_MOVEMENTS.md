@@ -1,6 +1,7 @@
 # VIC2.5 C-P3 — POP 정치성향·이익집단·정치운동
 
-- 상태: 설계 확정, 구현 전
+- 상태: 설계 확정 / 2026-11-08 실제 P3 POP 정치태도·이익집단 정치력·장기 운동 1차 C++ 실행 경로 구현 (빌드·CI 미검증, 전체 정치사회 모형 미완성).
+- 코드·불변식·한계: [P3+P5 연계 구현 기록](P3_P5_IMPLEMENTATION_2026-11-08.md).
 - 계약: `phase-c-politics/1.0`
 - 원본: PopulationSlice는 인원 수, PoliticalAttitudeLedger는 쟁점별 태도/분포, OrganizationLedger는 참여 관계. 회사/가계 자산은 E3 금융·소유권 원장.
 

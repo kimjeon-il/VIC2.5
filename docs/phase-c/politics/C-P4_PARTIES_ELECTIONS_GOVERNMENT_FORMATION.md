@@ -1,6 +1,7 @@
 # VIC2.5 C-P4 — 정당·선거·의회구성·정권교체
 
-- 상태: 설계 확정, 구현 전
+- 상태: 상세 설계 확정 / P4 정당·선거일정·국가/지역/국가원수 선거 부분 C++ 구현 (검증 전, 별도 개발 브랜치). 전체 정당·선거제도 구현 완료 아님.
+- 구현 경과: [P4 부분 구현 보고서](P4_PARTIES_ELECTIONS_IMPLEMENTATION_2026-11-07.md), [2026-11-08 개인별 선출직 임기·상원 선거 연계](P2_ADVANCED_POLITICS_2026-11-08.md).
 - 계약: `phase-c-politics/1.0`
 - 근거 자료: International IDEA의 Electoral System Design Database / Voter Turnout Database (제도 유형과 투표 통계 개념만 참조)
 

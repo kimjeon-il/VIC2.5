@@ -74,6 +74,96 @@ void fields(Archive& a,T& x) {
         V(holder_id);V(region_id);V(good_id);
     } else if constexpr(std::is_same_v<X,GovernmentState>){
         V(country);V(head_of_state);V(prime_minister);V(chamber_seats);V(quorum);V(revision);
+    } else if constexpr(std::is_same_v<X,P1Constitution>){
+        V(governance);V(power);V(legislature);V(legal_basis);
+    } else if constexpr(std::is_same_v<X,P1Coalition>){
+        V(ruling_groups);V(ruling_parties);V(caretaker);
+    } else if constexpr(std::is_same_v<X,P1GovernmentChange>){
+        V(country);V(new_head);V(new_prime);V(coalition);
+        V(legal_basis);V(replace_head);V(replace_prime);
+    } else if constexpr(std::is_same_v<X,P1Institution>){
+        V(country);V(public_institution_id);V(kind);V(level);
+    } else if constexpr(std::is_same_v<X,P3Stance>){
+        V(preference_ppm);V(importance_ppm);
+    } else if constexpr(std::is_same_v<X,P3Attitude>){
+        V(slice);V(radical_ppm);V(loyal_ppm);V(engagement_ppm);
+        V(observed_day);V(issues);
+    } else if constexpr(std::is_same_v<X,P3Group>){
+        V(country);V(id);V(leader_anchor);V(issue_domain);
+        V(preferred_choice);V(type);V(organization_ppm);
+        V(institutional_access_ppm);
+    } else if constexpr(std::is_same_v<X,P3Movement>){
+        V(id);V(country);V(issue_domain);V(desired_choice);
+        V(region);V(goal);V(groups);V(parties);
+        V(activism_ppm);V(radical_ppm);V(active);
+    } else if constexpr(std::is_same_v<X,P5CollectiveAction>){
+        V(id);V(movement);V(group);V(region);V(institution_id);
+        V(kind);V(slice);V(participants);V(strikers);V(day);
+    } else if constexpr(std::is_same_v<X,P5Crisis>){
+        V(id);V(country);V(movement);V(kind);V(stage);
+        V(pressure_days);V(calm_days);V(last_checked_day);
+        V(armed_day);V(settled_day);V(pledged_units);
+        V(contested_regions);V(verified_engagements);
+    } else if constexpr(std::is_same_v<X,P5ControlReconciliation>){
+        V(crisis_id);V(country);V(successor_head);V(verified_regions);
+    } else if constexpr(std::is_same_v<X,P5Settlement>){
+        V(id);V(crisis_id);V(legal_basis);V(successor_head);
+        V(new_sovereign);V(region);V(kind);V(day);
+    } else if constexpr(std::is_same_v<X,P5GuerrillaCampaign>){
+        V(id);V(country);V(movement);V(crisis_id);V(stage);
+        V(started_day);V(next_review_day);V(ended_day);
+        V(regions);V(units);V(verified_skirmishes);
+    } else if constexpr(std::is_same_v<X,P5GuerrillaIncident>){
+        V(id);V(campaign);V(region);V(irregular_unit);V(government_unit);
+        V(kind);V(day);V(ammunition_spent);V(access_disruption_ppm);
+    } else if constexpr(std::is_same_v<X,P5GuerrillaAccessEffect>){
+        V(incident_id);V(campaign);V(region);V(from_day);
+        V(through_day);V(penalty_ppm);
+    } else if constexpr(std::is_same_v<X,P5GuerrillaOutcome>){
+        V(campaign);V(legal_basis);V(kind);V(day);
+    } else if constexpr(std::is_same_v<X,P4Party>){
+        V(id);V(country);V(head_candidate);V(organization_ppm);
+        V(registered);V(active);
+    } else if constexpr(std::is_same_v<X,P4PersonTerm>){
+        V(contest_id);V(person_id);V(party_id);V(total_terms);
+        V(consecutive_terms);V(last_elected_day);V(incumbent);
+    } else if constexpr(std::is_same_v<X,P4Contest>){
+        V(id);V(country);V(jurisdiction);V(law_id);
+        V(office);V(method);V(term_mode);V(term_months);
+        V(turnout_ppm);V(seats);V(next_poll_day);V(regular_poll_day);
+        V(last_poll_day);V(dissolution_authorized);V(active);V(dissolved);
+    } else if constexpr(std::is_same_v<X,P4Result>){
+        V(contest_id);V(law_id);V(day);V(eligible);V(registered);
+        V(cast);V(invalid);V(valid);V(votes);V(seats);
+        V(winning_party);V(office_holder);V(early);
+    } else if constexpr(std::is_same_v<X,P4TermAmendment>){
+        V(contest_id);V(law_id);V(effective_day);V(next_poll_day);
+        V(term_months);V(applies_to_incumbent);V(term_mode);
+    } else if constexpr(std::is_same_v<X,P2Clause>){
+        V(id);V(target);V(kind);V(value);
+    } else if constexpr(std::is_same_v<X,P2BaseLaw>){
+        V(id);V(country);V(domain);V(scope);V(base_choice);V(legal_basis);
+        V(tier);V(clauses);
+    } else if constexpr(std::is_same_v<X,P2Amendment>){
+        V(id);V(law_id);V(legal_basis);V(exclusivity_group);V(clauses);
+    } else if constexpr(std::is_same_v<X,P2ElectionTransition>){
+        V(contest_id);V(mode);V(next_poll_day);
+    } else if constexpr(std::is_same_v<X,P2Bill>){
+        V(id);V(country);V(proposer);V(legal_basis);V(action);V(status);
+        V(proposed_base);V(proposed_amendment);V(target_id);V(transitions);
+        V(introduced_day);V(promulgated_day);V(effective_day);
+    } else if constexpr(std::is_same_v<X,P2LawEvent>){
+        V(bill_id);V(country);V(law_id);V(amendment_id);V(legal_basis);
+        V(action);V(effective_day);
+    } else if constexpr(std::is_same_v<X,P2GroupDemand>){
+        V(id);V(country);V(interest_group);V(law_domain);
+        V(amendment);V(min_population_support_ppm);
+    } else if constexpr(std::is_same_v<X,P2NegotiatedAmendment>){
+        V(bill_id);V(demand_id);V(group);V(amendment);
+        V(support_population);V(accepted_day);
+    } else if constexpr(std::is_same_v<X,P2ChamberDecision>){
+        V(bill_id);V(upper_contest_id);V(lower_poll_day);
+        V(upper_poll_day);V(lower_passed);V(upper_passed);
     } else if constexpr(std::is_same_v<X,CabinetChange>){
         V(country);V(new_head);V(new_prime_minister);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,TypedEntityId>){
@@ -334,6 +424,85 @@ struct SnapshotCodec {
             ar(std::string("VIC25_PHASEC_ESTATE_CLOSURES_1"));
             ar(w.completed_liquidations_);
         }
+        if(!w.p1_constitutions_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_GOVERNANCE_1"));
+            ar(w.p1_constitutions_);
+            ar(w.p1_coalitions_);
+            ar(w.p1_institutions_);
+            ar(w.p1_pending_);
+        }
+        if(!w.p4_parties_.empty()||!w.p4_contests_.empty()) {
+            ar(std::string("VIC25_PHASEC_P4_ELECTIONS_1"));
+            ar(w.p4_parties_);
+            ar(w.p4_affinities_);
+            ar(w.p4_contests_);
+            ar(w.p4_nonparliament_results_);
+            ar(w.p4_history_);
+            ar(w.p4_amendments_);
+        }
+        if(!w.p2_laws_.empty()||!w.p2_bills_.empty()) {
+            ar(std::string("VIC25_PHASEC_P2_LAWS_1"));
+            ar(w.p2_laws_);
+            ar(w.p2_active_base_);
+            ar(w.p2_amendments_);
+            ar(w.p2_active_amendments_);
+            ar(w.p2_bills_);
+            ar(w.p2_history_);
+        }
+        // Keep old P4/P2 schema signatures byte-identical. Extra contracts
+        // are optional trailers, never new writable population/seat ledgers.
+        if(!w.p4_nominations_.empty()||!w.p4_person_terms_.empty()) {
+            ar(std::string("VIC25_PHASEC_P4_PERSONAL_MANDATES_1"));
+            ar(w.p4_nominations_);
+            ar(w.p4_person_terms_);
+        }
+        if(!w.p2_upper_chambers_.empty()||
+           !w.p2_chamber_decisions_.empty()||
+           !w.p2_group_demands_.empty()||!w.p2_negotiated_.empty()) {
+            ar(std::string("VIC25_PHASEC_P2_POLITICAL_PROCEDURES_1"));
+            ar(w.p2_upper_chambers_);
+            ar(w.p2_chamber_decisions_);
+            ar(w.p2_group_demands_);
+            ar(w.p2_negotiated_);
+        }
+        if(!w.p3_groups_.empty()||!w.p3_attitudes_.empty()||
+           !w.p3_movements_.empty()) {
+            ar(std::string("VIC25_PHASEC_P3_POLITICS_1"));
+            ar(w.p3_attitudes_);
+            ar(w.p3_groups_);
+            ar(w.p3_movements_);
+            ar(w.p3_last_reaction_day_);
+        }
+        if(!w.p5_crises_.empty()||!w.p5_capitals_.empty()||
+           !w.p5_actions_.empty()||
+           !w.p5_settlements_.empty()||
+           !w.p5_scheduled_control_reconciliation_.empty()||
+           !w.p5_scheduled_daily_strikes_.empty()||
+           !w.p5_active_daily_strikes_.empty()) {
+            ar(std::string("VIC25_PHASEC_P5_UNREST_1"));
+            ar(w.p5_crises_);
+            ar(w.p5_capitals_);
+            ar(w.p5_actions_);
+            ar(w.p5_settlements_);
+            ar(w.p5_control_evidence_);
+            ar(w.p5_scheduled_control_reconciliation_);
+            ar(w.p5_scheduled_daily_strikes_);
+            ar(w.p5_active_daily_strikes_);
+        }
+        if(!w.p5_guerrilla_campaigns_.empty()||
+           !w.p5_guerrilla_incidents_.empty()||
+           !w.p5_guerrilla_outcomes_.empty()||
+           !w.p5_guerrilla_effect_due_.empty()||
+           !w.p5_guerrilla_effect_active_.empty()) {
+            ar(std::string("VIC25_PHASEC_P5_GUERRILLA_1"));
+            ar(w.p5_guerrilla_campaigns_);
+            ar(w.p5_guerrilla_incidents_);
+            ar(w.p5_guerrilla_outcomes_);
+            ar(w.p5_guerrilla_effect_due_);
+            ar(w.p5_guerrilla_effect_active_);
+            // The active regional penalty, the journal's incident identity
+            // set and 7-day due index are all reconstructed on load.
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -343,7 +512,9 @@ struct SnapshotCodec {
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
-             seen_armies=false,seen_estates=false;
+             seen_armies=false,seen_estates=false,seen_p1=false,
+             seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
+             seen_p3=false,seen_p5=false,seen_guerrilla=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -409,11 +580,128 @@ struct SnapshotCodec {
                 ar(w.completed_liquidations_);
                 if(w.completed_liquidations_.size()>1'000'000)
                     throw std::runtime_error("oversized closed estate records");
+            } else if(extension=="VIC25_PHASEC_P1_GOVERNANCE_1"&&!seen_p1) {
+                seen_p1=true;
+                ar(w.p1_constitutions_);
+                ar(w.p1_coalitions_);
+                ar(w.p1_institutions_);
+                ar(w.p1_pending_);
+                if(w.p1_constitutions_.empty()||
+                   w.p1_constitutions_.size()>100'000||
+                   w.p1_coalitions_.size()!=w.p1_constitutions_.size()||
+                   w.p1_institutions_.size()>1'000'000||
+                   w.p1_pending_.size()>1'000'000)
+                    throw std::runtime_error("invalid P1 constitutional extension");
+            } else if(extension=="VIC25_PHASEC_P4_ELECTIONS_1"&&!seen_p4) {
+                seen_p4=true;
+                ar(w.p4_parties_);
+                ar(w.p4_affinities_);
+                ar(w.p4_contests_);
+                ar(w.p4_nonparliament_results_);
+                ar(w.p4_history_);
+                ar(w.p4_amendments_);
+                if(w.p4_parties_.size()>100'000||
+                   w.p4_affinities_.size()>2'000'000||
+                   w.p4_contests_.size()>100'000||
+                   w.p4_nonparliament_results_.size()>100'000||
+                   w.p4_history_.size()>1'000'000||
+                   w.p4_amendments_.size()>1'000'000)
+                    throw std::runtime_error("oversized P4 election extension");
+                w.p4_rebuild_due_index();
+            } else if(extension=="VIC25_PHASEC_P2_LAWS_1"&&!seen_p2) {
+                seen_p2=true;
+                ar(w.p2_laws_);
+                ar(w.p2_active_base_);
+                ar(w.p2_amendments_);
+                ar(w.p2_active_amendments_);
+                ar(w.p2_bills_);
+                ar(w.p2_history_);
+                if(w.p2_laws_.size()>100'000||
+                   w.p2_active_base_.size()>100'000||
+                   w.p2_amendments_.size()>1'000'000||
+                   w.p2_active_amendments_.size()>1'000'000||
+                   w.p2_bills_.size()>1'000'000||
+                   w.p2_history_.size()>1'000'000)
+                    throw std::runtime_error("oversized P2 legislation extension");
+                w.p2_rebuild_due_index();
+            } else if(extension=="VIC25_PHASEC_P4_PERSONAL_MANDATES_1"&&
+                      !seen_people) {
+                seen_people=true;
+                ar(w.p4_nominations_);
+                ar(w.p4_person_terms_);
+                if(w.p4_nominations_.size()>1'000'000||
+                   w.p4_person_terms_.size()>5'000'000)
+                    throw std::runtime_error("oversized P4 named mandate records");
+            } else if(extension=="VIC25_PHASEC_P2_POLITICAL_PROCEDURES_1"&&
+                      !seen_procedures) {
+                seen_procedures=true;
+                ar(w.p2_upper_chambers_);
+                ar(w.p2_chamber_decisions_);
+                ar(w.p2_group_demands_);
+                ar(w.p2_negotiated_);
+                if(w.p2_upper_chambers_.size()>100'000||
+                   w.p2_chamber_decisions_.size()>1'000'000||
+                   w.p2_group_demands_.size()>1'000'000||
+                   w.p2_negotiated_.size()>1'000'000)
+                    throw std::runtime_error("oversized P2 parliamentary record");
+            } else if(extension=="VIC25_PHASEC_P3_POLITICS_1"&&!seen_p3) {
+                seen_p3=true;
+                ar(w.p3_attitudes_);
+                ar(w.p3_groups_);
+                ar(w.p3_movements_);
+                ar(w.p3_last_reaction_day_);
+                if(w.p3_attitudes_.size()>5'000'000||
+                   w.p3_groups_.size()>500'000||
+                   w.p3_movements_.size()>100'000)
+                    throw std::runtime_error("oversized POP political state");
+            } else if(extension=="VIC25_PHASEC_P5_UNREST_1"&&!seen_p5) {
+                seen_p5=true;
+                ar(w.p5_crises_);
+                ar(w.p5_capitals_);
+                ar(w.p5_actions_);
+                ar(w.p5_settlements_);
+                ar(w.p5_control_evidence_);
+                ar(w.p5_scheduled_control_reconciliation_);
+                ar(w.p5_scheduled_daily_strikes_);
+                ar(w.p5_active_daily_strikes_);
+                w.p5_action_ids_.clear();
+                for(const auto& event:w.p5_actions_)
+                    if(!w.p5_action_ids_.insert(event.id).second)
+                        throw std::runtime_error(
+                            "duplicate stored P5 collective action identity");
+                if(w.p5_crises_.size()>100'000||
+                   w.p5_capitals_.size()>100'000||
+                   w.p5_actions_.size()>1'000'000||
+                   w.p5_settlements_.size()>1'000'000||
+                   w.p5_control_evidence_.size()>100'000||
+                   w.p5_scheduled_control_reconciliation_.size()>1'000'000||
+                   w.p5_scheduled_daily_strikes_.size()>1'000'000||
+                   w.p5_active_daily_strikes_.size()>5'000'000)
+                    throw std::runtime_error("oversized P5 real civic/crisis state");
+            } else if(extension=="VIC25_PHASEC_P5_GUERRILLA_1"&&
+                      !seen_guerrilla) {
+                seen_guerrilla=true;
+                ar(w.p5_guerrilla_campaigns_);
+                ar(w.p5_guerrilla_incidents_);
+                ar(w.p5_guerrilla_outcomes_);
+                ar(w.p5_guerrilla_effect_due_);
+                ar(w.p5_guerrilla_effect_active_);
+                if(w.p5_guerrilla_campaigns_.size()>100'000||
+                   w.p5_guerrilla_incidents_.size()>1'000'000||
+                   w.p5_guerrilla_outcomes_.size()>1'000'000||
+                   w.p5_guerrilla_effect_due_.size()>1'000'000||
+                   w.p5_guerrilla_effect_active_.size()>100'000)
+                    throw std::runtime_error(
+                        "oversized P5-G regional guerrilla extension");
+                w.p5_guerrilla_rebuild_indexes();
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
         }
         if(w.stage_!=-1)throw std::runtime_error("staged month cannot be loaded");
+        // Negotiation's derived due index depends on the optional chamber
+        // decisions trailer, which may appear AFTER the P2 base-law trailer.
+        if(seen_p2)w.p2_rebuild_due_index();
         w.validate();
         return w;
     }

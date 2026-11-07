@@ -356,3 +356,44 @@ if(BUILD_TESTING)
     target_link_libraries(vic25_p0_daily_longrun PRIVATE vic25_core)
     add_test(NAME vic25_p0_daily_longrun COMMAND vic25_p0_daily_longrun)
 endif()
+
+# P4 party-system and institution-specific election schedule regressions.
+if(BUILD_TESTING)
+    add_executable(vic25_p4_governance_tests tests/test_p4_governance.cpp)
+    target_link_libraries(vic25_p4_governance_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p4_governance_tests COMMAND vic25_p4_governance_tests)
+endif()
+
+# P2 legislative rules, statutory amendments and legal elected-office terms.
+# Focused test executable is available; no CI/tests are run by this change.
+if(BUILD_TESTING)
+    add_executable(vic25_p2_governance_tests tests/test_p2_governance.cpp)
+    target_link_libraries(vic25_p2_governance_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p2_governance_tests COMMAND vic25_p2_governance_tests)
+endif()
+
+# P2 remaining political-system integration: actual bicameral votes,
+# interest-group amendment bargaining, named-person elected mandates and
+# law-constrained economy/service/conscription/trade actions.
+if(BUILD_TESTING)
+    add_executable(vic25_p2_advanced_tests tests/test_p2_advanced.cpp)
+    target_link_libraries(vic25_p2_advanced_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p2_advanced_tests COMMAND vic25_p2_advanced_tests)
+endif()
+
+# P3 and P5 opt-in daily politics: POP attitudes, institutional interest-group
+# clout, movements, actual one-day strikes, unrest and army-backed civil cases.
+if(BUILD_TESTING)
+    add_executable(vic25_p3_p5_politics_tests tests/test_p3_p5_politics.cpp)
+    target_link_libraries(vic25_p3_p5_politics_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p3_p5_politics_tests COMMAND vic25_p3_p5_politics_tests)
+endif()
+
+# P5-G regional guerrilla journal and C-backed irregular conflict adapter.
+# Scenarios cover real military/population/stock, temporary market access,
+# low-intensity skirmishes, conventional fronts and save/replay.
+if(BUILD_TESTING)
+    add_executable(vic25_p5_guerrilla_tests tests/test_p5_guerrilla.cpp)
+    target_link_libraries(vic25_p5_guerrilla_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p5_guerrilla_tests COMMAND vic25_p5_guerrilla_tests)
+endif()
