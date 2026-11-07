@@ -371,3 +371,12 @@ if(BUILD_TESTING)
     target_link_libraries(vic25_p2_governance_tests PRIVATE vic25_core)
     add_test(NAME vic25_p2_governance_tests COMMAND vic25_p2_governance_tests)
 endif()
+
+# P2 remaining political-system integration: actual bicameral votes,
+# interest-group amendment bargaining, named-person elected mandates and
+# law-constrained economy/service/conscription/trade actions.
+if(BUILD_TESTING)
+    add_executable(vic25_p2_advanced_tests tests/test_p2_advanced.cpp)
+    target_link_libraries(vic25_p2_advanced_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p2_advanced_tests COMMAND vic25_p2_advanced_tests)
+endif()
