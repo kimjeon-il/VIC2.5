@@ -54,6 +54,14 @@ inline void IntegratedWorld::p4_seed_contest(P4Contest contest) {
                (contest.jurisdiction.empty()||contest.jurisdiction=="national")&&
                contest.seats==governments_.at(contest.country).chamber_seats,
                "P4 national parliamentary contest must match real chamber");
+        // Current P1 is unicameral. Do not let two contests overwrite one
+        // authoritative C legislature; bicameral support needs P1/P4 expansion.
+        for(const auto& [id,existing]:p4_contests_) {
+            (void)id;
+            ensure(existing.country!=contest.country||
+                   existing.office!=P4Office::legislature,
+                   "P4 duplicate national chamber without bicameral authority");
+        }
     } else if(contest.office==P4Office::local) {
         ensure(sovereignty_.contains(contest.jurisdiction)&&
                sovereignty_.at(contest.jurisdiction)==contest.country,
