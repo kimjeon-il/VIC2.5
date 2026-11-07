@@ -18,7 +18,9 @@ enum class P2ClauseKind : std::uint8_t {
     voting_age_years, income_tax_min_ppm, income_tax_max_ppm,
     public_healthcare_right, conscription_authorized,
     minimum_monthly_contract_wage, public_institution_level,
-    maximum_import_tariff_ppm
+    maximum_import_tariff_ppm,
+    female_suffrage_allowed, political_association_allowed,
+    peaceful_strike_allowed
 };
 enum class P2BillAction : std::uint8_t {
     enact_or_replace_base, attach_amendment,
