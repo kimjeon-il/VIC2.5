@@ -473,6 +473,7 @@ public:
                 gh.phase_c().phase_time_apply_p1_government(today);
                 gh.phase_c().phase_time_apply_p4_amendments(today);
                 gh.phase_c().phase_time_apply_p2(today);
+                gh.enforce_p2_tariff_ceiling();
             });
         // P0 domain decisions run on the real calendar day, in the same
         // C/D/E/G/H transaction as scheduled commands and POP dynamics.
