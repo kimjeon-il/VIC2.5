@@ -173,7 +173,7 @@ inline P3MovementView IntegratedWorld::p3_movement_view(
     const auto& movement=p3_movements_.at(id);
     P3MovementView view{id,movement.country};
     view.activism_ppm=movement.activism_ppm;
-    view.radicalism_ppm=movement.radical_ppm;
+    view.radical_ppm=movement.radical_ppm;
     People population=0;
     std::map<Id,People> support;
     for(const auto& [slice,row]:people_.slices()) {
@@ -229,7 +229,7 @@ inline P3MovementView IntegratedWorld::p3_movement_view(
         }
     // Persistent organizational ideology defines a floor, not a fixed
     // national radicalism tag. Observed POP hardship can exceed that floor.
-    view.radicalism_ppm=std::max(movement.radical_ppm,
+    view.radical_ppm=std::max(movement.radical_ppm,
         static_cast<std::int32_t>(
             std::clamp<std::int64_t>(observed_radical,0,1'000'000)));
     view.activism_ppm=std::max(movement.activism_ppm,
