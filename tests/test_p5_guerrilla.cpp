@@ -266,13 +266,63 @@ static void conventional_escalation_and_regional_return_share_units() {
          "P5-G ceasefire must not destroy living troops or physical equipment");
 }
 
+static void enacted_reform_ends_campaign_with_actual_P2_law() {
+    Scenario fixture;
+    auto world=daily::World::adopt(std::move(fixture.gh),705);
+    phasegh::World::Plan pass;
+    pass[9].push_back([id=fixture.civilians](phasegh::Stage& gh) {
+        auto& core=gh.phase_c();
+        begin(gh,id);
+        // A real, legally eligible national electorate and parliamentary
+        // vote are required; no abstract journal 'success' flag changes law.
+        core.hold_country_election("A",100,0,{{"REFORM",100}});
+        P2Bill law;
+        law.id="REAL-REFORM-BILL";
+        law.country="A";
+        law.proposer="PRIME";
+        law.legal_basis="statute:adopt-regional-reform";
+        law.action=P2BillAction::enact_or_replace_base;
+        law.effective_day=d({2000,1,3});
+        law.proposed_base.id="REGIONAL-REFORM-ACT";
+        law.proposed_base.country="A";
+        law.proposed_base.domain="regional_reform";
+        law.proposed_base.scope="national";
+        law.proposed_base.base_choice="adopted";
+        law.proposed_base.legal_basis="statute:adopt-regional-reform";
+        core.p2_submit_bill(law,d({2000,1,1}));
+        core.p2_approve_bill(law.id,{"REFORM"});
+        core.p2_promulgate_bill(law.id,"HEAD",d({2000,1,1}));
+    });
+    world.advance_day(pass); // Jan1, bill is promulgated, not effective
+    need(c(world).p5_guerrilla_campaigns().at("G").stage==
+             P5GuerrillaStage::active&&
+         !c(world).p2_is_active_base("REGIONAL-REFORM-ACT"),
+         "P5-G must not terminate from a proposed but ineffective reform");
+    world.advance_day(); // Jan2, original law still applies
+    phasegh::World::Plan peace;
+    peace[9].push_back([](phasegh::Stage& gh){
+        gh.phase_c().p5_guerrilla_end({
+            "G","REGIONAL-REFORM-ACT",
+            P5GuerrillaResolution::enacted_reform,d({2000,1,3})});
+    });
+    world.advance_day(peace); // Jan3: real P2 effective at Stage0
+    need(c(world).p2_is_active_base("REGIONAL-REFORM-ACT")&&
+         c(world).p5_guerrilla_campaigns().at("G").stage==
+             P5GuerrillaStage::resolved&&
+         !c(world).p3_movements().at("MOV").active&&
+         c(world).active_strength("IRREGULAR")==5&&
+         c(world).sovereignty("R")=="A",
+         "P5-G peace must follow enacted law without silently deleting real people");
+}
+
 int main() {
     try {
         physical_unit_and_regional_support_are_mandatory();
         expenditure_real_market_access_and_checkpoint_replay();
         local_skirmish_uses_real_existing_armed_POP();
         conventional_escalation_and_regional_return_share_units();
-        std::cout<<"P5-G regional guerrilla journal: four scenarios PASSED\n";
+        enacted_reform_ends_campaign_with_actual_P2_law();
+        std::cout<<"P5-G regional guerrilla journal: five scenarios PASSED\n";
         return 0;
     } catch(const std::exception& ex) {
         std::cerr<<"P5-G REGRESSION FAILED: "<<ex.what()<<"\n";
