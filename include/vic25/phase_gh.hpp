@@ -1375,9 +1375,10 @@ inline void Stage::execute_autonomous_trade() {
                     "G_ERR_FREIGHT_ACCOUNTING_MISMATCH");
         }
         if(order.duty>0) {
-            core.phase_g_pay_customs(order.buyer,order.buyer_country,order.duty);
+            const auto& treasury=core.customs_revenue_wallet(order.buyer_country);
+            core.phase_g_pay_customs(order.buyer,treasury,order.duty);
             trade_.customs.push_back({order.execution_id,order.buyer_country,
-                 order.buyer_country,order.good,"H:effective-domestic-policy",
+                 treasury,order.good,"H:effective-domestic-policy",
                  core.month(),goods_cost,order.duty,order.duty,order.quantity});
         }
         if(!order.contract_id.empty()) {
