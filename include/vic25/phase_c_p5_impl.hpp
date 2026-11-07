@@ -190,8 +190,8 @@ inline void IntegratedWorld::p5_perform_action(P5CollectiveAction action) {
            action.participants>=0&&action.strikers>=0&&
            action.strikers<=action.participants,
            "P5 action lacks a real movement, timestamp, or participants");
-    for(const auto& prior:p5_actions_)
-        ensure(prior.id!=action.id,"P5 duplicate collective political action");
+    ensure(!p5_action_ids_.contains(action.id),
+           "P5 duplicate collective political action");
     const auto& movement=p3_movements_.at(action.movement);
     ensure(movement.active,"P5 inactive movement cannot launch fresh action");
     if(action.kind==P5ActionKind::policing) {
@@ -281,7 +281,9 @@ inline void IntegratedWorld::p5_perform_action(P5CollectiveAction action) {
             participation_this_month_[action.slice]+=action.participants;
         }
     }
+    const auto stable_id=action.id;
     p5_actions_.push_back(std::move(action));
+    p5_action_ids_.insert(stable_id);
     events_.push_back("p5-actual-political-collective-action");
 }
 
