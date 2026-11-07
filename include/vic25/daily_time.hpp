@@ -324,8 +324,11 @@ public:
             [&](const auto& p){return !p.second.arrived&&p.second.arrival==day_;});
         const bool treaty_due=engine_.has_due_daily_treaty(day_);
         const bool construction_due=engine_.has_ready_daily_commission();
-        if(day_commit_==std::numeric_limits<std::uint64_t>::max())
+        if(day_commit_==std::numeric_limits<std::uint64_t>::max() ||
+           engine_.commit_id()==std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("TIME_ERR_COMMIT_COUNTER");
+        require(engine_.month()==legacy_month(current),
+                "TIME_ERR_GAME_DATE_OUT_OF_SYNC");
         const bool native_actions=std::any_of(native_day_plan.begin(),native_day_plan.end(),
             [](const auto& row){return !row.empty();});
         if(commands.empty()&&!close&&!first_calendar_day&&
@@ -346,7 +349,8 @@ public:
                     return stage_of(a.kind)<stage_of(b.kind);
                 return a.id<b.id;
             });
-        auto candidate=engine_;
+        // Each owner already stages its own ledger transaction. Avoid a
+        // redundant complete world copy at the daily calendar boundary.
         phasegh::World::Plan real_actions;
         for(auto& [id,c]:next_cargo) {
             if(c.arrived||c.arrival!=day_)continue;
@@ -446,21 +450,19 @@ public:
         });
         // One atomic C/D/E/G/H commit for native events AND calendar
         // rollover. No second mutable month-close pass or event replay.
-        candidate.advance_daily(real_actions,day_,first_calendar_day,
-                                current.day,days_in_month(current.year,current.month),
-                                close);
-        require(candidate.month()==legacy_month(next),
-                "TIME_ERR_MONTH_CLOSE_NOT_ALIGNED");
-        candidate.validate();
+        const auto next_c_commit=engine_.commit_id()+1;
+        // Prepare journal allocations before the domain transaction commits.
         for(const auto& command:ordered)
             next_journal.push_back({day_,command.id,command.kind,
-                                     candidate.commit_id()});
-        static_assert(std::is_nothrow_move_assignable_v<phasegh::World>);
+                                    next_c_commit});
         static_assert(std::is_nothrow_move_assignable_v<
                       std::map<DayIndex,std::vector<Command>>>);
         static_assert(std::is_nothrow_move_assignable_v<
                       std::map<std::string,DailyCargo>>);
-        engine_=std::move(candidate);
+        static_assert(std::is_nothrow_move_assignable_v<std::vector<Entry>>);
+        engine_.advance_daily(real_actions,day_,first_calendar_day,
+                              current.day,days_in_month(current.year,current.month),
+                              close);
         scheduled_=std::move(next_scheduled);
         journal_=std::move(next_journal);
         cargo_=std::move(next_cargo);
