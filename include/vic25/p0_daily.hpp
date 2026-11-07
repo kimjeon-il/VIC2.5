@@ -236,6 +236,7 @@ struct Policies {
     std::vector<LiquidationStockBid> liquidation_stock_bids;
     std::vector<LiquidationFactoryBid> liquidation_factory_bids;
     bool retire_bank_debt_after_wages{true};
+    bool allow_market_liquidation_of_real_stock{true};
     std::vector<NationalBudgetEnvelope> national_budget_envelopes;
     std::vector<BondBuyerOrder> bond_buyer_orders;
 
@@ -1567,6 +1568,42 @@ public:
             plan[7].push_back([bid](phasegh::Stage& gh) {
                 (void)gh.phase_d().liquidate_commissioned_factory(
                     bid.site,bid.buyer,bid.actual_bid_price);
+            });
+        // Operating businesses may buy an insolvent supplier's existing
+        // merchandise only to fill their own observed physical stock target,
+        // at the true current regional price and with surplus actual cash.
+        if(decisions.allow_market_liquidation_of_real_stock)
+            plan[7].push_back([](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto index=c.market_seller_index();
+                for(const auto& [key,sellers]:index) {
+                    const auto& [region,good]=key;
+                    if(!c.has_market(region,good))continue;
+                    const auto& quote=c.market(region,good);
+                    if(quote.price<=0||quote.target_stock<=0)continue;
+                    for(const auto& insolvent:sellers) {
+                        if(!c.firm_bankrupt(insolvent))continue;
+                        for(const auto& [id,site]:c.facilities()) {
+                            (void)id;
+                            const auto& buyer=site.owner;
+                            if(site.region!=region||buyer==insolvent||
+                               c.firm_bankrupt(buyer))continue;
+                            const Quantity current=c.stock(buyer,region,good);
+                            if(current>=quote.target_stock)continue;
+                            const Money free=c.phase_d_cash_available(buyer);
+                            const Quantity affordable=free>0?
+                                free/(4*quote.price):0;
+                            const Quantity qty=std::min({
+                                quote.target_stock-current,affordable,
+                                c.phase_d_material_available(
+                                    insolvent,region,good)});
+                            if(qty>0)
+                                (void)c.sell_bankrupt_inventory(
+                                    insolvent,buyer,region,good,qty,
+                                    quote.price);
+                        }
+                    }
+                }
             });
         // Outstanding wages take precedence over unsecured bank principal.
         // Credits backed by G are retired through their actual facility first,
