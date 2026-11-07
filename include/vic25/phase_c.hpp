@@ -2790,6 +2790,12 @@ public:
                 staged.people_.finish_month();
                 staged.people_.release_ineligible();
             }
+            if(n==10&&(!staged.p3_groups_.empty()||
+                       !staged.p3_attitudes_.empty()||
+                       !staged.p3_movements_.empty()||
+                       !staged.p5_scheduled_daily_strikes_.empty()||
+                       !staged.p5_active_daily_strikes_.empty()))
+                staged.p3_reconcile_population();
             if(n==11&&final_calendar_day) {
                 staged.election_this_month_=false;
             }
@@ -2846,6 +2852,12 @@ public:
             if (n == 11) {
                 stage.reprice_markets();
             }
+            if(n==10&&(!stage.p3_groups_.empty()||
+                       !stage.p3_attitudes_.empty()||
+                       !stage.p3_movements_.empty()||
+                       !stage.p5_scheduled_daily_strikes_.empty()||
+                       !stage.p5_active_daily_strikes_.empty()))
+                stage.p3_reconcile_population();
             stage.validate();
             if (n == 11) {
                 stage.resources_.clear_month();
