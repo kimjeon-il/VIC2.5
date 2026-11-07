@@ -7,7 +7,7 @@ namespace vic25::phasec {
 inline bool IntegratedWorld::p2_valid_clause(const P2Clause& c) {
     if(c.id.empty()||c.target.empty()||
        static_cast<unsigned>(c.kind)>
-           static_cast<unsigned>(P2ClauseKind::maximum_import_tariff_ppm))
+           static_cast<unsigned>(P2ClauseKind::peaceful_strike_allowed))
         return false;
     switch(c.kind) {
       case P2ClauseKind::term_months:
@@ -19,6 +19,9 @@ inline bool IntegratedWorld::p2_valid_clause(const P2Clause& c) {
       case P2ClauseKind::dissolution_authorized:
       case P2ClauseKind::public_healthcare_right:
       case P2ClauseKind::conscription_authorized:
+      case P2ClauseKind::female_suffrage_allowed:
+      case P2ClauseKind::political_association_allowed:
+      case P2ClauseKind::peaceful_strike_allowed:
         return c.value==0||c.value==1;
       case P2ClauseKind::public_institution_level:
         return c.value>=0&&c.value<=5;
@@ -50,7 +53,10 @@ inline void IntegratedWorld::p2_validate_clauses(
            c.kind==P2ClauseKind::public_healthcare_right||
            c.kind==P2ClauseKind::conscription_authorized||
            c.kind==P2ClauseKind::minimum_monthly_contract_wage||
-           c.kind==P2ClauseKind::maximum_import_tariff_ppm) {
+           c.kind==P2ClauseKind::maximum_import_tariff_ppm||
+           c.kind==P2ClauseKind::female_suffrage_allowed||
+           c.kind==P2ClauseKind::political_association_allowed||
+           c.kind==P2ClauseKind::peaceful_strike_allowed) {
             ensure(c.target==country,
                    "P2 sovereign economic, civil or military rule needs its country");
         } else if(c.kind==P2ClauseKind::public_institution_level) {
