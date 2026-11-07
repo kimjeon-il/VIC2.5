@@ -307,6 +307,23 @@ struct Policies {
     }
 };
 
+// Contract wage is an economic cost even when payroll is scheduled outside
+// the manufacture command. Conservative highest rate prevents firms from
+// treating unpaid or omitted payroll as zero-cost labor.
+inline Money actual_daily_worker_wage(const phasec::IntegratedWorld& c,
+                                      const std::string& employer,
+                                      int day,int days) {
+    Money highest=0;
+    for(const auto& [slice,job]:c.people().jobs()) {
+        (void)slice;
+        if(job.employer!=employer||job.count<=0||
+           job.wage_per_month<=0)continue;
+        highest=std::max(highest,
+                         daily_increment(job.wage_per_month,day,days));
+    }
+    return highest;
+}
+
 inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
     // Count actual employment contracts in this region, NOT effective workers:
     // a strike is lost production for a day, not a vacant permanent job.
@@ -363,10 +380,13 @@ inline Quantity available_production(const phased::Stage& d,
         cost_per_batch=phaseb::add_checked(cost_per_batch,times(input.per_unit,iq.price));
     }
     const Money revenue=times(primary.per_unit,quote.price);
-    // A profitable recipe must cover the actual P0 payroll as well as inputs.
-    if(policy.wage_per_worker_per_day>0)
+    // Count explicitly scripted OR real contractual payroll, never both.
+    const Money per_worker=policy.wage_per_worker_per_day>0?
+        policy.wage_per_worker_per_day:
+        actual_daily_worker_wage(c,f.owner,day,days);
+    if(per_worker>0)
         cost_per_batch=phaseb::add_checked(cost_per_batch,
-                 times(r.workers_per_batch,policy.wage_per_worker_per_day));
+                 times(r.workers_per_batch,per_worker));
     if(revenue<=cost_per_batch)return 0;
     const Quantity stock_shortfall=policy.target_inventory-c.stock(f.owner,f.region,primary.good);
     Quantity batches=stock_shortfall/primary.per_unit+
@@ -668,7 +688,11 @@ public:
                 if(salary_shortfall->contains(src.owner))return;
                 const auto& facility=c.facility(src.site);
                 const auto& quote=c.market(src.region,src.good);
-                if(quote.price<=policy.wage_per_unit ||
+                const Money wage_per_unit=policy.wage_per_unit>0?
+                    policy.wage_per_unit:
+                    times(actual_daily_worker_wage(c,src.owner,date.day,dim),
+                          src.workers_per_unit);
+                if(quote.price<=wage_per_unit ||
                    c.stock(src.owner,src.region,src.good)>=policy.target_inventory)
                     return;
                 if(src.monthly_capacity<src.produced_this_month||
