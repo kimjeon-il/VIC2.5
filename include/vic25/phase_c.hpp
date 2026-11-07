@@ -43,6 +43,7 @@ struct CountryFiscalView {
     Money cash{}, bank_debt{};
     int income_tax_ppm{};
     Money bond_principal{},unpaid_coupons{};
+    Money realized_revenue{},realized_expenditure{};
 };
 struct WageArrearsClaim {
     std::string id,employer,worker,treasury,country;
@@ -682,6 +683,8 @@ public:
         service.provided+=patients;
         events_.push_back("actual-public-medical-service");
     }
+    [[nodiscard]] const std::map<std::string,PublicInstitution>&
+            public_institutions()const{return public_institutions_;}
     [[nodiscard]] People public_services_rendered(const std::string& id) const {
         return public_institutions_.at(id).provided;
     }
@@ -1428,7 +1431,9 @@ public:
                 due=phaseb::add_checked(due,amount);
         return {country,treasury,cash(treasury),
                 outstanding_loan(treasury),income_tax_ppm(country),
-                sovereign_bond_principal(country),due};
+                sovereign_bond_principal(country),due,
+                -money_.balance(account(treasury,"revenue")),
+                money_.balance(account(treasury,"expense"))};
     }
     void spend_country_budget(const std::string& country,
                               const std::string& recipient,Money amount) {
@@ -1730,6 +1735,8 @@ public:
             }
             money_.post({unique("wage-claim-paid"),
                          "settlement of previously earned wages",journal});
+            paid_staff_this_month_[claim.employer]=phaseb::add_checked(
+                paid_staff_this_month_[claim.employer],paid);
             claim.outstanding-=paid;
             events_.push_back("earned-wage-arrears-paid");
             if(claim.outstanding==0)it=wage_arrears_.erase(it);
