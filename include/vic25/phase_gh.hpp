@@ -1021,6 +1021,32 @@ public:
         ++diplomacy_.revision;
         return true;
     }
+    void march_army_for_front(const std::string& war_id,
+                              const std::string& unit,
+                              const std::string& destination) {
+        at(10);
+        const auto& war=diplomacy_.wars.at(war_id);
+        const auto& c=phase_c();
+        const auto& deployment=c.army_deployments().at(unit);
+        require(war.active&&!war.armistice &&
+                (deployment.country==war.attacker||
+                 deployment.country==war.defender) &&
+                c.active_strength(unit)>0,
+                "H_ERR_UNAUTHORIZED_ARMY_WAR_MARCH");
+        const auto& geo=spatial_.spatial();
+        const auto contested=geo.provinces.at(
+            diplomacy_.crises.at(war.crisis).province).region;
+        // A foreign territory can be entered only as the documented front
+        // of this active war. Other moves stay inside own controlled lands.
+        require(destination==contested ||
+                c.military_control(destination)==deployment.country,
+                "H_ERR_UNLAWFUL_FOREIGN_MILITARY_MOVE");
+        const auto ammunition=std::min<Quantity>(
+            c.active_strength(unit),
+            c.stock(unit,deployment.region,"ammunition"));
+        require(ammunition>0,"H_ERR_ARMY_UNSUPPLIED_MARCH");
+        spatial_.march_unit_adjacent(unit,destination,ammunition);
+    }
     void record_actual_war_engagement(const std::string& id) {
         at(10);
         auto& war=diplomacy_.wars.at(id);
