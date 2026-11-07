@@ -494,6 +494,24 @@ inline void IntegratedWorld::p5_settle(P5Settlement settlement) {
         }
         ensure(actual_law,
                "P5 concession must be backed by a law that actually took effect");
+        // A genuine peace agreement can return formerly contested military
+        // command to the same sovereign government. Only regions whose real
+        // C control is STILL held by this rebel faction are eligible.
+        if(crisis.stage==P5CrisisStage::armed_conflict&&
+           p5_control_evidence_.contains(crisis.id)) {
+            std::vector<std::string> recovered;
+            for(const auto& region:p5_control_evidence_.at(crisis.id))
+                if(sovereignty_.contains(region)&&
+                   sovereignty_.at(region)==crisis.country&&
+                   military_control_.at(region)=="P5:"+crisis.id)
+                    recovered.push_back(region);
+            if(!recovered.empty())
+                p5_scheduled_control_reconciliation_[settlement.day+1].push_back({
+                    crisis.id,crisis.country,
+                    governments_.at(crisis.country).head_of_state,
+                    std::move(recovered)
+                });
+        }
     } else if(settlement.kind==P5SettlementKind::crisis_recedes) {
         ensure(crisis.stage==P5CrisisStage::deescalated||
                p5_risk(crisis.movement).pressure_ppm<250'000,
