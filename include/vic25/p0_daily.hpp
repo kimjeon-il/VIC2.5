@@ -415,6 +415,8 @@ class DailyGame {
 public:
     DailyGame(daily::World world,Policies policies)
       :world_(std::move(world)),policies_(std::move(policies)) {policies_.validate();}
+    explicit DailyGame(daily::World world)
+      :DailyGame(std::move(world),Policies{}){}
     [[nodiscard]] const daily::World& world()const {return world_;}
     [[nodiscard]] const Policies& policies()const {return policies_;}
     // Campaign/save data owns the policy definitions; base day snapshots remain
@@ -422,8 +424,46 @@ public:
     daily::DayReport advance_day(const phasegh::World::Plan& additional_today={}) {
         const auto date=world_.date();
         const int dim=daily::days_in_month(date.year,date.month);
+        // Scenario policies are preferences, not a required exhaustive list
+        // of operating firms. Derive conservative supply plans from the live
+        // C/D ledger for sites that have no explicitly managed policy.
+        Policies decisions=policies_;
+        const auto& game_c=world_.engine().base().core().core();
+        const auto& industry=world_.engine().base().core().state();
+        std::set<std::string> payroll_needs_explicit_placement;
+        for(const auto& [id,job]:game_c.people().jobs()) {
+            (void)id;
+            if(job.count>0&&job.wage_per_month>0)
+                payroll_needs_explicit_placement.insert(job.employer);
+        }
+        for(const auto& [id,recipe]:industry.recipes) {
+            if(recipe.outputs.empty() ||
+               std::any_of(decisions.manufacturers.begin(),
+                           decisions.manufacturers.end(),
+                    [&](const Manufacturer& p){return p.recipe==id;}))
+                continue;
+            const auto& facility=game_c.facility(recipe.site);
+            const auto& output=recipe.outputs.front();
+            if(payroll_needs_explicit_placement.contains(facility.owner) ||
+               !game_c.has_market(facility.region,output.good))
+                continue; // Do not invent a household wage recipient.
+            const auto& quote=game_c.market(facility.region,output.good);
+            decisions.manufacturers.push_back(Manufacturer{
+                id,std::max<Quantity>(output.per_unit,quote.target_stock)});
+        }
+        for(const auto& [id,site]:industry.resource_sites) {
+            if(std::any_of(decisions.extractors.begin(),
+                           decisions.extractors.end(),
+                    [&](const Extractor& p){return p.resource_site==id;}))
+                continue;
+            if(payroll_needs_explicit_placement.contains(site.owner) ||
+               !game_c.has_market(site.region,site.good))continue;
+            const auto& quote=game_c.market(site.region,site.good);
+            decisions.extractors.push_back(Extractor{
+                id,std::max<Quantity>(1,quote.target_stock)});
+        }
         phasegh::World::Plan plan;
-        for(const auto& ai:policies_.countries) {
+        for(const auto& ai:decisions.countries) {
             plan[0].push_back([ai,date](phasegh::Stage& gh) {
                 const auto& c=gh.phase_c();
                 if(c.sovereignty(ai.domestic_region)!=ai.country)return;
@@ -440,7 +480,7 @@ public:
                     std::to_string(date.day),ai.country,ai.good,duty,ai.prime_minister);
             });
         }
-        for(const auto& investment:policies_.investments) {
+        for(const auto& investment:decisions.investments) {
             auto work=std::make_shared<Quantity>(0);
             plan[1].push_back([investment,work](phasegh::Stage& gh){
                 const auto& domain=gh.phase_d().state();
@@ -472,11 +512,11 @@ public:
                 if(*work>0)gh.phase_d().capitalize_work(investment.construction_project,*work);
             });
         }
-        for(const auto& staffing:policies_.staffing)
+        for(const auto& staffing:decisions.staffing)
             plan[2].push_back([staffing](phasegh::Stage& gh){
                 hire_available(gh.phase_c(),staffing);
             });
-        for(const auto& firm:policies_.manufacturers) {
+        for(const auto& firm:decisions.manufacturers) {
             auto workers=std::make_shared<People>(0);
             plan[4].push_back([firm,date,dim,workers](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
@@ -499,7 +539,7 @@ public:
         // A site operator chooses a real output quantity from target stock,
         // market price, labor, available wages and *cumulative* extraction
         // plus site throughput. No underground reserve counter is created.
-        for(const auto& policy:policies_.extractors) {
+        for(const auto& policy:decisions.extractors) {
             auto completed=std::make_shared<Quantity>(0);
             plan[4].push_back([policy,date,dim,completed](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
@@ -565,7 +605,7 @@ public:
         // stage1 cash reservation, stage4 lab work/materials, stage5 pay,
         // stage9 verified result. Every lab shares cumulative DAY capacity
         // with manufacturing and geological extraction.
-        for(const auto& research:policies_.researches) {
+        for(const auto& research:decisions.researches) {
             auto work=std::make_shared<Quantity>(0);
             plan[1].push_back([research,date,dim,work](phasegh::Stage& gh) {
                 const auto& ds=gh.phase_d().state();
@@ -628,7 +668,7 @@ public:
                     gh.phase_d().review_research(research.project);
             });
         }
-        for(const auto& maintenance:policies_.maintenance) {
+        for(const auto& maintenance:decisions.maintenance) {
             auto completed=std::make_shared<Quantity>(0);
             plan[4].push_back([maintenance,completed](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
@@ -667,7 +707,7 @@ public:
                           maintenance.treasury_wallet,gross);
                 });
         }
-        for(const auto& credit:policies_.debt_service)
+        for(const auto& credit:decisions.debt_service)
             plan[8].push_back([credit](phasegh::Stage& gh){
                 auto& c=gh.phase_c();
                 const Money debt=c.outstanding_loan(credit.borrower);
@@ -688,7 +728,7 @@ public:
                 }
                 if(remaining>0)c.repay(credit.borrower,remaining);
             });
-        for(const auto& b:policies_.buyers) {
+        for(const auto& b:decisions.buyers) {
             plan[7].push_back([b](phasegh::Stage& gh){
                 auto& c=gh.phase_c();
                 if(!c.people().has_slice(b.population_slice))return;
@@ -707,7 +747,7 @@ public:
                 }
             });
         }
-        for(const auto& p:policies_.political_reactions) {
+        for(const auto& p:decisions.political_reactions) {
             plan[9].push_back([p](phasegh::Stage& gh){
                 auto& c=gh.phase_c();
                 if(!c.people().has_slice(p.population_slice) ||
@@ -729,7 +769,7 @@ public:
                 if(protest>0)c.protest(p.population_slice,p.interest_group,protest);
             });
         }
-        for(const auto& election:policies_.elections) {
+        for(const auto& election:decisions.elections) {
             if(date.year!=election.year||date.month!=election.month||date.day!=election.day)continue;
             plan[9].push_back([election](phasegh::Stage& gh){
                 auto& c=gh.phase_c();
@@ -762,7 +802,7 @@ public:
                           {election.reform_party,reform}});
             });
         }
-        for(const auto& dues:policies_.organization_dues)
+        for(const auto& dues:decisions.organization_dues)
             plan[5].push_back([dues](phasegh::Stage& gh) {
                 const auto& org=gh.diplomacy().organizations.at(dues.organization);
                 if(!org.active||!org.members.contains(dues.country)||
@@ -778,7 +818,7 @@ public:
                 if(gh.phase_c().phase_d_cash_available(dues.country)<due)return;
                 gh.pay_dues(dues.organization,dues.country,due);
             });
-        for(const auto& ai:policies_.crisis_mandates)
+        for(const auto& ai:decisions.crisis_mandates)
             plan[9].push_back([ai](phasegh::Stage& gh) {
                 if(gh.phase_c().government(ai.country).prime_minister!=
                    ai.prime_minister)
@@ -821,7 +861,7 @@ public:
                         id,selected->id,ai.country,true,ai.prime_minister);
                 }
             });
-        for(const auto& rule:policies_.treaty_ratifications)
+        for(const auto& rule:decisions.treaty_ratifications)
             plan[9].push_back([rule](phasegh::Stage& gh){
                 auto& c=gh.phase_c();
                 if(c.government(rule.country).prime_minister!=rule.prime_minister)
@@ -861,7 +901,7 @@ public:
                     gh.ratify_package_member(id,rule.country,rule.prime_minister);
                 }
             });
-        for(const auto& rule:policies_.council_decisions)
+        for(const auto& rule:decisions.council_decisions)
             plan[9].push_back([rule](phasegh::Stage& gh){
                 const auto& org=gh.diplomacy().organizations.at(rule.organization);
                 if(!org.active||org.decisions.contains(rule.decision_id))
@@ -884,11 +924,11 @@ public:
                 gh.hold_organization_vote(rule.organization,rule.decision_id,
                        rule.subject,votes,rule.proposer,rule.prime_minister);
             });
-        for(const auto& combat:policies_.engagements)
+        for(const auto& combat:decisions.engagements)
             plan[10].push_back([combat](phasegh::Stage& gh){
                 fight(gh.phase_c(),combat);
             });
-        if(!policies_.buyers.empty())
+        if(!decisions.buyers.empty())
             plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
                 gh.phase_c().phase_time_close_daily_markets(ordinal);
             });
@@ -897,14 +937,14 @@ public:
         for(std::size_t i=0;i<plan.size();++i)
             plan[i].insert(plan[i].end(),
                 additional_today[i].begin(),additional_today[i].end());
-        if(policies_.freight_lanes.empty())
+        if(decisions.freight_lanes.empty())
             return world_.advance_day(plan);
         // Freight planning may enqueue several dated physical commands. They
         // must be committed together with today's B/C/D/G/H events, never
         // leave a stray queue entry when a carrier/insurance payment fails.
         daily::World staged=world_;
         phasef::DayPlanningReservations freight_plan;
-        for(const auto& lane:policies_.freight_lanes)
+        for(const auto& lane:decisions.freight_lanes)
             if(auto job=phasef::plan_next_hop(staged,lane,freight_plan))
                 staged.enqueue(date,std::move(*job));
         const auto report=staged.advance_day(plan);
