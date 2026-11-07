@@ -102,6 +102,8 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,SovereignBond>) {
         V(id);V(country);V(treasury);V(original_face);V(coupon_ppm);
         V(issue_day);V(maturity_day);
+    } else if constexpr(std::is_same_v<X,ArmyDeployment>) {
+        V(unit);V(country);V(region);
     } else {
         static_assert(sizeof(X)==0,"SnapshotCodec needs an explicit struct layout");
     }
@@ -324,6 +326,10 @@ struct SnapshotCodec {
             ar(w.sovereign_coupon_due_);
             ar(w.sovereign_coupon_fraction_);
         }
+        if(!w.army_deployments_.empty()) {
+            ar(std::string("VIC25_PHASEC_ARMY_DEPLOYMENTS_1"));
+            ar(w.army_deployments_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -332,7 +338,8 @@ struct SnapshotCodec {
         IntegratedWorld w;
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
-             seen_birth_days=false,seen_wages=false,seen_bonds=false;
+             seen_birth_days=false,seen_wages=false,seen_bonds=false,
+             seen_armies=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -386,6 +393,12 @@ struct SnapshotCodec {
                    w.sovereign_coupon_due_.size()>5'000'000||
                    w.sovereign_coupon_fraction_.size()>5'000'000)
                     throw std::runtime_error("oversized sovereign bond state");
+            } else if(extension=="VIC25_PHASEC_ARMY_DEPLOYMENTS_1"&&
+                      !seen_armies) {
+                seen_armies=true;
+                ar(w.army_deployments_);
+                if(w.army_deployments_.size()>1'000'000)
+                    throw std::runtime_error("oversized army deployment records");
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
