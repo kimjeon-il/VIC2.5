@@ -679,6 +679,24 @@ public:
     [[nodiscard]] const ProductionFacility& facility(const std::string& id) const {
         return facilities_.at(id);
     }
+    [[nodiscard]] const std::map<std::string,ProductionFacility>&
+            facilities()const{return facilities_;}
+    // Liquidator may transfer a proven physical factory to a solvent buyer
+    // only against a bona fide cash payment. Phase D updates the project
+    // owner in the same staged day; no phantom title or equipment is created.
+    void sell_bankrupt_facility(const std::string& site,
+                               const std::string& buyer,Money price) {
+        require_stage({7});
+        auto& f=facilities_.at(site);
+        ensure(bankrupt_firms_.contains(f.owner)&&actors_.contains(buyer)&&
+               !bankrupt_firms_.contains(buyer)&&buyer!=f.owner&&
+               price>0&&phase_d_cash_available(buyer)>=price,
+               "unfunded or unlawful bankrupt factory purchase");
+        const auto old=f.owner;
+        pay(buyer,old,price);
+        f.owner=buyer;
+        events_.push_back("bankrupt-real-factory-cash-sale");
+    }
     // Phase D additive bridge: material/production share C's real inventory
     // and Phase B's real employment, not an independent Phase D stock.
     [[nodiscard]] People phase_d_workforce(const std::string& owner) const {
@@ -1610,6 +1628,29 @@ public:
     }
     [[nodiscard]] const std::map<std::string,WageArrearsClaim>&
             wage_arrears()const{return wage_arrears_;}
+    // A bid is an actual buyer policy and must pay for existing stock at the
+    // observed market quote. Bankruptcy never destroys or creates goods.
+    Quantity sell_bankrupt_inventory(const std::string& firm,
+                                    const std::string& buyer,
+                                    const std::string& region,
+                                    const std::string& good,
+                                    Quantity max_units,Money max_price) {
+        require_stage({7});
+        ensure(bankrupt_firms_.contains(firm)&&actors_.contains(buyer)&&
+               !bankrupt_firms_.contains(buyer)&&firm!=buyer&&max_units>0&&
+               max_price>0&&has_market(region,good),
+               "invalid liquidation stock bid");
+        const Money quote=market(region,good).price;
+        if(quote<=0||quote>max_price)return 0;
+        const Quantity available=phase_d_material_available(firm,region,good);
+        const Money spendable=phase_d_cash_available(buyer);
+        const Quantity quantity=std::min({
+            max_units,available,static_cast<Quantity>(spendable/quote)});
+        if(quantity<=0)return 0;
+        trade(firm,buyer,region,good,quantity,quote);
+        events_.push_back("cash-backed-liquidation-inventory-sale");
+        return quantity;
+    }
     [[nodiscard]] const std::map<std::string,std::int64_t>&
             bankrupt_firms()const{return bankrupt_firms_;}
 
