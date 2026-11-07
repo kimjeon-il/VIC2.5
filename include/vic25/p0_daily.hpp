@@ -841,6 +841,7 @@ public:
         // dividends or other discretionary local business expenditures.
         plan[5].push_back([](phasegh::Stage& gh) {
             gh.phase_c().phase_time_settle_wage_arrears();
+            gh.phase_c().phase_time_settle_bankrupt_reparations();
         });
         if(date.day==1 && decisions.autonomous_tax_step_ppm>0)
             plan[9].push_back(
@@ -1743,6 +1744,9 @@ public:
         // are prioritized before discretionary spending in Stage5.
         plan[8].push_back([today=world_.day_index()](phasegh::Stage& gh) {
             gh.phase_c().phase_time_resolve_firm_insolvency(today);
+        });
+        plan[8].push_back([](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_distribute_liquidation_equity();
         });
         plan[8].push_back([today=world_.day_index()](phasegh::Stage& gh) {
             gh.phase_c().phase_time_close_empty_bankrupt_estates(today);
