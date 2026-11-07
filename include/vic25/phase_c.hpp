@@ -1428,6 +1428,10 @@ public:
     }
     [[nodiscard]] Money bank_losses() const { return total_bad_debt_; }
     [[nodiscard]] bool bank_insolvent() const { return bank_insolvent_; }
+    [[nodiscard]] const std::map<std::string,People>&
+            regional_food_grievances()const {
+        return regional_food_grievance_;
+    }
     [[nodiscard]] People food_grievance(const std::string& region) const {
         auto it=regional_food_grievance_.find(region);
         return it==regional_food_grievance_.end()?0:it->second;
