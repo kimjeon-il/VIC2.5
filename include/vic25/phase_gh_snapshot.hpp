@@ -65,9 +65,14 @@ template<class A>void edge(A& a,TransportEdge& x,bool day_fields=false,
     if(day_fields)a(x.transit_days);
     if(mode_fields)a(x.mode);
 }
-template<class A>void native_transit(A& a,DailyTradeTransit& x) {
+template<class A>void native_transit(A& a,DailyTradeTransit& x,
+                                     bool extended=false) {
     a(x.id);a(x.buyer);a(x.destination);a(x.good);
     a(x.quantity);a(x.loss);a(x.arrival_day);
+    if(extended) {
+        a(x.path_edges);a(x.current_leg_id);a(x.hub_region);
+        a(x.hop_index);a(x.at_hub);
+    }
 }
 template<class A>void fill(A& a,TradeFill& x) {
     a(x.execution_id);a(x.route_id);a(x.seller_country);a(x.buyer_country);
@@ -106,7 +111,8 @@ template<class A>void insurance(A& a,CargoInsurance& x) {
     a(x.insured_quantity);a(x.premium_paid);a(x.claim_registered);
 }
 template<class A>void g_state(A& a,TradeState& x,bool day_fields=false,
-                              bool mode_fields=false) {
+                              bool mode_fields=false,
+                              bool extended_cargo=false) {
     checked_map(a,x.routes,route<A>);
     checked_map(a,x.transport_edges,
         [&](A& io,TransportEdge& value){
@@ -121,7 +127,10 @@ template<class A>void g_state(A& a,TradeState& x,bool day_fields=false,
     checked_vector(a,x.pending,planned<A>);
     checked_vector(a,x.fills,fill<A>);
     a(x.executed);a(x.revision);
-    if(day_fields)checked_map(a,x.daily_shipments,native_transit<A>);
+    if(day_fields)checked_map(a,x.daily_shipments,
+        [&](A& ar,DailyTradeTransit& cargo){
+            native_transit(ar,cargo,extended_cargo);
+        });
 }
 template<class A>void tariff(A& a,Tariff& x) {
     a(x.importer_country);a(x.good);a(x.ppm);
@@ -226,7 +235,8 @@ template<class A>void h_state(A& a,DiplomacyState& x,bool include_daily=true,
 
 struct SnapshotCodec {
     static constexpr const char* magic="VIC25_PHASE_GH_SNAPSHOT_1";
-    static constexpr const char* version="phase-gh-cpp/0.6";
+    static constexpr const char* version="phase-gh-cpp/0.7";
+    static constexpr const char* war_version="phase-gh-cpp/0.6";
     static constexpr const char* multimodal_version="phase-gh-cpp/0.5";
     static constexpr const char* daily_transport_version="phase-gh-cpp/0.4";
     static constexpr const char* daily_treaty_version="phase-gh-cpp/0.3";
@@ -245,20 +255,26 @@ struct SnapshotCodec {
             w.trade_.transport_edges.begin(),w.trade_.transport_edges.end(),
             [](const auto& row){return row.second.mode!="legacy";});
         const bool has_wars=!w.diplomacy_.wars.empty();
-        a(std::string(has_wars?version:
-                      (multimodal?multimodal_version:
-                       (native_transport?daily_transport_version:
-                        (upgraded?daily_treaty_version:legacy_version)))));
+        const bool intermodal=std::any_of(
+            w.trade_.daily_shipments.begin(),w.trade_.daily_shipments.end(),
+            [](const auto& row){return !row.second.path_edges.empty();});
+        a(std::string(intermodal?version:
+                      (has_wars?war_version:
+                       (multimodal?multimodal_version:
+                        (native_transport?daily_transport_version:
+                         (upgraded?daily_treaty_version:legacy_version))))));
         a(std::string(g_version));
         a(std::string(h_version));
         const std::string existing=phasee::SnapshotCodec::encode(w.core_);
         a(existing);
         auto g=w.trade_;
         auto h=w.diplomacy_;
-        persisted::g_state(a,g,native_transport||multimodal||has_wars,
-                           multimodal||has_wars);
-        persisted::h_state(a,h,upgraded||native_transport||multimodal||has_wars,
-                           has_wars);
+        persisted::g_state(a,g,
+                           native_transport||multimodal||has_wars||intermodal,
+                           multimodal||has_wars||intermodal,intermodal);
+        persisted::h_state(a,h,
+                           upgraded||native_transport||multimodal||has_wars||intermodal,
+                           has_wars||intermodal);
         const std::string payload=out.str();
         std::ostringstream end(std::ios::binary|std::ios::out);
         persisted::Writer check{end};
@@ -272,8 +288,9 @@ struct SnapshotCodec {
         persisted::Reader a{in};
         std::string m,v,g,h,base;
         a(m);a(v);a(g);a(h);
-        if(m!=magic||(v!=version&&v!=multimodal_version&&
-             v!=daily_transport_version&&v!=daily_treaty_version&&
+        if(m!=magic||(v!=version&&v!=war_version&&
+             v!=multimodal_version&&v!=daily_transport_version&&
+             v!=daily_treaty_version&&
              v!=legacy_version)||
              g!=g_version||h!=h_version)
             throw std::runtime_error("G/H incompatible snapshot contract");
@@ -281,10 +298,13 @@ struct SnapshotCodec {
         World next;
         next.core_=phasee::SnapshotCodec::decode(base);
         persisted::g_state(a,next.trade_,
-                           v==version||v==multimodal_version||
-                           v==daily_transport_version,
-                           v==version||v==multimodal_version);
-        persisted::h_state(a,next.diplomacy_,v!=legacy_version,v==version);
+                           v==version||v==war_version||
+                           v==multimodal_version||v==daily_transport_version,
+                           v==version||v==war_version||
+                           v==multimodal_version,
+                           v==version);
+        persisted::h_state(a,next.diplomacy_,v!=legacy_version,
+                           v==version||v==war_version);
         std::uint64_t crc{};a(crc);
         if(in.peek()!=std::char_traits<char>::eof()||
            crc!=phasec::persistence_detail::checksum(
