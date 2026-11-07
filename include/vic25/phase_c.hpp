@@ -240,6 +240,13 @@ public:
         return sovereignty_.at(region);
     }
 
+    [[nodiscard]] bool has_actor(const std::string& who)const {
+        return actors_.contains(who);
+    }
+    [[nodiscard]] bool has_government(const std::string& country)const {
+        return governments_.contains(country);
+    }
+
     void seed_actor(const std::string& who, Money amount) {
         ensure(stage_ == -1 && commit_id_ == 0, "actor seed after simulation start");
         ensure(!who.empty() && !actors_.contains(who) && amount >= 0, "invalid actor seed");
@@ -886,6 +893,46 @@ public:
     }
     [[nodiscard]] const MarketQuote& market(const std::string& region,const std::string& good) const {
         return markets_.at({region,good});
+    }
+    // Select all real sellers deterministically. This is a query over the
+    // authoritative goods ledger, not a separate market-inventory cache.
+    Quantity clear_household_market(const std::string& buyer,
+                                    const std::string& region,
+                                    const std::string& good,Quantity requested) {
+        require_stage({7});
+        ensure(requested>=0 && markets_.contains({region,good}) &&
+               actors_.contains(buyer),"invalid household market request");
+        auto& quote=markets_.at({region,good});
+        const Quantity solvent=std::min(requested,cash(buyer)/quote.price);
+        Quantity total_offered=0;
+        std::vector<std::pair<std::string,Quantity>> sellers;
+        for(const auto& [key,stock_now]:goods_.holdings()) {
+            if(key.region_id!=region||key.good_id!=good ||
+               key.holder_id==buyer||stock_now<=0||
+               !actors_.contains(key.holder_id))continue;
+            sellers.push_back({key.holder_id,stock_now});
+            total_offered=phaseb::add_checked(total_offered,stock_now);
+        }
+        std::sort(sellers.begin(),sellers.end(),
+            [](const auto& a,const auto& b) {
+                return a.first<b.first;
+            });
+        quote.stock_offered=std::max(quote.stock_offered,
+            phaseb::add_checked(quote.delivered,total_offered));
+        quote.solvent_demand=phaseb::add_checked(quote.solvent_demand,solvent);
+        Quantity remaining=solvent;
+        for(const auto& [seller,available]:sellers) {
+            if(remaining<=0)break;
+            const Quantity quantity=std::min(remaining,available);
+            if(quantity<=0)continue;
+            trade(seller,buyer,region,good,quantity,quote.price);
+            remaining-=quantity;
+        }
+        const Quantity fulfilled=solvent-remaining;
+        quote.delivered=phaseb::add_checked(quote.delivered,fulfilled);
+        quote.unmet=phaseb::add_checked(quote.unmet,remaining);
+        events_.push_back("daily-household-market-clearing");
+        return fulfilled;
     }
     Quantity clear_consumer_market(const std::string& seller,const std::string& buyer,
                                   const std::string& region,const std::string& good,
