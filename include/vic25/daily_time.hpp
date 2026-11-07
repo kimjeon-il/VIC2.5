@@ -351,7 +351,8 @@ public:
            !engine_.base().core().core().has_active_sovereign_bonds()&&
            !engine_.has_autonomous_daily_trade()&&
            !engine_.base().core().core().has_due_p1_government(day_)&&
-           !engine_.base().core().core().p4_has_due_amendment(day_)) {
+           !engine_.base().core().core().p4_has_due_amendment(day_)&&
+           engine_.base().core().core().p4_due_contests(day_).empty()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
         }
@@ -475,6 +476,19 @@ public:
         for(std::size_t n=0;n<native_day_plan.size();++n)
             for(const auto& action:native_day_plan[n])
                 real_actions[n].push_back(action);
+        // Native election fallback. P0 plans its contested election earlier
+        // in Stage9 (after P3 political reactions); the due index is then
+        // cleared, so the fallback does not count the same ballot twice.
+        // A base daily::World without P0 still holds all lawful due elections.
+        real_actions[9].push_back([today=day_,current](phasegh::Stage& gh) {
+            auto& c=gh.phase_c();
+            for(const auto& contest_id:c.p4_due_contests(today)) {
+                const auto months=c.p4_contest(contest_id).term_months;
+                const auto next=to_day_index(add_calendar_months(current,months));
+                c.p4_hold_contest(contest_id,today,next,
+                                  c.p4_autonomous_ballot(contest_id));
+            }
+        });
         // Sovereign security obligations accrue and settle on their actual
         // calendar day even when no P0 AI/controller was explicitly attached.
         real_actions[5].push_back([today=day_](phasegh::Stage& gh) {
