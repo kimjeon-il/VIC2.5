@@ -229,8 +229,22 @@ static void daily_diplomacy_changes_real_trade_tariff() {
          "H signed treaty not day-effective");
     const auto& x=exempt.engine().commerce().fills;
     const auto& y=taxed.engine().commerce().fills;
-    need(x.size()==1&&y.size()==1 &&
-         x[0].duty_paid==0&&y[0].duty_paid>0,
+    vic25::Quantity exempt_qty=0,taxed_qty=0;
+    vic25::phasec::Money exempt_duty=0,taxed_duty=0;
+    for(const auto& fill:x) {
+        if(fill.route_id!="TRADE-IRON"||fill.month!=24000)continue;
+        exempt_qty+=fill.quantity;
+        exempt_duty+=fill.duty_paid;
+    }
+    for(const auto& fill:y) {
+        if(fill.route_id!="TRADE-IRON"||fill.month!=24000)continue;
+        taxed_qty+=fill.quantity;
+        taxed_duty+=fill.duty_paid;
+    }
+    // In native daily mode a 3-unit monthly route may produce up to 3
+    // physically backed fills across different days. The total and actual
+    // diplomatic duty, not a legacy one-fill/month assumption, are invariant.
+    need(exempt_qty==3&&taxed_qty==3&&exempt_duty==0&&taxed_duty>0,
          "H daily effective treaty did not alter actual G tariff settlement");
 }
 
@@ -441,16 +455,128 @@ static void autonomous_pop_is_day_native_not_monthly_replayed() {
          "native day POP and legacy close must remain deterministic");
 }
 
+
+static void autonomous_daily_trade_budget_and_month_close() {
+    Fixture f;
+    auto& c=f.gh.seed_geography().seed_core().seed_core();
+    c.seed_market("R1","iron",10,1,25);
+    c.seed_market("R2","iron",20,1,30);
+    f.gh.seed_route({"AUTO-G","SELLER","BUYER","iron",1,2,5,1,0});
+    auto world=World::adopt(std::move(f.gh),4433);
+    const auto start_seller=ledger(world).stock("SELLER","R1","iron");
+    const auto start_buyer_cash=ledger(world).cash("BUYER");
+    for(int day=1;day<=6;++day){
+        world.advance_day();
+        need(world.engine().commerce().fills.empty(),
+             "G monthly quota allocated before real daily cumulative entitlement");
+    }
+    world.advance_day(); // Jan 7: floor(5*7/31) = 1
+    need(world.engine().commerce().fills.size()==1 &&
+         world.engine().commerce().fills.front().quantity==1 &&
+         ledger(world).stock("SELLER","R1","iron")==start_seller-1,
+         "G autonomous real physical shipment must execute by January 7");
+    const auto snapshot=SnapshotCodec::encode(world);
+    auto replay=SnapshotCodec::decode(snapshot);
+    need(SnapshotCodec::encode(replay)==snapshot,
+         "G autonomous daily trade failed snapshot roundtrip");
+    while(world.date()<Date{2000,2,1}){
+        world.advance_day();
+        replay.advance_day();
+    }
+    need(SnapshotCodec::encode(world)==SnapshotCodec::encode(replay),
+         "G trade events must replay deterministically across month-close");
+    vic25::Quantity total=0;
+    for(const auto& fill:world.engine().commerce().fills){
+        if(fill.month==24000&&fill.route_id=="AUTO-G")total+=fill.quantity;
+    }
+    need(total==5 && ledger(world).stock("SELLER","R1","iron")==start_seller-5 &&
+         ledger(world).cash("BUYER")<start_buyer_cash,
+         "G month-end must not repeat an already-autonomous daily contract");
+    world.advance_day(); // Feb 1 resets G monthly edge allowances on first DAY.
+    need(world.engine().commerce().fills.size()==5,
+         "G must not grant next month's complete volume on February 1");
+}
+
+
+static void real_freight_insurance_and_dated_delivery() {
+    Fixture f;
+    f.gh.seed_transport_edge({"F-BILLED","CARRIER",1,2,310,2,1,true});
+    f.gh.seed_geography().seed_core().seed_core().seed_actor("INSURER",200);
+    auto world=World::adopt(std::move(f.gh));
+
+    vic25::phasegh::World::Plan insure;
+    insure[9].push_back([](vic25::phasegh::Stage& stage) {
+        vic25::phasegh::CargoInsurance x;
+        x.id="DAY-POLICY";x.shipment_id="REAL-F-CARGO";
+        x.insurer="INSURER";x.beneficiary="BUYER";
+        x.premium=3;x.maximum_claim=30;x.insured_quantity=3;
+        stage.insure_cargo(x);
+    });
+    world.advance_day(insure); // Jan 1 legal insurance contract
+    auto shipment=cmd("REAL-F-CARGO",Kind::cargo_dispatch);
+    shipment.from="SELLER";shipment.to="BUYER";
+    shipment.region="R1";shipment.destination="R2";
+    shipment.good="iron";shipment.route_id="F-BILLED";
+    shipment.amount=3;shipment.unit_price=2;shipment.auxiliary=1;
+    world.enqueue({2000,1,2},shipment);
+    const auto original=SnapshotCodec::encode(world);
+    world.advance_day(); // Jan 2: actual C money and stock
+    const auto& c=ledger(world);
+    need(c.cash("SELLER")==94 && c.cash("CARRIER")==106 &&
+         c.cash("BUYER")==97 && c.cash("INSURER")==203 &&
+         c.stock("SELLER","R1","iron")==7 &&
+         c.stock("TRANSIT:DAY:REAL-F-CARGO","in_transit","iron")==3 &&
+         world.engine().commerce().insurance.at("DAY-POLICY").premium_paid,
+         "F physical dispatch must book actual carrier freight and insurer premium");
+    const auto in_flight=SnapshotCodec::encode(world);
+    auto replay=SnapshotCodec::decode(in_flight);
+    need(SnapshotCodec::encode(replay)==in_flight,
+         "F covered daily cargo must save real insurance/liability metadata");
+
+    world.advance_day();replay.advance_day(); // Jan 3: in transit
+    world.advance_day();replay.advance_day(); // Jan 4: arrival and claim
+    need(SnapshotCodec::encode(world)==SnapshotCodec::encode(replay) &&
+         ledger(world).stock("BUYER","R2","iron")==2 &&
+         ledger(world).stock("TRANSIT:DAY:REAL-F-CARGO","in_transit","iron")==0 &&
+         ledger(world).cash("BUYER")==107 &&
+         ledger(world).cash("INSURER")==193,
+         "F dated physical loss and actual G insurance cash payout not conserved");
+    const auto& claim=world.engine().commerce().insurance.at("DAY-POLICY");
+    need(claim.claim_registered&&claim.claim_due==10&&claim.claim_paid==10,
+         "covered physical loss claim must be measured from delivered goods");
+    world.advance_day();
+    need(ledger(world).cash("BUYER")==107 &&
+         world.engine().commerce().insurance.at("DAY-POLICY").claim_paid==10,
+         "F/G repeated insurance claim must be idempotent");
+
+    Fixture no_funds;
+    no_funds.gh.seed_transport_edge({"EXPENSIVE","CARRIER",1,2,310,1000,1,true});
+    auto rejected=World::adopt(std::move(no_funds.gh));
+    auto bad=cmd("UNFUNDED-FREIGHT",Kind::cargo_dispatch);
+    bad.from="SELLER";bad.to="BUYER";
+    bad.region="R1";bad.destination="R2";
+    bad.good="iron";bad.route_id="EXPENSIVE";
+    bad.amount=2;bad.unit_price=2;
+    rejected.enqueue({2000,1,1},bad);
+    const auto before=SnapshotCodec::encode(rejected);
+    need(reject([&]{rejected.advance_day();})&&
+         before==SnapshotCodec::encode(rejected),
+         "unfunded real freight must rollback date and every C/G owner ledger");
+    (void)original;
+}
+
 int main(){
     try{
         cross_domain_daily_events_and_replay();
         daily_rollback_due_to_resource_constraints();
         migrates_old_daily_v1_without_inventing_actions();
         daily_diplomacy_changes_real_trade_tariff();
+        real_freight_insurance_and_dated_delivery();
         autonomous_pop_is_day_native_not_monthly_replayed();
         conversion_only_epidemic_and_consumption();
         conversion_only_daily_tariff_and_authority();
         conversion_legacy_11_safe_migration();
+        autonomous_daily_trade_budget_and_month_close();
         std::cout<<"NATIVE_DAILY_BCDGH: 3 domains groups PASS\n";
         return 0;
     }catch(const std::exception& e) {

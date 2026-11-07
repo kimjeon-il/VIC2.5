@@ -1,5 +1,5 @@
 #pragma once
-#include "vic25/daily_time.hpp"
+#include "vic25/phase_f.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -8,6 +8,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -45,10 +46,36 @@ struct Manufacturer {
     std::string employee_wallet,treasury_wallet;
     Money wage_per_worker_per_day{};
 };
+// Autonomous owner supply target: real resource-site output, not a fictional
+// world resource stock. Wages, when configured, use the original C ledger.
+struct Extractor {
+    std::string resource_site;
+    Quantity target_inventory{};
+    Money wage_per_unit{};
+    std::string employee_wallet,treasury_wallet;
+};
+struct ResearchPolicy {
+    std::string project;
+    Quantity maximum_daily_work{1};
+};
 struct Buyer {
     Id population_slice{};
     std::string household_actor,seller,region,good;
     Quantity units_per_person_per_day{1};
+};
+// Real owner repair decision, with a strict daily labor/material budget.
+// Autonomous credit principal repayment uses the canonical C bank ledger;
+ // no separate debt balance or generated repayment funds.
+struct DebtService {
+    std::string borrower;
+    Money minimum_cash_reserve{},max_daily_principal{};
+};
+struct FacilityMaintenance {
+    std::string facility,building_good;
+    Quantity max_daily_restoration{1},material_per_unit{1};
+    People workers_per_unit{1};
+    Money wage_per_worker_per_day{};
+    std::string employee_wallet,treasury_wallet;
 };
 struct Investment {
     std::string construction_project,output_good;
@@ -61,9 +88,9 @@ struct PoliticalReaction {
     People max_new_members_per_day{1};
     People max_protesters_per_day{1};
 };
-// Existing C election implementation stores the last election globally. Until
-// its nationalized election registry lands, P0 accepts at most one election
-// schedule per world, rather than silently replacing another nation's result.
+// National ballot targets use the country-specific Phase C/E election
+// registry. Elections of multiple countries can occur on the same date
+// without sharing a seat or voter-count ledger.
 struct Election {
     std::string country,incumbent_party,reform_party;
     std::int32_t year{},month{1},day{1};
@@ -75,6 +102,34 @@ struct CountryAI {
     Quantity surplus_stock_threshold{};
     std::int64_t protective_tariff_ppm{100'000};
 };
+// Government strategy rules are scenario inputs, not independent diplomacy,
+ // funds or population state. Actual negotiations/dues use existing H/C ledgers.
+struct CrisisMandate {
+    std::string country,prime_minister;
+    Money maximum_cash_settlement{};
+    bool accept_claim_withdrawal{true};
+    bool mediate_neutral_crises{false};
+};
+struct OrganizationDuesMandate {
+    std::string country,prime_minister,organization;
+};
+// H autonomous ratification is conditional on real fiscal resources and
+// observed treaty obligations; an AI must not invent or sign unknown clauses.
+struct TreatyDecisionMandate {
+    std::string country,prime_minister;
+    Money maximum_new_fiscal_obligation{};
+    bool allow_trade_constraints{};
+    bool allow_military_commitments{};
+    bool allow_territorial_cession{};
+};
+struct CouncilMemberRule {
+    std::string country,prime_minister;
+    Money minimum_free_treasury_for_yes{};
+};
+struct CouncilDecisionMandate {
+    std::string organization,decision_id,subject,proposer,prime_minister;
+    std::vector<CouncilMemberRule> member_rules;
+};
 struct Engagement {
     std::string attacker,defender,region;
     Id attacker_slice{},defender_slice{};
@@ -85,11 +140,20 @@ struct Engagement {
 struct Policies {
     std::vector<Staffing> staffing;
     std::vector<Manufacturer> manufacturers;
+    std::vector<Extractor> extractors;
+    std::vector<ResearchPolicy> researches;
+    std::vector<FacilityMaintenance> maintenance;
+    std::vector<DebtService> debt_service;
     std::vector<Buyer> buyers;
     std::vector<Investment> investments;
     std::vector<PoliticalReaction> political_reactions;
     std::vector<Election> elections;
     std::vector<CountryAI> countries;
+    std::vector<CrisisMandate> crisis_mandates;
+    std::vector<OrganizationDuesMandate> organization_dues;
+    std::vector<TreatyDecisionMandate> treaty_ratifications;
+    std::vector<CouncilDecisionMandate> council_decisions;
+    std::vector<phasef::FreightLane> freight_lanes;
     std::vector<Engagement> engagements;
 
     void validate() const {
@@ -102,9 +166,37 @@ struct Policies {
                (f.wage_per_worker_per_day>0 &&
                 (f.employee_wallet.empty()||f.treasury_wallet.empty())))
                 throw std::invalid_argument("P0_INVALID_MANUFACTURER");
+        std::set<std::string> extraction_ids;
+        for(const auto& e:extractors)
+            if(e.resource_site.empty()||e.target_inventory<=0||
+               e.wage_per_unit<0||
+               (e.wage_per_unit>0&&
+                (e.employee_wallet.empty()||e.treasury_wallet.empty()))||
+               !extraction_ids.insert(e.resource_site).second)
+                throw std::invalid_argument("P0_INVALID_EXTRACTOR");
+        std::set<std::string> research_ids;
+        for(const auto& r:researches)
+            if(r.project.empty()||r.maximum_daily_work<=0||
+               !research_ids.insert(r.project).second)
+                throw std::invalid_argument("P0_INVALID_RESEARCH_POLICY");
         for(const auto& s:staffing)
             if(s.employer.empty()||s.region.empty()||s.wanted<0||s.monthly_wage<0)
                 throw std::invalid_argument("P0_INVALID_STAFFING");
+        std::set<std::string> maintained_sites;
+        for(const auto& m:maintenance)
+            if(m.facility.empty()||m.building_good.empty()||
+               m.max_daily_restoration<=0||m.material_per_unit<=0||
+               m.workers_per_unit<=0||m.wage_per_worker_per_day<0||
+               (m.wage_per_worker_per_day>0&&
+                (m.employee_wallet.empty()||m.treasury_wallet.empty()))||
+               !maintained_sites.insert(m.facility).second)
+                throw std::invalid_argument("P0_INVALID_MAINTENANCE_POLICY");
+        std::set<std::string> debt_borrowers;
+        for(const auto& credit:debt_service)
+            if(credit.borrower.empty()||credit.minimum_cash_reserve<0||
+               credit.max_daily_principal<=0||
+               !debt_borrowers.insert(credit.borrower).second)
+                throw std::invalid_argument("P0_INVALID_DEBT_SERVICE");
         for(const auto& b:buyers)
             if(!b.population_slice||b.household_actor.empty()||b.seller.empty()||
                b.region.empty()||b.good.empty()||b.units_per_person_per_day<=0||
@@ -119,14 +211,15 @@ struct Policies {
             if(!p.population_slice||p.region.empty()||p.interest_group.empty()||
                p.max_new_members_per_day<0||p.max_protesters_per_day<0)
                 throw std::invalid_argument("P0_INVALID_POLITICS");
-        if(elections.size()>1)throw std::invalid_argument("P0_SINGLE_ELECTION_REGISTRY");
+        std::set<std::tuple<std::string,int,int>> election_months;
         for(const auto& e:elections)
             if(e.country.empty()||e.incumbent_party.empty()||e.reform_party.empty()||
                e.incumbent_party==e.reform_party||e.year<1||e.year>9999||
                e.month<1||e.month>12||e.day<1||
                e.day>daily::days_in_month(e.year,e.month)||
-               e.turnout_ppm<0||e.turnout_ppm>1'000'000)
-                throw std::invalid_argument("P0_INVALID_ELECTION");
+               e.turnout_ppm<0||e.turnout_ppm>1'000'000||
+               !election_months.insert({e.country,e.year,e.month}).second)
+                throw std::invalid_argument("P0_INVALID_COUNTRY_ELECTION");
         for(const auto& c:countries)
             if(c.country.empty()||c.prime_minister.empty()||
                c.domestic_region.empty()||c.good.empty()||
@@ -134,6 +227,46 @@ struct Policies {
                c.protective_tariff_ppm<0||c.protective_tariff_ppm>1'000'000||
                !seen_countries.insert(c.country+":"+c.good).second)
                 throw std::invalid_argument("P0_INVALID_COUNTRY_AI");
+        std::set<std::string> crisis_countries;
+        for(const auto& mandate:crisis_mandates)
+            if(mandate.country.empty()||mandate.prime_minister.empty()||
+               mandate.maximum_cash_settlement<0||
+               !crisis_countries.insert(mandate.country).second)
+                throw std::invalid_argument("P0_INVALID_CRISIS_MANDATE");
+        std::set<std::pair<std::string,std::string>> dues_members;
+        for(const auto& mandate:organization_dues)
+            if(mandate.country.empty()||mandate.prime_minister.empty()||
+               mandate.organization.empty()||
+               !dues_members.insert({mandate.organization,mandate.country}).second)
+                throw std::invalid_argument("P0_INVALID_DUES_MANDATE");
+        std::set<std::string> treaty_countries;
+        for(const auto& m:treaty_ratifications)
+            if(m.country.empty()||m.prime_minister.empty()||
+               m.maximum_new_fiscal_obligation<0||
+               !treaty_countries.insert(m.country).second)
+                throw std::invalid_argument("P0_INVALID_TREATY_DECISION");
+        std::set<std::pair<std::string,std::string>> council_ids;
+        for(const auto& m:council_decisions) {
+            if(m.organization.empty()||m.decision_id.empty()||
+               m.subject.empty()||m.proposer.empty()||
+               m.prime_minister.empty()||m.member_rules.empty()||
+               !council_ids.insert({m.organization,m.decision_id}).second)
+                throw std::invalid_argument("P0_INVALID_COUNCIL_DECISION");
+            std::set<std::string> members;
+            for(const auto& member:m.member_rules)
+                if(member.country.empty()||member.prime_minister.empty()||
+                   member.minimum_free_treasury_for_yes<0||
+                   !members.insert(member.country).second)
+                    throw std::invalid_argument("P0_INVALID_COUNCIL_MEMBER");
+            if(!members.contains(m.proposer))
+                throw std::invalid_argument("P0_MISSING_COUNCIL_PROPOSER");
+        }
+        std::set<std::string> freight_ids;
+        for(const auto& f:freight_lanes) {
+            phasef::validate(f);
+            if(!freight_ids.insert(f.id).second)
+                throw std::invalid_argument("P0_DUPLICATE_AUTONOMOUS_FREIGHT");
+        }
         for(const auto& b:engagements) {
             if(b.attacker.empty()||b.defender.empty()||
                b.attacker==b.defender||b.region.empty()||
@@ -286,7 +419,7 @@ public:
     [[nodiscard]] const Policies& policies()const {return policies_;}
     // Campaign/save data owns the policy definitions; base day snapshots remain
     // fully compatible and replay exactly when the same policy set is restored.
-    daily::DayReport advance_day(const phasegh::World::Plan& month_close_plan={}) {
+    daily::DayReport advance_day(const phasegh::World::Plan& additional_today={}) {
         const auto date=world_.date();
         const int dim=daily::days_in_month(date.year,date.month);
         phasegh::World::Plan plan;
@@ -363,6 +496,198 @@ public:
                                                   firm.treasury_wallet,gross);
                 });
         }
+        // A site operator chooses a real output quantity from target stock,
+        // market price, labor, available wages and *cumulative* extraction
+        // plus site throughput. No underground reserve counter is created.
+        for(const auto& policy:policies_.extractors) {
+            auto completed=std::make_shared<Quantity>(0);
+            plan[4].push_back([policy,date,dim,completed](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto& ds=gh.phase_d().state();
+                const auto& src=ds.resource_sites.at(policy.resource_site);
+                const auto& facility=c.facility(src.site);
+                const auto& quote=c.market(src.region,src.good);
+                if(quote.price<=policy.wage_per_unit ||
+                   c.stock(src.owner,src.region,src.good)>=policy.target_inventory)
+                    return;
+                if(src.monthly_capacity<src.produced_this_month||
+                   facility.capacity<=facility.damaged) return;
+                const Quantity target=policy.target_inventory-
+                                      c.stock(src.owner,src.region,src.good);
+                Quantity available=proportional(src.monthly_capacity,date.day,dim);
+                if(src.produced_this_month>=available)return;
+                available=std::min(available-src.produced_this_month,target);
+                if(src.renewable)available=std::min(available,src.standing_biomass);
+                const People workers=c.phase_d_workforce(src.owner)-
+                                     c.phase_d_shared_labor_used(src.owner);
+                if(workers<=0)return;
+                available=std::min(available,
+                                  static_cast<Quantity>(workers/src.workers_per_unit));
+                Quantity already_site=0;
+                for(const auto& run:ds.actual_production_runs) {
+                    if(run.month!=gh.phase_d().month())continue;
+                    const auto& recipe=ds.recipes.at(run.recipe);
+                    if(recipe.site==src.site)
+                        already_site=phaseb::add_checked(already_site,
+                             times(run.batches,recipe.capacity_per_batch));
+                }
+                for(const auto& [id,other]:ds.resource_sites) {
+                    (void)id;
+                    if(other.site==src.site)
+                        already_site=phaseb::add_checked(already_site,
+                             times(other.produced_this_month,
+                                   other.site_service_per_unit));
+                }
+                const Quantity facility_limit=proportional(
+                       facility.capacity-facility.damaged,date.day,dim);
+                if(already_site>=facility_limit)return;
+                available=std::min(available,
+                         (facility_limit-already_site)/src.site_service_per_unit);
+                if(policy.wage_per_unit>0)
+                    available=std::min(available,
+                         c.phase_d_cash_available(src.owner)/policy.wage_per_unit);
+                if(available<=0)return;
+                gh.phase_d().extract_resource_daily(policy.resource_site,
+                                                    available,date.day,dim);
+                *completed=available;
+            });
+            if(policy.wage_per_unit>0)
+                plan[5].push_back([policy,completed](phasegh::Stage& gh){
+                    if(*completed<=0)return;
+                    const auto& src=gh.phase_d().state().resource_sites.at(
+                                              policy.resource_site);
+                    gh.phase_c().wages_under_law(src.owner,policy.employee_wallet,
+                                  policy.treasury_wallet,
+                                  times(*completed,policy.wage_per_unit));
+                });
+        }
+        // Funded, self-scheduling research is an actual D work order:
+        // stage1 cash reservation, stage4 lab work/materials, stage5 pay,
+        // stage9 verified result. Every lab shares cumulative DAY capacity
+        // with manufacturing and geological extraction.
+        for(const auto& research:policies_.researches) {
+            auto work=std::make_shared<Quantity>(0);
+            plan[1].push_back([research,date,dim,work](phasegh::Stage& gh) {
+                const auto& ds=gh.phase_d().state();
+                const auto& p=ds.researches.at(research.project);
+                if(p.reviewed||p.verified_work>=p.required_evidence)return;
+                auto& c=gh.phase_c();
+                const auto& lab=c.facility(p.lab_site);
+                if(lab.capacity<=lab.damaged)return;
+                Quantity used=0;
+                for(const auto& run:ds.actual_production_runs) {
+                    if(run.month!=gh.phase_d().month())continue;
+                    const auto& recipe=ds.recipes.at(run.recipe);
+                    if(recipe.site==p.lab_site)
+                        used=phaseb::add_checked(used,
+                                  times(run.batches,recipe.capacity_per_batch));
+                }
+                for(const auto& [id,source]:ds.resource_sites) {
+                    (void)id;
+                    if(source.site==p.lab_site)
+                        used=phaseb::add_checked(used,
+                                  times(source.produced_this_month,
+                                        source.site_service_per_unit));
+                }
+                for(const auto& evidence:ds.research_evidence) {
+                    if(evidence.month!=gh.phase_d().month())continue;
+                    if(ds.researches.at(evidence.project).lab_site==p.lab_site)
+                        used=phaseb::add_checked(used,evidence.units);
+                }
+                const Quantity cap=proportional(lab.capacity-lab.damaged,
+                                                date.day,dim);
+                if(used>=cap)return;
+                const People labor=c.phase_d_workforce(p.holder)-
+                                  c.phase_d_shared_labor_used(p.holder);
+                if(labor<=0)return;
+                const Quantity material=c.phase_d_material_available(
+                                    p.holder,p.region,p.material_good);
+                const Money funds=c.phase_d_cash_available(p.sponsor);
+                if(funds<=0)return;
+                const Quantity n=std::min({research.maximum_daily_work,
+                    p.required_evidence-p.verified_work,cap-used,
+                    material/p.material_per_work,
+                    static_cast<Quantity>(labor/p.workers_per_work),
+                    static_cast<Quantity>(funds/p.cash_cost_per_work)});
+                if(n<=0)return;
+                gh.phase_d().plan_research(research.project,n);
+                *work=n;
+            });
+            plan[4].push_back([research,date,dim,work](phasegh::Stage& gh){
+                if(*work>0)
+                    gh.phase_d().perform_research_daily(research.project,
+                                                   *work,date.day,dim);
+            });
+            plan[5].push_back([research,work](phasegh::Stage& gh){
+                if(*work>0)gh.phase_d().pay_research(research.project,*work);
+            });
+            plan[9].push_back([research](phasegh::Stage& gh){
+                const auto& p=gh.phase_d().state().researches.at(research.project);
+                if(!p.reviewed&&p.verified_work>=p.required_evidence&&
+                   p.paid_work>=p.required_evidence)
+                    gh.phase_d().review_research(research.project);
+            });
+        }
+        for(const auto& maintenance:policies_.maintenance) {
+            auto completed=std::make_shared<Quantity>(0);
+            plan[4].push_back([maintenance,completed](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto& site=c.facility(maintenance.facility);
+                if(site.damaged<=0)return;
+                const Quantity available=c.phase_d_material_available(
+                       site.owner,site.region,maintenance.building_good);
+                const People used=c.phase_d_shared_labor_used(site.owner);
+                const People employed=c.phase_d_workforce(site.owner);
+                if(employed<=used)return;
+                Quantity work=std::min({site.damaged,
+                       maintenance.max_daily_restoration,
+                       available/maintenance.material_per_unit,
+                       (employed-used)/maintenance.workers_per_unit});
+                if(work<=0)return;
+                if(maintenance.wage_per_worker_per_day>0) {
+                    const Money cost=times(times(work,maintenance.workers_per_unit),
+                                           maintenance.wage_per_worker_per_day);
+                    if(cost>c.phase_d_cash_available(site.owner))return;
+                }
+                c.phase_time_maintain_facility(maintenance.facility,
+                         maintenance.building_good,work,
+                         maintenance.material_per_unit,
+                         times(work,maintenance.workers_per_unit));
+                *completed=work;
+            });
+            if(maintenance.wage_per_worker_per_day>0)
+                plan[5].push_back([maintenance,completed](phasegh::Stage& gh) {
+                    if(*completed<=0)return;
+                    const auto& site=gh.phase_c().facility(maintenance.facility);
+                    const Money gross=times(times(*completed,
+                          maintenance.workers_per_unit),
+                          maintenance.wage_per_worker_per_day);
+                    gh.phase_c().wages_under_law(site.owner,
+                          maintenance.employee_wallet,
+                          maintenance.treasury_wallet,gross);
+                });
+        }
+        for(const auto& credit:policies_.debt_service)
+            plan[8].push_back([credit](phasegh::Stage& gh){
+                auto& c=gh.phase_c();
+                const Money debt=c.outstanding_loan(credit.borrower);
+                const Money available=c.phase_d_cash_available(credit.borrower);
+                if(debt<=0||available<=credit.minimum_cash_reserve)return;
+                Money remaining=std::min({debt,credit.max_daily_principal,
+                               available-credit.minimum_cash_reserve});
+                // G trade credit is a bounded legal facility backed by this
+                // SAME C bank loan. Retire its utilization before a direct
+                // C repayment, otherwise G.drawn would disagree with C debt.
+                for(const auto& [id,facility]:gh.commerce().credit) {
+                    if(remaining<=0)break;
+                    if(!facility.active||facility.borrower!=credit.borrower ||
+                       facility.drawn<=0)continue;
+                    const Money amount=std::min(remaining,facility.drawn);
+                    gh.repay_trade_credit(id,amount);
+                    remaining-=amount;
+                }
+                if(remaining>0)c.repay(credit.borrower,remaining);
+            });
         for(const auto& b:policies_.buyers) {
             plan[7].push_back([b](phasegh::Stage& gh){
                 auto& c=gh.phase_c();
@@ -432,11 +757,133 @@ public:
                 }
                 const People registered=phaseb::add_checked(incumbent,reform);
                 if(registered>0)
-                    c.hold_election(registered,0,g.chamber_seats,
+                    c.hold_country_election(election.country,registered,0,
                          {{election.incumbent_party,incumbent},
                           {election.reform_party,reform}});
             });
         }
+        for(const auto& dues:policies_.organization_dues)
+            plan[5].push_back([dues](phasegh::Stage& gh) {
+                const auto& org=gh.diplomacy().organizations.at(dues.organization);
+                if(!org.active||!org.members.contains(dues.country)||
+                   org.dues_per_member<=0)return;
+                if(gh.phase_c().government(dues.country).prime_minister!=
+                   dues.prime_minister)
+                    throw std::invalid_argument("P0_DUES_UNAUTHORIZED_GOVERNMENT");
+                const auto key=std::make_pair(gh.phase_c().month(),dues.country);
+                const auto it=org.paid.find(key);
+                const Money already=it==org.paid.end()?0:it->second;
+                if(already>=org.dues_per_member)return;
+                const Money due=org.dues_per_member-already;
+                if(gh.phase_c().phase_d_cash_available(dues.country)<due)return;
+                gh.pay_dues(dues.organization,dues.country,due);
+            });
+        for(const auto& ai:policies_.crisis_mandates)
+            plan[9].push_back([ai](phasegh::Stage& gh) {
+                if(gh.phase_c().government(ai.country).prime_minister!=
+                   ai.prime_minister)
+                    throw std::invalid_argument("P0_CRISIS_UNAUTHORIZED_GOVERNMENT");
+                for(const auto& [id,crisis]:gh.diplomacy().crises) {
+                    if(crisis.status==phasegh::CrisisStatus::settled||
+                       crisis.status==phasegh::CrisisStatus::withdrawn||
+                       crisis.status==phasegh::CrisisStatus::escalated||
+                       crisis.status==phasegh::CrisisStatus::scheduled)
+                        continue;
+                    if(ai.mediate_neutral_crises&&
+                       crisis.status==phasegh::CrisisStatus::active&&
+                       ai.country!=crisis.claimant&&
+                       ai.country!=crisis.respondent&&crisis.mediator.empty()) {
+                        gh.mediate_crisis(id,ai.country,ai.prime_minister);
+                        continue;
+                    }
+                    if(ai.country!=crisis.claimant&&ai.country!=crisis.respondent)
+                        continue;
+                    // No arbitrary war/claim generation or unfunded concession:
+                    // select an actual proposal and compare real treasury risk.
+                    const phasegh::CrisisProposal* selected=nullptr;
+                    for(const auto& [offer_id,offer]:crisis.proposals) {
+                        (void)offer_id;
+                        if(offer.approvers.contains(ai.country)||
+                           (offer.freeze_claim&&
+                            ai.country==crisis.claimant&&
+                            !ai.accept_claim_withdrawal))continue;
+                        if(offer.compensation>0&&offer.payer==ai.country &&
+                           (offer.compensation>ai.maximum_cash_settlement ||
+                            offer.compensation>
+                              gh.phase_c().phase_d_cash_available(ai.country)))
+                            continue;
+                        if(!selected||offer.compensation<selected->compensation||
+                           (offer.compensation==selected->compensation&&
+                            offer.id<selected->id))
+                            selected=&offer;
+                    }
+                    if(selected)gh.respond_crisis_offer(
+                        id,selected->id,ai.country,true,ai.prime_minister);
+                }
+            });
+        for(const auto& rule:policies_.treaty_ratifications)
+            plan[9].push_back([rule](phasegh::Stage& gh){
+                auto& c=gh.phase_c();
+                if(c.government(rule.country).prime_minister!=rule.prime_minister)
+                    throw std::invalid_argument("P0_H_TREATY_UNAUTHORIZED_PRIME");
+                for(const auto& [id,t]:gh.diplomacy().treaties) {
+                    if(t.parties.empty()||!t.parties.contains(rule.country)||
+                       t.active||t.pending_termination||
+                       t.ratifications.contains(rule.country))
+                        continue;
+                    Money fiscal_exposure=0;
+                    bool eligible=true;
+                    for(const auto& term:t.clauses) {
+                        if(term.obligor!=rule.country)continue;
+                        const auto kind=term.kind;
+                        if(kind==phasegh::ClauseKind::territorial_cession &&
+                           !rule.allow_territorial_cession)
+                            eligible=false;
+                        if((kind==phasegh::ClauseKind::trade_embargo ||
+                            kind==phasegh::ClauseKind::trade_quota) &&
+                           !rule.allow_trade_constraints)
+                            eligible=false;
+                        if((kind==phasegh::ClauseKind::military_access ||
+                            kind==phasegh::ClauseKind::defense_guarantee ||
+                            kind==phasegh::ClauseKind::protectorate) &&
+                           !rule.allow_military_commitments)
+                            eligible=false;
+                        if(kind==phasegh::ClauseKind::financial_aid ||
+                           kind==phasegh::ClauseKind::reparations ||
+                           kind==phasegh::ClauseKind::cultural_exchange)
+                            fiscal_exposure=phaseb::add_checked(
+                                fiscal_exposure,term.amount);
+                    }
+                    if(!eligible||
+                       fiscal_exposure>rule.maximum_new_fiscal_obligation||
+                       fiscal_exposure>c.phase_d_cash_available(rule.country))
+                        continue;
+                    gh.ratify_package_member(id,rule.country,rule.prime_minister);
+                }
+            });
+        for(const auto& rule:policies_.council_decisions)
+            plan[9].push_back([rule](phasegh::Stage& gh){
+                const auto& org=gh.diplomacy().organizations.at(rule.organization);
+                if(!org.active||org.decisions.contains(rule.decision_id))
+                    return;
+                if(!org.members.contains(rule.proposer)||
+                   gh.phase_c().government(rule.proposer).prime_minister!=
+                         rule.prime_minister)
+                    throw std::invalid_argument("P0_H_COUNCIL_NO_PROPOSER");
+                std::map<std::string,phasegh::VoteChoice> votes;
+                for(const auto& m:rule.member_rules) {
+                    if(!org.members.contains(m.country)||
+                       gh.phase_c().government(m.country).prime_minister!=
+                            m.prime_minister)
+                        throw std::invalid_argument("P0_H_COUNCIL_UNAUTHORIZED_MEMBER");
+                    const Money actual=gh.phase_c().phase_d_cash_available(m.country);
+                    votes.emplace(m.country,actual>=m.minimum_free_treasury_for_yes?
+                        phasegh::VoteChoice::yes:phasegh::VoteChoice::no);
+                }
+                if(votes.size()<org.governance.quorum)return;
+                gh.hold_organization_vote(rule.organization,rule.decision_id,
+                       rule.subject,votes,rule.proposer,rule.prime_minister);
+            });
         for(const auto& combat:policies_.engagements)
             plan[10].push_back([combat](phasegh::Stage& gh){
                 fight(gh.phase_c(),combat);
@@ -445,7 +892,24 @@ public:
             plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
                 gh.phase_c().phase_time_close_daily_markets(ordinal);
             });
-        return world_.advance_day(month_close_plan,plan);
+        // Supplemental commands execute today in the canonical day
+        // transaction. No monthly callback staging or adapter remains.
+        for(std::size_t i=0;i<plan.size();++i)
+            plan[i].insert(plan[i].end(),
+                additional_today[i].begin(),additional_today[i].end());
+        if(policies_.freight_lanes.empty())
+            return world_.advance_day(plan);
+        // Freight planning may enqueue several dated physical commands. They
+        // must be committed together with today's B/C/D/G/H events, never
+        // leave a stray queue entry when a carrier/insurance payment fails.
+        daily::World staged=world_;
+        phasef::DayPlanningReservations freight_plan;
+        for(const auto& lane:policies_.freight_lanes)
+            if(auto job=phasef::plan_next_hop(staged,lane,freight_plan))
+                staged.enqueue(date,std::move(*job));
+        const auto report=staged.advance_day(plan);
+        world_=std::move(staged);
+        return report;
     }
 };
 } // namespace vic25::p0

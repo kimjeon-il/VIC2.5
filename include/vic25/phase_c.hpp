@@ -214,6 +214,18 @@ public:
     [[nodiscard]] const InventoryLedger& inventory() const { return goods_; }
     [[nodiscard]] const std::vector<std::string>& journal() const { return events_; }
     [[nodiscard]] const ElectionResult& election() const { return last_election_; }
+    // Nationally authoritative election results. The original global result
+    // is retained for previously encoded Phase C saves and standalone tests.
+    [[nodiscard]] const ElectionResult& country_election(
+            const std::string& country) const {
+        return country_elections_.at(country);
+    }
+    [[nodiscard]] const std::map<std::string,ElectionResult>&
+            country_elections() const { return country_elections_; }
+    [[nodiscard]] std::int64_t country_election_month(
+            const std::string& country) const {
+        return country_election_months_.at(country);
+    }
     [[nodiscard]] int voting_age() const { return voting_age_years_; }
     [[nodiscard]] const std::string& military_control(const std::string& region) const {
         return military_control_.at(region);
@@ -629,6 +641,39 @@ public:
         site.damaged+=destroyed;
         events_.push_back("physical-facility-war-damage");
     }
+    // Owner-directed physical maintenance is performed at stage 4 on the
+    // actual game date. Shares the same C/D POP, stock and facility ledgers.
+    void phase_time_maintain_facility(const std::string& id,
+                                     const std::string& good,
+                                     Quantity units,Quantity material_per_unit,
+                                     People workers) {
+        require_stage({4});
+        auto& site=facilities_.at(id);
+        ensure(units>0&&material_per_unit>0&&workers>0&&
+               units<=site.damaged&&!good.empty()&&
+               phase_d_reservation_mode_,
+               "TIME_D_INVALID_FACILITY_MAINTENANCE");
+        Quantity reserved=0;
+        for(const auto& [due,sites]:scheduled_site_repairs_) {
+            if(due<=month())continue;
+            if(const auto it=sites.find(id);it!=sites.end())
+                reserved=phaseb::add_checked(reserved,it->second);
+        }
+        ensure(reserved<=site.damaged&&units<=site.damaged-reserved,
+               "TIME_D_REPAIR_ALREADY_SCHEDULED");
+        const Quantity consumed=positive_product(units,material_per_unit);
+        ensure(phase_d_material_available(site.owner,site.region,good)>=consumed &&
+               employed_by(site.owner)>=workers,
+               "TIME_D_MAINTENANCE_UNFUNDED_INPUTS");
+        resources_.use_labor(site.owner,workers,employed_by(site.owner));
+        resources_.assert_stage4_available(
+            {site.owner,site.region,good},consumed,
+            stock(site.owner,site.region,good));
+        goods_.consume({site.owner,site.region,good},consumed);
+        site.damaged-=units;
+        events_.push_back("daily-facility-restoration-actual-material-and-labor");
+    }
+
     void rebuild_facility(const std::string& id,const std::string& building_good,
                           Quantity restored,People construction_workers) {
         require_stage({4});
@@ -1044,9 +1089,11 @@ public:
         require_stage({9});
         ensure(ppm >= 0 && ppm <= 1'000'000, "invalid tax rate");
         const auto& g = governments_.at(country);
-        ensure(g.prime_minister == proposer && last_election_.total_seats == g.chamber_seats,
-               "unauthorized tax bill or missing legislature");
-        ensure(coalition_seats(supporting_parties) >= g.quorum, "insufficient legislative votes");
+        const auto& result=legislature_for(country);
+        ensure(g.prime_minister == proposer && result.total_seats == g.chamber_seats,
+               "unauthorized tax bill or missing national legislature");
+        ensure(coalition_seats(supporting_parties,result) >= g.quorum,
+               "insufficient national legislative votes");
         scheduled_income_tax_[month()+1] = ppm;
         events_.push_back("constitutional-tax-law");
     }
@@ -1054,10 +1101,11 @@ public:
                         std::string minister, const std::vector<std::string>& supporting_parties) {
         require_stage({9});
         const auto& g=governments_.at(country);
+        const auto& result=legislature_for(country);
         ensure(g.head_of_state == head && !minister.empty() &&
-               last_election_.total_seats == g.chamber_seats &&
-               coalition_seats(supporting_parties) >= g.quorum,
-               "cabinet lacks appointment authority or majority");
+               result.total_seats == g.chamber_seats &&
+               coalition_seats(supporting_parties,result) >= g.quorum,
+               "cabinet lacks appointment authority or national majority");
         scheduled_cabinets_[month()+1].push_back({country, "", std::move(minister), false, true});
         events_.push_back("cabinet-approved");
     }
@@ -1212,6 +1260,13 @@ public:
         membership_[{slice,group}]+=n;
         events_.push_back("material-shortage-political-organization");
     }
+    [[nodiscard]] Money outstanding_loan(const std::string& borrower) const {
+        ensure(actors_.contains(borrower),"unknown bank-debt obligor");
+        const Money debt=money_.balance(account(borrower,"debt"));
+        ensure(debt<=0&&debt>std::numeric_limits<Money>::min(),
+               "invalid financial liability balance");
+        return -debt;
+    }
     void repay(const std::string& borrower, Money amount) {
         require_stage({8});
         if(phase_d_reservation_mode_)
@@ -1358,6 +1413,71 @@ public:
         last_election_ = std::move(result);
         election_this_month_ = true;
         events_.push_back("election");
+    }
+    // Day-native E/C country elections use a separate record per country.
+    // Valid ballots are backed by real eligible citizens in that sovereign
+    // jurisdiction; a different country's legislature cannot authorize a
+    // cabinet, treaty funding or tax decision.
+    void hold_country_election(const std::string& country,
+            People registered,People invalid,
+            const std::map<std::string,People>& votes) {
+        require_stage({9});
+        const auto& g=governments_.at(country);
+        ensure(!country_election_months_.contains(country)||
+               country_election_months_.at(country)!=month(),
+               "duplicate national election in calendar month");
+        People eligible=0;
+        for(const auto& [id,row]:people_.slices()) {
+            (void)id;
+            const auto& demo=people_.demographic(row.key.demographic);
+            const auto sovereign=sovereignty_.find(demo.region);
+            if(sovereign==sovereignty_.end()||sovereign->second!=country||
+               demo.citizenship!="citizen"||
+               demo.service==phaseb::Service::active||
+               demo.service==phaseb::Service::pow||
+               demo.service==phaseb::Service::missing||
+               people_.age_months(row.key.demographic)<
+                   static_cast<std::int64_t>(voting_age_years_)*12)
+                continue;
+            eligible=phaseb::add_checked(eligible,row.count);
+        }
+        ensure(registered>0&&registered<=eligible&&
+               invalid>=0&&invalid<=registered&&
+               g.chamber_seats>0&&!votes.empty(),
+               "national election has invalid eligible-voter scope");
+        People valid=0;
+        for(const auto& [party,n]:votes) {
+            ensure(!party.empty()&&n>=0,"invalid national party ballot");
+            valid=phaseb::add_checked(valid,n);
+        }
+        ensure(valid>0&&valid<=registered-invalid,
+               "national ballots exceed real voter registration");
+        ElectionResult result;
+        result.eligible=eligible;
+        result.registered=registered;
+        result.cast=phaseb::add_checked(valid,invalid);
+        result.valid=valid;
+        result.invalid=invalid;
+        result.total_seats=g.chamber_seats;
+        result.votes=votes;
+        for(const auto& [party,n]:votes){(void)n;result.seats.emplace(party,0);}
+        // Integer D'Hondt allocation with portable exact-fraction ties.
+        for(People i=0;i<result.total_seats;++i) {
+            std::string chosen;
+            for(const auto& [party,n]:votes) {
+                if(chosen.empty()){chosen=party;continue;}
+                const int order=compare_nonnegative_ratios(
+                     static_cast<std::uint64_t>(n),
+                     static_cast<std::uint64_t>(result.seats[party]+1),
+                     static_cast<std::uint64_t>(votes.at(chosen)),
+                     static_cast<std::uint64_t>(result.seats[chosen]+1));
+                if(order>0||(order==0&&party<chosen))chosen=party;
+            }
+            ++result.seats[chosen];
+        }
+        country_elections_[country]=std::move(result);
+        country_election_months_[country]=month();
+        events_.push_back("national-election:"+country);
     }
     // Actual epidemic shock: death plus a non-overlapping illness allocation
     // through the same Phase B population source of truth. Applied in stage 10.
@@ -1565,12 +1685,6 @@ public:
         sync_service_transitions(before);
         events_.push_back("daily-auto-demography");
     }
-    // This transient flag is consumed by the *same* legacy MonthClose,
-    // so daily POP hazard is never run again as a 12-stage month hazard.
-    void phase_time_suppress_monthly_demography() {
-        require_stage({10});
-        suppress_demography_this_close_=true;
-    }
     // Apply monthly policy expirations, inventories, tax/strike/clinic
     // availability on the true first DAY, not at the last day of that
     // month. The ordinary legacy month engine remains unchanged.
@@ -1583,18 +1697,29 @@ public:
     // monthly settlement. No open_month(), no autonomous market clearing,
     // no monthly POP mortality/aging/production, and no finish_month().
     // Call only whitelisted stage-valid C commands from the day coordinator.
-    AdvanceReport advance_daily(const Plan& plan) {
+    AdvanceReport advance_daily(const Plan& plan,
+                                bool final_calendar_day=false) {
         IntegratedWorld staged = *this;
         const auto opening_month = month();
         for (int n=0; n<12; ++n) {
             staged.stage_=n;
             for (const auto& command:plan[static_cast<std::size_t>(n)])
                 command(staged);
+            if(n==10&&final_calendar_day) {
+                // Update month-based age classification after today's real
+                // population events; never rerun month-sized risk rates.
+                staged.strike_active_.clear();
+                staged.people_.finish_month();
+                staged.people_.release_ineligible();
+            }
+            if(n==11&&final_calendar_day) {
+                staged.election_this_month_=false;
+            }
             staged.validate();
         }
         staged.stage_=-1;
-        ensure(staged.month()==opening_month,
-               "daily action attempted to advance legacy monthly clock");
+        ensure(staged.month()==opening_month+(final_calendar_day?1:0),
+               "TIME_ERR_NATIVE_CALENDAR_ROLLOVER");
         ensure(staged.commit_id_<std::numeric_limits<std::uint64_t>::max(),
                "daily commit id exhausted");
         ++staged.commit_id_;
@@ -1611,23 +1736,21 @@ public:
         return result;
     }
 
-    AdvanceReport advance(const Plan& plan = {},
-                          bool already_opened_on_calendar_day=false) {
+    AdvanceReport advance(const Plan& plan = {}) {
         IntegratedWorld stage = *this;
         const auto start = month();
         stage.election_this_month_ = false;
         for (int n = 0; n != 12; ++n) {
             stage.stage_ = n;
-            if (n == 0 && !already_opened_on_calendar_day)
-                stage.open_month();
-            if (n == 9) stage.collect_market_grievances(); // actual stage-7 shortages precede political decisions
+            if (n == 0) stage.open_month();
+            if (n == 9) stage.collect_market_grievances();
             for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
             if (n == 10) {
                 // Strikes reserve actual working time only for this month's
                 // production; they must not outlive a later death or split.
                 stage.strike_active_.clear();
                 const std::size_t before = stage.people_.events().size();
-                if (stage.demography_enabled_ && !stage.suppress_demography_this_close_) {
+                if (stage.demography_enabled_) {
                     phaseb::Engine engine{stage.demographic_rules_};
                     (void)engine.advance(stage.people_);
                     stage.sync_service_transitions(before);
@@ -1640,7 +1763,6 @@ public:
             }
             if (n == 11) {
                 stage.reprice_markets();
-                stage.suppress_demography_this_close_=false;
             }
             stage.validate();
             if (n == 11) {
@@ -1688,6 +1810,34 @@ public:
         for(const auto& [id,site]:facilities_) {
             ensure(id==site.id&&site.capacity>0&&site.damaged>=0&&
                    site.damaged<=site.capacity,"invalid physical facility");
+        }
+        ensure(country_elections_.size()==country_election_months_.size()&&
+               country_elections_.size()<=governments_.size(),
+               "national election registry size mismatch");
+        for(const auto& [country,result]:country_elections_) {
+            const auto government=governments_.find(country);
+            const auto when=country_election_months_.find(country);
+            ensure(government!=governments_.end()&&
+                   when!=country_election_months_.end()&&
+                   when->second>=0&&when->second<=month()&&
+                   result.total_seats==government->second.chamber_seats&&
+                   result.registered>=0&&result.eligible>=result.registered&&
+                   result.invalid>=0&&result.valid>0&&
+                   result.cast==phaseb::add_checked(result.valid,result.invalid)&&
+                   result.cast<=result.registered,
+                   "national election not backed by government or voters");
+            People votes=0,seats=0;
+            ensure(result.votes.size()==result.seats.size()&&
+                   !result.votes.empty(),"national election missing vote distribution");
+            for(const auto& [party,n]:result.votes) {
+                ensure(!party.empty()&&n>=0&&result.seats.contains(party)&&
+                       result.seats.at(party)>=0,
+                       "national election invalid party count");
+                votes=phaseb::add_checked(votes,n);
+                seats=phaseb::add_checked(seats,result.seats.at(party));
+            }
+            ensure(votes==result.valid&&seats==result.total_seats,
+                   "national election votes/seats not conserved");
         }
         for (const auto& [id,g] : governments_) {
             ensure(id==g.country && !g.head_of_state.empty() && !g.prime_minister.empty() &&
@@ -1814,13 +1964,15 @@ private:
     bool conscription_enabled_{true};
     std::map<std::int64_t, int> scheduled_voting_age_;
     ElectionResult last_election_;
+    // Append-only save extension; absent in authentic Phase C legacy payloads.
+    std::map<std::string,ElectionResult> country_elections_;
+    std::map<std::string,std::int64_t> country_election_months_;
     phaseb::DemographyRules demographic_rules_;
     std::vector<std::string> events_;
     std::uint64_t commit_id_{};
     std::uint64_t sequence_{};
     int stage_{-1}, voting_age_years_{21};
     bool election_this_month_{}, demography_enabled_{};
-    bool suppress_demography_this_close_{}; // transient per-close event, not persistent
 
     // Exact nonnegative fraction comparison using Euclid/continued fractions:
     // no 128-bit GNU extension, overflow or floating-point ties (MSVC friendly).
@@ -1871,13 +2023,27 @@ private:
             }
         }
     }
-    [[nodiscard]] People coalition_seats(const std::vector<std::string>& party_ids) const {
+    [[nodiscard]] const ElectionResult& legislature_for(
+            const std::string& country) const {
+        const auto it=country_elections_.find(country);
+        if(it!=country_elections_.end())return it->second;
+        // Legacy single-legislature fixtures retain their original meaning.
+        // Once a modern country-specific election exists, other nations must
+        // have their OWN election rather than reuse a neighbour's seats.
+        ensure(country_elections_.empty(),
+               "missing country-specific legislative election");
+        return last_election_;
+    }
+    [[nodiscard]] People coalition_seats(
+            const std::vector<std::string>& party_ids,
+            const ElectionResult& legislature) const {
         std::set<std::string> unique;
-        People total = 0;
-        for (const auto& party : party_ids) {
-            ensure(unique.insert(party).second && last_election_.seats.contains(party),
-                   "duplicate or unknown coalition party");
-            total = phaseb::add_checked(total, last_election_.seats.at(party));
+        People total=0;
+        for(const auto& party:party_ids) {
+            ensure(unique.insert(party).second&&
+                   legislature.seats.contains(party),
+                   "duplicate or unknown national coalition party");
+            total=phaseb::add_checked(total,legislature.seats.at(party));
         }
         return total;
     }

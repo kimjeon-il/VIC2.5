@@ -544,6 +544,52 @@ public:
         if(source.renewable)source.standing_biomass-=units;
         d_.append(d_.opening_month,"resource-extracted",id);
     }
+    // Native resource extraction is bounded by both the source's observed
+    // monthly flow and the shared physical facility's prorated capacity.
+    // Neither is an underground total reserve or a hidden depletion stock.
+    void extract_resource_daily(const std::string& id,Quantity units,
+                                std::int32_t day,std::int32_t days_in_month){
+        must(4);
+        require(day>0&&days_in_month>=28&&days_in_month<=31&&
+                day<=days_in_month&&units>0,"D_DAILY_INVALID_EXTRACTION_DATE");
+        const auto& source=d_.resource_sites.at(id);
+        const auto& site=c_.facility(source.site);
+        require(site.capacity>=site.damaged,"D_DAILY_DAMAGED_EXTRACTION_SITE");
+        const auto prorate=[&](Quantity cap){
+            return phaseb::add_checked(
+                phaseb::mul_checked(cap/days_in_month,day),
+                phaseb::mul_checked(cap%days_in_month,day)/days_in_month);
+        };
+        const Quantity source_limit=prorate(source.monthly_capacity);
+        require(source.produced_this_month<=source_limit&&
+                units<=source_limit-source.produced_this_month,
+                "D_DAILY_RESOURCE_FLOW_BUDGET_EXCEEDED");
+        Quantity used_site=0;
+        for(const auto& run:d_.actual_production_runs) {
+            if(run.month!=d_.opening_month)continue;
+            const auto& recipe=d_.recipes.at(run.recipe);
+            if(recipe.site==source.site)
+                used_site=phaseb::add_checked(used_site,
+                    phaseb::mul_checked(run.batches,recipe.capacity_per_batch));
+        }
+        for(const auto& [site_id,other]:d_.resource_sites) {
+            (void)site_id;
+            if(other.site==source.site)
+                used_site=phaseb::add_checked(used_site,
+                    phaseb::mul_checked(other.produced_this_month,
+                                        other.site_service_per_unit));
+        }
+        for(const auto& evidence:d_.research_evidence) {
+            if(evidence.month!=d_.opening_month)continue;
+            if(d_.researches.at(evidence.project).lab_site==source.site)
+                used_site=phaseb::add_checked(used_site,evidence.units);
+        }
+        const Quantity cap=prorate(site.capacity-site.damaged);
+        const Quantity needed=phaseb::mul_checked(units,source.site_service_per_unit);
+        require(used_site<=cap&&needed<=cap-used_site,
+                "D_DAILY_SHARED_SITE_FLOW_EXCEEDED");
+        extract_resource(id,units);
+    }
     void manufacture(const std::string& recipe,Quantity batches) {
         must(4);
         const auto& r=d_.recipes.at(recipe);
@@ -601,6 +647,18 @@ public:
                 used=phaseb::add_checked(used,
                     phaseb::mul_checked(run.batches,previous.capacity_per_batch));
         }
+        for(const auto& [resource_id,source]:d_.resource_sites) {
+            (void)resource_id;
+            if(source.site==spec.site)
+                used=phaseb::add_checked(used,
+                     phaseb::mul_checked(source.produced_this_month,
+                                         source.site_service_per_unit));
+        }
+        for(const auto& evidence:d_.research_evidence) {
+            if(evidence.month!=d_.opening_month)continue;
+            if(d_.researches.at(evidence.project).lab_site==spec.site)
+                used=phaseb::add_checked(used,evidence.units);
+        }
         const Quantity required=phaseb::mul_checked(batches,spec.capacity_per_batch);
         require(used<=allowed&&required<=allowed-used,
                 "D_DAILY_MONTHLY_FACILITY_BUDGET_EXCEEDED");
@@ -633,6 +691,42 @@ public:
         p.planned_work-=units;
         d_.research_evidence.push_back({project,c_.month(),units});
         d_.append(c_.month(),"verified-research-work",project);
+    }
+    void perform_research_daily(const std::string& project,Quantity units,
+                                std::int32_t day,std::int32_t days_in_month) {
+        must(4);
+        require(day>0&&days_in_month>=28&&days_in_month<=31&&
+                day<=days_in_month&&units>0,"D_DAILY_INVALID_RESEARCH_DATE");
+        const auto& p=d_.researches.at(project);
+        const auto& site=c_.facility(p.lab_site);
+        require(site.capacity>=site.damaged,"D_DAILY_DAMAGED_RESEARCH_LAB");
+        const Quantity monthly=site.capacity-site.damaged;
+        const Quantity cap=phaseb::add_checked(
+               phaseb::mul_checked(monthly/days_in_month,day),
+               phaseb::mul_checked(monthly%days_in_month,day)/days_in_month);
+        Quantity used=0;
+        for(const auto& run:d_.actual_production_runs) {
+            if(run.month!=d_.opening_month)continue;
+            const auto& recipe=d_.recipes.at(run.recipe);
+            if(recipe.site==p.lab_site)
+                used=phaseb::add_checked(used,
+                     phaseb::mul_checked(run.batches,recipe.capacity_per_batch));
+        }
+        for(const auto& [source_id,source]:d_.resource_sites) {
+            (void)source_id;
+            if(source.site==p.lab_site)
+                used=phaseb::add_checked(used,
+                     phaseb::mul_checked(source.produced_this_month,
+                                         source.site_service_per_unit));
+        }
+        for(const auto& evidence:d_.research_evidence) {
+            if(evidence.month!=d_.opening_month)continue;
+            if(d_.researches.at(evidence.project).lab_site==p.lab_site)
+                used=phaseb::add_checked(used,evidence.units);
+        }
+        require(used<=cap&&units<=cap-used,
+                "D_DAILY_RESEARCH_MONTHLY_LAB_BUDGET");
+        perform_research(project,units);
     }
     void pay_research(const std::string& project,Quantity units) {
         must(5);
@@ -820,7 +914,8 @@ public:
     // begin_month() must NOT run here: it renews natural pools and resets
     // monthly throughput. Those effects still happen only at MonthClose.
     phasec::AdvanceReport advance_daily(const Plan& tasks,
-                                         bool first_calendar_day=false) {
+                                         bool first_calendar_day=false,
+                                         bool final_calendar_day=false) {
         DomainState next=domain_;
         phasec::IntegratedWorld::Plan bridge;
         for(int i=0;i<12;++i) {
@@ -855,7 +950,7 @@ public:
             });
         }
         static_assert(std::is_nothrow_move_assignable_v<DomainState>);
-        const auto report=core_.advance_daily(bridge);
+        const auto report=core_.advance_daily(bridge,final_calendar_day);
         domain_=std::move(next);
         return report;
     }
@@ -1045,26 +1140,14 @@ private:
         copy.finalize(core_);
     }
 public:
-    phasec::AdvanceReport advance(const Plan& plan={},
-                                   bool already_opened_on_calendar_day=false) {
+    phasec::AdvanceReport advance(const Plan& plan={}) {
         // Both the domain state and Phase C's internal snapshot are staged.
         // No mutable Phase D state escapes when C throws in any of stages 0..11.
         DomainState next=domain_;
         phasec::IntegratedWorld::Plan bridge;
         for(int i=0;i<12;++i) {
             bridge[static_cast<std::size_t>(i)].push_back([&,i](phasec::IntegratedWorld& live) {
-                if(i==0) {
-                    if(!already_opened_on_calendar_day) {
-                        next.begin_month(live);
-                    } else {
-                        // At MonthClose, this calendar month was already
-                        // opened on day 1. Only re-open transient reservation
-                        // scopes for legacy G/H trade. Do not regenerate
-                        // renewable resources, reset work or commission twice.
-                        next.opening_month=live.month();
-                        live.phase_d_enable_shared_resources();
-                    }
-                }
+                if(i==0)next.begin_month(live);
                 Stage stage{live,next,i};
                 for(const auto& task:plan[static_cast<std::size_t>(i)])task(stage);
                 if(i==11)next.finalize(live);
@@ -1075,7 +1158,7 @@ public:
         // triples peak population RAM without adding rollback safety.
         static_assert(std::is_nothrow_move_assignable_v<DomainState>,
                       "Phase D domain commit must never throw after Phase C commit");
-        const auto report=core_.advance(bridge,already_opened_on_calendar_day);
+        const auto report=core_.advance(bridge);
         domain_=std::move(next);
         return report;
     }
