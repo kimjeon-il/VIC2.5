@@ -1123,6 +1123,15 @@ private:
                     cargo.quantity>0&&cargo.loss>=0&&cargo.loss<=cargo.quantity&&
                     cargo.arrival_day>0,
                     "G_ERR_NATIVE_CARGO_INVARIANT");
+            if(!cargo.path_edges.empty()) {
+                require(cargo.hop_index<cargo.path_edges.size()&&
+                        !cargo.current_leg_id.empty()&&
+                        (!cargo.at_hub||!cargo.hub_region.empty()),
+                        "G_ERR_NATIVE_INTERMODAL_STATE");
+                for(const auto& edge:cargo.path_edges)
+                    require(g.transport_edges.contains(edge),
+                            "G_ERR_NATIVE_INTERMODAL_MISSING_EDGE");
+            }
         }
         require(g.pending.empty(), "G_ERR_UNSETTLED_RESERVATIONS");
     }
@@ -1332,10 +1341,17 @@ public:
                     core_.spatial().provinces.contains(r.destination),
                     "G_ERR_INVALID_ROUTE");
         const auto& inventory=core_.core().core();
-        for(const auto& [id,cargo]:trade_.daily_shipments)
-            require(inventory.stock("TRANSIT:DAY:"+id,"in_transit",cargo.good)==
+        for(const auto& [id,cargo]:trade_.daily_shipments) {
+            const std::string physical_holder=cargo.at_hub?
+                "TRANSIT:HUB:"+id:
+                "TRANSIT:DAY:"+(cargo.current_leg_id.empty()?
+                               id:cargo.current_leg_id);
+            const std::string physical_region=cargo.at_hub?
+                cargo.hub_region:"in_transit";
+            require(inventory.stock(physical_holder,physical_region,cargo.good)==
                         cargo.quantity,
                     "G_ERR_NATIVE_CARGO_NOT_BACKED_BY_INVENTORY");
+        }
         require(trade_.pending.empty(),"G_ERR_PENDING_OUTSIDE_MONTH");
     }
     phasec::AdvanceReport advance(const Plan& plan={}) {
