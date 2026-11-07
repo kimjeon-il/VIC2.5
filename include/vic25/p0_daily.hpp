@@ -1733,7 +1733,8 @@ public:
                     bool fighting_capability=false;
                     if(!war.armistice)
                         for(const auto& [unit,deployment]:c.army_deployments()) {
-                            if(c.active_strength(unit)<=0||
+                            if(c.p5_guerrilla_is_insurgent_unit(unit)||
+                               c.active_strength(unit)<=0||
                                c.stock(unit,deployment.region,"ammunition")<=0||
                                std::find(fronts.begin(),fronts.end(),
                                    deployment.region)==fronts.end())continue;
@@ -1802,6 +1803,7 @@ public:
                     std::string attacker,defender;
                     for(const auto& [unit,deployment]:c.army_deployments()) {
                         if(deployment.region!=front||used.contains(unit)||
+                           c.p5_guerrilla_is_insurgent_unit(unit)||
                            c.active_strength(unit)<=0||
                            c.stock(unit,front,"ammunition")<=0)continue;
                         if(deployment.country==war.attacker&&attacker.empty())
@@ -2140,7 +2142,8 @@ public:
                     }
                 }
                 for(const auto& [unit,d]:c.army_deployments()) {
-                    if(!at_war.contains(d.country)||
+                    if(c.p5_guerrilla_is_insurgent_unit(unit)||
+                       !at_war.contains(d.country)||
                        !c.has_country_treasury(d.country))continue;
                     const auto& treasury=c.country_treasury(d.country);
                     if(treasury==unit)continue;
