@@ -42,6 +42,10 @@ struct P5Crisis {
     std::vector<std::string> contested_regions; // legal claims, not title changes
     std::int32_t verified_engagements{};
 };
+struct P5ControlReconciliation {
+    std::string crisis_id,country,successor_head;
+    std::vector<std::string> verified_regions;
+};
 struct P5Settlement {
     std::string id,crisis_id,legal_basis,successor_head,new_sovereign,region;
     P5SettlementKind kind{P5SettlementKind::legal_concession};
