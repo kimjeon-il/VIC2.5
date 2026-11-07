@@ -239,6 +239,7 @@ static void armed_conflict_requires_real_deployments_and_verified_control() {
          "P5 government turnover must not predate the committed settlement");
     world.advance_day();
     need(c(world).government("A").head_of_state=="NEW_HEAD"&&
+         c(world).military_control("R")=="A"&&
          c(world).p5_crises().at("P5:MOV").stage==P5CrisisStage::settled&&
          c(world).p5_settlements().size()==1&&
          c(world).people().population()==start_population&&
