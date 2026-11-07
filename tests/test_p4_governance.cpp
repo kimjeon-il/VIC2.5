@@ -27,6 +27,7 @@ struct Scenario {
         geo.seed_unit(11,"A","CAPITAL");
         geo.seed_unit(22,"B","CAPITAL");
         geo.seed_assignment(1,11);
+        geo.seed_assignment(2,11);
         geo.seed_assignment(3,22);
         auto& core=geo.seed_core().seed_core();
         core.seed_actor("A",100);
