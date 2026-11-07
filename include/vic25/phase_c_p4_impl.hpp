@@ -314,7 +314,8 @@ inline void IntegratedWorld::p4_hold_contest(
         const auto& authoritative=country_elections_.at(contest.country);
         ensure(authoritative.seats==result.seats,
                "P4 and C must agree on the parliamentary seat allocation");
-        p1_coalitions_.at(contest.country).caretaker=true;
+        if(p1_authority(contest.country).assembly_confidence_required)
+            p1_coalitions_.at(contest.country).caretaker=true;
     } else if(contest.office==P4Office::head_of_state) {
         const auto& chosen=p4_parties_.at(result.winning_party);
         result.office_holder=chosen.head_candidate;
@@ -370,7 +371,8 @@ inline void IntegratedWorld::p4_dissolve(
     if(old.empty())p4_due_days_.erase(contest.next_poll_day);
     contest.next_poll_day=early_poll_day;
     contest.dissolved=true;
-    p1_coalitions_.at(contest.country).caretaker=true;
+    if(p1_authority(contest.country).assembly_confidence_required)
+        p1_coalitions_.at(contest.country).caretaker=true;
     p4_due_days_[early_poll_day].insert(id);
     events_.push_back("p4-parliament-dissolved:"+id);
 }
