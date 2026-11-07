@@ -318,4 +318,291 @@ inline void IntegratedWorld::p5_guerrilla_daily_review(
     }
 }
 
+
+inline void IntegratedWorld::p5_guerrilla_disrupt(
+        const std::string& id,const std::string& incident_id,
+        const std::string& region,const std::string& unit,
+        Quantity ammunition,std::int64_t today) {
+    require_stage({10});
+    const auto& campaign=p5_guerrilla_campaigns_.at(id);
+    ensure(!incident_id.empty()&&
+           !p5_guerrilla_incident_ids_.contains(incident_id)&&
+           today>=campaign.started_day&&
+           today<std::numeric_limits<std::int64_t>::max()-5&&
+           campaign.stage==P5GuerrillaStage::active&&
+           std::find(campaign.regions.begin(),campaign.regions.end(),region)!=
+               campaign.regions.end()&&
+           std::find(campaign.units.begin(),campaign.units.end(),unit)!=
+               campaign.units.end()&&
+           army_deployments_.contains(unit)&&
+           army_deployments_.at(unit).country==campaign.country&&
+           army_deployments_.at(unit).region==region&&
+           active_strength(unit)>0&&ammunition>0&&
+           stock(unit,region,"ammunition")>=ammunition&&
+           (stock(unit,region,"rifle")>0||
+            assigned_equipment(unit,region,"rifle")>0),
+           "P5-G disruption requires an actually armed deployed irregular");
+    // Fixed-point scenario coefficients are provisional game calibration.
+    // One round cannot cause world-scale economic collapse: the impact is
+    // limited by real expended ammunition AND real armed personnel.
+    const auto strength=active_strength(unit);
+    const auto penalty=static_cast<std::int32_t>(
+        std::min<std::int64_t>({
+            250'000,
+            std::min<std::int64_t>(ammunition,5)*50'000,
+            std::min<std::int64_t>(strength,13)*20'000
+        }));
+    ensure(penalty>0,"P5-G physical action too small for access effect");
+    if(phase_d_reservation_mode_)
+        resources_.assert_goods_available({unit,region,"ammunition"},
+                                         ammunition,
+                                         stock(unit,region,"ammunition"));
+    // Consumption is owned by the existing C InventoryLedger.
+    goods_.consume({unit,region,"ammunition"},ammunition);
+    p5_guerrilla_incident_ids_.insert(incident_id);
+    p5_guerrilla_incidents_.push_back({
+        incident_id,id,region,unit,"",
+        P5GuerrillaIncidentKind::disruption,today,ammunition,penalty});
+    p5_guerrilla_effect_due_[today+1].push_back({
+        incident_id,id,region,today+1,today+3,penalty});
+    events_.push_back("p5-guerrilla-verified-regional-disruption:"+region);
+}
+
+inline void IntegratedWorld::p5_guerrilla_skirmish(
+        const std::string& id,const std::string& incident_id,
+        const std::string& irregular_unit,Id irregular_slice,
+        const std::string& government_unit,Id government_slice,
+        const std::string& region,
+        CombatLoss irregular_losses,CombatLoss government_losses,
+        std::int64_t today) {
+    require_stage({10});
+    const auto& campaign=p5_guerrilla_campaigns_.at(id);
+    ensure(!incident_id.empty()&&
+           !p5_guerrilla_incident_ids_.contains(incident_id)&&
+           today>=campaign.started_day&&
+           campaign.stage==P5GuerrillaStage::active&&
+           irregular_unit!=government_unit&&
+           std::find(campaign.units.begin(),campaign.units.end(),
+                     irregular_unit)!=campaign.units.end()&&
+           std::find(campaign.units.begin(),campaign.units.end(),
+                     government_unit)==campaign.units.end()&&
+           std::find(campaign.regions.begin(),campaign.regions.end(),
+                     region)!=campaign.regions.end()&&
+           army_deployments_.contains(irregular_unit)&&
+           army_deployments_.contains(government_unit)&&
+           army_deployments_.at(irregular_unit).country==campaign.country&&
+           army_deployments_.at(government_unit).country==campaign.country&&
+           army_deployments_.at(irregular_unit).region==region&&
+           army_deployments_.at(government_unit).region==region&&
+           people_.has_slice(irregular_slice)&&
+           people_.has_slice(government_slice)&&
+           unit_slice_strength(irregular_unit,irregular_slice)==
+               people_.slice(irregular_slice).count&&
+           unit_slice_strength(government_unit,government_slice)==
+               people_.slice(government_slice).count&&
+           irregular_losses.ammunition>0&&government_losses.ammunition>0&&
+           stock(irregular_unit,region,"ammunition")>=
+               irregular_losses.ammunition&&
+           stock(government_unit,region,"ammunition")>=
+               government_losses.ammunition&&
+           assigned_equipment(irregular_unit,region,"rifle")>0&&
+           assigned_equipment(government_unit,region,"rifle")>0,
+           "P5-G skirmish requires two existing opposed armed and deployed units");
+    for(const auto& [other_id,other]:p5_guerrilla_campaigns_) {
+        if(other_id==id||other.stage==P5GuerrillaStage::resolved||
+           other.stage==P5GuerrillaStage::ceasefire)continue;
+        ensure(std::find(other.units.begin(),other.units.end(),
+                         government_unit)==other.units.end(),
+               "P5-G alleged government troops belong to another uprising");
+    }
+    // Two real Phase B battle transactions: physical ammunition and actual
+    // casualties, never a fabricated insurgency-strength counter.
+    battle(irregular_unit,irregular_slice,region,irregular_losses);
+    battle(government_unit,government_slice,region,government_losses);
+    auto& mutable_campaign=p5_guerrilla_campaigns_.at(id);
+    ensure(mutable_campaign.verified_skirmishes<
+               std::numeric_limits<std::int32_t>::max(),
+           "P5-G verified skirmish count overflow");
+    ++mutable_campaign.verified_skirmishes;
+    p5_guerrilla_incident_ids_.insert(incident_id);
+    p5_guerrilla_incidents_.push_back({
+        incident_id,id,region,irregular_unit,government_unit,
+        P5GuerrillaIncidentKind::skirmish,today,
+        phaseb::add_checked(irregular_losses.ammunition,
+                            government_losses.ammunition),0});
+    events_.push_back("p5-guerrilla-actual-low-intensity-clash:"+id);
+}
+
+inline void IntegratedWorld::p5_guerrilla_to_conventional(
+        const std::string& id,const std::string& crisis_id,
+        std::int64_t today) {
+    require_stage({9});
+    auto& campaign=p5_guerrilla_campaigns_.at(id);
+    const auto& crisis=p5_crises_.at(crisis_id);
+    ensure(today>=campaign.started_day&&
+           (campaign.stage==P5GuerrillaStage::active||
+            campaign.stage==P5GuerrillaStage::supply_exhausted)&&
+           crisis.stage==P5CrisisStage::armed_conflict&&
+           crisis.country==campaign.country&&
+           crisis.movement==campaign.movement&&
+           p5_control_evidence_.contains(crisis_id)&&
+           !p5_control_evidence_.at(crisis_id).empty(),
+           "P5-G cannot enter regular civil war without existing C occupation and P5 crisis");
+    bool actual_common_formation=false,real_control=false;
+    for(const auto& unit:campaign.units)
+        if(std::find(crisis.pledged_units.begin(),crisis.pledged_units.end(),
+                     unit)!=crisis.pledged_units.end()&&
+           active_strength(unit)>0)
+            actual_common_formation=true;
+    for(const auto& region:campaign.regions)
+        if(p5_control_evidence_.at(crisis_id).contains(region)&&
+           military_control_.at(region)=="P5:"+crisis_id)
+            real_control=true;
+    ensure(actual_common_formation&&real_control,
+           "P5-G conventional transition must share real C units and occupied territory");
+    auto schedule=p5_guerrilla_review_due_.find(campaign.next_review_day);
+    if(schedule!=p5_guerrilla_review_due_.end()) {
+        schedule->second.erase(id);
+        if(schedule->second.empty())p5_guerrilla_review_due_.erase(schedule);
+    }
+    campaign.stage=P5GuerrillaStage::conventional;
+    campaign.crisis_id=crisis_id;
+    P5GuerrillaIncident entry;
+    entry.id="P5-G:conventional:"+id+":"+std::to_string(today);
+    ensure(p5_guerrilla_incident_ids_.insert(entry.id).second,
+           "P5-G duplicate conventional transition");
+    entry.campaign=id;
+    entry.kind=P5GuerrillaIncidentKind::conventional_transition;
+    entry.day=today;
+    p5_guerrilla_incidents_.push_back(std::move(entry));
+    events_.push_back("p5-guerrilla-existing-forces-converted-to-front:"+id);
+}
+
+inline void IntegratedWorld::p5_guerrilla_resume(
+        const std::string& id,std::int64_t today) {
+    require_stage({9});
+    auto& campaign=p5_guerrilla_campaigns_.at(id);
+    ensure(today>=campaign.started_day&&
+           (campaign.stage==P5GuerrillaStage::conventional||
+            campaign.stage==P5GuerrillaStage::ceasefire)&&
+           p3_movements_.at(campaign.movement).active,
+           "P5-G residual armed movement must still exist");
+    bool supplied=false;
+    for(const auto& unit:campaign.units) {
+        if(!army_deployments_.contains(unit)||active_strength(unit)<=0)continue;
+        const auto& location=army_deployments_.at(unit).region;
+        if(std::find(campaign.regions.begin(),campaign.regions.end(),
+                     location)==campaign.regions.end()||
+           sovereignty_.at(location)!=campaign.country||
+           stock(unit,location,"ammunition")<=0||
+           (stock(unit,location,"rifle")<=0&&
+            assigned_equipment(unit,location,"rifle")<=0))continue;
+        if(!campaign.crisis_id.empty()&&
+           military_control_.at(location)=="P5:"+campaign.crisis_id)
+            continue;
+        supplied=true;
+    }
+    ensure(supplied,
+           "P5-G residual guerrilla forces require real remaining soldiers and stocks");
+    if(campaign.stage==P5GuerrillaStage::conventional) {
+        ensure(p5_crises_.contains(campaign.crisis_id),
+               "P5-G conventional campaign lost parent political crisis");
+    }
+    campaign.stage=P5GuerrillaStage::active;
+    campaign.next_review_day=today+7;
+    p5_guerrilla_review_due_[campaign.next_review_day].insert(id);
+    P5GuerrillaIncident entry;
+    entry.id="P5-G:resume:"+id+":"+std::to_string(today);
+    ensure(p5_guerrilla_incident_ids_.insert(entry.id).second,
+           "P5-G duplicate regional return");
+    entry.campaign=id;
+    entry.kind=P5GuerrillaIncidentKind::return_to_irregular;
+    entry.day=today;
+    p5_guerrilla_incidents_.push_back(std::move(entry));
+    events_.push_back("p5-guerrilla-real-remnant-resumed:"+id);
+}
+
+inline void IntegratedWorld::p5_guerrilla_end(
+        P5GuerrillaOutcome outcome) {
+    require_stage({9});
+    ensure(!outcome.campaign.empty()&&!outcome.legal_basis.empty()&&
+           outcome.day>=0&&
+           static_cast<unsigned>(outcome.kind)<=
+               static_cast<unsigned>(P5GuerrillaResolution::disarmed),
+           "P5-G resolution needs dated political and legal basis");
+    auto& campaign=p5_guerrilla_campaigns_.at(outcome.campaign);
+    ensure(outcome.day>=campaign.started_day&&
+           campaign.stage!=P5GuerrillaStage::resolved&&
+           campaign.stage!=P5GuerrillaStage::ceasefire,
+           "P5-G campaign already ceased or resolved");
+    const auto& movement=p3_movements_.at(campaign.movement);
+    if(outcome.kind==P5GuerrillaResolution::enacted_reform) {
+        bool actually_enacted=false;
+        for(const auto& [slot,law_id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(law_id);
+            if(law.id==outcome.legal_basis&&
+               law.country==campaign.country&&
+               law.domain==movement.issue_domain&&
+               law.base_choice==movement.desired_choice)
+                actually_enacted=true;
+        }
+        ensure(actually_enacted,
+               "P5-G peace by reform requires an enacted and effective P2 law");
+    } else if(outcome.kind==P5GuerrillaResolution::disarmed) {
+        for(const auto& unit:campaign.units) {
+            const auto deploy=army_deployments_.find(unit);
+            if(deploy==army_deployments_.end())continue;
+            const auto& region=deploy->second.region;
+            ensure(active_strength(unit)==0||
+                   (stock(unit,region,"ammunition")==0&&
+                    stock(unit,region,"rifle")==0&&
+                    assigned_equipment(unit,region,"rifle")==0),
+                   "P5-G demobilization cannot claim that equipped troops disarmed");
+        }
+    }
+    if(campaign.stage==P5GuerrillaStage::conventional)
+        ensure(p5_crises_.contains(campaign.crisis_id)&&
+               p5_crises_.at(campaign.crisis_id).stage==
+                   P5CrisisStage::settled,
+               "P5-G cannot end front-scale war before real P5 political settlement");
+    auto schedule=p5_guerrilla_review_due_.find(campaign.next_review_day);
+    if(schedule!=p5_guerrilla_review_due_.end()) {
+        schedule->second.erase(campaign.id);
+        if(schedule->second.empty())p5_guerrilla_review_due_.erase(schedule);
+    }
+    campaign.stage=outcome.kind==
+        P5GuerrillaResolution::negotiated_ceasefire?
+            P5GuerrillaStage::ceasefire:P5GuerrillaStage::resolved;
+    campaign.ended_day=outcome.day;
+    if(outcome.kind==P5GuerrillaResolution::enacted_reform)
+        p3_movements_.at(campaign.movement).active=false;
+    P5GuerrillaIncident entry;
+    entry.id="P5-G:end:"+campaign.id+":"+std::to_string(outcome.day);
+    ensure(p5_guerrilla_incident_ids_.insert(entry.id).second,
+           "P5-G duplicate cessation on same calendar day");
+    entry.campaign=campaign.id;
+    entry.kind=outcome.kind==P5GuerrillaResolution::negotiated_ceasefire?
+        P5GuerrillaIncidentKind::ceasefire:
+        P5GuerrillaIncidentKind::resolution;
+    entry.day=outcome.day;
+    p5_guerrilla_incidents_.push_back(std::move(entry));
+    p5_guerrilla_outcomes_.push_back(std::move(outcome));
+    events_.push_back("p5-guerrilla-politically-verified-campaign-ended:"+campaign.id);
+}
+
+inline void IntegratedWorld::p5_guerrilla_rebuild_indexes() {
+    p5_guerrilla_incident_ids_.clear();
+    p5_guerrilla_review_due_.clear();
+    for(const auto& event:p5_guerrilla_incidents_)
+        ensure(!event.id.empty()&&
+               p5_guerrilla_incident_ids_.insert(event.id).second,
+               "P5-G duplicate saved historical incident identity");
+    for(const auto& [id,campaign]:p5_guerrilla_campaigns_)
+        if(campaign.stage==P5GuerrillaStage::organizing||
+           campaign.stage==P5GuerrillaStage::active||
+           campaign.stage==P5GuerrillaStage::supply_exhausted)
+            p5_guerrilla_review_due_[campaign.next_review_day].insert(id);
+}
+
 } // namespace vic25::phasec
