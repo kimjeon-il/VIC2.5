@@ -1,3 +1,5 @@
+> **2026-11-07 일간 엔진 단순화 작업 브랜치 (검증 생략):** [6단계 변경·잔여 작업 기록](docs/time/DAILY_SIMPLIFICATION_2026-11-07.md) — 일별 용량·국고·네이티브 화물·자원재생·기초 자율 기업 연결. **컴파일/CTest/CI 미실행, 부분 구현, main 미병합.**
+
 > **작업 브랜치 통합(2026-11-05):** [전체 브랜치 병합 감사](docs/BRANCH_MERGE_AUDIT_2026-11-05.md) — Phase B~H C++ 최신 구현, Phase D/E 전체 설계, Phase E 30k·역사지리 시험, G/H 238개 개별 게이트, 최신 Phase I/J 및 지하자원 매장량 없는 J-R1. *완성형 전체 인수 통과를 의미하지 않으며* BLOCKED는 PASS가 아니다.
 
 > **Phase C 통합 프로토타입 C-D4 인수 현황(2026-11-04):** [실제 구현 상태·48개 시험 결과](docs/phase-c/ENGINE_IMPLEMENTATION_STATUS.md) — T46·T47·T48 포함 **48개 합성시험 PASS**, Linux/Windows CTest 9개 PASS. **통합 코드는 `work/phase-c-engine-integration` Draft PR #6에 있고 main 미병합**, CE/CP/CM 전체 기능 구현·역사적 보정 및 D4-DONE은 미완료입니다.
