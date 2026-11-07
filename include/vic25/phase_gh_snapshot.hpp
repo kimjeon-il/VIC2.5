@@ -201,7 +201,13 @@ template<class A>void daily_treaty(A& a,DailyTreaty& t) {
     a(t.proposed_day);a(t.effective_day);
     a(t.approved_a);a(t.approved_b);a(t.active);
 }
-template<class A>void h_state(A& a,DiplomacyState& x,bool include_daily=true) {
+template<class A>void war(A& a,WarState& w) {
+    a(w.id);a(w.crisis);a(w.attacker);a(w.defender);
+    a(w.started_day);a(w.last_combat_day);a(w.ended_day);
+    a(w.active);a(w.armistice);
+}
+template<class A>void h_state(A& a,DiplomacyState& x,bool include_daily=true,
+                              bool include_wars=false) {
     checked_map(a,x.tariffs,tariff<A>);
     checked_vector(a,x.scheduled_tariffs,pending_tariff<A>);
     checked_map(a,x.treaties,treaty<A>);
@@ -214,12 +220,14 @@ template<class A>void h_state(A& a,DiplomacyState& x,bool include_daily=true) {
     checked_vector(a,x.military_assistance,aid<A>);
     a(x.quota_used);a(x.revision);
     if(include_daily)checked_map(a,x.daily_treaties,daily_treaty<A>);
+    if(include_wars)checked_map(a,x.wars,war<A>);
 }
 } // namespace persisted
 
 struct SnapshotCodec {
     static constexpr const char* magic="VIC25_PHASE_GH_SNAPSHOT_1";
-    static constexpr const char* version="phase-gh-cpp/0.5";
+    static constexpr const char* version="phase-gh-cpp/0.6";
+    static constexpr const char* multimodal_version="phase-gh-cpp/0.5";
     static constexpr const char* daily_transport_version="phase-gh-cpp/0.4";
     static constexpr const char* daily_treaty_version="phase-gh-cpp/0.3";
     static constexpr const char* legacy_version="phase-gh-cpp/0.2";
@@ -236,17 +244,21 @@ struct SnapshotCodec {
         const bool multimodal=std::any_of(
             w.trade_.transport_edges.begin(),w.trade_.transport_edges.end(),
             [](const auto& row){return row.second.mode!="legacy";});
-        a(std::string(multimodal?version:
-                      (native_transport?daily_transport_version:
-                       (upgraded?daily_treaty_version:legacy_version))));
+        const bool has_wars=!w.diplomacy_.wars.empty();
+        a(std::string(has_wars?version:
+                      (multimodal?multimodal_version:
+                       (native_transport?daily_transport_version:
+                        (upgraded?daily_treaty_version:legacy_version)))));
         a(std::string(g_version));
         a(std::string(h_version));
         const std::string existing=phasee::SnapshotCodec::encode(w.core_);
         a(existing);
         auto g=w.trade_;
         auto h=w.diplomacy_;
-        persisted::g_state(a,g,native_transport||multimodal,multimodal);
-        persisted::h_state(a,h,upgraded||native_transport||multimodal);
+        persisted::g_state(a,g,native_transport||multimodal||has_wars,
+                           multimodal||has_wars);
+        persisted::h_state(a,h,upgraded||native_transport||multimodal||has_wars,
+                           has_wars);
         const std::string payload=out.str();
         std::ostringstream end(std::ios::binary|std::ios::out);
         persisted::Writer check{end};
@@ -260,17 +272,19 @@ struct SnapshotCodec {
         persisted::Reader a{in};
         std::string m,v,g,h,base;
         a(m);a(v);a(g);a(h);
-        if(m!=magic||(v!=version&&v!=daily_transport_version&&
-             v!=daily_treaty_version&&v!=legacy_version)||
+        if(m!=magic||(v!=version&&v!=multimodal_version&&
+             v!=daily_transport_version&&v!=daily_treaty_version&&
+             v!=legacy_version)||
              g!=g_version||h!=h_version)
             throw std::runtime_error("G/H incompatible snapshot contract");
         a(base);
         World next;
         next.core_=phasee::SnapshotCodec::decode(base);
         persisted::g_state(a,next.trade_,
-                           v==version||v==daily_transport_version,
-                           v==version);
-        persisted::h_state(a,next.diplomacy_,v!=legacy_version);
+                           v==version||v==multimodal_version||
+                           v==daily_transport_version,
+                           v==version||v==multimodal_version);
+        persisted::h_state(a,next.diplomacy_,v!=legacy_version,v==version);
         std::uint64_t crc{};a(crc);
         if(in.peek()!=std::char_traits<char>::eof()||
            crc!=phasec::persistence_detail::checksum(
