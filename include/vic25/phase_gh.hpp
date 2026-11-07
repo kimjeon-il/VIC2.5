@@ -136,7 +136,8 @@ struct TradeState {
 inline std::optional<PathQuote> quote_daily_freight_path(
         const TradeState& trade,Id from,Id to,Month month,
         std::int32_t day_of_month=0,std::int32_t days_in_month=0,
-        const std::map<std::string,Quantity>* provisional_edges=nullptr) {
+        const std::map<std::string,Quantity>* provisional_edges=nullptr,
+        bool verified_day_edges_only=false) {
     if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
     if(trade.transport_edges.empty())return std::nullopt;
     using Item=std::tuple<Money,Month,Id>;
@@ -155,6 +156,7 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         // World::seed_transport_edge inserts in deterministic ID order.
         for(const auto& edge_id:it->second) {
             const auto& edge=trade.transport_edges.at(edge_id);
+            if(verified_day_edges_only&&edge.transit_days<=0)continue;
             const Quantity committed=trade.edge_usage.contains({month,edge_id})?
                                      trade.edge_usage.at({month,edge_id}):0;
             const Quantity pending=(provisional_edges&&
