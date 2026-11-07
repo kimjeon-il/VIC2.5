@@ -204,6 +204,7 @@ struct Policies {
     Money autonomous_factory_cash_reserve{};
     bool allow_endogenous_crisis_wars{true};
     bool allow_operational_battle_ai{true};
+    bool allow_autonomous_war_peace{true};
 
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
@@ -1289,6 +1290,56 @@ public:
                         continue;
                     const auto& pm=c.government(crisis.claimant).prime_minister;
                     (void)gh.begin_war_from_crisis(id,crisis.claimant,pm);
+                }
+            });
+        if(decisions.allow_autonomous_war_peace)
+            plan[9].push_back([today=world_.day_index()](phasegh::Stage& gh) {
+                const auto& geo=gh.geography();
+                const auto& c=gh.phase_c();
+                for(const auto& [id,war]:gh.diplomacy().wars) {
+                    if(war.ended_day>=0||
+                       !c.has_government(war.attacker)||
+                       !c.has_government(war.defender))continue;
+                    auto crisis=gh.diplomacy().crises.find(war.crisis);
+                    if(crisis==gh.diplomacy().crises.end() ||
+                       !geo.provinces.contains(crisis->second.province))
+                        continue;
+                    const auto& front=
+                        geo.provinces.at(crisis->second.province).region;
+                    bool armed_attacker=false,armed_defender=false;
+                    for(const auto& [unit,deployment]:c.army_deployments()) {
+                        if(deployment.region!=front||
+                           c.active_strength(unit)<=0||
+                           c.stock(unit,front,"ammunition")<=0)continue;
+                        if(deployment.country==war.attacker)
+                            armed_attacker=true;
+                        if(deployment.country==war.defender)
+                            armed_defender=true;
+                    }
+                    if(armed_attacker||armed_defender)continue;
+                    const auto treaty_id=
+                        std::string(war.armistice?"AUTO:PEACE:":"AUTO:CEASEFIRE:")+id;
+                    if(gh.diplomacy().treaties.contains(treaty_id))continue;
+                    const auto idle_from=std::max(war.started_day,
+                                                  war.last_combat_day);
+                    if(today<idle_from || today-idle_from<
+                       (war.armistice?90:30))continue;
+                    phasegh::TreatyClause term;
+                    term.id="end-hostilities";
+                    term.obligor=war.attacker;
+                    term.beneficiary=war.defender;
+                    term.kind=war.armistice?
+                        phasegh::ClauseKind::peace_settlement:
+                        phasegh::ClauseKind::ceasefire;
+                    const auto& first_pm=
+                        c.government(war.attacker).prime_minister;
+                    const auto& second_pm=
+                        c.government(war.defender).prime_minister;
+                    gh.propose_treaty_package(treaty_id,
+                        {war.attacker,war.defender},{term},
+                        war.attacker,first_pm);
+                    gh.ratify_package_member(treaty_id,
+                        war.defender,second_pm);
                 }
             });
         for(const auto& combat:decisions.engagements)
