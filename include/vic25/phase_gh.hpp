@@ -6,6 +6,7 @@
 // This is a functional vertical slice, NOT the full 62+176 acceptance engine.
 
 #include "vic25/phase_e.hpp"
+#include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -128,17 +129,6 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         const TradeState& trade,Id from,Id to,Month month,
         std::int32_t day_of_month=0,std::int32_t days_in_month=0,
         const std::map<std::string,Quantity>* provisional_edges=nullptr) {
-    auto day_budget=[&](Quantity total,Quantity used)->Quantity {
-        require(total>=0&&used>=0,"F_ERR_BAD_BUDGET");
-        if(day_of_month<=0)return total;
-        require(days_in_month>=28&&days_in_month<=31&&
-                day_of_month<=days_in_month,"F_ERR_BAD_DAY");
-        const Quantity ceiling=phaseb::add_checked(
-            phaseb::mul_checked(total/days_in_month,day_of_month),
-            phaseb::mul_checked(total%days_in_month,day_of_month)/
-                            days_in_month);
-        return ceiling>used?ceiling-used:0;
-    };
     if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
     if(trade.transport_edges.empty())return std::nullopt;
     using Item=std::tuple<Money,Month,Id>;
@@ -164,7 +154,9 @@ inline std::optional<PathQuote> quote_daily_freight_path(
                 provisional_edges->at(edge_id):0;
             const Quantity used=phaseb::add_checked(committed,pending);
             const Quantity ceiling=day_of_month>0?
-                day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
+                daily_budget::cumulative(edge.monthly_capacity,
+                                         day_of_month,days_in_month):
+                edge.monthly_capacity;
             if(!edge.enabled || used>=ceiling)continue;
             require(edge.from==node && used>=0,
                     "G_ERR_LOGISTICS_INDEX_CORRUPT");
@@ -362,14 +354,8 @@ class Stage {
     std::int64_t day_index_{-1};
     // Cumulative allowance: never regrant a full month of quota daily.
     Quantity day_budget(Quantity total,Quantity used)const {
-        require(total>=0&&used>=0,"G_DAY_BAD_BUDGET");
-        if(day_of_month_<=0)return total; // legacy month, unchanged
-        require(days_in_month_>=28&&days_in_month_<=31&&
-                day_of_month_<=days_in_month_,"G_DAY_BAD_DATE");
-        const Quantity ceiling=phaseb::add_checked(
-          phaseb::mul_checked(total/days_in_month_,day_of_month_),
-          phaseb::mul_checked(total%days_in_month_,day_of_month_)/days_in_month_);
-        return ceiling>used?ceiling-used:0;
+        if(day_of_month_<=0)return total; // historical stand-alone month engine
+        return daily_budget::remaining(total,used,day_of_month_,days_in_month_);
     }
     Quantity monthly_fill(const std::string& id,bool contract) {
         Quantity used=0;
