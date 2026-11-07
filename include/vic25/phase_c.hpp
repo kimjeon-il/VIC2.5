@@ -450,6 +450,10 @@ public:
         ensure(!bond_id.empty() && face > 0 && actors_.contains(government) &&
                actors_.contains(buyer) && government != buyer && cash(buyer) >= face &&
                !tracked_assets_.contains("bond:" + bond_id), "unfunded bond issue");
+        // Separate actual bank principal from new sovereign securities before
+        // the common historical debt account receives the bond liability.
+        if(!bank_principal_by_borrower_.contains(government))
+            bank_principal_by_borrower_[government]=outstanding_loan(government);
         const auto asset = "bond:" + bond_id;
         ownership_.issue(asset, buyer, face);
         tracked_assets_.insert(asset);
@@ -1535,21 +1539,24 @@ public:
         require_stage({1});
         ensure(amount > 0 && actors_.contains(borrower) && !bank_insolvent_,
                "bank insolvent or borrower invalid");
+        const Money prior=outstanding_loan(borrower);
         money_.post({unique("loan"), "bank loan creates matching deposit", {
             {"BANK:loan", amount, 0}, {"BANK:deposit", 0, amount},
             {account(borrower, "cash"), amount, 0}, {account(borrower, "debt"), 0, amount}}});
+        bank_principal_by_borrower_[borrower]=phaseb::add_checked(prior,amount);
         events_.push_back("loan");
     }
     void forgive_defaulted_loan(const std::string& borrower, Money amount) {
         require_stage({8});
         ensure(actors_.contains(borrower)&&amount>0 &&
-               -money_.balance(account(borrower,"debt"))>=amount &&
+               outstanding_loan(borrower)>=amount &&
                money_.balance("BANK:loan")>=amount,
                "invalid defaulted loan debt forgiveness");
         money_.post({unique("loan-loss"),"bank recognizes loss, borrower released from debt",{
             {"BANK:loan_loss",amount,0},{"BANK:loan",0,amount},
             {account(borrower,"debt"),amount,0},
             {account(borrower,"revenue"),0,amount}}});
+        bank_principal_by_borrower_[borrower]=outstanding_loan(borrower)-amount;
         total_bad_debt_=phaseb::add_checked(total_bad_debt_,amount);
         const Money loans=money_.balance("BANK:loan");
         const Money deposits=-money_.balance("BANK:deposit");
@@ -1580,6 +1587,10 @@ public:
     }
     [[nodiscard]] Money outstanding_loan(const std::string& borrower) const {
         ensure(actors_.contains(borrower),"unknown bank-debt obligor");
+        auto bank=bank_principal_by_borrower_.find(borrower);
+        if(bank!=bank_principal_by_borrower_.end())return bank->second;
+        // Pre-upgrade snapshots lack per-obligor bank loan attribution.
+        // Preserve the old behavior for historical stand-alone saves.
         const Money debt=money_.balance(account(borrower,"debt"));
         ensure(debt<=0&&debt>std::numeric_limits<Money>::min(),
                "invalid financial liability balance");
@@ -1590,10 +1601,13 @@ public:
         if(phase_d_reservation_mode_)
             resources_.assert_cash_available(borrower,amount,cash(borrower));
         ensure(amount > 0 && actors_.contains(borrower) && cash(borrower) >= amount &&
-               -money_.balance(account(borrower, "debt")) >= amount, "invalid loan repayment");
+               outstanding_loan(borrower)>=amount &&
+               money_.balance("BANK:loan")>=amount,"invalid loan repayment");
+        const Money old_principal=outstanding_loan(borrower);
         money_.post({unique("repay"), "loan principal retirement", {
             {account(borrower, "debt"), amount, 0}, {account(borrower, "cash"), 0, amount},
             {"BANK:deposit", amount, 0}, {"BANK:loan", 0, amount}}});
+        bank_principal_by_borrower_[borrower]=old_principal-amount;
         events_.push_back("repay");
     }
     void hire(Id slice, People count, const std::string& employer, Money wage) {
@@ -2344,6 +2358,7 @@ private:
     std::map<std::string,Money> paid_staff_this_month_;
     Money total_bad_debt_{};
     bool bank_insolvent_{};
+    std::map<std::string,Money> bank_principal_by_borrower_;
     std::map<std::string,WageArrearsClaim> wage_arrears_;
     std::map<std::string,std::int64_t> bankrupt_firms_;
     std::map<std::string,People> regional_food_grievance_;
