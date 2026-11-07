@@ -17,6 +17,7 @@ SERVICE_COLUMNS = ("service_id", "link_id", "carrier", "from_province",
                    "to_province", "mode", "monthly_capacity", "freight_per_unit",
                    "transit_days", "valid_from_month", "valid_through_month",
                    "source_hash")
+LIFETIME_COLUMNS = ("link_id", "certain_from_month", "certain_through_month")
 
 
 def digest(path):
@@ -36,6 +37,26 @@ def read_rows(path, columns):
         for line, fields in enumerate(stream, start=2):
             if len(fields) != len(columns) or any(not v for v in fields):
                 raise ValueError(f"{path}:{line}: invalid service/link row")
+            yield tuple(fields)
+
+
+def read_optional_lifetimes(path):
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8", newline="") as inp:
+        rows=csv.reader(inp, delimiter="\\t")
+        header=tuple(next(rows, ()))
+        if header!=LIFETIME_COLUMNS:
+            raise ValueError(f"{path}: bad historical lifetime header")
+        for line,fields in enumerate(rows,start=2):
+            if len(fields)!=3 or not fields[0] or not (
+                    fields[1] or fields[2]):
+                raise ValueError(f"{path}:{line}: invalid physical lifetime")
+            for value in fields[1:]:
+                if value and (not value.isdecimal() or int(value)<0):
+                    raise ValueError(f"{path}:{line}: invalid certain month")
+            if fields[1] and fields[2] and int(fields[2])<int(fields[1]):
+                raise ValueError(f"{path}:{line}: inverted physical dates")
             yield tuple(fields)
 
 
@@ -62,6 +83,8 @@ def main():
                            " from_id TEXT, to_id TEXT, mode TEXT, capacity TEXT,"
                            " fare TEXT, days TEXT, first TEXT, last TEXT,"
                            " source_hash TEXT)")
+        connection.execute("CREATE TABLE lifetimes "
+                           "(id TEXT PRIMARY KEY, first TEXT, last TEXT)")
         for region in inputs:
             links_file = region / "geographic_links.tsv"
             services_file = region / "transport_services.tsv"
@@ -83,6 +106,16 @@ def main():
                 if existing is None:
                     connection.execute(
                         "INSERT INTO links VALUES(?,?,?,?,?)", row)
+            for row in read_optional_lifetimes(
+                    region / "physical_line_lifetimes.tsv"):
+                existing = connection.execute(
+                    "SELECT first,last FROM lifetimes WHERE id=?",
+                    (row[0],)).fetchone()
+                if existing is not None and existing != row[1:]:
+                    raise ValueError(f"Conflicting historical line dates: {row[0]}")
+                if existing is None:
+                    connection.execute(
+                        "INSERT INTO lifetimes VALUES(?,?,?)",row)
             for row in read_rows(services_file, SERVICE_COLUMNS):
                 existing = connection.execute(
                     "SELECT link_id,carrier,from_id,to_id,mode,capacity,"
@@ -106,6 +139,18 @@ def main():
             "OR s.mode!=l.mode LIMIT 1"
         ):
             raise ValueError("Service disagrees with network link: " + row[0])
+        for row in connection.execute(
+            "SELECT t.id FROM lifetimes t LEFT JOIN links l ON t.id=l.id "
+            "WHERE l.id IS NULL LIMIT 1"
+        ):
+            raise ValueError("Historical dates without physical link: " + row[0])
+        for row in connection.execute(
+            "SELECT s.id FROM services s JOIN lifetimes t ON s.link_id=t.id "
+            "WHERE (t.first!='' AND CAST(s.first AS INTEGER)<CAST(t.first AS INTEGER)) "
+            "OR (t.last!='' AND CAST(s.last AS INTEGER)>CAST(t.last AS INTEGER)) "
+            "LIMIT 1"
+        ):
+            raise ValueError("Service predates or exceeds physical line: " + row[0])
         output_links = args.output / "geographic_links.tsv"
         output_services = args.output / "transport_services.tsv"
         for dest, fields, query in (
@@ -118,6 +163,15 @@ def main():
                 writer = csv.writer(out, delimiter="\t", lineterminator="\n")
                 writer.writerow(fields)
                 writer.writerows(connection.execute(query))
+        life_count=connection.execute(
+            "SELECT COUNT(*) FROM lifetimes").fetchone()[0]
+        if life_count:
+            with (args.output/"physical_line_lifetimes.tsv").open(
+                    "w",encoding="utf-8",newline="") as out:
+                writer=csv.writer(out,delimiter="\\t",lineterminator="\\n")
+                writer.writerow(LIFETIME_COLUMNS)
+                writer.writerows(connection.execute(
+                    "SELECT id,first,last FROM lifetimes ORDER BY id"))
         link_count = connection.execute("SELECT COUNT(*) FROM links").fetchone()[0]
         route_count = connection.execute(
             "SELECT COUNT(*) FROM services").fetchone()[0]
@@ -125,6 +179,7 @@ def main():
             json.dumps({
                 "source_regions": metadata,
                 "unique_physical_links": link_count,
+                "historically_dated_physical_links": life_count,
                 "unique_independently_verified_services": route_count,
                 "service_prices_and_times_never_inferred": True,
                 "cross_boundary_routes_not_invented": True,
