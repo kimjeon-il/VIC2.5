@@ -106,6 +106,24 @@ inline P1LegitimacyView IntegratedWorld::p1_legitimacy(
         result.observed_groups=true;
         result.group_support=p1_percent(aligned,affiliated);
     }
+    // Once P3 national group profiles exist, government support follows
+    // actual derived clout rather than counting every membership equally.
+    bool has_p3_groups=false;
+    std::int64_t governing_clout=0;
+    for(const auto& [key,profile]:p3_groups_) {
+        (void)profile;
+        if(key.first!=country)continue;
+        has_p3_groups=true;
+        if(std::find(coalition.ruling_groups.begin(),
+                     coalition.ruling_groups.end(),key.second)!=
+                     coalition.ruling_groups.end())
+            governing_clout+=p3_group_view(country,key.second).clout_ppm;
+    }
+    if(has_p3_groups&&affiliated>0) {
+        result.observed_groups=true;
+        result.group_support=static_cast<int>(
+            std::min<std::int64_t>(100,governing_clout/10'000));
+    }
     const auto election=country_elections_.find(country);
     if(election!=country_elections_.end()&&
        constitution.legislature!=P1LegislatureKind::none) {
