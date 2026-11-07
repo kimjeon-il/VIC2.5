@@ -60,6 +60,32 @@ inline bool IntegratedWorld::p5_needs_daily_tick()const {
     return false;
 }
 
+inline bool IntegratedWorld::p5_has_due_daily_strike(
+        std::int64_t day)const {
+    return !p5_active_daily_strikes_.empty()||
+           p5_scheduled_daily_strikes_.contains(day);
+}
+
+inline void IntegratedWorld::phase_time_apply_p5_strikes(
+        std::int64_t day) {
+    require_stage({0});
+    ensure(day>=0,"P5 daily labor action needs calendar evidence");
+    p5_active_daily_strikes_.clear();
+    const auto due=p5_scheduled_daily_strikes_.find(day);
+    if(due==p5_scheduled_daily_strikes_.end())return;
+    for(const auto& [slice,planned]:due->second) {
+        if(!people_.has_slice(slice))continue;
+        const auto real_job=people_.employed(slice);
+        const auto monthly=strike_active_.find(slice);
+        const People legacy=monthly==strike_active_.end()?0:monthly->second;
+        if(legacy>=real_job)continue;
+        const People actual=std::min(planned,real_job-legacy);
+        if(actual>0)p5_active_daily_strikes_[slice]=actual;
+    }
+    p5_scheduled_daily_strikes_.erase(due);
+    events_.push_back("p5-real-day-strike-allocation-effective");
+}
+
 inline void IntegratedWorld::p5_daily_advance(std::int64_t day) {
     require_stage({9});
     ensure(day>=0,"P5 crisis observation needs a real day");
@@ -186,8 +212,24 @@ inline void IntegratedWorld::p5_perform_action(P5CollectiveAction action) {
             ensure(action.strikers==0||
                    action.kind==P5ActionKind::strike,
                    "P5 peaceful demonstration cannot fabricate strike allocation");
-            protest(action.slice,action.group,action.participants,
-                    action.strikers);
+            if(action.kind==P5ActionKind::strike) {
+                ensure(action.strikers>0&&
+                       action.strikers<=people_.employed(action.slice)&&
+                       p2_rule(movement.country,movement.country,
+                               P2ClauseKind::peaceful_strike_allowed)
+                               .value_or(1)!=0,
+                       "P5 native strike requires contracted employees and a lawful strike right");
+                const auto tomorrow=action.day+1;
+                const auto old=p5_scheduled_daily_strikes_[tomorrow][action.slice];
+                const auto sum=phaseb::add_checked(old,action.strikers);
+                ensure(sum<=people_.employed(action.slice),
+                       "P5 repeated next-day strikes overbook actual employees");
+                p5_scheduled_daily_strikes_[tomorrow][action.slice]=sum;
+            }
+            // Attendance uses the existing C real-POP participant journal,
+            // while native strike hours are deducted only tomorrow, not on
+            // a production stage that was already committed earlier today.
+            protest(action.slice,action.group,action.participants,0);
         } else {
             ensure(action.strikers==0&&
                    participation_this_month_[action.slice]+
