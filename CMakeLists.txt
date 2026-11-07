@@ -388,3 +388,12 @@ if(BUILD_TESTING)
     target_link_libraries(vic25_p3_p5_politics_tests PRIVATE vic25_core)
     add_test(NAME vic25_p3_p5_politics_tests COMMAND vic25_p3_p5_politics_tests)
 endif()
+
+# P5-G regional guerrilla journal and C-backed irregular conflict adapter.
+# Scenarios cover real military/population/stock, temporary market access,
+# low-intensity skirmishes, conventional fronts and save/replay.
+if(BUILD_TESTING)
+    add_executable(vic25_p5_guerrilla_tests tests/test_p5_guerrilla.cpp)
+    target_link_libraries(vic25_p5_guerrilla_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p5_guerrilla_tests COMMAND vic25_p5_guerrilla_tests)
+endif()
