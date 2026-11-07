@@ -1176,6 +1176,7 @@ public:
                         if(n==5)stage.settle_insurance_claims();
                         if(n==7){
                             stage.execute_autonomous_trade();
+                            stage.dispatch_pending_trade_hops();
                             stage.pay_insurance_premiums();
                         }
                     }
@@ -1448,7 +1449,11 @@ inline void Stage::plan_contracts() {
             trade_.fx_held[{agreement.buyer,agreement.currency}]=phaseb::add_checked(
                   trade_.fx_held[{agreement.buyer,agreement.currency}],base);
         reserve_trade_quota(country_from,country_to,agreement.good,q);
-        if(path)for(const auto& edge_id:path->edges) {
+        if(path)for(std::size_t hop=0;hop<path->edges.size();++hop) {
+            // Native trade only books capacity of the departing hop;
+            // future regions reserve their actual date when cargo arrives.
+            if(day_of_month_>0&&hop>0)break;
+            const auto& edge_id=path->edges[hop];
             trade_.edge_usage[{month,edge_id}]=phaseb::add_checked(
                       trade_.edge_usage[{month,edge_id}],q);
         }
@@ -1507,9 +1512,12 @@ inline void Stage::plan_autonomous_trade() {
         core.phase_d_reserve_cash(route.buyer,eid,total);
         core.phase_d_reserve_material(route.seller,origin,route.good,eid,qty);
         reserve_trade_quota(from,to,route.good,qty);
-        if(path)for(const auto& edge_id:path->edges)
+        if(path)for(std::size_t hop=0;hop<path->edges.size();++hop) {
+            if(day_of_month_>0&&hop>0)break;
+            const auto& edge_id=path->edges[hop];
             trade_.edge_usage[{core.month(),edge_id}]=phaseb::add_checked(
                 trade_.edge_usage[{core.month(),edge_id}],qty);
+        }
         trade_.pending.push_back({eid,route.id,route.seller,route.buyer,
                          route.good,origin,dest,from,to,qty,travel,
                          price,total,duty,freight,"","TEST",
@@ -1542,13 +1550,14 @@ inline void Stage::execute_autonomous_trade() {
                 // inventory and arrival method as Phase F's cargo commands.
                 require(day_index_>=0&&!order.path_edges.empty(),
                         "G_ERR_NATIVE_ROUTE_REQUIRED");
-                std::int64_t duration=0;
-                for(const auto& edge_id:order.path_edges) {
-                    const auto days=trade_.transport_edges.at(edge_id).transit_days;
-                    require(days>0,"G_ERR_UNVERIFIED_TRANSIT_DAYS");
-                    duration=phaseb::add_checked(duration,days);
-                }
-                const auto arrival=phaseb::add_checked(day_index_,duration);
+                const auto& first=trade_.transport_edges.at(
+                    order.path_edges.front());
+                require(first.transit_days>0 &&
+                        spatial_.spatial().provinces.at(first.from).region==
+                            order.origin_region,
+                        "G_ERR_INVALID_VERIFIED_ORIGIN_HOP");
+                const auto arrival=phaseb::add_checked(
+                    day_index_,first.transit_days);
                 require(arrival>day_index_ &&
                         !trade_.daily_shipments.contains(order.execution_id),
                         "G_ERR_INVALID_NATIVE_ETA");
@@ -1558,7 +1567,8 @@ inline void Stage::execute_autonomous_trade() {
                 trade_.daily_shipments.emplace(order.execution_id,
                     DailyTradeTransit{order.execution_id,order.buyer,
                         order.destination_region,order.good,order.quantity,
-                        order.confirmed_arrival_loss,arrival});
+                        order.confirmed_arrival_loss,arrival,
+                        order.path_edges,order.execution_id,"",0,false});
                 trade_.executed.insert("DAY:"+order.execution_id);
             } else {
                 // Standalone legacy monthly scenario only; not day gameplay.
@@ -1577,7 +1587,9 @@ inline void Stage::execute_autonomous_trade() {
         if(order.freight>0) {
             require(!order.path_edges.empty(),"G_ERR_MISSING_FREIGHT_ROUTE");
             Money actual_freight=0;
-            for(const auto& edge_id:order.path_edges) {
+            for(std::size_t hop=0;hop<order.path_edges.size();++hop) {
+                if(day_of_month_>0&&hop>0)break;
+                const auto& edge_id=order.path_edges[hop];
                 const auto& edge=trade_.transport_edges.at(edge_id);
                 const Money amount=phaseb::mul_checked(
                                      order.quantity,edge.freight_per_unit);
@@ -1588,7 +1600,12 @@ inline void Stage::execute_autonomous_trade() {
                     actual_freight=phaseb::add_checked(actual_freight,amount);
                 }
             }
-            require(actual_freight==order.freight,
+            const Money expected=day_of_month_>0?
+                phaseb::mul_checked(order.quantity,
+                    trade_.transport_edges.at(order.path_edges.front()).
+                    freight_per_unit):
+                order.freight;
+            require(actual_freight==expected,
                     "G_ERR_FREIGHT_ACCOUNTING_MISMATCH");
         }
         if(order.duty>0) {
