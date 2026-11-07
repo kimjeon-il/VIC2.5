@@ -902,12 +902,36 @@ public:
         for(auto& [id,cargo]:trade_.daily_shipments) {
             if(!cargo.at_hub||cargo.path_edges.empty()||
                cargo.hop_index+1>=cargo.path_edges.size())continue;
-            const std::string edge_id=
-                cargo.path_edges[cargo.hop_index+1];
+            std::string edge_id=cargo.path_edges[cargo.hop_index+1];
+            // Some railroads, carriers and seaways cease operation while
+            // the lot is moving between hubs. Find another actual grounded
+            // route from its *current real inventory location*, never
+            // teleport it to an invented intermediate node.
+            const auto ready=[&](const TransportEdge& edge)->bool {
+                return edge.enabled&&edge.transit_days>0&&
+                    geo.provinces.at(edge.from).region==cargo.hub_region&&
+                    (edge.valid_from_month<0||
+                        c.month()>=edge.valid_from_month)&&
+                    (edge.valid_through_month<0||
+                        c.month()<=edge.valid_through_month);
+            };
+            if(!ready(trade_.transport_edges.at(edge_id))) {
+                if(!geo.regions.contains(cargo.hub_region)||
+                   !geo.regions.contains(cargo.destination))continue;
+                const auto alternate=quote_daily_freight_path(
+                    trade_,geo.regions.at(cargo.hub_region),
+                    geo.regions.at(cargo.destination),c.month(),
+                    day_of_month_,days_in_month_,nullptr,true);
+                if(!alternate||alternate->edges.empty()||
+                   alternate->capacity<cargo.quantity)continue;
+                cargo.path_edges.resize(cargo.hop_index+1);
+                cargo.path_edges.insert(cargo.path_edges.end(),
+                    alternate->edges.begin(),alternate->edges.end());
+                edge_id=cargo.path_edges[cargo.hop_index+1];
+                ++trade_.revision;
+            }
             const auto& edge=trade_.transport_edges.at(edge_id);
-            if(!edge.enabled||edge.transit_days<=0||
-               geo.provinces.at(edge.from).region!=cargo.hub_region)
-                continue;
+            if(!ready(edge))continue;
             const auto key=std::make_pair(c.month(),edge_id);
             const Quantity used=trade_.edge_usage[key];
             const Quantity free=daily_budget::remaining(
