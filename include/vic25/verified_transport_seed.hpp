@@ -60,7 +60,8 @@ inline bool next_row(std::istream& input,std::vector<std::string>& parts,
 inline void seed(phasegh::World& world,
                  std::istream& geographic_links,
                  std::istream& transport_services,
-                 std::int64_t starting_month) {
+                 std::int64_t starting_month,
+                 std::istream* historical_line_lifetimes=nullptr) {
     const std::vector<std::string> link_header{
         "link_id","source_feature","from_province","to_province","mode"};
     const std::vector<std::string> service_header{
@@ -87,6 +88,40 @@ inline void seed(phasegh::World& world,
         world.seed_verified_geographic_link(
             cols[0],from,to,cols[4]);
     }
+    std::map<std::string,std::pair<phasegh::Month,phasegh::Month>>
+        physical_lifetime;
+    // Optional OHM source: year/month-only feature tags do not become
+    // fictitious precise opening days. Empty bounds mean undetermined;
+    // the documented service itself must still contain an exact month range.
+    if(historical_line_lifetimes) {
+        const std::vector<std::string> historical_header{
+            "link_id","certain_from_month","certain_through_month"};
+        std::string row;
+        if(!std::getline(*historical_line_lifetimes,row))
+            throw std::invalid_argument("GEO_ERR_MISSING_HISTORICAL_HEADER");
+        if(!row.empty()&&row.back()=='\\r')row.pop_back();
+        if(split_tsv(row)!=historical_header)
+            throw std::invalid_argument("GEO_ERR_HISTORICAL_SCHEMA");
+        while(std::getline(*historical_line_lifetimes,row)) {
+            if(!row.empty()&&row.back()=='\\r')row.pop_back();
+            const auto fields=split_tsv(row);
+            if(fields.size()!=3||fields[0].empty()||
+               !real_links.contains(fields[0])||
+               (fields[1].empty()&&fields[2].empty()))
+                throw std::invalid_argument("GEO_ERR_HISTORICAL_LINK_ORPHAN");
+            const auto first=fields[1].empty()?
+                static_cast<phasegh::Month>(-1):
+                required_number<phasegh::Month>(fields[1]);
+            const auto last=fields[2].empty()?
+                static_cast<phasegh::Month>(-1):
+                required_number<phasegh::Month>(fields[2]);
+            if(first< -1||last< -1||
+               (first>=0&&last>=0&&first>last)||
+               !physical_lifetime.emplace(fields[0],
+                                          std::make_pair(first,last)).second)
+                throw std::invalid_argument("GEO_ERR_CONFLICTING_HISTORICAL_LINK");
+        }
+    }
     if(!next_row(transport_services,cols,service_header.size()))
         throw std::invalid_argument("GEO_ERR_NO_SERVICE_SOURCE");
     check_columns(cols,service_header);
@@ -108,6 +143,14 @@ inline void seed(phasegh::World& world,
         const auto last=required_number<phasegh::Month>(cols[10]);
         if(first<0||last<first)
             throw std::invalid_argument("GEO_ERR_UNDATED_TRANSPORT_SERVICE");
+        if(auto life=physical_lifetime.find(cols[1]);
+           life!=physical_lifetime.end()) {
+            const auto [certain_from,certain_through]=life->second;
+            if((certain_from>=0&&first<certain_from)||
+               (certain_through>=0&&last>certain_through))
+                throw std::invalid_argument(
+                    "GEO_ERR_SERVICE_OUTSIDE_PHYSICAL_NETWORK_LIFETIME");
+        }
         // Preseed verified future services as dormant E/G evidence so
         // railways, roads and shipping can appear in their original month.
         // The path oracle will never use one before valid_from_month.
