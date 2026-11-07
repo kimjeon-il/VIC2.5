@@ -575,6 +575,55 @@ public:
     [[nodiscard]] const std::map<std::string,SovereignBond>& sovereign_bonds()const {
         return sovereign_bonds_;
     }
+    // Secondary bond exchange at an agreed LIMIT price, settled with
+    // existing C cash and original C security title. No market-maker
+    // deposits, synthetic buyers, proxy ownership or notional stock.
+    void exchange_sovereign_bond(const std::string& id,
+                                  const std::string& seller,
+                                  const std::string& buyer,
+                                  Money face_units,
+                                  int price_ppm) {
+        require_stage({7});
+        const auto bond=sovereign_bonds_.find(id);
+        ensure(bond!=sovereign_bonds_.end()&&!seller.empty()&&
+               !buyer.empty()&&seller!=buyer&&
+               buyer!=bond->second.treasury&&
+               seller!=bond->second.treasury&&
+               actors_.contains(seller)&&actors_.contains(buyer)&&
+               !bankrupt_firms_.contains(buyer)&&
+               face_units>0&&price_ppm>0&&price_ppm<=5'000'000,
+               "invalid real sovereign security exchange");
+        const auto asset="bond:"+id;
+        ensure(shares(asset,seller)>=face_units,
+               "bond seller does not own the security");
+        const Money cash_price=phaseb::add_checked(
+            phaseb::mul_checked(face_units/1'000'000,price_ppm),
+            phaseb::mul_checked(face_units%1'000'000,price_ppm)/
+                    1'000'000);
+        ensure(cash_price>0&&
+               phase_d_cash_available(buyer)>=cash_price,
+               "bond buyer lacks actual funds");
+        ensure_security_account(buyer,asset);
+        std::vector<Posting> postings{
+            {account(seller,"cash"),cash_price,0},
+            {security_account(seller,asset),0,face_units},
+            {security_account(buyer,asset),face_units,0},
+            {account(buyer,"cash"),0,cash_price}};
+        if(cash_price>face_units) {
+            const Money premium=cash_price-face_units;
+            postings.push_back({account(seller,"revenue"),0,premium});
+            postings.push_back({account(buyer,"expense"),premium,0});
+        }else if(face_units>cash_price){
+            const Money discount=face_units-cash_price;
+            postings.push_back({account(seller,"expense"),discount,0});
+            postings.push_back({account(buyer,"revenue"),0,discount});
+        }
+        money_.post({unique("sovereign-secondary-trade"),
+                     "real discount/premium settlement of existing title",
+                     postings});
+        ownership_.transfer(asset,seller,buyer,face_units);
+        events_.push_back("actual-secondary-government-bond-trade");
+    }
     [[nodiscard]] bool has_active_sovereign_bonds()const {
         if(!sovereign_coupon_due_.empty())return true;
         for(const auto& [id,bond]:sovereign_bonds_) {
