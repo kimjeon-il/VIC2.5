@@ -318,6 +318,15 @@ inline void IntegratedWorld::p5_pledge_army_unit(
                          unit)==other.pledged_units.end(),
                "P5 same real army cannot pledge to competing factions");
     }
+    for(const auto& [campaign_id,campaign]:p5_guerrilla_campaigns_) {
+        (void)campaign_id;
+        if(campaign.stage==P5GuerrillaStage::resolved||
+           campaign.stage==P5GuerrillaStage::ceasefire||
+           campaign.movement==crisis.movement)continue;
+        ensure(std::find(campaign.units.begin(),campaign.units.end(),unit)==
+                   campaign.units.end(),
+               "P5 military unit already serves an unrelated guerrilla faction");
+    }
     ensure(std::find(crisis.pledged_units.begin(),
                      crisis.pledged_units.end(),unit)==
                      crisis.pledged_units.end(),
