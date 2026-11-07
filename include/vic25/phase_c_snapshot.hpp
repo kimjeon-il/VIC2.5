@@ -630,6 +630,11 @@ struct SnapshotCodec {
                 ar(w.p5_control_evidence_);
                 ar(w.p5_scheduled_daily_strikes_);
                 ar(w.p5_active_daily_strikes_);
+                w.p5_action_ids_.clear();
+                for(const auto& event:w.p5_actions_)
+                    if(!w.p5_action_ids_.insert(event.id).second)
+                        throw std::runtime_error(
+                            "duplicate stored P5 collective action identity");
                 if(w.p5_crises_.size()>100'000||
                    w.p5_actions_.size()>1'000'000||
                    w.p5_settlements_.size()>1'000'000||
