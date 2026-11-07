@@ -34,8 +34,10 @@ inline void Stage::queue_package_effects_if_ratified(Treaty& treaty) {
                     !clause.beneficiary.empty(),
                     "H_ERR_INVALID_REPARATION_TERM");
             const std::string ref="H:REPARATION:"+treaty.id+":"+clause.id;
-            phase_c().sign_reparation_treaty(ref,clause.obligor,
-                                             clause.beneficiary,clause.amount);
+            phase_c().sign_reparation_treaty(ref,
+                phase_c().country_financial_wallet(clause.obligor),
+                phase_c().country_financial_wallet(clause.beneficiary),
+                clause.amount);
             diplomacy_.reparation_links.insert(ref);
         } else if(clause.kind==ClauseKind::protectorate) {
             const std::string ref="H:PROTECTORATE:"+treaty.id+":"+clause.id;
@@ -357,8 +359,10 @@ inline void Stage::respond_crisis_offer(
        offer.approvers.contains(c.respondent)) {
         if(offer.compensation>0) {
             const auto key="H:CRISIS-REPARATION:"+c.id+":"+offer.id;
-            phase_c().sign_reparation_treaty(key,offer.payer,
-                                             offer.recipient,offer.compensation);
+            phase_c().sign_reparation_treaty(key,
+                phase_c().country_financial_wallet(offer.payer),
+                phase_c().country_financial_wallet(offer.recipient),
+                offer.compensation);
             diplomacy_.reparation_links.insert(key);
         }
         if(offer.freeze_claim)
@@ -398,7 +402,9 @@ inline void Stage::disburse_treaty_aid(const std::string& treaty_id,
                 term.fulfilled<=term.amount&&
                 amount<=term.amount-term.fulfilled,
                 "H_ERR_AID_TERM_EXHAUSTED");
-        phase_c().pay(term.obligor,term.beneficiary,amount);
+        phase_c().pay(phase_c().country_financial_wallet(term.obligor),
+                      phase_c().country_financial_wallet(term.beneficiary),
+                      amount);
         term.fulfilled=phaseb::add_checked(term.fulfilled,amount);
         if(term.kind==ClauseKind::cultural_exchange)
             diplomacy_.funded_exchanges.push_back(

@@ -96,6 +96,14 @@ void fields(Archive& a,T& x) {
         V(quantity);V(loss);V(arrival_month);V(delivered);
     } else if constexpr(std::is_same_v<X,DividendDue>){
         V(asset);V(payer);V(holder);V(amount);V(due);
+    } else if constexpr(std::is_same_v<X,WageArrearsClaim>) {
+        V(id);V(employer);V(worker);V(treasury);V(country);
+        V(accrued);V(outstanding);V(issued_day);
+    } else if constexpr(std::is_same_v<X,SovereignBond>) {
+        V(id);V(country);V(treasury);V(original_face);V(coupon_ppm);
+        V(issue_day);V(maturity_day);
+    } else if constexpr(std::is_same_v<X,ArmyDeployment>) {
+        V(unit);V(country);V(region);
     } else {
         static_assert(sizeof(X)==0,"SnapshotCodec needs an explicit struct layout");
     }
@@ -285,6 +293,47 @@ struct SnapshotCodec {
             ar(w.country_elections_);
             ar(w.country_election_months_);
         }
+        if(!w.country_income_tax_.empty()||
+           !w.scheduled_country_income_tax_.empty()||
+           !w.country_treasuries_.empty()) {
+            ar(std::string("VIC25_PHASEC_COUNTRY_FISCAL_1"));
+            ar(w.country_income_tax_);
+            ar(w.scheduled_country_income_tax_);
+            ar(w.country_treasuries_);
+        }
+        if(w.bank_interest_annual_ppm_!=0||
+           !w.bank_interest_fraction_.empty()) {
+            ar(std::string("VIC25_PHASEC_BANK_INTEREST_1"));
+            ar(w.bank_interest_annual_ppm_);
+            ar(w.bank_interest_fraction_);
+        }
+        if(!w.people_.exact_birth_days_.empty()) {
+            ar(std::string("VIC25_PHASEC_EXACT_BIRTH_DAYS_1"));
+            ar(w.people_.exact_birth_days_);
+        }
+        if(!w.wage_arrears_.empty()||!w.bankrupt_firms_.empty()) {
+            ar(std::string("VIC25_PHASEC_WAGE_INSOLVENCY_1"));
+            ar(w.wage_arrears_);
+            ar(w.bankrupt_firms_);
+        }
+        if(!w.bank_principal_by_borrower_.empty()||
+           !w.sovereign_bonds_.empty()||
+           !w.sovereign_coupon_due_.empty()||
+           !w.sovereign_coupon_fraction_.empty()) {
+            ar(std::string("VIC25_PHASEC_SOVEREIGN_BONDS_1"));
+            ar(w.bank_principal_by_borrower_);
+            ar(w.sovereign_bonds_);
+            ar(w.sovereign_coupon_due_);
+            ar(w.sovereign_coupon_fraction_);
+        }
+        if(!w.army_deployments_.empty()) {
+            ar(std::string("VIC25_PHASEC_ARMY_DEPLOYMENTS_1"));
+            ar(w.army_deployments_);
+        }
+        if(!w.completed_liquidations_.empty()) {
+            ar(std::string("VIC25_PHASEC_ESTATE_CLOSURES_1"));
+            ar(w.completed_liquidations_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -292,20 +341,78 @@ struct SnapshotCodec {
         persistence_detail::BinaryReader ar{is};
         IntegratedWorld w;
         all(ar,w);
-        if(is.peek()!=std::char_traits<char>::eof()) {
+        bool seen_elections=false,seen_fiscal=false,seen_interest=false,
+             seen_birth_days=false,seen_wages=false,seen_bonds=false,
+             seen_armies=false,seen_estates=false;
+        while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
-            if(extension!="VIC25_PHASEC_COUNTRY_ELECTIONS_1")
-                throw std::runtime_error("unknown Phase C election extension");
-            ar(w.country_elections_);
-            ar(w.country_election_months_);
-            if(w.country_elections_.empty() ||
-               w.country_elections_.size()!=w.country_election_months_.size() ||
-               w.country_elections_.size()>100'000)
-                throw std::runtime_error("invalid serialized national elections");
+            if(extension=="VIC25_PHASEC_COUNTRY_ELECTIONS_1"&&!seen_elections) {
+                seen_elections=true;
+                ar(w.country_elections_);
+                ar(w.country_election_months_);
+                if(w.country_elections_.empty() ||
+                   w.country_elections_.size()!=w.country_election_months_.size() ||
+                   w.country_elections_.size()>100'000)
+                    throw std::runtime_error("invalid national elections extension");
+            } else if(extension=="VIC25_PHASEC_COUNTRY_FISCAL_1"&&!seen_fiscal) {
+                seen_fiscal=true;
+                ar(w.country_income_tax_);
+                ar(w.scheduled_country_income_tax_);
+                ar(w.country_treasuries_);
+                if(w.country_income_tax_.size()>100'000 ||
+                   w.scheduled_country_income_tax_.size()>1'000'000 ||
+                   w.country_treasuries_.size()>100'000)
+                    throw std::runtime_error("oversized country fiscal extension");
+            } else if(extension=="VIC25_PHASEC_BANK_INTEREST_1"&&!seen_interest) {
+                seen_interest=true;
+                ar(w.bank_interest_annual_ppm_);
+                ar(w.bank_interest_fraction_);
+                if(w.bank_interest_annual_ppm_<0||
+                   w.bank_interest_annual_ppm_>1'000'000||
+                   w.bank_interest_fraction_.size()>1'000'000)
+                    throw std::runtime_error("invalid bank interest extension");
+            } else if(extension=="VIC25_PHASEC_EXACT_BIRTH_DAYS_1" &&
+                      !seen_birth_days) {
+                seen_birth_days=true;
+                ar(w.people_.exact_birth_days_);
+                if(w.people_.exact_birth_days_.size()>5'000'000)
+                    throw std::runtime_error("oversized POP exact birth extension");
+            } else if(extension=="VIC25_PHASEC_WAGE_INSOLVENCY_1"&&!seen_wages) {
+                seen_wages=true;
+                ar(w.wage_arrears_);
+                ar(w.bankrupt_firms_);
+                if(w.wage_arrears_.size()>5'000'000||
+                   w.bankrupt_firms_.size()>1'000'000)
+                    throw std::runtime_error("oversized real wage debt state");
+            } else if(extension=="VIC25_PHASEC_SOVEREIGN_BONDS_1"&&
+                      !seen_bonds) {
+                seen_bonds=true;
+                ar(w.bank_principal_by_borrower_);
+                ar(w.sovereign_bonds_);
+                ar(w.sovereign_coupon_due_);
+                ar(w.sovereign_coupon_fraction_);
+                if(w.sovereign_bonds_.size()>1'000'000 ||
+                   w.bank_principal_by_borrower_.size()>1'000'000||
+                   w.sovereign_coupon_due_.size()>5'000'000||
+                   w.sovereign_coupon_fraction_.size()>5'000'000)
+                    throw std::runtime_error("oversized sovereign bond state");
+            } else if(extension=="VIC25_PHASEC_ARMY_DEPLOYMENTS_1"&&
+                      !seen_armies) {
+                seen_armies=true;
+                ar(w.army_deployments_);
+                if(w.army_deployments_.size()>1'000'000)
+                    throw std::runtime_error("oversized army deployment records");
+            } else if(extension=="VIC25_PHASEC_ESTATE_CLOSURES_1"&&
+                      !seen_estates) {
+                seen_estates=true;
+                ar(w.completed_liquidations_);
+                if(w.completed_liquidations_.size()>1'000'000)
+                    throw std::runtime_error("oversized closed estate records");
+            } else {
+                throw std::runtime_error("unknown or duplicate Phase C extension");
+            }
         }
-        if(is.peek()!=std::char_traits<char>::eof())
-            throw std::runtime_error("trailing data in snapshot");
         if(w.stage_!=-1)throw std::runtime_error("staged month cannot be loaded");
         w.validate();
         return w;

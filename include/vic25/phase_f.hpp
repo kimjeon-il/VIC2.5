@@ -7,6 +7,9 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
+#include <tuple>
+#include <vector>
 #include <stdexcept>
 #include <string>
 
@@ -38,7 +41,7 @@ inline void validate(const FreightLane& lane) {
        lane.origin_region.empty()||lane.destination_region.empty()||
        lane.origin_region==lane.destination_region||
        lane.target_inventory<=0||lane.maximum_daily_units<=0||
-       lane.confirmed_loss_per_hop<0||lane.edge_transit_days.empty())
+       lane.confirmed_loss_per_hop<0)
         throw std::invalid_argument("F_INVALID_AUTONOMOUS_FREIGHT_LANE");
     for(const auto& [edge,days]:lane.edge_transit_days)
         if(edge.empty()||days<=0)
@@ -93,12 +96,19 @@ inline std::optional<daily::Command> plan_next_hop(
     const auto from=geo.regions.at(origin);
     const auto to=geo.regions.at(lane.destination_region);
     const auto route=phasegh::quote_daily_freight_path(
-        trade,from,to,gh.month(),current.day,dim,&provisional.edge_units);
+        trade,from,to,gh.month(),current.day,dim,&provisional.edge_units,
+        true,&lane.edge_transit_days);
     if(!route||route->edges.empty()||route->capacity<=0)
         return std::nullopt;
     const auto& edge=trade.transport_edges.at(route->edges.front());
-    const auto duration=lane.edge_transit_days.find(edge.id);
-    if(duration==lane.edge_transit_days.end())
+    const auto configured=lane.edge_transit_days.find(edge.id);
+    std::int32_t transit_days=edge.transit_days;
+    if(configured!=lane.edge_transit_days.end()) {
+        if(transit_days>0&&configured->second!=transit_days)
+            throw std::invalid_argument("F_CONFLICTING_TRANSIT_DAY_SOURCES");
+        transit_days=configured->second;
+    }
+    if(transit_days<=0)
         throw std::invalid_argument("F_MISSING_VERIFIED_EDGE_DAYS");
     const auto& hop_region=geo.provinces.at(edge.to).region;
     const auto stock_key=std::make_tuple(shipper,origin,lane.good);
@@ -131,7 +141,7 @@ inline std::optional<daily::Command> plan_next_hop(
     command.good=lane.good;
     command.route_id=edge.id;
     command.amount=units;
-    command.unit_price=duration->second; // actual travel days
+    command.unit_price=transit_days; // actual travel days
     command.auxiliary=std::min(units,lane.confirmed_loss_per_hop);
     return command;
 }
@@ -141,5 +151,116 @@ inline std::optional<daily::Command> plan_next_hop(
         const daily::World& world,const FreightLane& lane) {
     DayPlanningReservations provisional;
     return plan_next_hop(world,lane,provisional);
+}
+// Supplies are acquired from state-owned physical arsenals (the existing
+// sovereign treasury wallet), not created when a military unit is underarmed.
+// Direct verified transport links only: if the army is not connected, remain
+// out of ammunition until a real service exists. The resulting shipment uses
+// the exact same dated World cargo command and C/G reservations as civilian F.
+inline std::vector<daily::Command> plan_direct_army_supply(
+        const daily::World& world,DayPlanningReservations& provisional) {
+    const auto& gh=world.engine();
+    const auto& c=gh.base().core().core();
+    const auto& geography=gh.base().spatial();
+    const auto& transport=gh.commerce();
+    const auto current=world.date();
+    const int dim=daily::days_in_month(current.year,current.month);
+    std::set<std::string> belligerents;
+    for(const auto& [id,war]:gh.diplomacy().wars) {
+        (void)id;
+        if(!war.active||war.armistice)continue;
+        belligerents.insert(war.attacker);
+        belligerents.insert(war.defender);
+    }
+    std::vector<daily::Command> orders;
+    for(const auto& [unit,deployment]:c.army_deployments()) {
+        const auto& country=deployment.country;
+        if(!belligerents.contains(country)||!c.has_country_treasury(country)||
+           !geography.regions.contains(deployment.region))continue;
+        const auto& arsenal=c.country_treasury(country);
+        const Quantity desired=c.active_strength(unit);
+        if(desired<=0)continue;
+        const Quantity current_ammo=c.stock(unit,deployment.region,"ammunition");
+        Quantity in_transit=0;
+        for(const auto& [shipment_id,cargo]:world.cargo()) {
+            (void)shipment_id;
+            if(cargo.arrived||cargo.recipient!=unit||
+               cargo.destination!=deployment.region||
+               cargo.good!="ammunition")continue;
+            in_transit=phaseb::add_checked(in_transit,
+                                           cargo.quantity-cargo.loss);
+        }
+        const Quantity already_supplied=phaseb::add_checked(
+            current_ammo,in_transit);
+        if(already_supplied>=desired)continue;
+        Quantity lacking=desired-already_supplied;
+        const auto destination=geography.regions.at(deployment.region);
+        const std::string id="F:ARMY:"+unit+":"+std::to_string(world.day_index());
+        for(const auto& [stock_key,real_qty]:c.physical_inventory()) {
+            if(lacking<=0)break;
+            if(stock_key.holder_id!=arsenal||
+               stock_key.good_id!="ammunition"||
+               stock_key.region_id==deployment.region||real_qty<=0||
+               !geography.regions.contains(stock_key.region_id))continue;
+            if(c.military_control(stock_key.region_id)!=country)continue;
+            const auto origin=geography.regions.at(stock_key.region_id);
+            const auto stock_identity=std::make_tuple(
+                arsenal,stock_key.region_id,std::string("ammunition"));
+            const Quantity already=provisional.goods[stock_identity];
+            const Quantity available=real_qty>already?real_qty-already:0;
+            if(available<=0)continue;
+            const phasegh::TransportEdge* best=nullptr;
+            Quantity capacity=0;
+            for(const auto& [edge_id,edge]:transport.transport_edges) {
+                if(!edge.enabled||edge.from!=origin||edge.to!=destination||
+                   edge.transit_days<=0||edge.mode=="air"||
+                   edge.valid_from_month>=0&&gh.month()<edge.valid_from_month||
+                   edge.valid_through_month>=0&&gh.month()>edge.valid_through_month)
+                    continue;
+                const Quantity used=transport.edge_usage.contains(
+                    {gh.month(),edge_id})?
+                    transport.edge_usage.at({gh.month(),edge_id}):0;
+                const Quantity free=daily_budget::remaining(
+                    edge.monthly_capacity,used,current.day,dim);
+                const Quantity already_on_route=provisional.edge_units[edge_id];
+                if(free<=already_on_route)continue;
+                if(!best ||
+                   std::tuple{edge.freight_per_unit,edge.transit_days,edge.id}<
+                   std::tuple{best->freight_per_unit,best->transit_days,best->id}) {
+                    best=&edge;
+                    capacity=free-already_on_route;
+                }
+            }
+            if(!best)continue;
+            Quantity qty=std::min({lacking,available,capacity});
+            const Money free_cash=std::max<Money>(0,
+                c.cash(arsenal)-provisional.cash[arsenal]);
+            if(best->carrier!=arsenal&&best->freight_per_unit>0)
+                qty=std::min(qty,free_cash/best->freight_per_unit);
+            if(qty<=0)continue;
+            const Money freight=best->carrier==arsenal?0:
+                phaseb::mul_checked(qty,best->freight_per_unit);
+            provisional.goods[stock_identity]=phaseb::add_checked(already,qty);
+            provisional.edge_units[best->id]=phaseb::add_checked(
+                provisional.edge_units[best->id],qty);
+            provisional.cash[arsenal]=phaseb::add_checked(
+                provisional.cash[arsenal],freight);
+            daily::Command command;
+            command.id=id+":"+std::to_string(orders.size());
+            command.kind=daily::Kind::cargo_dispatch;
+            command.from=arsenal;
+            command.to=unit;
+            command.region=stock_key.region_id;
+            command.destination=deployment.region;
+            command.good="ammunition";
+            command.route_id=best->id;
+            command.amount=qty;
+            command.unit_price=best->transit_days;
+            command.auxiliary=0; // no unverified loss model
+            orders.push_back(std::move(command));
+            lacking-=qty;
+        }
+    }
+    return orders;
 }
 } // namespace vic25::phasef

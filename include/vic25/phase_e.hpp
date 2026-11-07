@@ -319,6 +319,20 @@ public:
     [[nodiscard]] phased::Stage& phase_d(){return d_;}
     [[nodiscard]] phasec::IntegratedWorld& phase_c(){return d_.phase_c();}
     [[nodiscard]] const SpatialState& spatial() const{return s_;}
+    // One province edge per day and real unit-held ammunition. A country
+    // cannot jump over a foreign province or spawn its military supplies.
+    void march_unit_adjacent(const std::string& unit,
+                             const std::string& destination,
+                             Quantity carried_ammunition) {
+        require(stage_==10,"E_ERR_MARCH_WRONG_DAY_STAGE");
+        const auto& c=phase_c();
+        const auto& deployment=c.army_deployments().at(unit);
+        const auto from=s_.regions.at(deployment.region);
+        const auto to=s_.regions.at(destination);
+        require(s_.provinces.at(from).neighbors.contains(to),
+                "E_ERR_ARMY_NONADJACENT_MOVE");
+        phase_c().phase_time_move_army(unit,destination,carried_ammunition);
+    }
     void schedule(Operation op) {
         require(stage_==9,"ED0_ERR_TIME_CONFLICT");
         require(!op.id.empty()&&s_.commands.insert(op.id).second,
@@ -570,7 +584,9 @@ public:
     // day of its effective month; MonthClose never applies it twice.
     phasec::AdvanceReport advance_daily(const Plan& tasks,
                                          bool first_calendar_day=false,
-                                         bool final_calendar_day=false) {
+                                         bool final_calendar_day=false,
+                                         int day_of_month=0,
+                                         int days_in_month=0) {
         SpatialState staged=spatial_;
         phased::World::Plan bridge;
         for(int i=0;i<12;++i)
@@ -584,7 +600,8 @@ public:
                 });
         static_assert(std::is_nothrow_move_assignable_v<SpatialState>);
         const auto report=core_.advance_daily(bridge,first_calendar_day,
-                                               final_calendar_day);
+                                               final_calendar_day,
+                                               day_of_month,days_in_month);
         spatial_=std::move(staged);
         return report;
     }

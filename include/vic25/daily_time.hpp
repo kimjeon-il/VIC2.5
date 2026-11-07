@@ -324,13 +324,18 @@ public:
             [&](const auto& p){return !p.second.arrived&&p.second.arrival==day_;});
         const bool treaty_due=engine_.has_due_daily_treaty(day_);
         const bool construction_due=engine_.has_ready_daily_commission();
-        if(day_commit_==std::numeric_limits<std::uint64_t>::max())
+        if(day_commit_==std::numeric_limits<std::uint64_t>::max() ||
+           engine_.commit_id()==std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("TIME_ERR_COMMIT_COUNTER");
+        require(engine_.month()==legacy_month(current),
+                "TIME_ERR_GAME_DATE_OUT_OF_SYNC");
         const bool native_actions=std::any_of(native_day_plan.begin(),native_day_plan.end(),
             [](const auto& row){return !row.empty();});
         if(commands.empty()&&!close&&!first_calendar_day&&
            !native_actions&&!cargo_due&&!treaty_due&&!construction_due &&
            !engine_.base().core().core().daily_auto_demography_enabled()&&
+           engine_.base().core().core().annual_bank_interest_ppm()==0&&
+           !engine_.base().core().core().has_active_sovereign_bonds()&&
            !engine_.has_autonomous_daily_trade()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
@@ -346,7 +351,8 @@ public:
                     return stage_of(a.kind)<stage_of(b.kind);
                 return a.id<b.id;
             });
-        auto candidate=engine_;
+        // Each owner already stages its own ledger transaction. Avoid a
+        // redundant complete world copy at the daily calendar boundary.
         phasegh::World::Plan real_actions;
         for(auto& [id,c]:next_cargo) {
             if(c.arrived||c.arrival!=day_)continue;
@@ -390,6 +396,13 @@ public:
                         "TIME_ERR_INVALID_CARGO_ETA");
                 require(!next_cargo.contains(command.id),
                         "TIME_ERR_DUPLICATE_CARGO");
+                real_actions[1].push_back(
+                    [command,current](phasegh::Stage& gh) {
+                        gh.reserve_daily_cargo(command.id,command.route_id,
+                            command.from,command.region,command.good,
+                            command.amount,current.day,
+                            days_in_month(current.year,current.month));
+                    });
                 real_actions[7].push_back(
                     [command,current](phasegh::Stage& gh) {
                         gh.dispatch_daily_cargo(command.id,command.route_id,
@@ -432,11 +445,22 @@ public:
                 });
             }
         }
+        // Exact birth day and age eligibility must be known at Stage0,
+        // before any same-day labor, election or explicit birth command.
+        real_actions[0].insert(real_actions[0].begin(),
+            [day=current.day](phasegh::Stage& gh) {
+                gh.phase_c().phase_time_set_calendar_day(day);
+            });
         // P0 domain decisions run on the real calendar day, in the same
         // C/D/E/G/H transaction as scheduled commands and POP dynamics.
         for(std::size_t n=0;n<native_day_plan.size();++n)
             for(const auto& action:native_day_plan[n])
                 real_actions[n].push_back(action);
+        // Sovereign security obligations accrue and settle on their actual
+        // calendar day even when no P0 AI/controller was explicitly attached.
+        real_actions[5].push_back([today=day_](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_service_sovereign_bonds(today);
+        });
         // The autonomous population hazard is calendar-day resolved, even
         // without user actions. The existing monthly rate is NOT replayed
         // at MonthClose.
@@ -446,21 +470,19 @@ public:
         });
         // One atomic C/D/E/G/H commit for native events AND calendar
         // rollover. No second mutable month-close pass or event replay.
-        candidate.advance_daily(real_actions,day_,first_calendar_day,
-                                current.day,days_in_month(current.year,current.month),
-                                close);
-        require(candidate.month()==legacy_month(next),
-                "TIME_ERR_MONTH_CLOSE_NOT_ALIGNED");
-        candidate.validate();
+        const auto next_c_commit=engine_.commit_id()+1;
+        // Prepare journal allocations before the domain transaction commits.
         for(const auto& command:ordered)
             next_journal.push_back({day_,command.id,command.kind,
-                                     candidate.commit_id()});
-        static_assert(std::is_nothrow_move_assignable_v<phasegh::World>);
+                                    next_c_commit});
         static_assert(std::is_nothrow_move_assignable_v<
                       std::map<DayIndex,std::vector<Command>>>);
         static_assert(std::is_nothrow_move_assignable_v<
                       std::map<std::string,DailyCargo>>);
-        engine_=std::move(candidate);
+        static_assert(std::is_nothrow_move_assignable_v<std::vector<Entry>>);
+        engine_.advance_daily(real_actions,day_,first_calendar_day,
+                              current.day,days_in_month(current.year,current.month),
+                              close);
         scheduled_=std::move(next_scheduled);
         journal_=std::move(next_journal);
         cargo_=std::move(next_cargo);

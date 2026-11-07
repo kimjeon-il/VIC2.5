@@ -6,6 +6,7 @@
 // This is a functional vertical slice, NOT the full 62+176 acceptance engine.
 
 #include "vic25/phase_e.hpp"
+#include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -57,8 +58,13 @@ struct TransportEdge {
     Id from{}, to{};
     Quantity monthly_capacity{};
     Money freight_per_unit{};
-    Month transit_months{};
+    Month transit_months{}; // historical standalone monthly input
     bool enabled{true};
+    std::int32_t transit_days{}; // native game: verified days, zero = unknown
+    std::string mode{"legacy"}; // road, rail, sea, river, air or old map link
+    // Source-qualified and dated; absent means an unverified old scenario edge.
+    std::string evidence_id;
+    Month valid_from_month{-1}, valid_through_month{-1};
 };
 struct CustomsRecord {
     std::string execution_id, importer, treasury, good, policy_source;
@@ -101,9 +107,26 @@ struct PlannedTrade {
 
 struct PathQuote {
     Money freight_per_unit{};
-    Month travel_months{};
+    Month travel_months{}; // standalone legacy contract only
     Quantity capacity{};
     std::vector<std::string> edges;
+    std::int64_t travel_days{}; // native route, zero if timing unknown
+};
+struct DailyTradeTransit {
+    std::string id, buyer, destination, good;
+    Quantity quantity{}, loss{};
+    std::int64_t arrival_day{};
+    // Native multi-hop extension. The physical item is held by C only;
+    // these fields record its currently active segment or staging hub.
+    std::vector<std::string> path_edges;
+    std::string current_leg_id,hub_region;
+    std::uint32_t hop_index{};
+    bool at_hub{};
+};
+struct DayCargoReservation {
+    std::string edge,sender,origin,good;
+    Quantity quantity{};
+    Money freight{};
 };
 struct TradeState {
     std::map<std::string, Route> routes;
@@ -117,6 +140,10 @@ struct TradeState {
     std::map<std::pair<std::string,std::string>,Money> fx_held;
     std::vector<PlannedTrade> pending;
     std::vector<TradeFill> fills;
+    // Only timing/recipient metadata: physical inventory is always in C.
+    std::map<std::string,DailyTradeTransit> daily_shipments;
+    // Stage1->Stage7 only. A save is always taken outside the transaction.
+    std::map<std::string,DayCargoReservation> day_cargo_reservations;
     std::set<std::string> executed;
     std::uint64_t revision{};
 };
@@ -127,18 +154,9 @@ struct TradeState {
 inline std::optional<PathQuote> quote_daily_freight_path(
         const TradeState& trade,Id from,Id to,Month month,
         std::int32_t day_of_month=0,std::int32_t days_in_month=0,
-        const std::map<std::string,Quantity>* provisional_edges=nullptr) {
-    auto day_budget=[&](Quantity total,Quantity used)->Quantity {
-        require(total>=0&&used>=0,"F_ERR_BAD_BUDGET");
-        if(day_of_month<=0)return total;
-        require(days_in_month>=28&&days_in_month<=31&&
-                day_of_month<=days_in_month,"F_ERR_BAD_DAY");
-        const Quantity ceiling=phaseb::add_checked(
-            phaseb::mul_checked(total/days_in_month,day_of_month),
-            phaseb::mul_checked(total%days_in_month,day_of_month)/
-                            days_in_month);
-        return ceiling>used?ceiling-used:0;
-    };
+        const std::map<std::string,Quantity>* provisional_edges=nullptr,
+        bool verified_day_edges_only=false,
+        const std::map<std::string,std::int32_t>* override_days=nullptr) {
     if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
     if(trade.transport_edges.empty())return std::nullopt;
     using Item=std::tuple<Money,Month,Id>;
@@ -157,6 +175,19 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         // World::seed_transport_edge inserts in deterministic ID order.
         for(const auto& edge_id:it->second) {
             const auto& edge=trade.transport_edges.at(edge_id);
+            std::int32_t actual_days=edge.transit_days;
+            if(override_days) {
+                const auto configured=override_days->find(edge_id);
+                if(configured!=override_days->end()) {
+                    require(configured->second>0 &&
+                            (actual_days==0||actual_days==configured->second),
+                            "F_ERR_CONFLICTING_VERIFIED_TRANSIT_DAYS");
+                    actual_days=configured->second;
+                }
+            }
+            if(verified_day_edges_only&&actual_days<=0)continue;
+            if(edge.valid_from_month>=0 && month<edge.valid_from_month)continue;
+            if(edge.valid_through_month>=0 && month>edge.valid_through_month)continue;
             const Quantity committed=trade.edge_usage.contains({month,edge_id})?
                                      trade.edge_usage.at({month,edge_id}):0;
             const Quantity pending=(provisional_edges&&
@@ -164,12 +195,20 @@ inline std::optional<PathQuote> quote_daily_freight_path(
                 provisional_edges->at(edge_id):0;
             const Quantity used=phaseb::add_checked(committed,pending);
             const Quantity ceiling=day_of_month>0?
-                day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
-            if(!edge.enabled || used>=ceiling)continue;
+                daily_budget::cumulative(edge.monthly_capacity,
+                                         day_of_month,days_in_month):
+                edge.monthly_capacity;
+            // Actual native cargo occupies only its departing segment
+            // today. Future segments are capacity-checked when the lot
+            // physically reaches their hub, not months prematurely.
+            const bool due_now=day_of_month<=0 || node==from;
+            if(!edge.enabled||(due_now&&used>=ceiling))continue;
             require(edge.from==node && used>=0,
                     "G_ERR_LOGISTICS_INDEX_CORRUPT");
             const Money next_cost=phaseb::add_checked(cost,edge.freight_per_unit);
-            const Month next_travel=phaseb::add_checked(travel,edge.transit_months);
+            const Month next_travel=phaseb::add_checked(travel,
+                day_of_month>0&&actual_days>0?
+                    static_cast<Month>(actual_days):edge.transit_months);
             const std::pair<Money,Month> candidate{next_cost,next_travel};
             auto old=best.find(edge.to);
             if(old==best.end() || candidate<old->second) {
@@ -182,7 +221,7 @@ inline std::optional<PathQuote> quote_daily_freight_path(
     if(!best.contains(to))return std::nullopt;
     PathQuote result;
     result.freight_per_unit=best.at(to).first;
-    result.travel_months=best.at(to).second;
+    result.travel_days=day_of_month>0?best.at(to).second:0;
     result.capacity=std::numeric_limits<Quantity>::max();
     for(Id p=to;p!=from;) {
         auto it=parent.find(p);
@@ -195,13 +234,18 @@ inline std::optional<PathQuote> quote_daily_freight_path(
             provisional_edges->at(edge.id):0;
         const Quantity used=phaseb::add_checked(committed,pending);
         const Quantity ceiling=day_of_month>0?
-            day_budget(edge.monthly_capacity,0):edge.monthly_capacity;
-        require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
-        result.capacity=std::min(result.capacity,ceiling-used);
+            daily_budget::cumulative(edge.monthly_capacity,day_of_month,days_in_month):edge.monthly_capacity;
+        if(day_of_month<=0||edge.from==from) {
+            require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
+            result.capacity=std::min(result.capacity,ceiling-used);
+        }
         result.edges.push_back(edge.id);
         p=it->second.first;
     }
     std::reverse(result.edges.begin(),result.edges.end());
+    for(const auto& edge_id:result.edges)
+        result.travel_months=phaseb::add_checked(result.travel_months,
+            trade.transport_edges.at(edge_id).transit_months);
     return result;
 }
 
@@ -213,7 +257,8 @@ enum class ClauseKind : std::uint8_t {
     tariff_exemption, trade_embargo, trade_quota, military_access,
     defense_guarantee, non_aggression, territorial_cession,
     financial_aid, reparations, protectorate, research_cooperation,
-    cultural_exchange, ceasefire, military_withdrawal
+    cultural_exchange, ceasefire, military_withdrawal,
+    peace_settlement // distinct from a temporary armistice
 };
 struct TreatyClause {
     std::string id, obligor, beneficiary, good;
@@ -320,11 +365,17 @@ struct DailyTreaty {
     std::int64_t proposed_day{}, effective_day{};
     bool approved_a{}, approved_b{}, active{};
 };
+struct WarState {
+    std::string id,crisis,attacker,defender;
+    std::int64_t started_day{},last_combat_day{-1},ended_day{-1};
+    bool active{true},armistice{};
+};
 struct DiplomacyState {
     std::map<std::pair<std::string,std::string>,Tariff> tariffs;
     std::vector<PendingTariff> scheduled_tariffs;
     std::map<std::string,Treaty> treaties;
     std::map<std::string,DailyTreaty> daily_treaties;
+    std::map<std::string,WarState> wars; // legal war state only, never duplicate army ledger
     std::map<std::string,Organization> organizations;
     std::map<std::string,Protectorate> protectorates;
     std::map<std::string,Crisis> crises;
@@ -362,14 +413,8 @@ class Stage {
     std::int64_t day_index_{-1};
     // Cumulative allowance: never regrant a full month of quota daily.
     Quantity day_budget(Quantity total,Quantity used)const {
-        require(total>=0&&used>=0,"G_DAY_BAD_BUDGET");
-        if(day_of_month_<=0)return total; // legacy month, unchanged
-        require(days_in_month_>=28&&days_in_month_<=31&&
-                day_of_month_<=days_in_month_,"G_DAY_BAD_DATE");
-        const Quantity ceiling=phaseb::add_checked(
-          phaseb::mul_checked(total/days_in_month_,day_of_month_),
-          phaseb::mul_checked(total%days_in_month_,day_of_month_)/days_in_month_);
-        return ceiling>used?ceiling-used:0;
+        if(day_of_month_<=0)return total; // historical stand-alone month engine
+        return daily_budget::remaining(total,used,day_of_month_,days_in_month_);
     }
     Quantity monthly_fill(const std::string& id,bool contract) {
         Quantity used=0;
@@ -455,6 +500,9 @@ public:
     [[nodiscard]] int phase() const { return phase_; }
     [[nodiscard]] phasee::SpatialStage& geography() { return spatial_; }
     [[nodiscard]] phased::Stage& phase_d() { return spatial_.phase_d(); }
+    [[nodiscard]] const phasee::SpatialState& geography()const {
+        return spatial_.spatial();
+    }
     [[nodiscard]] phasec::IntegratedWorld& phase_c() { return spatial_.phase_c(); }
     [[nodiscard]] const DiplomacyState& diplomacy() const { return diplomacy_; }
     [[nodiscard]] const TradeState& commerce() const { return trade_; }
@@ -490,6 +538,41 @@ public:
         }
         ++trade_.revision;
     }
+    // Reserve real seller stock, carrier fare and G edge capacity before
+    // autonomous merchants make competing Stage1 purchases that same day.
+    void reserve_daily_cargo(const std::string& cargo_id,
+                             const std::string& edge_id,
+                             const std::string& sender,
+                             const std::string& origin,
+                             const std::string& good,
+                             Quantity quantity,
+                             std::int32_t day,
+                             std::int32_t days) {
+        at(1);
+        require(day>0&&days>=28&&days<=31&&day<=days&&quantity>0&&
+                !trade_.day_cargo_reservations.contains(cargo_id),
+                "F_ERR_INVALID_CARGO_BOOKING");
+        const auto& edge=trade_.transport_edges.at(edge_id);
+        const auto& geo=spatial_.spatial();
+        require(edge.enabled&&geo.regions.contains(origin)&&
+                (edge.from==geo.regions.at(origin)||
+                 edge.to==geo.regions.at(origin)),
+                "F_ERR_ROUTE_NOT_CONNECTED");
+        const auto key=std::make_pair(phase_c().month(),edge_id);
+        const Quantity used=trade_.edge_usage[key];
+        require(quantity<=daily_budget::remaining(
+                    edge.monthly_capacity,used,day,days),
+                "F_ERR_DUPLICATE_FREIGHT_CAPACITY");
+        const std::string purpose="F:"+cargo_id;
+        phase_c().phase_d_reserve_material(
+            sender,origin,good,purpose,quantity);
+        const Money fare=sender==edge.carrier?0:
+                           phaseb::mul_checked(quantity,edge.freight_per_unit);
+        if(fare>0)phase_c().phase_d_reserve_cash(sender,purpose,fare);
+        trade_.edge_usage[key]=phaseb::add_checked(used,quantity);
+        trade_.day_cargo_reservations.emplace(cargo_id,
+            DayCargoReservation{edge_id,sender,origin,good,quantity,fare});
+    }
     void dispatch_daily_cargo(const std::string& cargo_id,
                               const std::string& edge_id,
                               const std::string& sender,
@@ -513,24 +596,35 @@ public:
                 "G_DAILY_UNREACHABLE_DESTINATION");
         const auto key=std::make_pair(phase_c().month(),edge_id);
         const auto used=trade_.edge_usage[key];
-        const auto term=edge.monthly_capacity/days_in_month;
-        const auto rest=edge.monthly_capacity%days_in_month;
-        const auto capacity=phaseb::add_checked(
-            phaseb::mul_checked(term,static_cast<Quantity>(day_of_month)),
-            phaseb::mul_checked(rest,static_cast<Quantity>(day_of_month))/days_in_month);
-        require(used<=capacity&&quantity<=capacity-used,
+        const auto capacity=daily_budget::cumulative(
+            edge.monthly_capacity,day_of_month,days_in_month);
+        const auto booked=trade_.day_cargo_reservations.find(cargo_id);
+        const bool reserved=booked!=trade_.day_cargo_reservations.end();
+        require(used<=capacity&&
+                (reserved||quantity<=capacity-used),
                 "G_DAILY_MONTHLY_CAPACITY_EXCEEDED");
         require(!cargo_id.empty()&&
                 !trade_.executed.contains("DAY:"+cargo_id),
                 "F_ERR_DUPLICATE_DAILY_DISPATCH");
-        const Money freight=phaseb::mul_checked(quantity,edge.freight_per_unit);
-        // Freight is a real monetary transaction, not a shadow transport
-        // points balance. An own-carrier route needs no internal transfer.
-        if(freight>0&&sender!=edge.carrier)
+        const Money freight=sender==edge.carrier?0:
+            phaseb::mul_checked(quantity,edge.freight_per_unit);
+        if(reserved) {
+            const auto& entry=booked->second;
+            require(entry.edge==edge_id&&entry.sender==sender&&
+                    entry.origin==origin&&entry.good==good&&
+                    entry.quantity==quantity&&entry.freight==freight,
+                    "F_ERR_RESERVED_ROUTE_DISAGREES_WITH_DISPATCH");
+            phase_c().phase_g_release_reserved_goods(
+                sender,origin,good,"F:"+cargo_id,quantity);
+            if(freight>0)
+                phase_c().phase_d_release_cash(sender,"F:"+cargo_id,freight);
+        }
+        if(freight>0)
             phase_c().pay(sender,edge.carrier,freight);
         phase_c().phase_time_dispatch(cargo_id,sender,origin,good,quantity);
         trade_.executed.insert("DAY:"+cargo_id);
-        trade_.edge_usage[key]=phaseb::add_checked(used,quantity);
+        if(reserved)trade_.day_cargo_reservations.erase(booked);
+        else trade_.edge_usage[key]=phaseb::add_checked(used,quantity);
         ++trade_.revision;
     }
 
@@ -674,7 +768,8 @@ public:
         require(total<=org.dues_per_member &&
                 amount<=org.dues_per_member-total,
                 "H_ERR_CONTRIBUTION_OVERPAY");
-        phase_c().pay(member,"ORG:"+id,amount);
+        phase_c().pay(phase_c().country_financial_wallet(member),
+                      "ORG:"+id,amount);
         total=phaseb::add_checked(total,amount);
         ++diplomacy_.revision;
     }
@@ -686,7 +781,9 @@ public:
         leader(phase_c(),payer,prime);
         require(!diplomacy_.reparation_links.contains(id),
                 "H_ERR_DUPLICATE_REPARATION");
-        phase_c().sign_reparation_treaty(id,payer,recipient,amount);
+        phase_c().sign_reparation_treaty(id,
+            phase_c().country_financial_wallet(payer),
+            phase_c().country_financial_wallet(recipient),amount);
         diplomacy_.reparation_links.insert(id);
         ++diplomacy_.revision;
     }
@@ -755,6 +852,122 @@ public:
 
     void plan_autonomous_trade();
     void execute_autonomous_trade();
+    void settle_due_daily_trade_cargo() {
+        at(0);
+        if(day_index_<0)return;
+        const auto& geo=spatial_.spatial();
+        for(auto it=trade_.daily_shipments.begin();
+            it!=trade_.daily_shipments.end();) {
+            auto& cargo=it->second;
+            if(cargo.at_hub||cargo.arrival_day>day_index_) {
+                ++it;continue;
+            }
+            if(cargo.path_edges.empty()) {
+                // A saved 0.4-0.6 single-leg cargo remains byte-compatible.
+                phase_c().phase_time_arrive(cargo.id,cargo.buyer,
+                    cargo.destination,cargo.good,cargo.quantity,cargo.loss);
+                acknowledge_daily_cargo_arrival(cargo.id,cargo.quantity,cargo.loss);
+                it=trade_.daily_shipments.erase(it);
+                continue;
+            }
+            require(cargo.hop_index<cargo.path_edges.size(),
+                    "G_ERR_INVALID_CURRENT_INTERMODAL_HOP");
+            const auto& edge=trade_.transport_edges.at(
+                cargo.path_edges[cargo.hop_index]);
+            const auto hub=geo.provinces.at(edge.to).region;
+            const bool final=cargo.hop_index+1==cargo.path_edges.size();
+            phase_c().phase_time_arrive(cargo.current_leg_id,
+                final?cargo.buyer:"TRANSIT:HUB:"+cargo.id,
+                hub,cargo.good,cargo.quantity,final?cargo.loss:0);
+            if(final) {
+                acknowledge_daily_cargo_arrival(
+                    cargo.id,cargo.quantity,cargo.loss);
+                it=trade_.daily_shipments.erase(it);
+            } else {
+                cargo.at_hub=true;
+                cargo.hub_region=hub;
+                ++trade_.revision;
+                ++it;
+            }
+        }
+    }
+    // Later legs use only goods actually at the hub, current-day available
+    // carrier capacity and real buyer cash. Congestion keeps the lot at the
+    // real transit hub; no automatic teleport or pre-charged future carrier.
+    void dispatch_pending_trade_hops() {
+        at(7);
+        if(day_index_<0||day_of_month_<=0)return;
+        const auto& geo=spatial_.spatial();
+        auto& c=phase_c();
+        for(auto& [id,cargo]:trade_.daily_shipments) {
+            if(!cargo.at_hub||cargo.path_edges.empty()||
+               cargo.hop_index+1>=cargo.path_edges.size())continue;
+            std::string edge_id=cargo.path_edges[cargo.hop_index+1];
+            // Some railroads, carriers and seaways cease operation while
+            // the lot is moving between hubs. Find another actual grounded
+            // route from its *current real inventory location*, never
+            // teleport it to an invented intermediate node.
+            const auto ready=[&](const TransportEdge& edge)->bool {
+                return edge.enabled&&edge.transit_days>0&&
+                    geo.provinces.at(edge.from).region==cargo.hub_region&&
+                    (edge.valid_from_month<0||
+                        c.month()>=edge.valid_from_month)&&
+                    (edge.valid_through_month<0||
+                        c.month()<=edge.valid_through_month);
+            };
+            if(!ready(trade_.transport_edges.at(edge_id))) {
+                if(!geo.regions.contains(cargo.hub_region)||
+                   !geo.regions.contains(cargo.destination))continue;
+                const auto alternate=quote_daily_freight_path(
+                    trade_,geo.regions.at(cargo.hub_region),
+                    geo.regions.at(cargo.destination),c.month(),
+                    day_of_month_,days_in_month_,nullptr,true);
+                if(!alternate||alternate->edges.empty()||
+                   alternate->capacity<cargo.quantity)continue;
+                cargo.path_edges.resize(cargo.hop_index+1);
+                cargo.path_edges.insert(cargo.path_edges.end(),
+                    alternate->edges.begin(),alternate->edges.end());
+                edge_id=cargo.path_edges[cargo.hop_index+1];
+                ++trade_.revision;
+            }
+            const auto& edge=trade_.transport_edges.at(edge_id);
+            if(!ready(edge))continue;
+            const auto key=std::make_pair(c.month(),edge_id);
+            const Quantity used=trade_.edge_usage[key];
+            const Quantity free=daily_budget::remaining(
+                edge.monthly_capacity,used,day_of_month_,days_in_month_);
+            if(free<cargo.quantity)continue;
+            const Money price=phaseb::mul_checked(
+                cargo.quantity,edge.freight_per_unit);
+            if(edge.carrier!=cargo.buyer&&
+               c.phase_d_cash_available(cargo.buyer)<price)
+                continue;
+            if(c.stock("TRANSIT:HUB:"+id,cargo.hub_region,
+                       cargo.good)<cargo.quantity)
+                continue;
+            const auto next_leg=id+":H"+std::to_string(cargo.hop_index+1);
+            if(trade_.executed.contains("DAY:"+next_leg))continue;
+            if(price>0&&edge.carrier!=cargo.buyer)
+                c.pay(cargo.buyer,edge.carrier,price);
+            c.phase_time_dispatch(next_leg,"TRANSIT:HUB:"+id,
+                                  cargo.hub_region,cargo.good,cargo.quantity);
+            trade_.executed.insert("DAY:"+next_leg);
+            trade_.edge_usage[key]=phaseb::add_checked(used,cargo.quantity);
+            ++cargo.hop_index;
+            cargo.current_leg_id=next_leg;
+            cargo.hub_region.clear();
+            cargo.at_hub=false;
+            cargo.arrival_day=phaseb::add_checked(
+                day_index_,edge.transit_days);
+            ++trade_.revision;
+        }
+    }
+    [[nodiscard]] bool verified_day_route(const PathQuote& path)const {
+        if(path.edges.empty())return false;
+        for(const auto& id:path.edges)
+            if(trade_.transport_edges.at(id).transit_days<=0)return false;
+        return true;
+    }
     void propose_treaty_package(const std::string& id,
              const std::set<std::string>& parties,
              std::vector<TreatyClause> clauses,
@@ -802,6 +1015,137 @@ public:
     void exchange_currencies(const std::string& a, const std::string& b,
                              const std::string& sold, Money sold_amount,
                              const std::string& bought, Money bought_amount);
+    // All provable disputed provinces of a belligerent pair are potential
+    // active fronts of the same war. Derive them from the single authoritative
+    // E claim and C sovereignty registries, not duplicated H front markers.
+    [[nodiscard]] std::vector<std::string> war_front_regions(
+            const WarState& war) {
+        const auto& geo=spatial_.spatial();
+        const auto& c=phase_c();
+        std::set<std::string> real_fronts;
+        const auto underlying=diplomacy_.crises.find(war.crisis);
+        if(underlying!=diplomacy_.crises.end()&&
+           geo.provinces.contains(underlying->second.province))
+            real_fronts.insert(geo.provinces.at(
+                underlying->second.province).region);
+        for(const auto& [province,claimants]:geo.claims) {
+            if(!geo.provinces.contains(province))continue;
+            const auto& region=geo.provinces.at(province).region;
+            const auto& owner=c.sovereignty(region);
+            if((owner==war.defender&&claimants.contains(war.attacker))||
+               (owner==war.attacker&&claimants.contains(war.defender)))
+                real_fronts.insert(region);
+        }
+        return {real_fronts.begin(),real_fronts.end()};
+    }
+
+    // War starts only from a recorded unresolved crisis backed by actual
+    // opposed, deployed and armed units at its documented disputed province.
+    // No abstract belligerence points, free armies or automatic claims.
+    bool begin_war_from_crisis(const std::string& crisis_id,
+                              const std::string& claimant,
+                              const std::string& prime) {
+        at(9);
+        auto it=diplomacy_.crises.find(crisis_id);
+        if(it==diplomacy_.crises.end()||day_index_<0)return false;
+        auto& crisis=it->second;
+        if(crisis.claimant!=claimant||
+           (crisis.status!=CrisisStatus::active &&
+            crisis.status!=CrisisStatus::escalated)||
+           diplomacy_.wars.contains("WAR:"+crisis_id))
+            return false;
+        leader(phase_c(),claimant,prime);
+        allow_foreign_policy(claimant);
+        const auto& geographical=spatial_.spatial();
+        if(!geographical.provinces.contains(crisis.province))return false;
+        const auto& front=geographical.provinces.at(crisis.province).region;
+        bool claimant_ready=false,respondent_ready=false;
+        for(const auto& [unit,deployment]:phase_c().army_deployments()) {
+            if(deployment.region!=front||phase_c().active_strength(unit)<=0||
+               phase_c().stock(unit,front,"ammunition")<=0)continue;
+            if(deployment.country==claimant)claimant_ready=true;
+            if(deployment.country==crisis.respondent)respondent_ready=true;
+        }
+        if(!claimant_ready||!respondent_ready)return false;
+        (void)phase_c().government(crisis.respondent);
+        const auto id="WAR:"+crisis_id;
+        diplomacy_.wars.emplace(id,WarState{
+            id,crisis_id,claimant,crisis.respondent,day_index_,-1,-1,true,false});
+        crisis.status=CrisisStatus::escalated;
+        ++diplomacy_.revision;
+        return true;
+    }
+    void march_army_for_front(const std::string& war_id,
+                              const std::string& unit,
+                              const std::string& destination) {
+        at(10);
+        const auto& war=diplomacy_.wars.at(war_id);
+        const auto& c=phase_c();
+        const auto& deployment=c.army_deployments().at(unit);
+        require(war.active&&!war.armistice &&
+                (deployment.country==war.attacker||
+                 deployment.country==war.defender) &&
+                c.active_strength(unit)>0,
+                "H_ERR_UNAUTHORIZED_ARMY_WAR_MARCH");
+        const auto claimed_fronts=war_front_regions(war);
+        // A foreign territory can be entered only at a disputed province
+        // established by one of the belligerents' original E claims.
+        // Rear-area travel stays inside real friendly military control.
+        require(std::find(claimed_fronts.begin(),claimed_fronts.end(),
+                          destination)!=claimed_fronts.end()||
+                c.military_control(destination)==deployment.country,
+                "H_ERR_UNLAWFUL_FOREIGN_MILITARY_MOVE");
+        const auto ammunition=std::min<Quantity>(
+            c.active_strength(unit),
+            c.stock(unit,deployment.region,"ammunition"));
+        require(ammunition>0,"H_ERR_ARMY_UNSUPPLIED_MARCH");
+        spatial_.march_unit_adjacent(unit,destination,ammunition);
+    }
+    void record_actual_war_engagement(const std::string& id) {
+        at(10);
+        auto& war=diplomacy_.wars.at(id);
+        require(war.active&&day_index_>=war.started_day,
+                "H_ERR_NO_ACTIVE_WAR_FRONT");
+        war.last_combat_day=day_index_;
+        ++diplomacy_.revision;
+    }
+    // A ratified, effective ceasefire pauses combat; only an explicit peace
+    // settlement clause terminates the war permanently. Neither transfers
+    // provinces nor creates payments: those require their own C/E treaty acts.
+    void reconcile_war_treaties() {
+        at(0);
+        if(day_index_<0)return;
+        for(auto& [id,war]:diplomacy_.wars) {
+            (void)id;
+            if(war.ended_day>=0)continue;
+            bool ceasefire=false,peace=false;
+            for(const auto& [treaty_id,t]:diplomacy_.treaties) {
+                (void)treaty_id;
+                if(!t.active)continue;
+                for(const auto& clause:t.clauses) {
+                    if(clause.effective>phase_c().month()||
+                       (clause.expires>=0&&clause.expires<phase_c().month()))
+                        continue;
+                    const bool matches=
+                        (clause.obligor==war.attacker&&
+                         clause.beneficiary==war.defender)||
+                        (clause.obligor==war.defender&&
+                         clause.beneficiary==war.attacker);
+                    if(!matches)continue;
+                    if(clause.kind==ClauseKind::ceasefire)ceasefire=true;
+                    if(clause.kind==ClauseKind::peace_settlement)peace=true;
+                }
+            }
+            if(peace) {
+                war.active=false;war.armistice=false;war.ended_day=day_index_;
+                ++diplomacy_.revision;
+            } else if(war.active==ceasefire || war.armistice!=ceasefire) {
+                war.active=!ceasefire;
+                war.armistice=ceasefire;
+                ++diplomacy_.revision;
+            }
+        }
+    }
     void advance_legal_state() {
         at(0);
         for(const auto& rule:diplomacy_.scheduled_tariffs) {
@@ -907,7 +1251,31 @@ private:
         for(const auto& [id,c]:h.crises)
             require(id==c.id && s.spatial().provinces.contains(c.province),
                     "H_ERR_CRISIS_INVARIANT");
-        require(g.pending.empty(), "G_ERR_UNSETTLED_RESERVATIONS");
+        for(const auto& [id,war]:h.wars)
+            require(id==war.id&&h.crises.contains(war.crisis)&&
+                    war.attacker!=war.defender&&
+                    war.started_day>=0&&war.last_combat_day>=-1&&
+                    war.ended_day>=-1&&
+                    (war.ended_day<0||!war.active),
+                    "H_ERR_WAR_RECORD_INVARIANT");
+        for(const auto& [id,cargo]:g.daily_shipments) {
+            require(id==cargo.id&&!id.empty()&&!cargo.buyer.empty()&&
+                    !cargo.destination.empty()&&!cargo.good.empty()&&
+                    cargo.quantity>0&&cargo.loss>=0&&cargo.loss<=cargo.quantity&&
+                    cargo.arrival_day>0,
+                    "G_ERR_NATIVE_CARGO_INVARIANT");
+            if(!cargo.path_edges.empty()) {
+                require(cargo.hop_index<cargo.path_edges.size()&&
+                        !cargo.current_leg_id.empty()&&
+                        (!cargo.at_hub||!cargo.hub_region.empty()),
+                        "G_ERR_NATIVE_INTERMODAL_STATE");
+                for(const auto& edge:cargo.path_edges)
+                    require(g.transport_edges.contains(edge),
+                            "G_ERR_NATIVE_INTERMODAL_MISSING_EDGE");
+            }
+        }
+        require(g.pending.empty()&&g.day_cargo_reservations.empty(),
+                "G_ERR_UNSETTLED_RESERVATIONS");
     }
 public:
     explicit World(Month starting_month=24000):core_(starting_month){}
@@ -934,7 +1302,10 @@ public:
                                 day_of_month,days_in_month,day};
                     if(n==0){
                         if(first_calendar_day)stage.advance_legal_state();
-                        if(day_of_month>0)stage.register_arrived_losses();
+                        if(day_of_month>0) {
+                            stage.settle_due_daily_trade_cargo();
+                            stage.register_arrived_losses();
+                        }
                         for(auto& [id,t]:new_diplomacy.daily_treaties) {
                             (void)id;
                             if(!t.active&&t.approved_a&&t.approved_b&&
@@ -943,6 +1314,7 @@ public:
                                 ++new_diplomacy.revision;
                             }
                         }
+                        stage.reconcile_war_treaties();
                     }
                     for(const auto& fn:tasks[static_cast<std::size_t>(n)])
                         fn(stage);
@@ -955,6 +1327,7 @@ public:
                         if(n==5)stage.settle_insurance_claims();
                         if(n==7){
                             stage.execute_autonomous_trade();
+                            stage.dispatch_pending_trade_hops();
                             stage.pay_insurance_premiums();
                         }
                     }
@@ -963,7 +1336,8 @@ public:
         static_assert(std::is_nothrow_move_assignable_v<TradeState>);
         static_assert(std::is_nothrow_move_assignable_v<DiplomacyState>);
         const auto result=core_.advance_daily(bridge,first_calendar_day,
-                                               final_calendar_day);
+                                               final_calendar_day,
+                                               day_of_month,days_in_month);
         trade_=std::move(new_trade);
         diplomacy_=std::move(new_diplomacy);
         return result;
@@ -973,7 +1347,8 @@ public:
     // background calculations are executed ONLY in advance() at MonthClose.
     [[nodiscard]] bool has_autonomous_daily_trade()const {
         return !trade_.routes.empty()||!trade_.contracts.empty()||
-               !trade_.credit.empty()||!trade_.insurance.empty();
+               !trade_.credit.empty()||!trade_.insurance.empty()||
+               !trade_.daily_shipments.empty();
     }
     phasec::AdvanceReport advance_daily(const phasec::IntegratedWorld::Plan& commands) {
         World staged=*this;
@@ -996,11 +1371,24 @@ public:
                 !trade_.routes.contains(r.id),"G_ERR_INVALID_ROUTE");
         trade_.routes.emplace(r.id,std::move(r));
     }
+    void seed_verified_geographic_link(std::string id,Id from,Id to,
+                                       std::string mode) {
+        core_.seed_geographic_link(std::move(id),from,to,std::move(mode));
+    }
     void seed_transport_edge(TransportEdge edge) {
         require(core_.commit_id()==0 && !edge.id.empty() &&
                 edge.from>0 && edge.to>0 && edge.from!=edge.to &&
                 edge.monthly_capacity>0 && edge.freight_per_unit>=0 &&
-                edge.transit_months>0 && !edge.carrier.empty() &&
+                (edge.transit_months>0||edge.transit_days>0) &&
+                edge.transit_days>=0 &&
+                (edge.mode=="legacy"||edge.mode=="road"||
+                 edge.mode=="rail"||edge.mode=="sea"||
+                 edge.mode=="river"||edge.mode=="air")&&
+                (edge.mode=="legacy"||
+                 (!edge.evidence_id.empty()&&
+                  edge.valid_from_month>=0&&
+                  edge.valid_through_month>=edge.valid_from_month))&&
+                !edge.carrier.empty() &&
                 core_.spatial().provinces.contains(edge.from) &&
                 core_.spatial().provinces.contains(edge.to) &&
                 !trade_.transport_edges.contains(edge.id),
@@ -1009,8 +1397,20 @@ public:
         const auto& b=core_.spatial().provinces.at(edge.to);
         bool coastal=false;
         for(Id sea:a.coastal_seas)if(b.coastal_seas.contains(sea))coastal=true;
-        require(a.neighbors.contains(edge.to)||coastal,
-                "G_ERR_UNCONNECTED_LOGISTICS_EDGE");
+        bool documented_link=false;
+        for(const auto& [key,link]:core_.spatial().geographic_links) {
+            (void)key;
+            if(link.from==edge.from&&link.to==edge.to&&
+               link.mode==edge.mode) {
+                documented_link=true;
+                break;
+            }
+        }
+        const bool adjacent=a.neighbors.contains(edge.to);
+        const bool connected=edge.mode=="legacy"?(adjacent||coastal):
+            (documented_link&&(edge.mode!="road"||adjacent));
+        require(connected,
+                "G_ERR_UNVERIFIED_INTERMODAL_CONNECTIVITY");
         (void)core_.core().core().cash(edge.carrier);
         trade_.transport_adjacency[edge.from].push_back(edge.id);
         trade_.transport_edges.emplace(edge.id,std::move(edge));
@@ -1089,7 +1489,20 @@ public:
             require(id==r.id && core_.spatial().provinces.contains(r.origin)&&
                     core_.spatial().provinces.contains(r.destination),
                     "G_ERR_INVALID_ROUTE");
-        require(trade_.pending.empty(),"G_ERR_PENDING_OUTSIDE_MONTH");
+        const auto& inventory=core_.core().core();
+        for(const auto& [id,cargo]:trade_.daily_shipments) {
+            const std::string physical_holder=cargo.at_hub?
+                "TRANSIT:HUB:"+id:
+                "TRANSIT:DAY:"+(cargo.current_leg_id.empty()?
+                               id:cargo.current_leg_id);
+            const std::string physical_region=cargo.at_hub?
+                cargo.hub_region:"in_transit";
+            require(inventory.stock(physical_holder,physical_region,cargo.good)==
+                        cargo.quantity,
+                    "G_ERR_NATIVE_CARGO_NOT_BACKED_BY_INVENTORY");
+        }
+        require(trade_.pending.empty()&&trade_.day_cargo_reservations.empty(),
+                "G_ERR_PENDING_OUTSIDE_MONTH");
     }
     phasec::AdvanceReport advance(const Plan& plan={}) {
         TradeState next_trade=trade_;
@@ -1152,6 +1565,8 @@ inline void Stage::plan_contracts() {
         const auto path=quote_path(agreement.origin,agreement.destination,month);
         if(agreement.origin!=agreement.destination&&
            !trade_.transport_edges.empty()&&!path)continue;
+        if(day_of_month_>0 && agreement.origin!=agreement.destination &&
+           (!path || !verified_day_route(*path)))continue;
         const Money freight_unit=path?path->freight_per_unit:0;
         const Month travel=path?path->travel_months:
                                 (agreement.origin==agreement.destination?0:1);
@@ -1200,7 +1615,11 @@ inline void Stage::plan_contracts() {
             trade_.fx_held[{agreement.buyer,agreement.currency}]=phaseb::add_checked(
                   trade_.fx_held[{agreement.buyer,agreement.currency}],base);
         reserve_trade_quota(country_from,country_to,agreement.good,q);
-        if(path)for(const auto& edge_id:path->edges) {
+        if(path)for(std::size_t hop=0;hop<path->edges.size();++hop) {
+            // Native trade only books capacity of the departing hop;
+            // future regions reserve their actual date when cargo arrives.
+            if(day_of_month_>0&&hop>0)break;
+            const auto& edge_id=path->edges[hop];
             trade_.edge_usage[{month,edge_id}]=phaseb::add_checked(
                       trade_.edge_usage[{month,edge_id}],q);
         }
@@ -1229,6 +1648,8 @@ inline void Stage::plan_autonomous_trade() {
         const auto path=quote_path(route.origin,route.destination,core.month());
         if(route.origin!=route.destination&&
            !trade_.transport_edges.empty()&&!path)continue;
+        if(day_of_month_>0 && route.origin!=route.destination &&
+           (!path || !verified_day_route(*path)))continue;
         const Money unit_freight=path?path->freight_per_unit:0;
         const Quantity max_route=path?path->capacity:route.maximum_quantity;
         const Month travel=path?path->travel_months:route.travel_months;
@@ -1257,9 +1678,12 @@ inline void Stage::plan_autonomous_trade() {
         core.phase_d_reserve_cash(route.buyer,eid,total);
         core.phase_d_reserve_material(route.seller,origin,route.good,eid,qty);
         reserve_trade_quota(from,to,route.good,qty);
-        if(path)for(const auto& edge_id:path->edges)
+        if(path)for(std::size_t hop=0;hop<path->edges.size();++hop) {
+            if(day_of_month_>0&&hop>0)break;
+            const auto& edge_id=path->edges[hop];
             trade_.edge_usage[{core.month(),edge_id}]=phaseb::add_checked(
                 trade_.edge_usage[{core.month(),edge_id}],qty);
+        }
         trade_.pending.push_back({eid,route.id,route.seller,route.buyer,
                          route.good,origin,dest,from,to,qty,travel,
                          price,total,duty,freight,"","TEST",
@@ -1287,11 +1711,39 @@ inline void Stage::execute_autonomous_trade() {
             else core.phase_g_transfer_goods(order.seller,order.buyer,
                                  order.origin_region,order.good,order.quantity);
         } else {
-            require(order.travel_months>0,"G_ERR_UNSUPPORTED_TRANSPORT");
-            core.ship(order.execution_id,order.seller,order.buyer,
-                      order.origin_region,order.destination_region,
-                      order.good,order.quantity,order.travel_months,
-                      order.confirmed_arrival_loss);
+            if(day_of_month_>0) {
+                // Native G shipments use the same physical C TRANSIT:DAY
+                // inventory and arrival method as Phase F's cargo commands.
+                require(day_index_>=0&&!order.path_edges.empty(),
+                        "G_ERR_NATIVE_ROUTE_REQUIRED");
+                const auto& first=trade_.transport_edges.at(
+                    order.path_edges.front());
+                require(first.transit_days>0 &&
+                        spatial_.spatial().provinces.at(first.from).region==
+                            order.origin_region,
+                        "G_ERR_INVALID_VERIFIED_ORIGIN_HOP");
+                const auto arrival=phaseb::add_checked(
+                    day_index_,first.transit_days);
+                require(arrival>day_index_ &&
+                        !trade_.daily_shipments.contains(order.execution_id),
+                        "G_ERR_INVALID_NATIVE_ETA");
+                core.phase_time_dispatch(order.execution_id,order.seller,
+                                         order.origin_region,order.good,
+                                         order.quantity);
+                trade_.daily_shipments.emplace(order.execution_id,
+                    DailyTradeTransit{order.execution_id,order.buyer,
+                        order.destination_region,order.good,order.quantity,
+                        order.confirmed_arrival_loss,arrival,
+                        order.path_edges,order.execution_id,"",0,false});
+                trade_.executed.insert("DAY:"+order.execution_id);
+            } else {
+                // Standalone legacy monthly scenario only; not day gameplay.
+                require(order.travel_months>0,"G_ERR_UNSUPPORTED_TRANSPORT");
+                core.ship(order.execution_id,order.seller,order.buyer,
+                          order.origin_region,order.destination_region,
+                          order.good,order.quantity,order.travel_months,
+                          order.confirmed_arrival_loss);
+            }
             if(order.settlement_currency=="TEST")
                 core.pay(order.buyer,order.seller,goods_cost);
         }
@@ -1301,7 +1753,9 @@ inline void Stage::execute_autonomous_trade() {
         if(order.freight>0) {
             require(!order.path_edges.empty(),"G_ERR_MISSING_FREIGHT_ROUTE");
             Money actual_freight=0;
-            for(const auto& edge_id:order.path_edges) {
+            for(std::size_t hop=0;hop<order.path_edges.size();++hop) {
+                if(day_of_month_>0&&hop>0)break;
+                const auto& edge_id=order.path_edges[hop];
                 const auto& edge=trade_.transport_edges.at(edge_id);
                 const Money amount=phaseb::mul_checked(
                                      order.quantity,edge.freight_per_unit);
@@ -1312,13 +1766,19 @@ inline void Stage::execute_autonomous_trade() {
                     actual_freight=phaseb::add_checked(actual_freight,amount);
                 }
             }
-            require(actual_freight==order.freight,
+            const Money expected=day_of_month_>0?
+                phaseb::mul_checked(order.quantity,
+                    trade_.transport_edges.at(order.path_edges.front()).
+                    freight_per_unit):
+                order.freight;
+            require(actual_freight==expected,
                     "G_ERR_FREIGHT_ACCOUNTING_MISMATCH");
         }
         if(order.duty>0) {
-            core.phase_g_pay_customs(order.buyer,order.buyer_country,order.duty);
+            const auto& treasury=core.country_financial_wallet(order.buyer_country);
+            core.phase_g_pay_customs(order.buyer,treasury,order.duty);
             trade_.customs.push_back({order.execution_id,order.buyer_country,
-                 order.buyer_country,order.good,"H:effective-domestic-policy",
+                 treasury,order.good,"H:effective-domestic-policy",
                  core.month(),goods_cost,order.duty,order.duty,order.quantity});
         }
         if(!order.contract_id.empty()) {

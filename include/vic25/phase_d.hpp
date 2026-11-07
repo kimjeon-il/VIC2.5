@@ -5,6 +5,7 @@
 // This deliberately does not claim all D-C/I/T acceptance cases are implemented.
 
 #include "vic25/phase_c.hpp"
+#include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -187,17 +188,8 @@ struct DomainState {
         opening_month=c.month();
         c.phase_d_enable_shared_resources();
         for(auto& [id,source]:resource_sites) {
-            if(source.renewable) {
-                require(source.carrying_capacity>=source.standing_biomass &&
-                        source.renewal_per_month>=0,"invalid renewable pool");
-                const auto grown=std::min(source.renewal_per_month,
-                     source.carrying_capacity-source.standing_biomass);
-                if(grown>0) {
-                    source.standing_biomass=phaseb::add_checked(source.standing_biomass,grown);
-                    append(opening_month,"natural-resource-regeneration",id);
-                }
-            } else if(source.produced_this_month>0 &&
-                      source.decline_ppm_active_month>0) {
+            if(!source.renewable && source.produced_this_month>0 &&
+               source.decline_ppm_active_month>0) {
                 // Throughput decline does not refer to a hidden finite reserve.
                 constexpr Quantity scale=1'000'000;
                 const auto whole=phaseb::mul_checked(source.monthly_capacity/scale,
@@ -251,6 +243,39 @@ struct DomainState {
                 append(c.month(),"technique-effective",a.site);
             }
             pending_adoptions.erase(it);
+        }
+    }
+    // Historical standalone monthly fixtures keep their existing one-month
+    // renewable allowance; the actual game never calls this legacy path.
+    void regenerate_for_legacy_month() {
+        for(auto& [id,source]:resource_sites) {
+            if(!source.renewable)continue;
+            require(source.carrying_capacity>=source.standing_biomass &&
+                    source.renewal_per_month>=0,"invalid renewable pool");
+            const auto grown=std::min(
+                source.renewal_per_month,
+                source.carrying_capacity-source.standing_biomass);
+            if(grown<=0)continue;
+            source.standing_biomass=phaseb::add_checked(
+                source.standing_biomass,grown);
+            append(opening_month,"natural-resource-regeneration",id);
+        }
+    }
+    // Real renewable inflow becomes available incrementally each day, never
+    // as a free whole-month grant at month open. Nonrenewable throughput
+    // deterioration remains based on the preceding closed month's activity.
+    void regenerate_for_day(int day,int days_in_month) {
+        for(auto& [id,source]:resource_sites) {
+            if(!source.renewable)continue;
+            require(source.carrying_capacity>=source.standing_biomass &&
+                    source.renewal_per_month>=0,"invalid renewable pool");
+            const auto due=daily_budget::increment(
+                source.renewal_per_month,day,days_in_month);
+            const auto grown=std::min(
+                due,source.carrying_capacity-source.standing_biomass);
+            if(grown<=0)continue;
+            source.standing_biomass=phaseb::add_checked(source.standing_biomass,grown);
+            append(opening_month,"daily-resource-regeneration",id);
         }
     }
     void finalize(const phasec::IntegratedWorld& c) {
@@ -390,6 +415,118 @@ public:
                 "invalid Phase D external command");
         c_.command_once("PHASE_D:"+external_id,
             [&](phasec::IntegratedWorld&){operation(*this);});
+    }
+
+    // Endogenous enterprise investment reuses an existing fully paid and
+    // commissioned construction design. The new project is merely a plan:
+    // no factory, labor, money or inventory appears until real work is paid.
+    // Permit-sensitive or unsupported high-tech replicas cannot silently
+    // acquire regulatory permissions or technology.
+    bool propose_firm_expansion(const std::string& template_project,
+                                const std::string& template_recipe,
+                                const std::string& new_id,
+                                Quantity minimum_untapped_cash) {
+        must(9);
+        auto old=d_.constructions.find(template_project);
+        auto ri=d_.recipes.find(template_recipe);
+        if(old==d_.constructions.end()||ri==d_.recipes.end()||
+           !old->second.commissioned||old->second.permit_required||
+           old->second.inspection_required||old->second.allow_accrued_invoice_commission||
+           !ri->second.tech_id.empty()||ri->second.needs_retrofit||
+           ri->second.requires_same_stage_nonstorable_energy||
+           ri->second.site!=old->second.target_site||
+           c_.firm_bankrupt(old->second.client)||
+           c_.firm_bankrupt(old->second.contractor))return false;
+        const auto& model=old->second;
+        const auto& recipe=ri->second;
+        if(model.work_required<=0||model.cash_price_per_work<=0||
+           recipe.outputs.empty()||model.material_per_work<=0||
+           model.workers_per_work<=0)return false;
+        const auto good=recipe.outputs.front().good;
+        if(!c_.has_market(model.region,good))return false;
+        const auto& quote=c_.market(model.region,good);
+        // Demand alone is not enough: the observed sales value of a real
+        // production recipe must exceed the quoted actual input costs.
+        if(quote.unmet<=0)return false;
+        const auto& output=recipe.outputs.front();
+        const Money revenue=product(output.per_unit,quote.price);
+        Money inputs=0;
+        for(const auto& item:recipe.inputs) {
+            if(!c_.has_market(model.region,item.good))return false;
+            inputs=phaseb::add_checked(inputs,
+                product(item.per_unit,
+                        c_.market(model.region,item.good).price));
+        }
+        if(revenue<=inputs ||
+           c_.phase_d_workforce(model.contractor)<model.workers_per_work)
+            return false;
+        const Money cost=product(model.work_required,model.cash_price_per_work);
+        if(c_.phase_d_cash_available(model.client)<
+           phaseb::add_checked(cost,minimum_untapped_cash))
+            return false;
+        const Quantity stock=c_.phase_d_material_available(
+            model.contractor,model.region,model.material_good);
+        if(stock<model.material_per_work)return false;
+        // The work model is copied, but no old payment, ownership, permit or
+        // financed progress is inherited.
+        const auto id="AUTO:PROJECT:"+new_id;
+        const auto site="AUTO:SITE:"+new_id;
+        const auto recipe_id="AUTO:RECIPE:"+new_id;
+        if(d_.constructions.contains(id)||d_.recipes.contains(recipe_id))
+            return false;
+        for(const auto& [project_id,p]:d_.constructions) {
+            (void)project_id;
+            if(!p.commissioned&&p.client==model.client&&
+               p.region==model.region&&p.target_site!=model.target_site)
+                return false; // one outstanding expansion per region/owner
+        }
+        auto project=model;
+        project.id=id;project.target_site=site;
+        project.accepted_work=0;project.paid_work=0;
+        project.capitalized_work=0;project.planned_work=0;
+        project.capitalized_value=0;project.ready=false;
+        project.commissioned=false;project.ready_month=-1;
+        project.permit_valid=true;project.inspected=true;
+        auto production=recipe;
+        production.id=recipe_id;production.site=site;
+        d_.constructions.emplace(id,std::move(project));
+        d_.recipes.emplace(recipe_id,std::move(production));
+        d_.append(c_.month(),"endogenous-funded-factory-project",id);
+        return true;
+    }
+
+    // Only a commissioned industry site without a separate extraction
+    // concession, active laboratory contract or unfinished development may
+    // change hands through a simple cash sale. All others require their
+    // dedicated legal transfer process, not silent ownership substitution.
+    bool liquidate_commissioned_factory(const std::string& site,
+                                       const std::string& buyer,Money price) {
+        must(7);
+        if(price<=0||!c_.has_actor(buyer)||!d_.constructions.size())return false;
+        const auto& facility=c_.facility(site);
+        if(!c_.firm_bankrupt(facility.owner)||
+           buyer==facility.owner||c_.firm_bankrupt(buyer))return false;
+        std::string project_id;
+        for(const auto& [id,project]:d_.constructions) {
+            if(project.target_site!=site)continue;
+            if(!project.commissioned||!project_id.empty())
+                return false;
+            project_id=id;
+        }
+        if(project_id.empty())return false;
+        for(const auto& [id,source]:d_.resource_sites) {
+            (void)id;
+            if(source.site==site)return false;
+        }
+        for(const auto& [id,research]:d_.researches) {
+            (void)id;
+            if(research.lab_site==site&&!research.reviewed)return false;
+        }
+        if(c_.phase_d_cash_available(buyer)<price)return false;
+        c_.sell_bankrupt_facility(site,buyer,price);
+        d_.constructions.at(project_id).client=buyer;
+        d_.append(c_.month(),"cash-real-factory-liquidation",site);
+        return true;
     }
 
     // Cash reservation is now owned by the SAME Phase C authority used by
@@ -915,7 +1052,9 @@ public:
     // monthly throughput. Those effects still happen only at MonthClose.
     phasec::AdvanceReport advance_daily(const Plan& tasks,
                                          bool first_calendar_day=false,
-                                         bool final_calendar_day=false) {
+                                         bool final_calendar_day=false,
+                                         int day_of_month=0,
+                                         int days_in_month=0) {
         DomainState next=domain_;
         phasec::IntegratedWorld::Plan bridge;
         for(int i=0;i<12;++i) {
@@ -928,6 +1067,8 @@ public:
                         next.opening_month=live.month();
                         live.phase_d_enable_shared_resources();
                     }
+                    if(day_of_month>0)
+                        next.regenerate_for_day(day_of_month,days_in_month);
                     for(auto& [id,project]:next.constructions) {
                         if(!project.ready || project.commissioned)continue;
                         const auto cost=project.capitalized_value;
@@ -1147,7 +1288,10 @@ public:
         phasec::IntegratedWorld::Plan bridge;
         for(int i=0;i<12;++i) {
             bridge[static_cast<std::size_t>(i)].push_back([&,i](phasec::IntegratedWorld& live) {
-                if(i==0)next.begin_month(live);
+                if(i==0) {
+                    next.begin_month(live);
+                    next.regenerate_for_legacy_month();
+                }
                 Stage stage{live,next,i};
                 for(const auto& task:plan[static_cast<std::size_t>(i)])task(stage);
                 if(i==11)next.finalize(live);

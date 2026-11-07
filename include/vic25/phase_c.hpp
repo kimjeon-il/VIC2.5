@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <set>
@@ -36,6 +37,28 @@ struct GovernmentState {
     std::string country, head_of_state, prime_minister;
     People chamber_seats{}, quorum{};
     std::uint64_t revision{1};
+};
+// A query projection over C's existing financial accounts; not another ledger.
+struct CountryFiscalView {
+    std::string country, treasury;
+    Money cash{}, bank_debt{};
+    int income_tax_ppm{};
+    Money bond_principal{},unpaid_coupons{};
+    Money realized_revenue{},realized_expenditure{};
+};
+struct WageArrearsClaim {
+    std::string id,employer,worker,treasury,country;
+    Money accrued{},outstanding{};
+    std::int64_t issued_day{};
+};
+struct SovereignBond {
+    std::string id,country,treasury;
+    Money original_face{};
+    int coupon_ppm{};
+    std::int64_t issue_day{},maturity_day{};
+};
+struct ArmyDeployment {
+    std::string unit,country,region;
 };
 struct CabinetChange {
     std::string country, new_head, new_prime_minister;
@@ -119,6 +142,14 @@ public:
     [[nodiscard]] std::int64_t month() const { return people_.month(); }
     [[nodiscard]] std::uint64_t commit_id() const { return commit_id_; }
     [[nodiscard]] const FinancialLedger& financial() const { return money_; }
+    void seed_annual_bank_interest_ppm(int ppm) {
+        ensure(stage_==-1&&commit_id_==0&&ppm>=0&&ppm<=1'000'000,
+               "invalid annual bank interest policy");
+        bank_interest_annual_ppm_=ppm;
+    }
+    [[nodiscard]] int annual_bank_interest_ppm()const {
+        return bank_interest_annual_ppm_;
+    }
     // C and D share the single transient month-local authority, while
     // FinancialLedger / InventoryLedger / Population remain the only stocks.
     void phase_d_enable_shared_resources() {
@@ -234,6 +265,16 @@ public:
         return sovereignty_.at(region);
     }
 
+    [[nodiscard]] bool has_actor(const std::string& who)const {
+        return actors_.contains(who);
+    }
+    [[nodiscard]] bool has_government(const std::string& country)const {
+        return governments_.contains(country);
+    }
+    [[nodiscard]] bool has_any_government()const {
+        return !governments_.empty();
+    }
+
     void seed_actor(const std::string& who, Money amount) {
         ensure(stage_ == -1 && commit_id_ == 0, "actor seed after simulation start");
         ensure(!who.empty() && !actors_.contains(who) && amount >= 0, "invalid actor seed");
@@ -343,6 +384,90 @@ public:
         register_typed(EntityKind::unit,unit);
         units_.emplace(std::move(unit), std::map<Id, People>{});
     }
+    // Army national command and actual location are separate from the
+    // civilian sovereignty of the province containing its soldiers.
+    void seed_army_deployment(const std::string& unit,
+                              const std::string& country,
+                              const std::string& region) {
+        ensure(stage_==-1&&commit_id_==0&&units_.contains(unit)&&
+               governments_.contains(country)&&
+               sovereignty_.contains(region)&&
+               !army_deployments_.contains(unit),
+               "invalid historical military deployment");
+        ensure(sovereignty_.at(region)==country||
+               military_control_.at(region)==country,
+               "initial army not on its country's controlled territory");
+        army_deployments_.emplace(unit,ArmyDeployment{unit,country,region});
+    }
+    [[nodiscard]] const std::map<std::string,ArmyDeployment>&
+            army_deployments()const{return army_deployments_;}
+    [[nodiscard]] const std::map<Id,People>& unit_slices(
+            const std::string& unit)const {
+        return units_.at(unit);
+    }
+    void phase_time_move_army(const std::string& unit,
+                              const std::string& destination,
+                              Quantity carried_ammunition=0) {
+        require_stage({10});
+        auto it=army_deployments_.find(unit);
+        ensure(it!=army_deployments_.end()&&
+               sovereignty_.contains(destination)&&
+               active_strength(unit)>0&&carried_ammunition>=0 &&
+               carried_ammunition<=active_strength(unit),
+               "invalid real army move");
+        const auto old=it->second.region;
+        ensure(old!=destination,"army must actually move");
+        ensure(stock(unit,old,"ammunition")>=carried_ammunition,
+               "army march has no physical ammunition");
+        if(carried_ammunition>0) {
+            if(phase_d_reservation_mode_)
+                resources_.assert_goods_available(
+                    {unit,old,"ammunition"},carried_ammunition,
+                    stock(unit,old,"ammunition"));
+            goods_.transfer({unit,old,"ammunition"},
+                            {unit,destination,"ammunition"},
+                            carried_ammunition);
+        }
+        // Issued rifles/field equipment are physically carried by this
+        // same army. Spare, unassigned depots stay behind in their region.
+        std::vector<std::pair<std::string,Quantity>> carried_equipment;
+        for(const auto& [key,units]:equipment_assignment_) {
+            const auto& [assigned_unit,region,good]=key;
+            if(assigned_unit==unit&&region==old&&units>0)
+                carried_equipment.emplace_back(good,units);
+        }
+        for(const auto& [good,units]:carried_equipment) {
+            if(good=="ammunition") {
+                // Ammunition was already physically transferred above; moving
+                // its issued-accounting tag must not transfer it a second time.
+                const Quantity tagged=std::min(units,carried_ammunition);
+                if(tagged>0) {
+                    const auto next=std::make_tuple(unit,destination,good);
+                    equipment_assignment_[next]=phaseb::add_checked(
+                        equipment_assignment_[next],tagged);
+                    if(tagged==units)
+                        equipment_assignment_.erase({unit,old,good});
+                    else equipment_assignment_[{unit,old,good}]-=tagged;
+                }
+                continue;
+            }
+            ensure(stock(unit,old,good)>=units,
+                   "army has no documented physical issued equipment");
+            if(phase_d_reservation_mode_)
+                resources_.assert_goods_available({unit,old,good},units,
+                    stock(unit,old,good));
+            const auto next=std::make_tuple(unit,destination,good);
+            ensure(equipment_assignment_[next]<=
+                   std::numeric_limits<Quantity>::max()-units,
+                   "equipment moving overflows destination assignment");
+            goods_.transfer({unit,old,good},{unit,destination,good},units);
+            equipment_assignment_[next]=phaseb::add_checked(
+                equipment_assignment_[next],units);
+            equipment_assignment_.erase({unit,old,good});
+        }
+        it->second.region=destination;
+        events_.push_back("dated-physical-army-march");
+    }
     void seed_active(std::string unit, Id slice) {
         ensure(stage_ == -1 && commit_id_ == 0, "seed active after start");
         ensure(units_.contains(unit), "unknown unit");
@@ -421,6 +546,10 @@ public:
         ensure(!bond_id.empty() && face > 0 && actors_.contains(government) &&
                actors_.contains(buyer) && government != buyer && cash(buyer) >= face &&
                !tracked_assets_.contains("bond:" + bond_id), "unfunded bond issue");
+        // Separate actual bank principal from new sovereign securities before
+        // the common historical debt account receives the bond liability.
+        if(!bank_principal_by_borrower_.contains(government))
+            bank_principal_by_borrower_[government]=outstanding_loan(government);
         const auto asset = "bond:" + bond_id;
         ownership_.issue(asset, buyer, face);
         tracked_assets_.insert(asset);
@@ -431,6 +560,175 @@ public:
             {security_account(buyer, asset), face, 0},
             {account(buyer, "cash"), 0, face}}});
         events_.push_back("bond-issued-paid");
+    }
+    [[nodiscard]] Money sovereign_bond_principal(const std::string& country)const {
+        Money total=0;
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            if(bond.country!=country)continue;
+            for(const auto& [holder,units]:ownership_.holders("bond:"+id)) {
+                (void)holder;
+                total=phaseb::add_checked(total,units);
+            }
+        }
+        return total;
+    }
+    [[nodiscard]] const std::map<std::string,SovereignBond>& sovereign_bonds()const {
+        return sovereign_bonds_;
+    }
+    // Secondary bond exchange at an agreed LIMIT price, settled with
+    // existing C cash and original C security title. No market-maker
+    // deposits, synthetic buyers, proxy ownership or notional stock.
+    void exchange_sovereign_bond(const std::string& id,
+                                  const std::string& seller,
+                                  const std::string& buyer,
+                                  Money face_units,
+                                  int price_ppm) {
+        require_stage({7});
+        const auto bond=sovereign_bonds_.find(id);
+        ensure(bond!=sovereign_bonds_.end()&&!seller.empty()&&
+               !buyer.empty()&&seller!=buyer&&
+               buyer!=bond->second.treasury&&
+               seller!=bond->second.treasury&&
+               actors_.contains(seller)&&actors_.contains(buyer)&&
+               !bankrupt_firms_.contains(buyer)&&
+               face_units>0&&price_ppm>0&&price_ppm<=5'000'000,
+               "invalid real sovereign security exchange");
+        const auto asset="bond:"+id;
+        ensure(shares(asset,seller)>=face_units,
+               "bond seller does not own the security");
+        const Money cash_price=phaseb::add_checked(
+            phaseb::mul_checked(face_units/1'000'000,price_ppm),
+            phaseb::mul_checked(face_units%1'000'000,price_ppm)/
+                    1'000'000);
+        ensure(cash_price>0&&
+               phase_d_cash_available(buyer)>=cash_price,
+               "bond buyer lacks actual funds");
+        ensure_security_account(buyer,asset);
+        std::vector<Posting> postings{
+            {account(seller,"cash"),cash_price,0},
+            {security_account(seller,asset),0,face_units},
+            {security_account(buyer,asset),face_units,0},
+            {account(buyer,"cash"),0,cash_price}};
+        if(cash_price>face_units) {
+            const Money premium=cash_price-face_units;
+            postings.push_back({account(seller,"revenue"),0,premium});
+            postings.push_back({account(buyer,"expense"),premium,0});
+        }else if(face_units>cash_price){
+            const Money discount=face_units-cash_price;
+            postings.push_back({account(seller,"expense"),discount,0});
+            postings.push_back({account(buyer,"revenue"),0,discount});
+        }
+        money_.post({unique("sovereign-secondary-trade"),
+                     "real discount/premium settlement of existing title",
+                     postings});
+        ownership_.transfer(asset,seller,buyer,face_units);
+        events_.push_back("actual-secondary-government-bond-trade");
+    }
+    [[nodiscard]] bool has_active_sovereign_bonds()const {
+        if(!sovereign_coupon_due_.empty())return true;
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            (void)bond;
+            for(const auto& [owner,units]:ownership_.holders("bond:"+id)) {
+                (void)owner;
+                if(units>0)return true;
+            }
+        }
+        return false;
+    }
+    // The investor must have the actual cash. Signing a budget does not
+    // create fictitious bond demand or state funds.
+    void issue_sovereign_bond(const std::string& id,
+                              const std::string& country,
+                              const std::string& prime_minister,
+                              const std::string& buyer,Money face,
+                              int coupon_ppm,std::int64_t today,
+                              std::int64_t maturity_day) {
+        require_stage({1});
+        ensure(governments_.contains(country)&&
+               governments_.at(country).prime_minister==prime_minister&&
+               has_country_treasury(country)&&
+               !sovereign_bonds_.contains(id)&&coupon_ppm>=0&&
+               coupon_ppm<=1'000'000&&today>=0&&maturity_day>today,
+               "unlawful or unbacked sovereign bond offer");
+        const auto& treasury=country_treasury(country);
+        ensure(treasury!=buyer,"government cannot self-buy its bond");
+        issue_bond(id,treasury,buyer,face);
+        sovereign_bonds_.emplace(id,SovereignBond{
+            id,country,treasury,face,coupon_ppm,today,maturity_day});
+        events_.push_back("real-sovereign-bond-financed");
+    }
+    void phase_time_service_sovereign_bonds(std::int64_t today) {
+        require_stage({5});
+        ensure(today>=0,"invalid sovereign bond servicing day");
+        constexpr Money denominator=365'000'000;
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            if(today<=bond.issue_day)continue;
+            const auto holders=ownership_.holders("bond:"+id);
+            for(const auto& [holder,principal]:holders) {
+                if(principal<=0||bond.coupon_ppm<=0)continue;
+                const auto key=std::make_pair(id,holder);
+                const Money old=sovereign_coupon_fraction_[key];
+                const Money whole=phaseb::mul_checked(
+                    principal/denominator,bond.coupon_ppm);
+                const Money part=phaseb::add_checked(phaseb::mul_checked(
+                    principal%denominator,bond.coupon_ppm),old);
+                const Money coupon=phaseb::add_checked(whole,part/denominator);
+                sovereign_coupon_fraction_[key]=part%denominator;
+                if(coupon<=0)continue;
+                const auto payable=account(bond.treasury,"bond_coupon_payable");
+                const auto receivable=account(holder,"bond_coupon_receivable");
+                if(!money_.has_account(payable))
+                    money_.add_account(payable,bond.treasury,AccountType::liability);
+                if(!money_.has_account(receivable))
+                    money_.add_account(receivable,holder,AccountType::asset);
+                money_.post({unique("bond-coupon-accrual"),
+                    "interest on outstanding real government security",{
+                    {account(bond.treasury,"expense"),coupon,0},
+                    {payable,0,coupon},
+                    {receivable,coupon,0},
+                    {account(holder,"revenue"),0,coupon}}});
+                sovereign_coupon_due_[key]=phaseb::add_checked(
+                    sovereign_coupon_due_[key],coupon);
+            }
+        }
+        for(auto it=sovereign_coupon_due_.begin();
+            it!=sovereign_coupon_due_.end();) {
+            const auto& [id,holder]=it->first;
+            const auto& bond=sovereign_bonds_.at(id);
+            const Money free=std::max<Money>(0,
+                phase_d_cash_available(bond.treasury));
+            const Money paid=std::min(it->second,free);
+            if(paid<=0){++it;continue;}
+            money_.post({unique("bond-coupon-paid"),
+                         "interest paid from existing country cash",{
+                {account(bond.treasury,"bond_coupon_payable"),paid,0},
+                {account(bond.treasury,"cash"),0,paid},
+                {account(holder,"cash"),paid,0},
+                {account(holder,"bond_coupon_receivable"),0,paid}}});
+            it->second-=paid;
+            if(it->second==0)it=sovereign_coupon_due_.erase(it);
+            else ++it;
+        }
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            if(today<bond.maturity_day)continue;
+            const auto asset="bond:"+id;
+            const auto holders=ownership_.holders(asset);
+            for(const auto& [holder,principal]:holders) {
+                if(principal<=0)continue;
+                const Money free=std::max<Money>(0,
+                    phase_d_cash_available(bond.treasury));
+                const Money paid=std::min(principal,free);
+                if(paid<=0)continue; // valid unpaid maturing principal
+                money_.post({unique("sovereign-bond-redemption"),
+                    "cash-financed repayment of actual government bonds",{
+                    {account(bond.treasury,"debt"),paid,0},
+                    {account(bond.treasury,"cash"),0,paid},
+                    {account(holder,"cash"),paid,0},
+                    {security_account(holder,asset),0,paid}}});
+                ownership_.redeem(asset,holder,paid);
+                events_.push_back("sovereign-principal-actually-repaid");
+            }
+        }
     }
     void seed_public_institution(const std::string& id,const std::string& operator_id,
                                  const std::string& region,const std::string& medicine,
@@ -472,6 +770,8 @@ public:
         service.provided+=patients;
         events_.push_back("actual-public-medical-service");
     }
+    [[nodiscard]] const std::map<std::string,PublicInstitution>&
+            public_institutions()const{return public_institutions_;}
     [[nodiscard]] People public_services_rendered(const std::string& id) const {
         return public_institutions_.at(id).provided;
     }
@@ -484,6 +784,24 @@ public:
     }
     [[nodiscard]] const ProductionFacility& facility(const std::string& id) const {
         return facilities_.at(id);
+    }
+    [[nodiscard]] const std::map<std::string,ProductionFacility>&
+            facilities()const{return facilities_;}
+    // Liquidator may transfer a proven physical factory to a solvent buyer
+    // only against a bona fide cash payment. Phase D updates the project
+    // owner in the same staged day; no phantom title or equipment is created.
+    void sell_bankrupt_facility(const std::string& site,
+                               const std::string& buyer,Money price) {
+        require_stage({7});
+        auto& f=facilities_.at(site);
+        ensure(bankrupt_firms_.contains(f.owner)&&actors_.contains(buyer)&&
+               !bankrupt_firms_.contains(buyer)&&buyer!=f.owner&&
+               price>0&&phase_d_cash_available(buyer)>=price,
+               "unfunded or unlawful bankrupt factory purchase");
+        const auto old=f.owner;
+        pay(buyer,old,price);
+        f.owner=buyer;
+        events_.push_back("bankrupt-real-factory-cash-sale");
     }
     // Phase D additive bridge: material/production share C's real inventory
     // and Phase B's real employment, not an independent Phase D stock.
@@ -874,8 +1192,76 @@ public:
                "invalid market seed");
         markets_[{region,good}]={price,floor,ceiling,target_stock,0,0,0,0};
     }
+    [[nodiscard]] bool has_market(const std::string& region,
+                                  const std::string& good)const {
+        return markets_.contains({region,good});
+    }
     [[nodiscard]] const MarketQuote& market(const std::string& region,const std::string& good) const {
         return markets_.at({region,good});
+    }
+    // An ephemeral regional seller index derived from actual C Inventory.
+    // It is built once per active market day, not once per POP household.
+    using MarketSellerIndex=std::map<
+        std::pair<std::string,std::string>,std::vector<std::string>>;
+    [[nodiscard]] MarketSellerIndex market_seller_index()const {
+        MarketSellerIndex result;
+        for(const auto& [key,stock_now]:goods_.holdings()) {
+            if(stock_now<=0||!actors_.contains(key.holder_id)||
+               !markets_.contains({key.region_id,key.good_id}))continue;
+            result[{key.region_id,key.good_id}].push_back(key.holder_id);
+        }
+        for(auto& [key,sellers]:result) {
+            (void)key;
+            std::sort(sellers.begin(),sellers.end());
+            sellers.erase(std::unique(sellers.begin(),sellers.end()),
+                          sellers.end());
+        }
+        return result;
+    }
+    // One household demand is cleared against real current remaining stock,
+    // never the sum of stale seller offers captured earlier in the day.
+    Quantity clear_household_market(const std::string& buyer,
+                                    const std::string& region,
+                                    const std::string& good,Quantity requested,
+                                    const std::vector<std::string>& seller_ids) {
+        require_stage({7});
+        ensure(requested>=0 && markets_.contains({region,good}) &&
+               actors_.contains(buyer),"invalid household market request");
+        auto& quote=markets_.at({region,good});
+        const Quantity solvent=std::min(requested,cash(buyer)/quote.price);
+        Quantity total_offered=0;
+        std::vector<std::pair<std::string,Quantity>> sellers;
+        for(const auto& seller:seller_ids) {
+            if(seller==buyer||!actors_.contains(seller))continue;
+            const Quantity free=phase_d_material_available(seller,region,good);
+            if(free<=0)continue;
+            sellers.push_back({seller,free});
+            total_offered=phaseb::add_checked(total_offered,free);
+        }
+        quote.stock_offered=std::max(quote.stock_offered,
+            phaseb::add_checked(quote.delivered,total_offered));
+        quote.solvent_demand=phaseb::add_checked(quote.solvent_demand,solvent);
+        Quantity remaining=solvent;
+        for(const auto& [seller,available]:sellers) {
+            if(remaining<=0)break;
+            const Quantity quantity=std::min(remaining,available);
+            if(quantity<=0)continue;
+            trade(seller,buyer,region,good,quantity,quote.price);
+            remaining-=quantity;
+        }
+        const Quantity fulfilled=solvent-remaining;
+        quote.delivered=phaseb::add_checked(quote.delivered,fulfilled);
+        quote.unmet=phaseb::add_checked(quote.unmet,remaining);
+        events_.push_back("daily-household-market-clearing");
+        return fulfilled;
+    }
+    Quantity clear_household_market(const std::string& buyer,
+                                    const std::string& region,
+                                    const std::string& good,Quantity requested) {
+        const auto index=market_seller_index();
+        const auto it=index.find({region,good});
+        return clear_household_market(buyer,region,good,requested,
+                   it==index.end()?std::vector<std::string>{}:it->second);
     }
     Quantity clear_consumer_market(const std::string& seller,const std::string& buyer,
                                   const std::string& region,const std::string& good,
@@ -999,7 +1385,7 @@ public:
         const auto& dem=people_.demographic(people_.slice(slice).key.demographic);
         ensure(dem.citizenship=="citizen" && dem.service!=phaseb::Service::active &&
                dem.service!=phaseb::Service::pow && dem.service!=phaseb::Service::missing &&
-               people_.age_months(people_.slice(slice).key.demographic)>=
+               people_.age_months_slice(slice)>=
                    static_cast<std::int64_t>(voting_age_years_)*12,
                "ineligible voter");
         ensure(ballot_ids_.insert({election_id,anchor}).second, "duplicate ballot");
@@ -1020,7 +1406,7 @@ public:
                d.service!=phaseb::Service::active &&
                d.service!=phaseb::Service::pow &&
                d.service!=phaseb::Service::missing &&
-               people_.age_months(people_.slice(slice).key.demographic)>=
+               people_.age_months_slice(slice)>=
                    static_cast<std::int64_t>(voting_age_years_)*12)?
                people_.slice(slice).count:0;
     }
@@ -1084,6 +1470,69 @@ public:
     [[nodiscard]] const GovernmentState& government(const std::string& country) const {
         return governments_.at(country);
     }
+    [[nodiscard]] const std::map<std::string,GovernmentState>&
+            governments()const {return governments_;}
+    [[nodiscard]] bool has_pending_country_tax(const std::string& country)const {
+        const auto scheduled=scheduled_country_income_tax_.find(month()+1);
+        return scheduled!=scheduled_country_income_tax_.end() &&
+               scheduled->second.contains(country);
+    }
+    // Optional explicit country->treasury binding. The wallet remains in the
+    // original C FinancialLedger; no sovereign cash/debt is duplicated.
+    void seed_country_treasury(const std::string& country,
+                               const std::string& wallet) {
+        ensure(stage_==-1&&commit_id_==0&&governments_.contains(country)&&
+               actors_.contains(wallet)&&!country_treasuries_.contains(country),
+               "invalid country treasury binding");
+        for(const auto& [other,actor]:country_treasuries_)
+            ensure(actor!=wallet||other==country,
+                   "shared treasury across sovereign countries");
+        country_treasuries_.emplace(country,wallet);
+    }
+    [[nodiscard]] bool has_country_treasury(const std::string& country)const {
+        return governments_.contains(country) &&
+               (country_treasuries_.contains(country)||actors_.contains(country));
+    }
+    [[nodiscard]] const std::string& country_treasury(
+            const std::string& country)const {
+        ensure(governments_.contains(country),"unknown fiscal country");
+        const auto bound=country_treasuries_.find(country);
+        if(bound!=country_treasuries_.end())return bound->second;
+        // Explicit country wallet is the only safe convention, never infer a
+        // treasury from a random company or another state's wallet.
+        ensure(actors_.contains(country),"country treasury needs explicit binding");
+        return governments_.at(country).country;
+    }
+    [[nodiscard]] const std::string& country_financial_wallet(
+            const std::string& country)const {
+        if(governments_.contains(country))return country_treasury(country);
+        ensure(actors_.contains(country),"customs country wallet missing");
+        return country;
+    }
+    [[nodiscard]] CountryFiscalView country_fiscal(
+            const std::string& country)const {
+        const auto& treasury=country_treasury(country);
+        Money due=0;
+        for(const auto& [key,amount]:sovereign_coupon_due_)
+            if(sovereign_bonds_.at(key.first).country==country)
+                due=phaseb::add_checked(due,amount);
+        return {country,treasury,cash(treasury),
+                outstanding_loan(treasury),income_tax_ppm(country),
+                sovereign_bond_principal(country),due,
+                -money_.balance(account(treasury,"revenue")),
+                money_.balance(account(treasury,"expense"))};
+    }
+    void spend_country_budget(const std::string& country,
+                              const std::string& recipient,Money amount) {
+        require_stage({5,7,8});
+        pay(country_treasury(country),recipient,amount);
+        events_.push_back("country-budget-paid:"+country);
+    }
+    void borrow_country_budget_from_bank(const std::string& country,Money amount) {
+        require_stage({1});
+        lend(country_treasury(country),amount);
+        events_.push_back("country-bank-credit:"+country);
+    }
     void propose_tax_law(const std::string& country, const std::string& proposer,
                          const std::vector<std::string>& supporting_parties, int ppm) {
         require_stage({9});
@@ -1092,10 +1541,11 @@ public:
         const auto& result=legislature_for(country);
         ensure(g.prime_minister == proposer && result.total_seats == g.chamber_seats,
                "unauthorized tax bill or missing national legislature");
-        ensure(coalition_seats(supporting_parties,result) >= g.quorum,
-               "insufficient national legislative votes");
-        scheduled_income_tax_[month()+1] = ppm;
-        events_.push_back("constitutional-tax-law");
+        ensure(coalition_seats(supporting_parties,result) >= g.quorum &&
+               !has_pending_country_tax(country),
+               "insufficient votes or country tax law already scheduled");
+        scheduled_country_income_tax_[month()+1][country]=ppm;
+        events_.push_back("constitutional-tax-law:"+country);
     }
     void appoint_cabinet(const std::string& country, const std::string& head,
                         std::string minister, const std::vector<std::string>& supporting_parties) {
@@ -1136,6 +1586,8 @@ public:
                                  const std::string& good) const {
         return goods_.stock({holder, region, good});
     }
+    [[nodiscard]] const std::map<InventoryKey,Quantity>&
+            physical_inventory()const{return goods_.holdings();}
     [[nodiscard]] People unit_slice_strength(const std::string& unit,Id slice) const {
         auto owner=units_.find(unit);
         if(owner==units_.end())return 0;
@@ -1166,7 +1618,7 @@ public:
                 d.service != phaseb::Service::active &&
                 d.service != phaseb::Service::pow &&
                 d.service != phaseb::Service::missing &&
-                people_.age_months(s.key.demographic) >= static_cast<std::int64_t>(voting_age_years_) * 12)
+                people_.age_months_slice(id) >= static_cast<std::int64_t>(voting_age_years_) * 12)
                 total = phaseb::add_checked(total, s.count);
         }
         return total;
@@ -1174,6 +1626,10 @@ public:
 
     // Execute an externally identified command at most once across committed
     // months. A failed staged month also rolls back its dedupe set.
+    [[nodiscard]] bool command_processed(
+            const std::string& external_id)const {
+        return processed_commands_.contains(external_id);
+    }
     void command_once(const std::string& external_id, const Task& command) {
         ensure(stage_ >= 0 && !external_id.empty() &&
                !processed_commands_.contains(external_id),
@@ -1217,25 +1673,376 @@ public:
         paid_staff_this_month_[payer]=phaseb::add_checked(paid_staff_this_month_[payer],gross);
         events_.push_back("wages");
     }
+    // Interest is a claim, never a new cash deposit or trade-credit draw.
+    // It accrues on real outstanding loan PRINCIPAL at ACT/365 (including
+    // leap-year days); integer fractional micro-units are carried per debtor.
+    void phase_time_accrue_and_settle_interest() {
+        require_stage({8});
+        if(bank_interest_annual_ppm_<=0)return;
+        constexpr Money denominator=365'000'000;
+        if(!money_.has_account("BANK:interest_receivable"))
+            money_.add_account("BANK:interest_receivable","BANK",
+                               AccountType::asset);
+        if(!money_.has_account("BANK:interest_revenue"))
+            money_.add_account("BANK:interest_revenue","BANK",
+                               AccountType::revenue);
+        for(const auto& debtor:actors_) {
+            const Money principal=outstanding_loan(debtor);
+            if(principal<=0)continue;
+            const Money carry=bank_interest_fraction_[debtor];
+            ensure(carry>=0&&carry<denominator,"invalid interest carry");
+            const Money high=phaseb::mul_checked(
+                principal/denominator,bank_interest_annual_ppm_);
+            const Money low=phaseb::add_checked(
+                phaseb::mul_checked(principal%denominator,
+                                    bank_interest_annual_ppm_),carry);
+            const Money interest=phaseb::add_checked(high,low/denominator);
+            bank_interest_fraction_[debtor]=low%denominator;
+            if(interest<=0)continue;
+            const auto account_id=account(debtor,"interest_payable");
+            if(!money_.has_account(account_id))
+                money_.add_account(account_id,debtor,AccountType::liability);
+            money_.post({unique("bank-interest-accrual"),
+                "interest receivable from actual principal",{
+                {account(debtor,"expense"),interest,0},
+                {account_id,0,interest},
+                {"BANK:interest_receivable",interest,0},
+                {"BANK:interest_revenue",0,interest}}});
+            events_.push_back("daily-bank-interest-accrued");
+        }
+        for(const auto& debtor:actors_) {
+            const auto payable=account(debtor,"interest_payable");
+            if(!money_.has_account(payable))continue;
+            const Money due=-money_.balance(payable);
+            if(due<=0)continue;
+            const Money liquid=std::max<Money>(
+                0,phase_d_cash_available(debtor));
+            const Money paid=std::min(due,liquid);
+            if(paid<=0)continue;
+            money_.post({unique("bank-interest-payment"),
+                "pay recognized loan interest from existing deposit",{
+                {payable,paid,0},
+                {account(debtor,"cash"),0,paid},
+                {"BANK:deposit",paid,0},
+                {"BANK:interest_receivable",0,paid}}});
+            events_.push_back("daily-bank-interest-paid");
+        }
+    }
+    [[nodiscard]] bool firm_bankrupt(const std::string& firm)const {
+        return bankrupt_firms_.contains(firm);
+    }
+    [[nodiscard]] Money outstanding_worker_wages(const std::string& employer)const {
+        Money due=0;
+        for(const auto& [id,claim]:wage_arrears_) {
+            (void)id;
+            if(claim.employer==employer)
+                due=phaseb::add_checked(due,claim.outstanding);
+        }
+        return due;
+    }
+    [[nodiscard]] const std::map<std::string,WageArrearsClaim>&
+            wage_arrears()const{return wage_arrears_;}
+    // A bid is an actual buyer policy and must pay for existing stock at the
+    // observed market quote. Bankruptcy never destroys or creates goods.
+    Quantity sell_bankrupt_inventory(const std::string& firm,
+                                    const std::string& buyer,
+                                    const std::string& region,
+                                    const std::string& good,
+                                    Quantity max_units,Money max_price) {
+        require_stage({7});
+        ensure(bankrupt_firms_.contains(firm)&&actors_.contains(buyer)&&
+               !bankrupt_firms_.contains(buyer)&&firm!=buyer&&max_units>0&&
+               max_price>0&&has_market(region,good),
+               "invalid liquidation stock bid");
+        const Money quote=market(region,good).price;
+        if(quote<=0||quote>max_price)return 0;
+        const Quantity available=phase_d_material_available(firm,region,good);
+        const Money spendable=phase_d_cash_available(buyer);
+        const Quantity quantity=std::min({
+            max_units,available,static_cast<Quantity>(spendable/quote)});
+        if(quantity<=0)return 0;
+        trade(firm,buyer,region,good,quantity,quote);
+        events_.push_back("cash-backed-liquidation-inventory-sale");
+        return quantity;
+    }
+    [[nodiscard]] const std::map<std::string,std::int64_t>&
+            bankrupt_firms()const{return bankrupt_firms_;}
+    [[nodiscard]] const std::map<std::string,std::int64_t>&
+            completed_liquidations()const{return completed_liquidations_;}
+    // Close only genuinely empty estates. Unpaid worker, lender, interest or
+    // other liabilities keep the estate open; no judicial discharge is forged.
+    // Bankruptcy liquidator follows an actual claims waterfall. Verified
+    // historical court reparations are paid only after wage creditors and
+    // before unsecured bank retirement. No new legal claims are fabricated.
+    void phase_time_settle_bankrupt_reparations() {
+        require_stage({5});
+        for(const auto& [id,claim]:reparations_) {
+            if(!bankrupt_firms_.contains(claim.payer)||
+               !claim.recognized||claim.remaining<=0||
+               outstanding_worker_wages(claim.payer)>0)continue;
+            const Money free=std::max<Money>(0,
+                phase_d_cash_available(claim.payer));
+            const Money amount=std::min(free,claim.remaining);
+            if(amount>0)pay_reparation(id,amount);
+        }
+    }
+    // Equity receives only leftover *actual cash*, after every recognized
+    // creditor has been satisfied and the business has no residual goods,
+    // facilities, investment WIP, financial securities or public debt.
+    // A documented 'company:<firm>' share registry is the only beneficiary
+    // authority; never guess private owners or pay fictitious dividends.
+    [[nodiscard]] bool bankrupt_estate_has_non_cash_rights(
+            const std::string& firm)const {
+        if(phase_d_wip(firm)>0)return true;
+        if(money_.balance(account(firm,"reparations_receivable"))>0)
+            return true;
+        if(money_.has_account(account(firm,"wage_receivable"))&&
+           money_.balance(account(firm,"wage_receivable"))>0)return true;
+        if(money_.has_account(account(firm,"bond_coupon_receivable"))&&
+           money_.balance(account(firm,"bond_coupon_receivable"))>0)return true;
+        if(money_.has_account(account(firm,"bond_coupon_payable"))&&
+           money_.balance(account(firm,"bond_coupon_payable"))<0)return true;
+        for(const auto& [id,claim]:reparations_) {
+            (void)id;
+            if(claim.remaining>0&&
+               (claim.payer==firm||claim.recipient==firm))
+                return true;
+        }
+        for(const auto& [id,claim]:dividends_) {
+            (void)id;
+            if(claim.payer==firm||claim.holder==firm)return true;
+        }
+        for(const auto& [id,svc]:public_institutions_) {
+            (void)id;
+            if(svc.operator_id==firm)return true;
+        }
+        for(const auto& [id,site]:facilities_) {
+            (void)id;
+            if(site.owner==firm)return true;
+        }
+        for(const auto& [key,qty]:goods_.holdings())
+            if(key.holder_id==firm&&qty>0)return true;
+        for(const auto& [holder,asset]:security_accounts_)
+            if(holder==firm&&shares(asset,firm)>0)return true;
+        for(const auto& [holder,currency]:foreign_holders_)
+            if(holder==firm&&fx_balance(firm,currency)>0)return true;
+        return false;
+    }
+    void phase_time_distribute_liquidation_equity() {
+        require_stage({8});
+        for(const auto& [firm,declared]:bankrupt_firms_) {
+            (void)declared;
+            if(completed_liquidations_.contains(firm)||
+               outstanding_worker_wages(firm)>0||
+               outstanding_loan(firm)>0||
+               phase_d_wip(firm)>0)continue;
+            if(money_.balance(account(firm,"debt"))<0)continue;
+            if(money_.has_account(account(firm,"interest_payable"))&&
+               money_.balance(account(firm,"interest_payable"))<0)continue;
+            if(bankrupt_estate_has_non_cash_rights(firm))continue;
+            bool property=false;
+            const Money available=std::max<Money>(0,
+                phase_d_cash_available(firm));
+            if(available<=0)continue;
+            const auto asset="company:"+firm;
+            if(!tracked_assets_.contains(asset))continue;
+            const auto holders=ownership_.holders(asset);
+            Money total_shares=0;
+            for(const auto& [owner,shares]:holders) {
+                if(owner==firm){property=true;break;}
+                total_shares=phaseb::add_checked(total_shares,shares);
+            }
+            if(property||total_shares<=0)continue;
+            Money remainder=available;
+            for(auto it=holders.begin();it!=holders.end();++it) {
+                const auto& [owner,shares]=*it;
+                const Money amount=std::next(it)==holders.end()?remainder:
+                    phaseb::add_checked(
+                        phaseb::mul_checked(available/total_shares,shares),
+                        phaseb::mul_checked(available%total_shares,shares)/
+                        total_shares);
+                // Investment principal securities are actually retired.
+                // Record the investor's realized accounting gain/loss
+                // separately from the transferred existing bank deposit.
+                if(amount>0) {
+                    if(phase_d_reservation_mode_)
+                        resources_.assert_cash_available(firm,amount,
+                                                          cash(firm));
+                    std::vector<Posting> lines{
+                        {account(firm,"capital"),amount,0},
+                        {account(firm,"cash"),0,amount},
+                        {account(owner,"cash"),amount,0},
+                        {security_account(owner,asset),0,shares}};
+                    if(amount>shares)
+                        lines.push_back({account(owner,"revenue"),0,
+                                         amount-shares});
+                    else if(shares>amount)
+                        lines.push_back({account(owner,"expense"),
+                                         shares-amount,0});
+                    money_.post({unique("real-company-equity-liquidation"),
+                        "actual cash proceeds of retired corporate shares",
+                        lines});
+                    remainder-=amount;
+                } else {
+                    // A legitimate investor may receive zero when the
+                    // estate has insufficient residual proceeds.
+                    money_.post({unique("equity-worthless-retirement"),
+                        "unrecoverable principal of dissolved corporation",{
+                        {account(owner,"expense"),shares,0},
+                        {security_account(owner,asset),0,shares}}});
+                }
+                ownership_.redeem(asset,owner,shares);
+            }
+            events_.push_back("actual-liquidation-equity-cash-distribution");
+        }
+    }
+
+    void phase_time_close_empty_bankrupt_estates(std::int64_t today) {
+        require_stage({8});
+        ensure(today>=0,"invalid liquidation closing day");
+        for(const auto& [firm,declared]:bankrupt_firms_) {
+            (void)declared;
+            if(completed_liquidations_.contains(firm)||
+               outstanding_worker_wages(firm)>0||
+               outstanding_loan(firm)>0||cash(firm)!=0||
+               phase_d_wip(firm)>0||
+               money_.balance(account(firm,"debt"))<0)
+                continue;
+            if(money_.has_account(account(firm,"interest_payable"))&&
+               money_.balance(account(firm,"interest_payable"))<0)
+                continue;
+            if(bankrupt_estate_has_non_cash_rights(firm))continue;
+            completed_liquidations_[firm]=today;
+            events_.push_back("empty-real-bankrupt-estate-closed");
+        }
+    }
+
+    // Accrued salaries are legal employer liabilities and employee receivables,
+    // not fabricated cash. The existing C FinanceLedger holds all balances.
+    void phase_time_accrue_contract_wage(const std::string& claim_id,
+                                          const std::string& employer,
+                                          const std::string& worker,
+                                          const std::string& treasury,
+                                          const std::string& country,
+                                          Money gross,std::int64_t today) {
+        require_stage({5});
+        ensure(!claim_id.empty()&&today>=0&&gross>0&&
+               actors_.contains(employer)&&actors_.contains(worker)&&
+               actors_.contains(treasury)&&employer!=worker&&
+               worker!=treasury&&employer!=treasury&&
+               !bankrupt_firms_.contains(employer)&&
+               !wage_arrears_.contains(claim_id),
+               "invalid or duplicate wage debt");
+        if(!country.empty()&&governments_.contains(country))
+            ensure(country_treasury(country)==treasury,
+                   "wage debt foreign treasury");
+        const auto employer_payable=account(employer,"wage_payable");
+        const auto worker_receivable=account(worker,"wage_receivable");
+        if(!money_.has_account(employer_payable))
+            money_.add_account(employer_payable,employer,AccountType::liability);
+        if(!money_.has_account(worker_receivable))
+            money_.add_account(worker_receivable,worker,AccountType::asset);
+        money_.post({unique("wage-claim"),
+            "earned wages become an employer debt",{
+            {account(employer,"expense"),gross,0},
+            {employer_payable,0,gross},
+            {worker_receivable,gross,0},
+            {account(worker,"revenue"),0,gross}}});
+        wage_arrears_.emplace(claim_id,WageArrearsClaim{
+            claim_id,employer,worker,treasury,country,gross,gross,today});
+        events_.push_back("earned-daily-wages-owed");
+    }
+    void phase_time_settle_wage_arrears() {
+        require_stage({5});
+        for(auto it=wage_arrears_.begin();it!=wage_arrears_.end();) {
+            auto& claim=it->second;
+            const Money free=std::max<Money>(0,
+                phase_d_cash_available(claim.employer));
+            const Money paid=std::min(free,claim.outstanding);
+            if(paid<=0){++it;continue;}
+            const int tax=claim.country.empty()?income_tax_ppm_:
+                (governments_.contains(claim.country)?
+                    income_tax_ppm(claim.country):income_tax_ppm_);
+            const Money withholding=positive_product(paid,tax)/1'000'000;
+            const Money net=paid-withholding;
+            std::vector<Posting> journal{
+                {account(claim.employer,"wage_payable"),paid,0},
+                {account(claim.employer,"cash"),0,paid},
+                {account(claim.worker,"wage_receivable"),0,paid}};
+            if(net)journal.push_back({account(claim.worker,"cash"),net,0});
+            if(withholding) {
+                journal.push_back({account(claim.worker,"expense"),withholding,0});
+                journal.push_back({account(claim.treasury,"cash"),withholding,0});
+                journal.push_back({account(claim.treasury,"revenue"),0,withholding});
+            }
+            money_.post({unique("wage-claim-paid"),
+                         "settlement of previously earned wages",journal});
+            paid_staff_this_month_[claim.employer]=phaseb::add_checked(
+                paid_staff_this_month_[claim.employer],paid);
+            claim.outstanding-=paid;
+            events_.push_back("earned-wage-arrears-paid");
+            if(claim.outstanding==0)it=wage_arrears_.erase(it);
+            else ++it;
+        }
+    }
+    // A firm is insolvent only after actual salary debt remains unpaid for at
+    // least 30 real days. Its contracts end; assets, inventory and creditor
+    // claims remain in C, rather than being erased or assigned fictional value.
+    void phase_time_resolve_firm_insolvency(std::int64_t today) {
+        require_stage({8});
+        ensure(today>=0,"invalid insolvency day");
+        for(const auto& [id,claim]:wage_arrears_) {
+            (void)id;
+            if(bankrupt_firms_.contains(claim.employer) ||
+               claim.issued_day>today || today-claim.issued_day<30)
+                continue;
+            // A sovereign treasury is never liquidated under the private
+            // company's thirty-day wage insolvency rule. Public defaults
+            // require national debt and fiscal law, not factory liquidation.
+            bool public_wallet=governments_.contains(claim.employer);
+            for(const auto& [country,gov]:governments_) {
+                (void)gov;
+                if(has_country_treasury(country)&&
+                   country_treasury(country)==claim.employer) {
+                    public_wallet=true;
+                    break;
+                }
+            }
+            if(public_wallet)continue;
+            if(outstanding_worker_wages(claim.employer)<=
+               cash(claim.employer))continue;
+            bankrupt_firms_[claim.employer]=today;
+            std::vector<Id> layoffs;
+            for(const auto& [slice,job]:people_.jobs())
+                if(job.employer==claim.employer)layoffs.push_back(slice);
+            for(Id slice:layoffs)
+                people_.release(slice,people_.employed(slice));
+            events_.push_back("firm-insolvency-creditor-claims-preserved");
+        }
+    }
     void lend(const std::string& borrower, Money amount) {
         require_stage({1});
         ensure(amount > 0 && actors_.contains(borrower) && !bank_insolvent_,
                "bank insolvent or borrower invalid");
+        const Money prior=outstanding_loan(borrower);
         money_.post({unique("loan"), "bank loan creates matching deposit", {
             {"BANK:loan", amount, 0}, {"BANK:deposit", 0, amount},
             {account(borrower, "cash"), amount, 0}, {account(borrower, "debt"), 0, amount}}});
+        bank_principal_by_borrower_[borrower]=phaseb::add_checked(prior,amount);
         events_.push_back("loan");
     }
     void forgive_defaulted_loan(const std::string& borrower, Money amount) {
         require_stage({8});
         ensure(actors_.contains(borrower)&&amount>0 &&
-               -money_.balance(account(borrower,"debt"))>=amount &&
+               outstanding_loan(borrower)>=amount &&
                money_.balance("BANK:loan")>=amount,
                "invalid defaulted loan debt forgiveness");
+        const Money bank_prior=outstanding_loan(borrower);
         money_.post({unique("loan-loss"),"bank recognizes loss, borrower released from debt",{
             {"BANK:loan_loss",amount,0},{"BANK:loan",0,amount},
             {account(borrower,"debt"),amount,0},
             {account(borrower,"revenue"),0,amount}}});
+        bank_principal_by_borrower_[borrower]=bank_prior-amount;
         total_bad_debt_=phaseb::add_checked(total_bad_debt_,amount);
         const Money loans=money_.balance("BANK:loan");
         const Money deposits=-money_.balance("BANK:deposit");
@@ -1245,6 +2052,10 @@ public:
     }
     [[nodiscard]] Money bank_losses() const { return total_bad_debt_; }
     [[nodiscard]] bool bank_insolvent() const { return bank_insolvent_; }
+    [[nodiscard]] const std::map<std::string,People>&
+            regional_food_grievances()const {
+        return regional_food_grievance_;
+    }
     [[nodiscard]] People food_grievance(const std::string& region) const {
         auto it=regional_food_grievance_.find(region);
         return it==regional_food_grievance_.end()?0:it->second;
@@ -1262,6 +2073,10 @@ public:
     }
     [[nodiscard]] Money outstanding_loan(const std::string& borrower) const {
         ensure(actors_.contains(borrower),"unknown bank-debt obligor");
+        auto bank=bank_principal_by_borrower_.find(borrower);
+        if(bank!=bank_principal_by_borrower_.end())return bank->second;
+        // Pre-upgrade snapshots lack per-obligor bank loan attribution.
+        // Preserve the old behavior for historical stand-alone saves.
         const Money debt=money_.balance(account(borrower,"debt"));
         ensure(debt<=0&&debt>std::numeric_limits<Money>::min(),
                "invalid financial liability balance");
@@ -1272,15 +2087,19 @@ public:
         if(phase_d_reservation_mode_)
             resources_.assert_cash_available(borrower,amount,cash(borrower));
         ensure(amount > 0 && actors_.contains(borrower) && cash(borrower) >= amount &&
-               -money_.balance(account(borrower, "debt")) >= amount, "invalid loan repayment");
+               outstanding_loan(borrower)>=amount &&
+               money_.balance("BANK:loan")>=amount,"invalid loan repayment");
+        const Money old_principal=outstanding_loan(borrower);
         money_.post({unique("repay"), "loan principal retirement", {
             {account(borrower, "debt"), amount, 0}, {account(borrower, "cash"), 0, amount},
             {"BANK:deposit", amount, 0}, {"BANK:loan", 0, amount}}});
+        bank_principal_by_borrower_[borrower]=old_principal-amount;
         events_.push_back("repay");
     }
     void hire(Id slice, People count, const std::string& employer, Money wage) {
         require_stage({2});
-        ensure(actors_.contains(employer), "unknown employer");
+        ensure(actors_.contains(employer)&&!firm_bankrupt(employer),
+               "unknown or insolvent employer");
         people_.hire(slice, count, employer, "worker", wage, phaseb::JobRequirements{});
         events_.push_back("hire");
     }
@@ -1346,7 +2165,12 @@ public:
         return shipments_.at(id);
     }
     [[nodiscard]] bool conscription_enabled() const { return conscription_enabled_; }
-    [[nodiscard]] int income_tax_ppm() const { return income_tax_ppm_; }
+    [[nodiscard]] int income_tax_ppm() const { return income_tax_ppm_; } // legacy only
+    [[nodiscard]] int income_tax_ppm(const std::string& country)const {
+        ensure(governments_.contains(country),"unknown tax jurisdiction");
+        const auto found=country_income_tax_.find(country);
+        return found==country_income_tax_.end()?income_tax_ppm_:found->second;
+    }
     void enact_conscription(bool enabled) {
         require_stage({9});
         ensure(governments_.empty(), "constitutional government requires authorized policy procedure");
@@ -1360,12 +2184,29 @@ public:
         scheduled_income_tax_[month() + 1] = ppm;
         events_.push_back("income-tax-law-scheduled");
     }
-    void wages_under_law(const std::string& payer, const std::string& worker,
-                         const std::string& treasury, Money gross) {
+    void wages_under_law(const std::string& payer,const std::string& worker,
+                         const std::string& treasury,Money gross,
+                         const std::string& country="") {
         require_stage({5});
-        ensure(gross > 0, "invalid gross wage");
-        const auto withholding = positive_product(gross, income_tax_ppm_) / 1'000'000;
-        wages(payer, worker, treasury, gross, withholding);
+        ensure(gross>0,"invalid gross wage");
+        std::string authority=country;
+        if(authority.empty()&&!governments_.empty()) {
+            if(governments_.contains(treasury))authority=treasury;
+            else if(governments_.size()==1)
+                authority=governments_.begin()->first; // historical fixture
+            else throw std::invalid_argument("ambiguous national tax authority");
+        }
+        const int rate=authority.empty()?income_tax_ppm_:
+                        income_tax_ppm(authority);
+        if(!authority.empty()) {
+            auto bound=country_treasuries_.find(authority);
+            if(bound!=country_treasuries_.end())
+                ensure(bound->second==treasury,"foreign treasury withholding");
+            else if(governments_.size()>1)
+                ensure(treasury==authority,"national treasury binding required");
+        }
+        const auto withholding=positive_product(gross,rate)/1'000'000;
+        wages(payer,worker,treasury,gross,withholding);
     }
     void enact_voting_age(int new_age) {
         require_stage({9});
@@ -1436,7 +2277,7 @@ public:
                demo.service==phaseb::Service::active||
                demo.service==phaseb::Service::pow||
                demo.service==phaseb::Service::missing||
-               people_.age_months(row.key.demographic)<
+               people_.age_months_slice(slice)<
                    static_cast<std::int64_t>(voting_age_years_)*12)
                 continue;
             eligible=phaseb::add_checked(eligible,row.count);
@@ -1605,7 +2446,7 @@ public:
         ensure(babies>0&&people_.has_slice(mother),"TIME_POP_INVALID_MOTHER");
         const auto& source=people_.slice(mother);
         const auto demographic=people_.demographic(source.key.demographic);
-        const auto age=people_.age_months(source.key.demographic);
+        const auto age=people_.age_months_slice(mother);
         ensure(demographic.sex==phaseb::Sex::female &&
                age>=18*12 && age<45*12 &&
                demographic.service==phaseb::Service::civilian,
@@ -1671,6 +2512,12 @@ public:
         resources_.clear_month();
         phase_d_reservation_mode_=false;
     }
+    void phase_time_set_calendar_day(int day_of_month) {
+        require_stage({0});
+        ensure(day_of_month>=1&&day_of_month<=31,
+               "invalid native day for POP birth/eligibility");
+        people_.set_native_calendar_day(day_of_month);
+    }
     // Calendar day executes in the caller's one-day staging transaction.
     // This is the only routine that applies autonomous POP risk on a date.
     [[nodiscard]] bool daily_auto_demography_enabled() const {
@@ -1705,6 +2552,7 @@ public:
             staged.stage_=n;
             for (const auto& command:plan[static_cast<std::size_t>(n)])
                 command(staged);
+            if(n==8)staged.phase_time_accrue_and_settle_interest();
             if(n==10&&final_calendar_day) {
                 // Update month-based age classification after today's real
                 // population events; never rerun month-sized risk rates.
@@ -1715,7 +2563,11 @@ public:
             if(n==11&&final_calendar_day) {
                 staged.election_this_month_=false;
             }
-            staged.validate();
+            // Real daily events already enforce local preconditions. One
+            // full invariant pass at Stage 11 is sufficient for the single
+            // atomic day commit; avoid scanning every POP/financial account
+            // twelve times per calendar day.
+            if(n==11)staged.validate();
         }
         staged.stage_=-1;
         ensure(staged.month()==opening_month+(final_calendar_day?1:0),
@@ -1844,12 +2696,122 @@ public:
                    g.chamber_seats>0 && g.quorum>0 && g.quorum<=g.chamber_seats,
                    "invalid government institution");
         }
+        for(const auto& [country,ppm]:country_income_tax_)
+            ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
+                   "invalid country tax state");
+        for(const auto& [effective,policies]:scheduled_country_income_tax_) {
+            ensure(effective>0,"invalid scheduled country tax date");
+            for(const auto& [country,ppm]:policies)
+                ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
+                       "invalid scheduled country tax rate");
+        }
+        std::set<std::string> assigned_treasuries;
+        for(const auto& [country,wallet]:country_treasuries_)
+            ensure(governments_.contains(country)&&actors_.contains(wallet)&&
+                   assigned_treasuries.insert(wallet).second,
+                   "invalid or shared country treasury");
+
         ensure(resources_.valid(), "shared resource reservation journal inconsistent");
         if(phase_d_reservation_mode_) {
             for(const auto& actor:actors_)
                 ensure(resources_.cash_held(actor)<=cash(actor),
                        "reserved cash exceeds realized available balance");
         }
+        ensure(bank_interest_annual_ppm_>=0&&bank_interest_annual_ppm_<=1'000'000,
+               "invalid ACT/365 bank interest rate");
+        for(const auto& [borrower,carry]:bank_interest_fraction_)
+            ensure(actors_.contains(borrower)&&carry>=0&&carry<365'000'000,
+                   "invalid bank interest carry");
+        if(money_.has_account("BANK:interest_receivable")) {
+            Money receivables=0;
+            for(const auto& actor:actors_) {
+                const auto id=account(actor,"interest_payable");
+                if(!money_.has_account(id))continue;
+                const Money owed=-money_.balance(id);
+                ensure(owed>=0,"negative recognized interest payable");
+                receivables=phaseb::add_checked(receivables,owed);
+            }
+            ensure(receivables==money_.balance("BANK:interest_receivable"),
+                   "bank and borrower interest balances diverged");
+        }
+        std::map<std::string,Money> employer_wage_due,worker_wage_receivable;
+        for(const auto& [debtor,principal]:bank_principal_by_borrower_)
+            ensure(actors_.contains(debtor)&&principal>=0&&
+                   principal<=-money_.balance(account(debtor,"debt")),
+                   "bank loan principal exceeds actual finance debt");
+        std::map<std::string,Money> coupons_payable,coupons_receivable;
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            ensure(id==bond.id&&governments_.contains(bond.country)&&
+                   bond.treasury==country_treasury(bond.country)&&
+                   bond.original_face>0&&bond.coupon_ppm>=0&&
+                   bond.coupon_ppm<=1'000'000&&bond.issue_day>=0&&
+                   bond.maturity_day>bond.issue_day&&
+                   tracked_assets_.contains("bond:"+id),
+                   "invalid sovereign bond owner or issue");
+            Money live_face=0;
+            for(const auto& [owner,n]:ownership_.holders("bond:"+id)) {
+                ensure(actors_.contains(owner)&&n>0,
+                       "invalid live sovereign bond owner");
+                live_face=phaseb::add_checked(live_face,n);
+            }
+            ensure(live_face<=bond.original_face,
+                   "sovereign bond share principal exceeds issue");
+        }
+        for(const auto& [key,amount]:sovereign_coupon_due_) {
+            ensure(sovereign_bonds_.contains(key.first)&&
+                   actors_.contains(key.second)&&amount>0,
+                   "invalid unpaid bond interest claim");
+            const auto& treasury=sovereign_bonds_.at(key.first).treasury;
+            coupons_payable[treasury]=phaseb::add_checked(
+                coupons_payable[treasury],amount);
+            coupons_receivable[key.second]=phaseb::add_checked(
+                coupons_receivable[key.second],amount);
+        }
+        for(const auto& [key,carry]:sovereign_coupon_fraction_)
+            ensure(sovereign_bonds_.contains(key.first)&&
+                   actors_.contains(key.second)&&
+                   carry>=0&&carry<365'000'000,
+                   "invalid sovereign coupon fraction");
+        for(const auto& [treasury,amount]:coupons_payable)
+            ensure(money_.has_account(account(treasury,"bond_coupon_payable"))&&
+                   -money_.balance(account(treasury,"bond_coupon_payable"))==
+                     amount,"sovereign bond coupon liability not backed");
+        for(const auto& [holder,amount]:coupons_receivable)
+            ensure(money_.has_account(account(holder,"bond_coupon_receivable"))&&
+                   money_.balance(account(holder,"bond_coupon_receivable"))==
+                     amount,"sovereign bond coupon creditor not backed");
+        for(const auto& [id,claim]:wage_arrears_) {
+            ensure(id==claim.id&&claim.accrued>0&&claim.outstanding>0&&
+                   claim.outstanding<=claim.accrued&&claim.issued_day>=0&&
+                   actors_.contains(claim.employer)&&
+                   actors_.contains(claim.worker)&&
+                   actors_.contains(claim.treasury),
+                   "invalid earned wage creditor record");
+            employer_wage_due[claim.employer]=phaseb::add_checked(
+                employer_wage_due[claim.employer],claim.outstanding);
+            worker_wage_receivable[claim.worker]=phaseb::add_checked(
+                worker_wage_receivable[claim.worker],claim.outstanding);
+        }
+        for(const auto& [employer,total]:employer_wage_due)
+            ensure(money_.has_account(account(employer,"wage_payable"))&&
+                   -money_.balance(account(employer,"wage_payable"))==total,
+                   "employer wage payables not backed by contracts");
+        for(const auto& [worker,total]:worker_wage_receivable)
+            ensure(money_.has_account(account(worker,"wage_receivable"))&&
+                   money_.balance(account(worker,"wage_receivable"))==total,
+                   "household earned wage receivables not backed by contracts");
+        for(const auto& [firm,day]:bankrupt_firms_)
+            ensure(actors_.contains(firm)&&day>=0,
+                   "orphaned bankrupt firm");
+        for(const auto& [firm,day]:completed_liquidations_)
+            ensure(bankrupt_firms_.contains(firm)&&
+                   day>=bankrupt_firms_.at(firm),
+                   "invalid completed estate record");
+        for(const auto& [unit,deploy]:army_deployments_)
+            ensure(units_.contains(unit)&&deploy.unit==unit&&
+                   governments_.contains(deploy.country)&&
+                   sovereignty_.contains(deploy.region),
+                   "orphaned real national army deployment");
         ensure(money_.balanced(), "unbalanced financial ledger");
         for(const auto& [currency,l]:foreign_ledgers_){
             ensure(l.balanced(),"unbalanced foreign currency ledger");
@@ -1917,6 +2879,7 @@ private:
     std::set<std::string> actors_;
     std::set<std::string> processed_commands_;
     std::map<std::string, std::map<Id, People>> units_;
+    std::map<std::string,ArmyDeployment> army_deployments_;
     std::uint64_t next_typed_id_{1};
     std::map<std::pair<EntityKind,std::string>,TypedEntityId> typed_entities_;
     std::map<std::uint64_t,EntityKind> typed_active_ids_;
@@ -1936,7 +2899,16 @@ private:
     std::map<std::string,Money> paid_staff_this_month_;
     Money total_bad_debt_{};
     bool bank_insolvent_{};
+    std::map<std::string,Money> bank_principal_by_borrower_;
+    std::map<std::string,SovereignBond> sovereign_bonds_;
+    std::map<std::pair<std::string,std::string>,Money> sovereign_coupon_due_;
+    std::map<std::pair<std::string,std::string>,Money> sovereign_coupon_fraction_;
+    std::map<std::string,WageArrearsClaim> wage_arrears_;
+    std::map<std::string,std::int64_t> bankrupt_firms_;
+    std::map<std::string,std::int64_t> completed_liquidations_;
     std::map<std::string,People> regional_food_grievance_;
+    int bank_interest_annual_ppm_{}; // zero until historically configured
+    std::map<std::string,Money> bank_interest_fraction_;
     std::map<std::string,FinancialLedger> foreign_ledgers_;
     std::set<std::pair<std::string,std::string>> foreign_holders_;
     std::map<std::string,Reparation> reparations_;
@@ -1959,8 +2931,13 @@ private:
     std::set<std::string> tracked_goods_;
     std::map<std::string, std::string> sovereignty_, military_control_;
     std::map<std::int64_t, bool> scheduled_conscription_;
-    std::map<std::int64_t, int> scheduled_income_tax_;
+    std::map<std::int64_t, int> scheduled_income_tax_; // legacy-only world
     int income_tax_ppm_{100'000};
+    // Country-scoped tax policies and treasury identities only; country cash,
+    // loans and spending remain authoritative in the C financial ledger.
+    std::map<std::string,int> country_income_tax_;
+    std::map<std::int64_t,std::map<std::string,int>> scheduled_country_income_tax_;
+    std::map<std::string,std::string> country_treasuries_;
     bool conscription_enabled_{true};
     std::map<std::int64_t, int> scheduled_voting_age_;
     ElectionResult last_election_;
@@ -2158,9 +3135,20 @@ private:
             conscription_enabled_ = c->second;
             scheduled_conscription_.erase(c);
         }
-        if (auto t = scheduled_income_tax_.find(month()); t != scheduled_income_tax_.end()) {
-            income_tax_ppm_ = t->second;
+        if (auto t=scheduled_income_tax_.find(month());t!=scheduled_income_tax_.end()) {
+            // No constitutional country ever reads this global legacy change.
+            ensure(governments_.empty(),"global income tax in multi-country world");
+            income_tax_ppm_=t->second;
             scheduled_income_tax_.erase(t);
+        }
+        if(auto taxes=scheduled_country_income_tax_.find(month());
+           taxes!=scheduled_country_income_tax_.end()) {
+            for(const auto& [country,ppm]:taxes->second) {
+                ensure(governments_.contains(country),
+                       "country tax effective without government");
+                country_income_tax_[country]=ppm;
+            }
+            scheduled_country_income_tax_.erase(taxes);
         }
         for (auto& [key, cargo] : shipments_) {
             (void)key;
