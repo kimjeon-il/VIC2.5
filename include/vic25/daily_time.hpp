@@ -352,6 +352,7 @@ public:
            !engine_.has_autonomous_daily_trade()&&
            !engine_.base().core().core().has_due_p1_government(day_)&&
            !engine_.base().core().core().p4_has_due_amendment(day_)&&
+           !engine_.base().core().core().p2_has_due(day_)&&
            engine_.base().core().core().p4_due_contests(day_).empty()) {
             ++day_;++day_commit_;
             return {current,next,day_commit_,engine_.commit_id(),0,false};
@@ -470,6 +471,7 @@ public:
                 // if no P0 controller, battle or economic command is active.
                 gh.phase_c().phase_time_apply_p1_government(today);
                 gh.phase_c().phase_time_apply_p4_amendments(today);
+                gh.phase_c().phase_time_apply_p2(today);
             });
         // P0 domain decisions run on the real calendar day, in the same
         // C/D/E/G/H transaction as scheduled commands and POP dynamics.

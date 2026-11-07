@@ -122,7 +122,7 @@ inline People IntegratedWorld::p4_eligible(
            d.service==phaseb::Service::pow||
            d.service==phaseb::Service::missing||
            people_.age_months_slice(slice)<
-               static_cast<std::int64_t>(voting_age_years_)*12)continue;
+               static_cast<std::int64_t>(p2_voting_age(contest.country))*12)continue;
         eligible=phaseb::add_checked(eligible,row.count);
     }
     return eligible;
@@ -146,7 +146,8 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
         (void)id;
         if(party.country==contest.country&&party.active&&party.registered&&
            (contest.office!=P4Office::head_of_state||
-            !party.head_candidate.empty()))
+            (!party.head_candidate.empty()&&
+             p2_candidate_eligible(contest_id,party.head_candidate))))
             candidates.push_back(&party);
     }
     ensure(!candidates.empty()&&candidates.size()<=128,
@@ -177,7 +178,7 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
            d.service==phaseb::Service::pow||
            d.service==phaseb::Service::missing||
            people_.age_months_slice(slice)<
-               static_cast<std::int64_t>(voting_age_years_)*12)continue;
+               static_cast<std::int64_t>(p2_voting_age(contest.country))*12)continue;
         ballot.eligible=phaseb::add_checked(ballot.eligible,row.count);
         const People participating=p4_scaled(row.count,contest.turnout_ppm,1'000'000);
         ballot.registered=phaseb::add_checked(ballot.registered,row.count);
@@ -252,7 +253,8 @@ inline void IntegratedWorld::p4_hold_contest(
     for(const auto& [pid,party]:p4_parties_)
         if(party.country==contest.country&&party.registered&&party.active&&
            (contest.office!=P4Office::head_of_state||
-            !party.head_candidate.empty()))
+            (!party.head_candidate.empty()&&
+             p2_candidate_eligible(id,party.head_candidate))))
             ++permitted;
     if(order.power==P1PowerDistribution::single_party)
         ensure(permitted==1,"P4 unlawful multi-party election");
@@ -261,7 +263,9 @@ inline void IntegratedWorld::p4_hold_contest(
                p4_parties_.at(party).country==contest.country&&
                p4_parties_.at(party).active&&p4_parties_.at(party).registered&&
                (contest.office!=P4Office::head_of_state||
-                !p4_parties_.at(party).head_candidate.empty()),
+                (!p4_parties_.at(party).head_candidate.empty()&&
+                 p2_candidate_eligible(
+                     id,p4_parties_.at(party).head_candidate))),
                "P4 ballots for unregistered party or foreign contest");
         sum=phaseb::add_checked(sum,votes);
     }
@@ -356,7 +360,11 @@ inline void IntegratedWorld::p4_dissolve(
         std::int64_t early_poll_day) {
     require_stage({9});
     auto& contest=p4_contests_.at(id);
-    ensure(contest.office==P4Office::legislature&&
+    const auto legal_term=p2_term(id);
+    ensure((legal_term.dissolution_max_delay_days==0||
+            (early_poll_day>today&&
+             early_poll_day-today<=legal_term.dissolution_max_delay_days))&&
+           contest.office==P4Office::legislature&&
            contest.dissolution_authorized&&
            !contest.dissolved&&contest.active&&
            !legal_basis.empty()&&
@@ -383,6 +391,24 @@ inline void IntegratedWorld::p4_schedule_term_amendment(
         std::int64_t today) {
     require_stage({9});
     const auto& contest=p4_contests_.at(law.contest_id);
+    for(const auto& [slot,law_id]:p2_active_base_) {
+        (void)slot;
+        const auto& base=p2_laws_.at(law_id);
+        bool owns_term=false;
+        const auto checks=[&](const std::vector<P2Clause>& clauses){
+            for(const auto& c:clauses)
+                if(c.target==law.contest_id&&
+                   (c.kind==P2ClauseKind::term_months||
+                    c.kind==P2ClauseKind::term_cycle_mode))
+                    owns_term=true;
+        };
+        checks(base.clauses);
+        for(const auto& id:p2_active_amendments_)
+            if(p2_amendments_.at(id).law_id==law_id)
+                checks(p2_amendments_.at(id).clauses);
+        ensure(base.country!=contest.country||!owns_term,
+               "P4 law superseded by P2; use a P2 legislative bill");
+    }
     ensure(today>=0&&law.effective_day>today&&
            law.term_months>=1&&law.term_months<=240&&
            law.next_poll_day>law.effective_day&&

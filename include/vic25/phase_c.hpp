@@ -7,6 +7,7 @@
 #include "vic25/phase_b.hpp"
 #include "vic25/phase_c_p1.hpp"
 #include "vic25/phase_c_p4.hpp"
+#include "vic25/phase_c_p2.hpp"
 #include "vic25/ledgers.hpp"
 #include "vic25/shared_reservations.hpp"
 #include <algorithm>
@@ -1528,6 +1529,32 @@ public:
                                     const std::vector<std::string>&,std::int64_t);
     void phase_time_apply_p4_amendments(std::int64_t);
     [[nodiscard]] P4CompetitionView p4_competition(const std::string&)const;
+    // P2: legal authority and effective clauses; P1/P4/C retain their own
+    // office, election, tax and demographic state and transaction ownership.
+    void p2_seed_base(P2BaseLaw);
+    void p2_seed_amendment(P2Amendment);
+    [[nodiscard]] bool p2_is_active_base(const std::string&)const;
+    [[nodiscard]] bool p2_amendment_active(const std::string&)const;
+    [[nodiscard]] std::optional<std::int64_t> p2_rule(
+        const std::string&,const std::string&,P2ClauseKind)const;
+    [[nodiscard]] int p2_voting_age(const std::string&)const;
+    [[nodiscard]] P2TermView p2_term(const std::string&)const;
+    [[nodiscard]] bool p2_candidate_eligible(
+        const std::string&,const std::string&)const;
+    void p2_submit_bill(P2Bill,std::int64_t);
+    void p2_approve_bill(const std::string&,const std::vector<std::string>&);
+    void p2_promulgate_bill(const std::string&,const std::string&,std::int64_t);
+    [[nodiscard]] bool p2_has_due(std::int64_t)const;
+    void phase_time_apply_p2(std::int64_t);
+    [[nodiscard]] const std::map<std::string,P2BaseLaw>& p2_laws()const {
+        return p2_laws_;
+    }
+    [[nodiscard]] const std::map<std::string,P2Bill>& p2_bills()const {
+        return p2_bills_;
+    }
+    [[nodiscard]] const std::vector<P2LawEvent>& p2_history()const {
+        return p2_history_;
+    }
     [[nodiscard]] const GovernmentState& government(const std::string& country) const {
         return governments_.at(country);
     }
@@ -1597,7 +1624,13 @@ public:
     void propose_tax_law(const std::string& country, const std::string& proposer,
                          const std::vector<std::string>& supporting_parties, int ppm) {
         require_stage({9});
-        ensure(ppm >= 0 && ppm <= 1'000'000, "invalid tax rate");
+        ensure(ppm>=0&&ppm<=1'000'000,"invalid tax rate");
+        const auto lower=p2_rule(country,country,
+                                 P2ClauseKind::income_tax_min_ppm).value_or(0);
+        const auto upper=p2_rule(country,country,
+                                 P2ClauseKind::income_tax_max_ppm).value_or(1'000'000);
+        ensure(lower<=upper&&ppm>=lower&&ppm<=upper,
+               "P2 national tax proposal outside binding legal rate limits");
         const auto& g=governments_.at(country);
         ensure(g.prime_minister==proposer&&!has_pending_country_tax(country),
                "unauthorized or duplicate national income-tax bill");
@@ -2356,7 +2389,7 @@ public:
                demo.service==phaseb::Service::pow||
                demo.service==phaseb::Service::missing||
                people_.age_months_slice(id)<
-                   static_cast<std::int64_t>(voting_age_years_)*12)
+                   static_cast<std::int64_t>(p2_voting_age(country))*12)
                 continue;
             eligible=phaseb::add_checked(eligible,row.count);
         }
@@ -2859,6 +2892,65 @@ public:
                        amendment.next_poll_day>day&&
                        !amendment.law_id.empty(),
                        "P4 invalid pending constitutional amendment");
+        ensure(p2_laws_.size()<=100'000&&p2_bills_.size()<=1'000'000&&
+               p2_amendments_.size()<=1'000'000&&
+               p2_history_.size()<=1'000'000&&
+               p2_due_.size()<=1'000'000,
+               "P2 oversized law, amendment or bill registry");
+        for(const auto& [id,law]:p2_laws_) {
+            ensure(id==law.id,"P2 broken base law identity");
+            p2_validate_base(law);
+        }
+        for(const auto& [slot,law_id]:p2_active_base_) {
+            ensure(p2_laws_.contains(law_id)&&
+                   std::make_tuple(p2_laws_.at(law_id).country,
+                                   p2_laws_.at(law_id).domain,
+                                   p2_laws_.at(law_id).scope)==slot,
+                   "P2 broken unique active base law");
+        }
+        for(const auto& [id,amendment]:p2_amendments_) {
+            ensure(id==amendment.id&&p2_laws_.contains(amendment.law_id),
+                   "P2 orphan amendment");
+            p2_validate_clauses(p2_laws_.at(amendment.law_id).country,
+                                amendment.clauses);
+            if(p2_active_amendments_.contains(id)) {
+                ensure(p2_is_active_base(amendment.law_id),
+                       "P2 amendment active after parent base repeal");
+                p2_check_amendment(amendment);
+            }
+        }
+        for(const auto& id:p2_active_amendments_)
+            ensure(p2_amendments_.contains(id),
+                   "P2 amendment active without saved legal record");
+        for(const auto& [id,bill]:p2_bills_) {
+            ensure(id==bill.id&&governments_.contains(bill.country)&&
+                   bill.introduced_day>=0&&bill.effective_day>bill.introduced_day&&
+                   static_cast<unsigned>(bill.action)<=
+                     static_cast<unsigned>(P2BillAction::repeal_base)&&
+                   static_cast<unsigned>(bill.status)<=
+                     static_cast<unsigned>(P2BillStatus::rejected),
+                   "P2 corrupt legislative bill");
+            if(bill.status==P2BillStatus::promulgated)
+                ensure(p2_due_.contains(bill.effective_day)&&
+                       p2_due_.at(bill.effective_day).contains(id)&&
+                       bill.promulgated_day>=bill.introduced_day,
+                       "P2 promulgated law lacks future execution event");
+        }
+        for(const auto& [day,ids]:p2_due_)
+            for(const auto& id:ids)
+                ensure(p2_bills_.contains(id)&&
+                       p2_bills_.at(id).status==P2BillStatus::promulgated&&
+                       p2_bills_.at(id).effective_day==day,
+                       "P2 stale legal event index");
+        for(const auto& [id,contest]:p4_contests_) {
+            if(!p2_laws_.empty()) {
+                const auto legal=p2_term(id);
+                ensure(legal.term_months==contest.term_months&&
+                       legal.cycle_mode==contest.term_mode&&
+                       legal.dissolution_authorized==contest.dissolution_authorized,
+                       "P2/P4 effective office term law differs from election state");
+            }
+        }
         for(const auto& [country,ppm]:country_income_tax_)
             ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
                    "invalid country tax state");
@@ -3103,6 +3195,15 @@ private:
     std::vector<P4Result> p4_history_; // immutable election audit
     std::map<std::int64_t,std::vector<P4TermAmendment>> p4_amendments_;
     std::map<std::int64_t,std::set<std::string>> p4_due_days_; // derived index
+    // P2 authoritative legal choices + amendments; historical originals stay
+    // readable and all current economic/POP/office effects remain downstream.
+    std::map<std::string,P2BaseLaw> p2_laws_;
+    std::map<std::tuple<std::string,std::string,std::string>,std::string> p2_active_base_;
+    std::map<std::string,P2Amendment> p2_amendments_;
+    std::set<std::string> p2_active_amendments_;
+    std::map<std::string,P2Bill> p2_bills_;
+    std::vector<P2LawEvent> p2_history_;
+    std::map<std::int64_t,std::set<std::string>> p2_due_; // derived from P2 bills
     std::map<std::int64_t, std::vector<CabinetChange>> scheduled_cabinets_;
     std::map<std::string, Shipment> shipments_;
     std::set<std::string> tracked_goods_;
@@ -3134,6 +3235,15 @@ private:
     [[nodiscard]] static int p1_percent(People,People);
     [[nodiscard]] static People p4_scaled(People,People,People);
     void p4_rebuild_due_index();
+    static bool p2_valid_clause(const P2Clause&);
+    void p2_validate_clauses(
+        const std::string&,const std::vector<P2Clause>&)const;
+    void p2_validate_base(const P2BaseLaw&)const;
+    void p2_check_amendment(const P2Amendment&)const;
+    void p2_sync_country_rules(
+        const std::string&,const std::vector<P2ElectionTransition>&,
+        std::int64_t);
+    void p2_rebuild_due_index();
     static int compare_nonnegative_ratios(std::uint64_t a, std::uint64_t b,
                                           std::uint64_t c, std::uint64_t d) {
         ensure(b != 0 && d != 0, "zero election divisor");
@@ -3374,3 +3484,4 @@ private:
 
 #include "vic25/phase_c_p1_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
+#include "vic25/phase_c_p2_impl.hpp"

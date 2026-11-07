@@ -363,3 +363,11 @@ if(BUILD_TESTING)
     target_link_libraries(vic25_p4_governance_tests PRIVATE vic25_core)
     add_test(NAME vic25_p4_governance_tests COMMAND vic25_p4_governance_tests)
 endif()
+
+# P2 legislative rules, statutory amendments and legal elected-office terms.
+# Focused test executable is available; no CI/tests are run by this change.
+if(BUILD_TESTING)
+    add_executable(vic25_p2_governance_tests tests/test_p2_governance.cpp)
+    target_link_libraries(vic25_p2_governance_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p2_governance_tests COMMAND vic25_p2_governance_tests)
+endif()
