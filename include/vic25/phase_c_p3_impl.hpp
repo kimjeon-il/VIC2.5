@@ -340,6 +340,30 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
                 0,1'000'000));
         attitude.observed_day=today;
     }
+    // A scenario may define a *dormant* reform movement. It becomes
+    // active from real observed demand, not a random ideology factory. A
+    // previously settled P5 movement cannot silently restart in this pass.
+    for(auto& [id,movement]:p3_movements_) {
+        if(movement.active)continue;
+        const auto past=p5_crises_.find("P5:"+id);
+        if(past!=p5_crises_.end()&&
+           past->second.stage==P5CrisisStage::settled)continue;
+        const auto evidence=p3_movement_view(id);
+        bool already_satisfied=false;
+        for(const auto& [slot,law_id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(law_id);
+            if(law.country==movement.country&&
+               law.domain==movement.issue_domain&&
+               law.base_choice==movement.desired_choice)
+                already_satisfied=true;
+        }
+        if(!already_satisfied&&evidence.support_ppm>=150'000&&
+           evidence.potential_activists>0) {
+            movement.active=true;
+            events_.push_back("p3-social-demand-formed-persistent-movement:"+id);
+        }
+    }
     p3_last_reaction_day_=today;
     events_.push_back("p3-real-pop-daily-political-reaction");
 }
