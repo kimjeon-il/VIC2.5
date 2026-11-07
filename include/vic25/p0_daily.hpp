@@ -296,6 +296,7 @@ struct Policies {
         std::set<std::string> unique_national_budgets;
         for(const auto& b:national_budget_envelopes)
             if(b.country.empty()||
+               financed_countries.contains(b.country)||
                !unique_national_budgets.insert(b.country).second||
                b.reserve_cash<0||b.maximum_daily_spending<0||
                b.target_cash<0||b.maximum_daily_new_bonds<=0||
