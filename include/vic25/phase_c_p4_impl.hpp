@@ -159,6 +159,12 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
                    "P4 elected head must have named candidate");
         ballot.votes.emplace(party->id,0);
     }
+    // Build a single index per election, not a world-wide membership scan
+    // for every POP and party (the election is event-driven, not daily).
+    std::map<Id,std::vector<std::pair<std::string,People>>> slice_groups;
+    for(const auto& [membership,n]:membership_)
+        if(n>0)slice_groups[membership.first].push_back({
+            membership.second,n});
     for(const auto& [slice,row]:people_.slices()) {
         const auto& d=people_.demographic(row.key.demographic);
         const auto jurisdiction=sovereignty_.find(d.region);
@@ -181,16 +187,16 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
         People weight_sum=0;
         for(const auto* party:candidates) {
             People weight=party->organization_ppm;
-            for(const auto& [membership,n]:membership_) {
-                if(membership.first!=slice||n<=0)continue;
-                const auto affinity=p4_affinities_.find(
-                    {party->id,membership.second});
-                if(affinity==p4_affinities_.end())continue;
-                // Interests change relative preference, never headcount.
-                const People weighted=p4_scaled(affinity->second,n,row.count);
-                weight=std::min<People>(5'000'000,
-                    phaseb::add_checked(weight,weighted));
-            }
+            const auto groups=slice_groups.find(slice);
+            if(groups!=slice_groups.end())
+                for(const auto& [group,n]:groups->second) {
+                    const auto affinity=p4_affinities_.find({party->id,group});
+                    if(affinity==p4_affinities_.end())continue;
+                    // Interests change relative preference, never headcount.
+                    const People weighted=p4_scaled(affinity->second,n,row.count);
+                    weight=std::min<People>(5'000'000,
+                        phaseb::add_checked(weight,weighted));
+                }
             weights.emplace_back(party->id,weight);
             weight_sum=phaseb::add_checked(weight_sum,weight);
         }
