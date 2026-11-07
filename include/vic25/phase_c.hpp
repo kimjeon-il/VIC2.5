@@ -1153,6 +1153,10 @@ public:
                    "shared treasury across sovereign countries");
         country_treasuries_.emplace(country,wallet);
     }
+    [[nodiscard]] bool has_country_treasury(const std::string& country)const {
+        return governments_.contains(country) &&
+               (country_treasuries_.contains(country)||actors_.contains(country));
+    }
     [[nodiscard]] const std::string& country_treasury(
             const std::string& country)const {
         ensure(governments_.contains(country),"unknown fiscal country");
