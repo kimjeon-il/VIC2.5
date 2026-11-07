@@ -122,6 +122,49 @@ inline void IntegratedWorld::p5_daily_advance(std::int64_t day) {
                    crisis.stage!=P5CrisisStage::warning) {
                     crisis.stage=P5CrisisStage::warning;
                     events_.push_back("p5-political-crisis-warning:"+crisis.id);
+                    // A newly credible social movement first takes a bounded
+                    // peaceful, real-person petition route if legally possible.
+                    // It does NOT conjure troops or start civil war on warning.
+                    if(p2_rule(movement.country,movement.country,
+                               P2ClauseKind::political_association_allowed)
+                               .value_or(1)!=0) {
+                        for(const auto& [key,member_count]:membership_) {
+                            if(member_count<=0||
+                               std::find(movement.groups.begin(),
+                                         movement.groups.end(),key.second)==
+                                   movement.groups.end()||
+                               !people_.has_slice(key.first))continue;
+                            const auto& population=people_.slice(key.first);
+                            const auto& demo=people_.demographic(
+                                population.key.demographic);
+                            const auto sovereign=sovereignty_.find(demo.region);
+                            if(sovereign==sovereignty_.end()||
+                               sovereign->second!=movement.country||
+                               (!movement.region.empty()&&
+                                movement.region!=demo.region))continue;
+                            const auto capacity=std::max<People>(0,
+                                population.count-
+                                participation_this_month_[key.first]);
+                            const People n=std::min<People>(
+                                {5,member_count,capacity,observation.support_ppm>0?
+                                    p3_movement_view(id).potential_activists:0});
+                            if(n<=0)continue;
+                            P5CollectiveAction petition;
+                            petition.id="P5:petition:"+crisis.id+":"+
+                                std::to_string(day);
+                            petition.movement=id;
+                            petition.group=key.second;
+                            petition.region=demo.region;
+                            petition.kind=P5ActionKind::petition;
+                            petition.slice=key.first;
+                            petition.participants=n;
+                            petition.day=day;
+                            p5_perform_action(std::move(petition));
+                            events_.push_back(
+                                "p5-autonomous-peaceful-petition:"+id);
+                            break;
+                        }
+                    }
                 }
             } else {
                 crisis.calm_days=crisis.last_checked_day==day-1?
