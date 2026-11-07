@@ -356,3 +356,10 @@ if(BUILD_TESTING)
     target_link_libraries(vic25_p0_daily_longrun PRIVATE vic25_core)
     add_test(NAME vic25_p0_daily_longrun COMMAND vic25_p0_daily_longrun)
 endif()
+
+# P4 party-system and institution-specific election schedule regressions.
+if(BUILD_TESTING)
+    add_executable(vic25_p4_governance_tests tests/test_p4_governance.cpp)
+    target_link_libraries(vic25_p4_governance_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p4_governance_tests COMMAND vic25_p4_governance_tests)
+endif()
