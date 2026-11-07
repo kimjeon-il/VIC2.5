@@ -38,7 +38,31 @@ public:
         return n;
     }
     [[nodiscard]] People employed(Id slice_id) const { const auto* e = job(slice_id); return e ? e->count : 0; }
-    [[nodiscard]] std::int64_t age_months(Id cohort_id) const { return month_ - demographic(cohort_id).birth_month; }
+    // A 0 day means that legacy or historical data only provides a month.
+    // Exact day is attached to a PopulationSlice partition so old binary
+    // Demographic keys and all existing serialized population IDs survive.
+    void set_native_calendar_day(int day) {
+        require(day>=0&&day<=31,"invalid native POP calendar day");
+        native_day_of_month_=day;
+    }
+    [[nodiscard]] int native_calendar_day()const{return native_day_of_month_;}
+    [[nodiscard]] int exact_birth_day(Id slice_id)const {
+        auto it=exact_birth_days_.find(slice_id);
+        return it==exact_birth_days_.end()?0:it->second;
+    }
+    [[nodiscard]] const std::map<Id,int>& exact_birth_days()const {
+        return exact_birth_days_;
+    }
+    [[nodiscard]] std::int64_t age_months(Id cohort_id) const {
+        return month_ - demographic(cohort_id).birth_month;
+    }
+    [[nodiscard]] std::int64_t age_months_slice(Id slice_id)const {
+        const auto& s=slice(slice_id);
+        const auto months=age_months(s.key.demographic);
+        const int born=exact_birth_day(slice_id);
+        return months-(native_day_of_month_>0&&born>0&&
+                       native_day_of_month_<born?1:0);
+    }
 
     Id health_profile(const Health& health) {
         auto it = health_ids_.find(health); if (it != health_ids_.end()) return it->second;
@@ -189,7 +213,12 @@ public:
         Demographic newborn = baby; newborn.birth_month = month_; newborn.sex = sex;
         newborn.service = Service::civilian; newborn.health = default_health_;
         const Id d = demographic_profile(newborn);
-        const Id to = add_population(d, nonworker_economic, household_id, count);
+        const Id to = native_day_of_month_>0?
+            add_population(d,nonworker_economic,household_id,count,
+                           next_partition_++):
+            add_population(d,nonworker_economic,household_id,count);
+        if(native_day_of_month_>0)
+            exact_birth_days_[to]=native_day_of_month_;
         log(EventKind::birth, 0, to, count, 0, "birth");
     }
     void death(Id source, People count, std::optional<People> employed_affected = std::nullopt, std::string cause = "natural") {
@@ -201,7 +230,10 @@ public:
         }
         require(*employed_affected >= 0 && *employed_affected <= employed_src &&
                 count - *employed_affected <= s.count - employed_src, "invalid death employment allocation");
-        if (count == s.count) { slices_.erase(source); slice_ids_.erase(s.key); jobs_.erase(source); }
+        if (count == s.count) {
+            slices_.erase(source); slice_ids_.erase(s.key); jobs_.erase(source);
+            exact_birth_days_.erase(source);
+        }
         else { auto& current = slices_.at(source); current.count -= count; ++current.revision;
                if (*employed_affected) { auto& j=jobs_.at(source); j.count -= *employed_affected;
                                         if (!j.count) jobs_.erase(source); } }
@@ -290,7 +322,7 @@ public:
         const auto& d=demographic(s.key.demographic);
         const auto& ed=education(economic(s.key.economic).education);
         const auto& hp=health(d.health);
-        const auto age=age_months(s.key.demographic);
+        const auto age=age_months_slice(slice_id);
         if(age < std::max(policy.minimum_age_months,r.minimum_age_months) ||
            age >= std::min(policy.maximum_age_months,r.maximum_age_months))return false;
         if(d.service != Service::civilian && d.service != Service::reserve)return false;
@@ -311,7 +343,7 @@ public:
         for(const auto& [id,s]:slices_){
             const auto& d=demographic(s.key.demographic);
             const auto& e=economic(s.key.economic);
-            const auto age=age_months(s.key.demographic);
+            const auto age=age_months_slice(id);
             if(age<rule.minimum_age_months || age>=rule.maximum_age_months){ result.inactive=add_checked(result.inactive,s.count);continue; }
             result.working_age=add_checked(result.working_age,s.count);
             const auto sex_flag = static_cast<std::uint8_t>(1U << static_cast<std::uint8_t>(d.sex));
@@ -337,7 +369,7 @@ public:
             const auto& d=demographic(s.key.demographic);
             const auto& e=economic(s.key.economic);
             const auto& health_now=health(d.health);
-            const auto age=age_months(s.key.demographic);
+            const auto age=age_months_slice(id);
             result.people=add_checked(result.people,s.count);
             if(age<18*12){result.children=add_checked(result.children,s.count);result.dependents=add_checked(result.dependents,s.count);}
             else if(age>=65*12){result.elder=add_checked(result.elder,s.count);result.dependents=add_checked(result.dependents,s.count);}
@@ -372,6 +404,8 @@ public:
                 total=add_checked(total,s.count);
             }
             for(const auto& [id,job]:jobs_) if(!slices_.contains(id)||job.count<=0)return false;
+            for(const auto& [id,day]:exact_birth_days_)
+                if(!slices_.contains(id)||day<=0||day>31)return false;
             if(total<0 || next_id_==0)return false;
             return true;
         }catch(const std::exception&){return false;}
@@ -401,6 +435,10 @@ public:
             add(x.size());for(unsigned char c:x)add(static_cast<std::uint64_t>(c));
         };
         add(static_cast<std::uint64_t>(month_)); add(next_id_);add(next_partition_);
+        if(!exact_birth_days_.empty())
+            for(const auto& [id,day]:exact_birth_days_) {
+                add(id);add(static_cast<std::uint64_t>(day));
+            }
         for(const auto& [id,h]:health_){add(id);add(h.ill);add(h.temporary_injury);
             add(h.long_term_impairment);add(h.limited_capabilities);add(h.illness_severity);add(h.injury_severity);}
         for(const auto& [id,e]:educations_){add(id);add(static_cast<unsigned>(e.school));
@@ -434,6 +472,8 @@ public:
 private:
     Id next_id_{1},next_partition_{10'000},default_health_{},default_education_{};
     std::int64_t month_{};
+    int native_day_of_month_{}; // transient; next actual day sets this at Stage0
+    std::map<Id,int> exact_birth_days_; // optional saved extension
     std::map<Health,Id> health_ids_;
     std::map<Id,Health> health_;
     std::map<Education,Id> education_ids_;
@@ -462,6 +502,7 @@ private:
                      std::optional<People> jobs_moving,std::string provenance,Id partition_override=0){
         require(count>0&&slices_.contains(from_id),"invalid transfer source");
         const Slice old=slice(from_id);
+        const int original_birth_day=exact_birth_day(from_id);
         require(count<=old.count,"insufficient transfer source count");
         check_regions(d,e,h);
         const People prior_employed=employed(from_id);
@@ -475,6 +516,12 @@ private:
         SliceKey next_key{d,e,h,partition_override?partition_override:old.key.partition};
         require(!(next_key==old.key),"same destination group");
         auto existing=slice_ids_.find(next_key);
+        if(existing!=slice_ids_.end()&&
+           exact_birth_day(existing->second)!=original_birth_day) {
+            do {next_key.partition=next_partition_++;}
+            while(slice_ids_.contains(next_key));
+            existing=slice_ids_.find(next_key);
+        }
         if(existing!=slice_ids_.end()){
             const auto* other=job(existing->second);
             if(n_jobs>0 && other &&
@@ -488,10 +535,14 @@ private:
             (void)add_checked(slice(existing->second).count,count);
             (void)add_checked(employed(existing->second),n_jobs);
         }
-        if(count==old.count){slice_ids_.erase(old.key);slices_.erase(from_id);jobs_.erase(from_id);}
+        if(count==old.count){
+            slice_ids_.erase(old.key);slices_.erase(from_id);jobs_.erase(from_id);
+            exact_birth_days_.erase(from_id);
+        }
         else {auto& current=slices_.at(from_id);current.count-=count;++current.revision;
               if(n_jobs){auto& j=jobs_.at(from_id);j.count-=n_jobs;if(j.count==0)jobs_.erase(from_id);}}
         const Id dest=add_population(d,e,h,count,next_key.partition);
+        if(original_birth_day>0)exact_birth_days_[dest]=original_birth_day;
         if(n_jobs){
             auto& j=jobs_[dest];
             if(j.count==0){j=prior_job;j.count=0;}
