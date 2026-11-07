@@ -960,6 +960,7 @@ public:
                         due=phaseb::add_checked(due,times(pop.count,per_person));
                     }
                 }
+                const auto sellers=c.market_seller_index();
                 for(const auto& [key,demand]:needs) {
                     const auto& [region,household,good]=key;
                     const std::string wallet="HH:"+std::to_string(household);
@@ -972,8 +973,11 @@ public:
                     }
                     if(still_due>0 && c.has_actor(wallet) &&
                        c.has_market(region,good)) {
+                        const auto market_sellers=sellers.find({region,good});
                         const Quantity purchased=c.clear_household_market(
-                            wallet,region,good,still_due);
+                            wallet,region,good,still_due,
+                            market_sellers==sellers.end()?
+                                std::vector<std::string>{}:market_sellers->second);
                         if(purchased>0) {
                             c.consume(wallet,region,good,purchased);
                             still_due-=purchased;
