@@ -3597,3 +3597,4 @@ private:
 #include "vic25/phase_c_p4_impl.hpp"
 #include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
+#include "vic25/phase_c_p2_advanced_impl.hpp"
