@@ -1536,6 +1536,8 @@ public:
                                  const std::string& good) const {
         return goods_.stock({holder, region, good});
     }
+    [[nodiscard]] const std::map<InventoryKey,Quantity>&
+            physical_inventory()const{return goods_.holdings();}
     [[nodiscard]] People unit_slice_strength(const std::string& unit,Id slice) const {
         auto owner=units_.find(unit);
         if(owner==units_.end())return 0;
