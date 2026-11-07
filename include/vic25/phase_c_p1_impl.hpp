@@ -39,8 +39,19 @@ inline void IntegratedWorld::seed_p1_constitution(
            !p1_constitutions_.contains(country)&&
            valid_p1_constitution(constitution),
            "P1 invalid constitutional opening state");
+    const bool without_parliament=
+        constitution.legislature==P1LegislatureKind::none;
     p1_constitutions_.emplace(country,std::move(constitution));
     p1_coalitions_.emplace(country,P1Coalition{});
+    if(without_parliament) {
+        // A legacy seed was required to carry one nominal chamber. Once
+        // explicitly configured as a no-parliament state, discard phantom
+        // seats/quorum; P4 cannot use them to authorize a government.
+        auto& government=governments_.at(country);
+        government.chamber_seats=0;
+        government.quorum=0;
+        ++government.revision;
+    }
 }
 
 inline const P1Constitution& IntegratedWorld::p1_constitution(
