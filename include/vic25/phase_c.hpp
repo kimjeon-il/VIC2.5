@@ -1502,6 +1502,16 @@ public:
     void p4_register_party(P4Party);
     void p4_set_group_affinity(const std::string&,const std::string&,int);
     void p4_seed_contest(P4Contest);
+    // Named nominees must bind to actual P1 PersonAnchor/POP, not phantom
+    // politician populations. Party-only legacy lists remain supported.
+    void p4_nominate(const std::string&,const std::string&,
+                     std::vector<std::string>);
+    [[nodiscard]] const std::map<std::pair<std::string,std::string>,
+          std::vector<std::string>>& p4_nominations()const {
+        return p4_nominations_;
+    }
+    [[nodiscard]] const std::map<std::pair<std::string,std::string>,
+          P4PersonTerm>& p4_person_terms()const {return p4_person_terms_;}
     [[nodiscard]] const std::map<std::string,P4Party>& p4_parties()const {
         return p4_parties_;
     }
@@ -1533,6 +1543,16 @@ public:
     // office, election, tax and demographic state and transaction ownership.
     void p2_seed_base(P2BaseLaw);
     void p2_seed_amendment(P2Amendment);
+    void p2_register_upper_chamber(const std::string&,const std::string&);
+    void p2_approve_upper_bill(const std::string&,
+                                const std::vector<std::string>&);
+    void p2_register_group_demand(P2GroupDemand);
+    void p2_auto_negotiate_pending(std::int64_t);
+    [[nodiscard]] bool p2_has_negotiable_bills()const;
+    [[nodiscard]] const std::map<std::string,
+          std::vector<P2NegotiatedAmendment>>& p2_negotiated()const {
+        return p2_negotiated_;
+    }
     [[nodiscard]] bool p2_is_active_base(const std::string&)const;
     [[nodiscard]] bool p2_amendment_active(const std::string&)const;
     [[nodiscard]] std::optional<std::int64_t> p2_rule(
@@ -2951,6 +2971,64 @@ public:
                        "P2/P4 effective office term law differs from election state");
             }
         }
+        for(const auto& [key,nominees]:p4_nominations_) {
+            ensure(p4_contests_.contains(key.first)&&
+                   p4_parties_.contains(key.second)&&
+                   p4_parties_.at(key.second).country==
+                       p4_contests_.at(key.first).country&&
+                   !nominees.empty()&&
+                   nominees.size()<=static_cast<std::size_t>(
+                       p4_contests_.at(key.first).seats),
+                   "P4 orphaned personal candidate nomination");
+            std::set<std::string> unique;
+            for(const auto& person:nominees)
+                ensure(person_anchors_.contains(person)&&
+                       unique.insert(person).second,
+                       "P4 nominee not backed by unique actual POP anchor");
+        }
+        for(const auto& [key,tenure]:p4_person_terms_) {
+            ensure(p4_contests_.contains(key.first)&&
+                   key.first==tenure.contest_id&&key.second==tenure.person_id&&
+                   person_anchors_.contains(key.second)&&
+                   tenure.total_terms>0&&tenure.consecutive_terms>=0&&
+                   tenure.consecutive_terms<=tenure.total_terms&&
+                   tenure.last_elected_day>=0,
+                   "P4 invalid individual mandate history");
+        }
+        for(const auto& [country,contest_id]:p2_upper_chambers_)
+            ensure(p1_constitutions_.contains(country)&&
+                   p1_constitutions_.at(country).legislature==
+                       P1LegislatureKind::bicameral&&
+                   p4_contests_.contains(contest_id)&&
+                   p4_contests_.at(contest_id).country==country&&
+                   p4_contests_.at(contest_id).office==
+                       P4Office::upper_chamber,
+                   "P2 upper chamber not backed by an actual P4 senate");
+        for(const auto& [id,decision]:p2_chamber_decisions_)
+            ensure(p2_bills_.contains(id)&&decision.bill_id==id&&
+                   p4_contests_.contains(decision.upper_contest_id)&&
+                   decision.lower_poll_day>=-1&&
+                   decision.upper_poll_day>=-1,
+                   "P2 invalid bicameral voting evidence");
+        for(const auto& [id,demand]:p2_group_demands_)
+            ensure(id==demand.id&&governments_.contains(demand.country)&&
+                   interest_groups_.contains(demand.interest_group)&&
+                   demand.min_population_support_ppm>=0&&
+                   demand.min_population_support_ppm<=1'000'000&&
+                   !demand.law_domain.empty()&&
+                   !demand.amendment.id.empty(),
+                   "P2 invalid real interest-group demand");
+        for(const auto& [id,agreements]:p2_negotiated_) {
+            ensure(p2_bills_.contains(id),"P2 negotiated clause lacks real bill");
+            std::set<std::string> seen;
+            for(const auto& agreement:agreements)
+                ensure(agreement.bill_id==id&&
+                       seen.insert(agreement.demand_id).second&&
+                       p2_group_demands_.contains(agreement.demand_id)&&
+                       agreement.support_population>=0&&
+                       agreement.accepted_day>=0,
+                       "P2 invalid or duplicated negotiated amendment");
+        }
         for(const auto& [country,ppm]:country_income_tax_)
             ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
                    "invalid country tax state");
@@ -3191,6 +3269,9 @@ private:
     std::map<std::string,P4Party> p4_parties_;
     std::map<std::pair<std::string,std::string>,int> p4_affinities_;
     std::map<std::string,P4Contest> p4_contests_;
+    std::map<std::pair<std::string,std::string>,
+             std::vector<std::string>> p4_nominations_;
+    std::map<std::pair<std::string,std::string>,P4PersonTerm> p4_person_terms_;
     std::map<std::string,P4Result> p4_nonparliament_results_;
     std::vector<P4Result> p4_history_; // immutable election audit
     std::map<std::int64_t,std::vector<P4TermAmendment>> p4_amendments_;
@@ -3202,6 +3283,10 @@ private:
     std::map<std::string,P2Amendment> p2_amendments_;
     std::set<std::string> p2_active_amendments_;
     std::map<std::string,P2Bill> p2_bills_;
+    std::map<std::string,std::string> p2_upper_chambers_;
+    std::map<std::string,P2ChamberDecision> p2_chamber_decisions_;
+    std::map<std::string,P2GroupDemand> p2_group_demands_;
+    std::map<std::string,std::vector<P2NegotiatedAmendment>> p2_negotiated_;
     std::vector<P2LawEvent> p2_history_;
     std::map<std::int64_t,std::set<std::string>> p2_due_; // derived from P2 bills
     std::map<std::int64_t, std::vector<CabinetChange>> scheduled_cabinets_;
