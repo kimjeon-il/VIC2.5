@@ -337,5 +337,37 @@ inline void IntegratedWorld::p3_reconcile_population() {
             else ++it;
         }
     }
+    for(auto it=p5_active_daily_strikes_.begin();
+        it!=p5_active_daily_strikes_.end();) {
+        if(!people_.has_slice(it->first))
+            it=p5_active_daily_strikes_.erase(it);
+        else {
+            const auto base=strike_active_.find(it->first);
+            const People monthly=base==strike_active_.end()?0:base->second;
+            const People employed=people_.employed(it->first);
+            it->second=std::min(it->second,
+                               std::max<People>(0,employed-monthly));
+            if(it->second==0)it=p5_active_daily_strikes_.erase(it);
+            else ++it;
+        }
+    }
+    for(auto& [when,allocations]:p5_scheduled_daily_strikes_) {
+        (void)when;
+        for(auto it=allocations.begin();it!=allocations.end();) {
+            if(!people_.has_slice(it->first))
+                it=allocations.erase(it);
+            else {
+                it->second=std::min(it->second,
+                    people_.slice(it->first).count);
+                if(it->second==0)it=allocations.erase(it);
+                else ++it;
+            }
+        }
+    }
+    for(auto it=p5_scheduled_daily_strikes_.begin();
+        it!=p5_scheduled_daily_strikes_.end();) {
+        if(it->second.empty())it=p5_scheduled_daily_strikes_.erase(it);
+        else ++it;
+    }
 }
 } // namespace vic25::phasec
