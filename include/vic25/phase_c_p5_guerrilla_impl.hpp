@@ -574,12 +574,28 @@ inline void IntegratedWorld::p5_guerrilla_end(
         schedule->second.erase(campaign.id);
         if(schedule->second.empty())p5_guerrilla_review_due_.erase(schedule);
     }
+    // A successful regional legal compromise also closes a matching
+    // national P5 political crisis if one exists. Otherwise its warning
+    // would remain orphaned after the parent movement becomes inactive.
+    if(outcome.kind==P5GuerrillaResolution::enacted_reform) {
+        const auto crisis_id="P5:"+campaign.movement;
+        const auto crisis=p5_crises_.find(crisis_id);
+        if(crisis!=p5_crises_.end()&&
+           crisis->second.stage!=P5CrisisStage::settled) {
+            P5Settlement political;
+            political.id="P5-G:legal-peace:"+campaign.id;
+            political.crisis_id=crisis_id;
+            political.legal_basis=outcome.legal_basis;
+            political.kind=P5SettlementKind::legal_concession;
+            political.day=outcome.day;
+            p5_settle(std::move(political));
+        }
+        p3_movements_.at(campaign.movement).active=false;
+    }
     campaign.stage=outcome.kind==
         P5GuerrillaResolution::negotiated_ceasefire?
             P5GuerrillaStage::ceasefire:P5GuerrillaStage::resolved;
     campaign.ended_day=outcome.day;
-    if(outcome.kind==P5GuerrillaResolution::enacted_reform)
-        p3_movements_.at(campaign.movement).active=false;
     P5GuerrillaIncident entry;
     entry.id="P5-G:end:"+campaign.id+":"+std::to_string(outcome.day);
     ensure(p5_guerrilla_incident_ids_.insert(entry.id).second,
