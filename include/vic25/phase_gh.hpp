@@ -62,6 +62,9 @@ struct TransportEdge {
     bool enabled{true};
     std::int32_t transit_days{}; // native game: verified days, zero = unknown
     std::string mode{"legacy"}; // road, rail, sea, river, air or old map link
+    // Source-qualified and dated; absent means an unverified old scenario edge.
+    std::string evidence_id;
+    Month valid_from_month{-1}, valid_through_month{-1};
 };
 struct CustomsRecord {
     std::string execution_id, importer, treasury, good, policy_source;
@@ -183,6 +186,8 @@ inline std::optional<PathQuote> quote_daily_freight_path(
                 }
             }
             if(verified_day_edges_only&&actual_days<=0)continue;
+            if(edge.valid_from_month>=0 && month<edge.valid_from_month)continue;
+            if(edge.valid_through_month>=0 && month>edge.valid_through_month)continue;
             const Quantity committed=trade.edge_usage.contains({month,edge_id})?
                                      trade.edge_usage.at({month,edge_id}):0;
             const Quantity pending=(provisional_edges&&
@@ -1286,6 +1291,10 @@ public:
                 !trade_.routes.contains(r.id),"G_ERR_INVALID_ROUTE");
         trade_.routes.emplace(r.id,std::move(r));
     }
+    void seed_verified_geographic_link(std::string id,Id from,Id to,
+                                       std::string mode) {
+        core_.seed_geographic_link(std::move(id),from,to,std::move(mode));
+    }
     void seed_transport_edge(TransportEdge edge) {
         require(core_.commit_id()==0 && !edge.id.empty() &&
                 edge.from>0 && edge.to>0 && edge.from!=edge.to &&
@@ -1295,6 +1304,10 @@ public:
                 (edge.mode=="legacy"||edge.mode=="road"||
                  edge.mode=="rail"||edge.mode=="sea"||
                  edge.mode=="river"||edge.mode=="air")&&
+                (edge.mode=="legacy"||
+                 (!edge.evidence_id.empty()&&
+                  edge.valid_from_month>=0&&
+                  edge.valid_through_month>=edge.valid_from_month))&&
                 !edge.carrier.empty() &&
                 core_.spatial().provinces.contains(edge.from) &&
                 core_.spatial().provinces.contains(edge.to) &&
@@ -1315,8 +1328,7 @@ public:
         }
         const bool adjacent=a.neighbors.contains(edge.to);
         const bool connected=edge.mode=="legacy"?(adjacent||coastal):
-            edge.mode=="road"?adjacent:
-            edge.mode=="sea"?coastal:documented_link;
+            (documented_link&&(edge.mode!="road"||adjacent));
         require(connected,
                 "G_ERR_UNVERIFIED_INTERMODAL_CONNECTIVITY");
         (void)core_.core().core().cash(edge.carrier);
