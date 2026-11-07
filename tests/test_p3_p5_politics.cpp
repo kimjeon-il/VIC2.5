@@ -36,6 +36,7 @@ struct PoliticalFixture {
         core.seed_actor("A",1000);
         core.seed_actor("EMP",100);
         core.seed_government("A","OLD_HEAD","PM",5,3);
+        core.p5_seed_capital("A","R");
         core.seed_p1_constitution("A",{
             no_parliament?P1GovernancePrinciple::monarchy:
                           P1GovernancePrinciple::presidential_republic,
