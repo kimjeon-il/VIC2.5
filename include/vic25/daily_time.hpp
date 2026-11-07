@@ -396,6 +396,13 @@ public:
                         "TIME_ERR_INVALID_CARGO_ETA");
                 require(!next_cargo.contains(command.id),
                         "TIME_ERR_DUPLICATE_CARGO");
+                real_actions[1].push_back(
+                    [command,current](phasegh::Stage& gh) {
+                        gh.reserve_daily_cargo(command.id,command.route_id,
+                            command.from,command.region,command.good,
+                            command.amount,current.day,
+                            days_in_month(current.year,current.month));
+                    });
                 real_actions[7].push_back(
                     [command,current](phasegh::Stage& gh) {
                         gh.dispatch_daily_cargo(command.id,command.route_id,
