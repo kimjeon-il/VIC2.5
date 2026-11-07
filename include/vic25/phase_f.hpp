@@ -7,6 +7,9 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
+#include <tuple>
+#include <vector>
 #include <stdexcept>
 #include <string>
 
