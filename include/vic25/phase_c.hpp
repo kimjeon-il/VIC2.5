@@ -1502,6 +1502,10 @@ public:
         const std::string&,const std::string&)const;
     [[nodiscard]] std::int64_t p3_trait_modifier_ppm(
         const std::string& country,const std::string& effect_key)const;
+    // Derived from real registered personal investors or the actual company
+    // share ledger. No virtual investment pool, contributions or currency.
+    [[nodiscard]] std::int64_t p3_private_investment_bonus_ppm(
+        const std::string& country,const std::string& investor)const;
     [[nodiscard]] std::vector<politics::IGEffect> p3_active_traits(
         const std::string& country,const std::string& group)const;
     [[nodiscard]] P3MovementView p3_movement_view(const std::string&)const;

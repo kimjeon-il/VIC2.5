@@ -1154,14 +1154,29 @@ public:
                               p.contractor,p.region,p.material_good)/p.material_per_work;
                 const People staff=c.phase_d_workforce(p.contractor);
                 const Quantity affordable=(free-investment.reserve_cash)/p.cash_price_per_work;
-                Quantity n=std::min({investment.maximum_daily_work,
+                Quantity work_budget=investment.maximum_daily_work;
+                const auto country=c.sovereignty(p.region);
+                const bool privately_funded=
+                    !c.has_country_treasury(country)||
+                    p.client!=c.country_treasury(country);
+                if(privately_funded) {
+                    const auto effect=phaseb::add_checked(
+                        c.p2_modifier_ppm(
+                            country,"country_private_construction_allocation_mult"),
+                        c.p3_private_investment_bonus_ppm(country,p.client));
+                    const auto rate=std::clamp<std::int64_t>(
+                        1'000'000+effect,0,2'000'000);
+                    work_budget=phaseb::add_checked(
+                        phaseb::mul_checked(work_budget/1'000'000,rate),
+                        phaseb::mul_checked(work_budget%1'000'000,rate)/1'000'000);
+                }
+                Quantity n=std::min({work_budget,
                      p.work_required-p.accepted_work,materials,
                      static_cast<Quantity>(staff/p.workers_per_work),affordable});
                 // The actual Trade Unions "work to rule" trait modifies
                 // paid daily construction work, not a synthetic construction
                 // progress bar. Bonuses cannot create additional materials,
                 // workers or funds beyond the observed feasible work.
-                const auto country=c.sovereignty(p.region);
                 const auto trait=c.p3_trait_modifier_ppm(
                     country,"state_construction_mult");
                 if(trait<0&&n>0) {

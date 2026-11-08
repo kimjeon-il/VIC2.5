@@ -340,6 +340,48 @@ inline std::int64_t IntegratedWorld::p3_trait_modifier_ppm(
     return sum;
 }
 
+inline std::int64_t IntegratedWorld::p3_private_investment_bonus_ppm(
+        const std::string& country,const std::string& investor)const {
+    ensure(governments_.contains(country),"P3 investment needs real sovereign");
+    const auto cap=p3_trait_modifier_ppm(
+        country,"state_capitalists_investment_pool_efficiency_mult");
+    const auto arist=p3_trait_modifier_ppm(
+        country,"state_aristocrats_investment_pool_efficiency_mult");
+    if(cap==0&&arist==0)return 0;
+    const auto rate=[&](const std::string& holder)->std::int64_t {
+        const auto anchor=person_anchors_.find(holder);
+        if(anchor==person_anchors_.end()||
+           !people_.has_slice(anchor->second))return 0;
+        const auto row=people_.slice(anchor->second);
+        const auto& demographic=people_.demographic(row.key.demographic);
+        const auto sovereign=sovereignty_.find(demographic.region);
+        if(sovereign==sovereignty_.end()||sovereign->second!=country)return 0;
+        const auto& kind=people_.economic(row.key.economic).profession;
+        if(kind=="capitalist"||kind=="capitalists")return cap;
+        if(kind=="aristocrat"||kind=="aristocrats")return arist;
+        return 0;
+    };
+    const auto asset="company:"+investor;
+    if(!tracked_assets_.contains(asset))return rate(investor);
+    const auto holders=ownership_.holders(asset);
+    Money total=0;
+    for(const auto& [holder,units]:holders) {
+        (void)holder;
+        if(units>0)total=phaseb::add_checked(total,units);
+    }
+    if(total<=0)return 0;
+    std::int64_t weighted=0;
+    for(const auto& [holder,units]:holders) {
+        if(units<=0)continue;
+        const auto contribution=rate(holder);
+        if(contribution==0)continue;
+        const auto fraction=p3_fraction(units,total);
+        weighted=phaseb::add_checked(weighted,
+            phaseb::mul_checked(contribution,fraction)/1'000'000);
+    }
+    return weighted;
+}
+
 inline P3MovementView IntegratedWorld::p3_movement_view(
         const std::string& id)const {
     const auto& movement=p3_movements_.at(id);
