@@ -707,6 +707,7 @@ static void autonomous_h_treaty_risk_and_institutional_vote() {
     auto world=seed_lawful_autonomous_treaty_and_council();
     p0::DailyGame game(std::move(world),policy);
     const auto beforeA=c(game).cash("A"),beforeB=c(game).cash("B");
+    const auto beforeOrganization=c(game).cash("ORG:LEAGUE");
     game.advance_day(); // January 2: lawful country AI decisions
     const auto& h=game.world().engine().diplomacy();
     require_test(h.treaties.at("PACT-A-B").ratifications.contains("B"),
@@ -717,13 +718,22 @@ static void autonomous_h_treaty_risk_and_institutional_vote() {
                  "H organization with a lawful quorum and yes votes should adopt");
     require_test(!h.organizations.at("LEAGUE").decisions.at("COUNCIL-VETO").adopted,
                  "H organization veto member rejected but vote was adopted");
-    if(c(game).cash("A")!=beforeA || c(game).cash("B")!=beforeB)
-        throw std::runtime_error(
-            "H deliberation cash mismatch: A="+std::to_string(beforeA)+
-            "->"+std::to_string(c(game).cash("A"))+
-            ", B="+std::to_string(beforeB)+
-            "->"+std::to_string(c(game).cash("B"))+
-            ", organization="+std::to_string(c(game).cash("ORG:LEAGUE")));
+    // Ordinary active organization membership is a pre-existing, legally
+    // enforceable monthly obligation: the native P0 code pays real dues even
+    // without an explicit manual mandate. Voting and treaty ratification
+    // create no cash, while funded membership debits must be fully balanced.
+    const auto& council=h.organizations.at("LEAGUE");
+    const auto dues=council.dues_per_member;
+    require_test(dues>0 &&
+                 council.paid.at({24000,"A"})==dues &&
+                 council.paid.at({24000,"B"})==dues &&
+                 c(game).cash("A")==beforeA-dues &&
+                 c(game).cash("B")==beforeB-dues &&
+                 c(game).cash("ORG:LEAGUE")==beforeOrganization+2*dues &&
+                 c(game).cash("A")+c(game).cash("B")+
+                 c(game).cash("ORG:LEAGUE")==
+                 beforeA+beforeB+beforeOrganization,
+                 "H autonomous dues must transfer actual cash once, no money creation");
 
     const auto checkpoint=daily::SnapshotCodec::encode(game.world());
     p0::DailyGame replay(daily::SnapshotCodec::decode(checkpoint),policy);

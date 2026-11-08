@@ -11,7 +11,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Configure headless content test
         run: cmake -S . -B build-content -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF
-      - name: Build content test only
-        run: cmake --build build-content --target vic25_content_tests vic25_content_json_tests vic25_phase_c_tests vic25_daily_native_tests vic25_p0_daily_tests --parallel 2
-      - name: Content event decision journal formation regression
-        run: ctest --test-dir build-content -R "^(vic25_content(_json)?_tests|vic25_phase_c_tests|vic25_phase_c_contract_audit|vic25_daily_native_tests|vic25_p0_daily_tests)$" --output-on-failure
+      - name: Compile P0 gameplay regression first
+        run: cmake --build build-content --target vic25_p0_daily_tests --parallel 2
+      - name: P0 gameplay regression
+        run: ctest --test-dir build-content -R "^vic25_p0_daily_tests$" --output-on-failure
+      - name: Compile remaining content and integration regressions
+        run: cmake --build build-content --target vic25_content_tests vic25_content_json_tests vic25_phase_c_tests vic25_daily_native_tests --parallel 2
+      - name: Remaining content, Phase C and native daily regressions
+        run: ctest --test-dir build-content -R "^(vic25_content(_json)?_tests|vic25_phase_c_tests|vic25_phase_c_contract_audit|vic25_daily_native_tests)$" --output-on-failure
