@@ -79,8 +79,20 @@ static void catalogued_laws_and_stances() {
     // 1.13.11 (172 ideology definitions, 136 unconditional law modifiers).
     // The extra 18 newer 1.15 ideologies and conditional effects are not
     // fabricated by assigning arbitrary default opinions.
-    check(c.ideologies.size()>=172&&c.modifiers.size()==136,
-          "source-qualified ideological or legal modifier rows missing");
+    std::size_t stanceCount=0,modifierCount=0;
+    for(const auto& [id,stances]:c.ideologies) {
+        (void)id; stanceCount+=stances.size();
+    }
+    for(const auto& [id,mods]:c.modifiers) {
+        (void)id; modifierCount+=mods.size();
+    }
+    check(c.ideologies.size()==190&&c.modifiers.size()==148&&
+          stanceCount==4469&&modifierCount==812,
+          "1.15 full ideology or unconditional law modifier dataset incomplete");
+    check(c.knows_ideology("modernizer")&&c.knows_ideology("autocratic")&&
+          c.knows_ideology("tsarist")&&
+          c.stance("socialist","economic_system","cooperative_ownership").has_value(),
+          "1.15 sourced ideology or backwards-compatible ideology migration missing");
     check(c.modifier("serfdom",
           "state_peasants_internal_migration_disallowed_bool").has_value()&&
           c.modifier("mass_conscription",
