@@ -510,6 +510,30 @@ public:
                actors_.contains(seller) && actors_.contains(buyer) &&
                buyer != seller && shares(asset, seller) >= units &&
                cash(buyer) >= units, "invalid security transfer");
+        // Apply actual enacted command ownership law only when the share
+        // registry is demonstrably bound to a physical firm and one
+        // unambiguous sovereign jurisdiction. Unbound securities remain
+        // governed by the existing ownership ledger, never guessed.
+        if(asset.rfind("company:",0)==0) {
+            const auto firm=asset.substr(8);
+            std::string sovereign;
+            for(const auto& [site_id,site]:facilities_) {
+                (void)site_id;
+                if(site.owner!=firm)continue;
+                const auto juris=sovereignty_.find(site.region);
+                if(juris==sovereignty_.end())continue;
+                ensure(sovereign.empty()||sovereign==juris->second,
+                       "P2 multinational title transfer needs legal allocation");
+                sovereign=juris->second;
+            }
+            if(!sovereign.empty()&&
+               p2_selected_law(sovereign,"economic_system")==
+                   std::optional<std::string>("command_economy")) {
+                ensure(has_country_treasury(sovereign)&&
+                       buyer==country_treasury(sovereign),
+                       "P2 command-economy corporate titles require state buyer");
+            }
+        }
         ensure_security_account(buyer, asset);
         ownership_.transfer(asset, seller, buyer, units);
         money_.post({unique("share-sale"), "share ownership and cash swap", {
