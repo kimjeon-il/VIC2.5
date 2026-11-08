@@ -143,12 +143,19 @@ inline bool IntegratedWorld::p2_citizenship_vote_allowed(
 }
 inline bool IntegratedWorld::p2_migration_permitted(
         Id source,const std::string& destination_region)const {
-    if(!people_.has_slice(source)||destination_region.empty()||
-       !sovereignty_.contains(destination_region))return false;
+    if(!people_.has_slice(source)||destination_region.empty())return false;
     const auto& dem=people_.demographic(
         people_.slice(source).key.demographic);
     const auto from=sovereignty_.find(dem.region);
     if(from==sovereignty_.end())return false;
+    if(!sovereignty_.contains(destination_region)) {
+        // Old Phase C fiscal/population fixtures can explicitly migrate to
+        // an unseeded economic region before any national government/laws
+        // exist. Preserve this historic contract. Once a real sovereign
+        // government exists the destination must be legally registered.
+        return !governments_.contains(from->second)&&
+               !p2_national_identities_.contains(from->second);
+    }
     const auto& home=from->second;
     const auto& target=sovereignty_.at(destination_region);
     if(dem.legal_status=="serf"&&
