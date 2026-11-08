@@ -32,6 +32,13 @@ inline std::string bare_law(std::string s) {
 struct Law {
     std::string group,id,category;
 };
+// Coefficients are integer fixed point (1e6 = 1.0); booleans are 0/1.
+// Only direct effects verified in the imported source are present.
+// Unsupported runtime effect keys remain visible rather than simulated.
+struct LawModifier {
+    std::int64_t value_ppm{};
+    bool boolean{};
+};
 struct Stance {
     std::string ideology,law_group,law;
     std::int8_t strength{};
@@ -40,7 +47,17 @@ struct Catalogue {
     std::map<std::string,Law> laws;
     std::map<std::string,std::set<std::string>> by_group;
     std::map<std::string,std::map<std::string,std::int8_t>> ideologies;
+    std::map<std::string,std::map<std::string,LawModifier>> modifiers;
     std::map<std::string,std::string> categories;
+    [[nodiscard]] std::optional<LawModifier> modifier(
+               const std::string& law,const std::string& effect_key)const {
+        const auto id=bare_law(law);
+        const auto it=modifiers.find(id);
+        if(it==modifiers.end())return std::nullopt;
+        const auto v=it->second.find(effect_key);
+        if(v==it->second.end())return std::nullopt;
+        return v->second;
+    }
     [[nodiscard]] bool has_group(const std::string& group)const {
         return by_group.contains(bare_group(group));
     }
@@ -66,6 +83,7 @@ struct Catalogue {
 // identifiers, not a copy of scripted conditions, artwork or descriptions.
 // Only a single selected law per group belongs in the Phase-C P2 legal ledger.
 #include "vic25/phase_c_politics_reference_ideologies.hpp"
+#include "vic25/phase_c_politics_reference_modifiers.hpp"
 
 inline const Catalogue& catalogue() {
     static const Catalogue result=[] {
@@ -224,6 +242,7 @@ inline const Catalogue& catalogue() {
             }
         }
         install_reference_ideologies(c);
+        install_reference_modifiers(c);
         return c;
     }();
     return result;
