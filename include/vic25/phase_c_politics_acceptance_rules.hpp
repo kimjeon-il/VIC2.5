@@ -18,12 +18,12 @@ struct P2AcceptanceLawEffect {
 inline std::optional<P2AcceptanceLawEffect> p2_acceptance_law_effect(
     const std::string& law,P2AcceptanceLevel level) {
     static const std::map<std::string,std::array<P2AcceptanceLawEffect,5>> table{
-        {"subjecthood",{{false,600000,600000,1000000},{false,700000,700000,1000000},{true,800000,800000,750000},{true,900000,900000,1000000},{true,1000000,1000000,1000000}}},
-        {"ethnostate",{{false,500000,500000,1000000},{false,600000,600000,1000000},{false,700000,750000,1000000},{true,850000,850000,500000},{true,1250000,1250000,1000000}}},
-        {"national_supremacy",{{false,600000,600000,1000000},{false,700000,700000,1000000},{true,800000,800000,500000},{true,900000,900000,750000},{true,1200000,1200000,1000000}}},
-        {"racial_segregation",{{false,700000,700000,1000000},{false,800000,800000,1000000},{true,900000,900000,750000},{true,1100000,1050000,1000000},{true,1100000,1150000,1000000}}},
-        {"cultural_exclusion",{{false,700000,700000,1000000},{true,800000,800000,750000},{true,900000,900000,1000000},{true,1100000,1000000,1000000},{true,1100000,1050000,1000000}}},
-        {"multicultural",{{true,1000000,800000,1000000},{true,1000000,900000,1000000},{true,1000000,950000,1000000},{true,1000000,1000000,1000000},{true,1000000,1000000,1000000}}},
+        {"subjecthood", std::array<P2AcceptanceLawEffect,5>{P2AcceptanceLawEffect{false,600000,600000,1000000},P2AcceptanceLawEffect{false,700000,700000,1000000},P2AcceptanceLawEffect{true,800000,800000,750000},P2AcceptanceLawEffect{true,900000,900000,1000000},P2AcceptanceLawEffect{true,1000000,1000000,1000000}}},
+        {"ethnostate", std::array<P2AcceptanceLawEffect,5>{P2AcceptanceLawEffect{false,500000,500000,1000000},P2AcceptanceLawEffect{false,600000,600000,1000000},P2AcceptanceLawEffect{false,700000,750000,1000000},P2AcceptanceLawEffect{true,850000,850000,500000},P2AcceptanceLawEffect{true,1250000,1250000,1000000}}},
+        {"national_supremacy", std::array<P2AcceptanceLawEffect,5>{P2AcceptanceLawEffect{false,600000,600000,1000000},P2AcceptanceLawEffect{false,700000,700000,1000000},P2AcceptanceLawEffect{true,800000,800000,500000},P2AcceptanceLawEffect{true,900000,900000,750000},P2AcceptanceLawEffect{true,1200000,1200000,1000000}}},
+        {"racial_segregation", std::array<P2AcceptanceLawEffect,5>{P2AcceptanceLawEffect{false,700000,700000,1000000},P2AcceptanceLawEffect{false,800000,800000,1000000},P2AcceptanceLawEffect{true,900000,900000,750000},P2AcceptanceLawEffect{true,1100000,1050000,1000000},P2AcceptanceLawEffect{true,1100000,1150000,1000000}}},
+        {"cultural_exclusion", std::array<P2AcceptanceLawEffect,5>{P2AcceptanceLawEffect{false,700000,700000,1000000},P2AcceptanceLawEffect{true,800000,800000,750000},P2AcceptanceLawEffect{true,900000,900000,1000000},P2AcceptanceLawEffect{true,1100000,1000000,1000000},P2AcceptanceLawEffect{true,1100000,1050000,1000000}}},
+        {"multicultural", std::array<P2AcceptanceLawEffect,5>{P2AcceptanceLawEffect{true,1000000,800000,1000000},P2AcceptanceLawEffect{true,1000000,900000,1000000},P2AcceptanceLawEffect{true,1000000,950000,1000000},P2AcceptanceLawEffect{true,1000000,1000000,1000000},P2AcceptanceLawEffect{true,1000000,1000000,1000000}}},
     };
     const auto it=table.find(law);
     if(it==table.end())return std::nullopt;
