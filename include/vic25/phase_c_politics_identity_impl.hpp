@@ -124,15 +124,22 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
     return P2AcceptanceView{country,pop.culture,pop.religion,pop.region,
                             static_cast<int>(score),level};
 }
-inline bool IntegratedWorld::p2_citizenship_vote_allowed(
+inline std::optional<P2AcceptanceLawEffect>
+IntegratedWorld::p2_acceptance_effect(
         const std::string& country,Id slice)const {
     const auto view=p2_acceptance(country,slice);
-    if(!view)return true; // legacy simulations have no cultural source
+    if(!view)return std::nullopt;
     const auto law=p2_selected_law(country,"citizenship");
-    if(law&&*law=="multicultural")return true;
-    // Reduced franchise under discriminatory law. This is a hard
-    // eligibility gate; actual ballot volume still uses P4 real POP.
-    return view->score>=60;
+    if(!law)return std::nullopt;
+    return p2_acceptance_law_effect(*law,view->level);
+}
+inline bool IntegratedWorld::p2_citizenship_vote_allowed(
+        const std::string& country,Id slice)const {
+    if(const auto effect=p2_acceptance_effect(country,slice))
+        return effect->can_vote;
+    // Missing law/trait source remains "not established", not "score 0".
+    // The legacy ballot conditions still apply in unconfigured scenarios.
+    return true;
 }
 inline bool IntegratedWorld::p2_migration_permitted(
         Id source,const std::string& destination_region)const {
