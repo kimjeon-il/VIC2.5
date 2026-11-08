@@ -709,12 +709,16 @@ static void autonomous_h_treaty_risk_and_institutional_vote() {
     const auto beforeA=c(game).cash("A"),beforeB=c(game).cash("B");
     game.advance_day(); // January 2: lawful country AI decisions
     const auto& h=game.world().engine().diplomacy();
-    require_test(h.treaties.at("PACT-A-B").ratifications.contains("B") &&
-                 !h.treaties.at("PACT-A-B").active &&
-                 h.organizations.at("LEAGUE").decisions.at("COUNCIL-APPROVE").adopted &&
-                 !h.organizations.at("LEAGUE").decisions.at("COUNCIL-VETO").adopted &&
-                 c(game).cash("A")==beforeA && c(game).cash("B")==beforeB,
-                 "H AI must respect real treaty ratification, organization quorum/veto and no free money");
+    require_test(h.treaties.at("PACT-A-B").ratifications.contains("B"),
+                 "H country AI did not ratify authorized treaty");
+    require_test(!h.treaties.at("PACT-A-B").active,
+                 "H ratification applied treaty before effective month");
+    require_test(h.organizations.at("LEAGUE").decisions.at("COUNCIL-APPROVE").adopted,
+                 "H organization with a lawful quorum and yes votes should adopt");
+    require_test(!h.organizations.at("LEAGUE").decisions.at("COUNCIL-VETO").adopted,
+                 "H organization veto member rejected but vote was adopted");
+    require_test(c(game).cash("A")==beforeA && c(game).cash("B")==beforeB,
+                 "H deliberation alone must not create or move treasury cash");
 
     const auto checkpoint=daily::SnapshotCodec::encode(game.world());
     p0::DailyGame replay(daily::SnapshotCodec::decode(checkpoint),policy);
