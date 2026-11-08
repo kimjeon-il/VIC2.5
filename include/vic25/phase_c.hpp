@@ -1073,6 +1073,8 @@ public:
                (moving_shares==0||(tracked_assets_.contains(asset) &&
                 shares(asset,old_owner)>=moving_shares)),
                "invalid explicit migration and ownership allocation");
+        ensure(p2_migration_permitted(source,destination_region),
+               "P2 migration law, serfdom or citizenship restrictions");
         const Id arrived=people_.migrate(source,count,destination_region,destination_household,0);
         if(moving_cash) {
             if(phase_d_reservation_mode_)
@@ -2866,6 +2868,7 @@ public:
             for (const auto& command:plan[static_cast<std::size_t>(n)])
                 command(staged);
             if(n==8)staged.phase_time_accrue_and_settle_interest();
+            if(n==10)staged.phase_time_enforce_abolition();
             if(n==10&&final_calendar_day) {
                 // Update month-based age classification after today's real
                 // population events; never rerun month-sized risk rates.
@@ -2917,6 +2920,7 @@ public:
             if (n == 9) stage.collect_market_grievances();
             for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
             if (n == 10) {
+                stage.phase_time_enforce_abolition();
                 // Strikes reserve actual working time only for this month's
                 // production; they must not outlive a later death or split.
                 stage.strike_active_.clear();
