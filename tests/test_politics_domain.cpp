@@ -43,8 +43,13 @@ static void native_rate_callback_changes_real_pop_only() {
     auto w=people(8*12);
     auto control=w;
     auto no=isolated();
+    no.primary_access_ppm=1'000'000;
     phaseb::Engine engine(no);
-    (void)engine.advance_day(control,1,31);
+    (void)engine.advance_day(control,1,31,
+        [](const phaseb::World&,phaseb::Id,
+           const char* metric,phaseb::People rate) {
+            return std::string(metric)=="school"?phaseb::People{0}:rate;
+        });
     check(schooling(control)==0&&control.population()==100,
           "zero school hazard changed a real POP");
     (void)engine.advance_day(w,1,31,
@@ -69,6 +74,7 @@ static void native_rate_callback_changes_real_pop_only() {
     auto migrants=people(30*12);
     auto migrules=isolated();
     migrules.destination_by_region["R"]="R2";
+    migrules.migration_ppm=1'000'000;
     phaseb::Engine move(migrules);
     (void)move.advance_day(migrants,1,31,
         [](const phaseb::World&,phaseb::Id,
