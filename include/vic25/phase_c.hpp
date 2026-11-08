@@ -9,6 +9,7 @@
 #include "vic25/phase_c_p4.hpp"
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
+#include "vic25/phase_c_politics_catalog.hpp"
 #include "vic25/phase_c_p5.hpp"
 #include "vic25/phase_c_p5_guerrilla.hpp"
 #include "vic25/ledgers.hpp"
@@ -1449,6 +1450,18 @@ public:
     void p3_seed_group(P3Group);
     void p3_seed_movement(P3Movement);
     void p3_set_stance(Id,const std::string&,P3Stance);
+    // Data-driven ideological profiles may be changed on the lawful
+    // political stage. The named leader must be an existing PersonAnchor;
+    // neither method manufactures new politicians or political headcount.
+    void p3_set_ideologies(const std::string&,const std::string&,
+                          std::vector<std::string>);
+    void p3_set_leader_ideology(const std::string&,const std::string&,
+                               const std::string&);
+    [[nodiscard]] std::vector<std::string> p3_ideologies(
+        const std::string&,const std::string&)const;
+    [[nodiscard]] std::optional<int> p3_law_stance(
+        const std::string&,const std::string&,
+        const std::string&,const std::string&)const;
     [[nodiscard]] const std::map<Id,P3Attitude>& p3_attitudes()const {
         return p3_attitudes_;
     }
@@ -1671,6 +1684,12 @@ public:
     [[nodiscard]] bool p2_amendment_active(const std::string&)const;
     [[nodiscard]] std::optional<std::int64_t> p2_rule(
         const std::string&,const std::string&,P2ClauseKind)const;
+    [[nodiscard]] std::optional<std::string> p2_selected_law(
+        const std::string&,const std::string&)const;
+    [[nodiscard]] std::int32_t p2_political_strength_ppm(
+        const std::string&,P3GroupType)const;
+    [[nodiscard]] std::int32_t p2_institution_factor_ppm(
+        const std::string&,P1InstitutionKind)const;
     [[nodiscard]] int p2_voting_age(const std::string&)const;
     [[nodiscard]] P2TermView p2_term(const std::string&)const;
     [[nodiscard]] bool p2_candidate_eligible(
@@ -2959,6 +2978,23 @@ public:
                     person_anchors_.contains(group.leader_anchor)),
                    "P3 illegal interest-group identity/leader");
         }
+        for(const auto& [key,ids]:p3_ideology_overrides_) {
+            ensure(p3_groups_.contains(key)&&!ids.empty()&&ids.size()<=8,
+                   "P3 ideology profile has no actual interest group");
+            std::set<std::string> unique;
+            for(const auto& id:ids)
+                ensure(politics::catalogue().knows_ideology(id)&&
+                       unique.insert(id).second,
+                       "P3 unknown or repeated ideology");
+        }
+        for(const auto& [key,id]:p3_leader_ideologies_) {
+            const auto group=p3_groups_.find(key);
+            ensure(group!=p3_groups_.end()&&
+                   !group->second.leader_anchor.empty()&&
+                   person_anchors_.contains(group->second.leader_anchor)&&
+                   politics::catalogue().knows_ideology(id),
+                   "P3 leader ideology not backed by real named person");
+        }
         for(const auto& [id,movement]:p3_movements_) {
             ensure(id==movement.id&&governments_.contains(movement.country)&&
                    static_cast<unsigned>(movement.goal)<=
@@ -3660,6 +3696,12 @@ private:
     // people, never an independent count or financial account.
     std::map<Id,P3Attitude> p3_attitudes_;
     std::map<std::pair<std::string,std::string>,P3Group> p3_groups_;
+    // Optional legal/leadership ideology selections; separate versioned
+    // snapshot extension preserves the old P3 group record byte layout.
+    std::map<std::pair<std::string,std::string>,std::vector<std::string>>
+        p3_ideology_overrides_;
+    std::map<std::pair<std::string,std::string>,std::string>
+        p3_leader_ideologies_;
     std::map<std::string,P3Movement> p3_movements_;
     std::int64_t p3_last_reaction_day_{-1};
     std::map<std::string,P5Crisis> p5_crises_;
