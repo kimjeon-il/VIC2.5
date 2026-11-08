@@ -2,6 +2,7 @@
 // VIC2.5: shared, deterministic event/decision/journal/formation content rules.
 // No independent population, finance, military, law or sovereignty ledgers.
 #include <algorithm>
+#include <compare>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -372,11 +373,10 @@ inline void apply_effects(const Registry& rules,State& st,const Scope& s,
             case EffectKind::clear_flag:st.flags.erase(key);break;
             case EffectKind::add_counter: {
                 auto& v=st.counters[key];
-                const auto sum=static_cast<__int128>(v)+e.amount;
-                require(sum>=std::numeric_limits<Number>::min()&&
-                        sum<=std::numeric_limits<Number>::max(),
+                require((e.amount>=0&&v<=std::numeric_limits<Number>::max()-e.amount)||
+                        (e.amount<0&&v>=std::numeric_limits<Number>::min()-e.amount),
                         "CONTENT_COUNTER_OVERFLOW");
-                v=static_cast<Number>(sum);
+                v+=e.amount;
                 break;
             }
             case EffectKind::schedule_event:
@@ -414,8 +414,8 @@ inline void apply_effects(const Registry& rules,State& st,const Scope& s,
 inline bool cooldown_ok(const std::map<std::string,Day>& last,
                         const std::string& key,Day current,Day days) {
     const auto it=last.find(key);
-    return it==last.end()||(days>0&&current>=it->second &&
-                            current-it->second>=days);
+    return it==last.end()||days==0||
+           (current>=it->second&&current-it->second>=days);
 }
 inline void step(const Registry& rules,State& st,Day day,
             std::uint64_t seed,const ReadDomain& read,
