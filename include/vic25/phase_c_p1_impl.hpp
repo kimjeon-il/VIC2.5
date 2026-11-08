@@ -148,6 +148,36 @@ inline P1LegitimacyView IntegratedWorld::p1_legitimacy(
     result.score=(50*result.group_support+
                   30*result.electoral_support+
                   20*result.legal_compatibility)/100;
+    // Political legitimacy is penalized by observable conflict between
+    // coalition groups' ideological positions on actually adopted laws.
+    // No invented party ideology, POP count, or political-power token.
+    std::int64_t disputes=0,comparisons=0;
+    for(const auto& [slot,law_id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(law_id);
+        if(law.country!=country||
+           !politics::catalogue().has(law.domain,law.base_choice))continue;
+        for(std::size_t i=0;i<coalition.ruling_groups.size();++i) {
+            const auto& left=coalition.ruling_groups[i];
+            if(!p3_groups_.contains({country,left}))continue;
+            const auto a=p3_law_stance(country,left,law.domain,law.base_choice);
+            if(!a)continue;
+            for(std::size_t j=i+1;j<coalition.ruling_groups.size();++j) {
+                const auto& right=coalition.ruling_groups[j];
+                if(!p3_groups_.contains({country,right}))continue;
+                const auto b=p3_law_stance(country,right,law.domain,law.base_choice);
+                if(!b)continue;
+                if((*a>0&&*b<0)||(*a<0&&*b>0))
+                    disputes+=std::abs(*a-*b);
+                ++comparisons;
+            }
+        }
+    }
+    if(comparisons>0)
+        result.ideological_incompatibility=static_cast<int>(
+            std::min<std::int64_t>(20,disputes*5/comparisons));
+    result.score=std::clamp(result.score-
+                           result.ideological_incompatibility,0,100);
     return result;
 }
 
@@ -191,8 +221,13 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
     const People accessible=p4_scaled(
         staffed_and_funded,
         1'000'000-p5_guerrilla_disruption_ppm(service.region),1'000'000);
+    // Existing paid staff/cash remain the upper bound. A country that
+    // legally has no schools, police or health institution cannot deliver
+    // those public services through a scenario's old orphaned facility.
+    const People lawful=p4_scaled(
+        accessible,p2_institution_factor_ppm(link.country,link.kind),1'000'000);
     return {link.country,institution_id,link.kind,level,
-            staff,slots,staffed,accessible,funded};
+            staff,slots,staffed,lawful,funded};
 }
 
 inline bool IntegratedWorld::has_due_p1_government(std::int64_t day)const {
