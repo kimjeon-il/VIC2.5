@@ -243,12 +243,45 @@ static void abolition_preserves_real_people_and_membership() {
         daily::SnapshotCodec::decode(bytes))==bytes,
           "new legal-status transition lost saving deterministic");
 }
+static void economic_law_restricts_real_company_ownership() {
+    Scenario fixture;
+    auto& c=fixture.gh.seed_geography().seed_core().seed_core();
+    c.seed_actor("OWNER",100);
+    c.seed_actor("PRIVATE",100);
+    c.seed_production_facility("MILL","OWNER","RA",10);
+    c.seed_shares("company:OWNER","OWNER",10);
+    law(c,"A","economic_system","command_economy");
+    fixture.gh.validate();
+    auto world=daily::World::adopt(std::move(fixture.gh),77);
+    const auto before=daily::SnapshotCodec::encode(world);
+    phasegh::World::Plan forbidden;
+    forbidden[7].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().sell_shares("company:OWNER","OWNER","PRIVATE",2);
+    });
+    check(rejects([&]{world.advance_day(forbidden);})&&
+          daily::SnapshotCodec::encode(world)==before,
+          "command economy illegally transferred physical company to private buyer");
+    phasegh::World::Plan state_acquisition;
+    state_acquisition[7].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().sell_shares("company:OWNER","OWNER","A",2);
+    });
+    world.advance_day(state_acquisition);
+    check(view(world).shares("company:OWNER","OWNER")==8&&
+          view(world).shares("company:OWNER","A")==2,
+          "real state acquisition under command economy did not settle shares");
+    const auto saved=daily::SnapshotCodec::encode(world);
+    check(daily::SnapshotCodec::encode(
+        daily::SnapshotCodec::decode(saved))==saved,
+        "state-owned company title changed on checkpoint replay");
+}
+
 int main(){
     try{
         source_ideologies_laws_traits();
         acceptance_and_five_tier_rights();
         physical_migration_and_law_block();
         abolition_preserves_real_people_and_membership();
+        economic_law_restricts_real_company_ownership();
         std::cout<<"VIC2.5 POLICY IDENTITY AND REFERENCE DATA PASS\n";
     }catch(const std::exception& e){
         std::cerr<<"POLITICS IDENTITY FAILURE: "<<e.what()<<"\n";
