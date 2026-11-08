@@ -1472,6 +1472,10 @@ public:
     }
     [[nodiscard]] P3GroupView p3_group_view(
         const std::string&,const std::string&)const;
+    [[nodiscard]] std::int64_t p3_trait_modifier_ppm(
+        const std::string& country,const std::string& effect_key)const;
+    [[nodiscard]] std::vector<politics::IGEffect> p3_active_traits(
+        const std::string& country,const std::string& group)const;
     [[nodiscard]] P3MovementView p3_movement_view(const std::string&)const;
     [[nodiscard]] bool p3_needs_daily_tick()const;
     void p3_daily_react(std::int64_t);
@@ -1690,6 +1694,12 @@ public:
         const std::string&,const std::string&,const std::string&)const;
     [[nodiscard]] std::int32_t p2_political_strength_ppm(
         const std::string&,P3GroupType)const;
+    // Read-only actual law modifiers. Numeric values are parts-per-million
+    // with 1,000,000 representing 1.0, including legacy raw unit +100.
+    [[nodiscard]] std::int64_t p2_modifier_ppm(
+        const std::string& country,const std::string& effect_key)const;
+    [[nodiscard]] std::map<std::string,politics::LawModifier>
+        p2_active_modifiers(const std::string& country)const;
     [[nodiscard]] std::int32_t p2_institution_factor_ppm(
         const std::string&,P1InstitutionKind)const;
     [[nodiscard]] int p2_voting_age(const std::string&)const;
