@@ -438,6 +438,17 @@ public:
            c_.firm_bankrupt(old->second.client)||
            c_.firm_bankrupt(old->second.contractor))return false;
         const auto& model=old->second;
+        // The investor, contractor and state treasury remain real C actors.
+        // Under an enacted command economy, new enterprise projects must be
+        // financed by the actual sovereign treasury. Existing completed
+        // private assets are not expropriated by merely evaluating a proposal.
+        const auto sovereign=c_.sovereignty(model.region);
+        if(const auto economy=c_.p2_selected_law(sovereign,"economic_system");
+           economy&&*economy=="command_economy") {
+            if(!c_.has_country_treasury(sovereign)||
+               model.client!=c_.country_treasury(sovereign))
+                return false;
+        }
         const auto& recipe=ri->second;
         if(model.work_required<=0||model.cash_price_per_work<=0||
            recipe.outputs.empty()||model.material_per_work<=0||

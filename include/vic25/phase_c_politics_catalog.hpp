@@ -67,6 +67,14 @@ struct Catalogue {
         const auto it=laws.find(id);
         return it!=laws.end()&&it->second.group==bare_group(group);
     }
+    [[nodiscard]] std::size_t sourced_ideology_count()const {
+        // The source-qualified 1.13.11 catalogue is intentionally separate
+        // from legacy aliases or blank template placeholders.
+        std::size_t count=0;
+        for(const auto& [id,stances]:ideologies)
+            if(!stances.empty())++count;
+        return count;
+    }
     [[nodiscard]] bool knows_ideology(const std::string& ideology)const {
         return ideologies.contains(ideology);
     }
