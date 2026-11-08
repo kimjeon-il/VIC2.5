@@ -473,6 +473,12 @@ struct SnapshotCodec {
             ar(w.p3_movements_);
             ar(w.p3_last_reaction_day_);
         }
+        if(!w.p3_ideology_overrides_.empty()||
+           !w.p3_leader_ideologies_.empty()) {
+            ar(std::string("VIC25_PHASEC_P3_IDEOLOGIES_1"));
+            ar(w.p3_ideology_overrides_);
+            ar(w.p3_leader_ideologies_);
+        }
         if(!w.p5_crises_.empty()||!w.p5_capitals_.empty()||
            !w.p5_actions_.empty()||
            !w.p5_settlements_.empty()||
@@ -514,7 +520,8 @@ struct SnapshotCodec {
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
-             seen_p3=false,seen_p5=false,seen_guerrilla=false;
+             seen_p3=false,seen_ideologies=false,seen_p5=false,
+             seen_guerrilla=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -654,6 +661,14 @@ struct SnapshotCodec {
                    w.p3_groups_.size()>500'000||
                    w.p3_movements_.size()>100'000)
                     throw std::runtime_error("oversized POP political state");
+            } else if(extension=="VIC25_PHASEC_P3_IDEOLOGIES_1"&&
+                      !seen_ideologies) {
+                seen_ideologies=true;
+                ar(w.p3_ideology_overrides_);
+                ar(w.p3_leader_ideologies_);
+                if(w.p3_ideology_overrides_.size()>500'000||
+                   w.p3_leader_ideologies_.size()>500'000)
+                    throw std::runtime_error("oversized P3 ideological profile");
             } else if(extension=="VIC25_PHASEC_P5_UNREST_1"&&!seen_p5) {
                 seen_p5=true;
                 ar(w.p5_crises_);
