@@ -465,6 +465,10 @@ static void autonomous_daily_trade_budget_and_month_close() {
     auto& c=f.gh.seed_geography().seed_core().seed_core();
     c.seed_market("R1","iron",10,1,25);
     c.seed_market("R2","iron",20,1,30);
+    // An actual day-native cargo route must have known day transit time;
+    // the legacy month-only EDGE must not silently qualify for daily trade.
+    f.gh.seed_transport_edge({"AUTO-G-DAY-LANE","CARRIER",1,2,
+                              310,0,0,true,1,"legacy"});
     f.gh.seed_route({"AUTO-G","SELLER","BUYER","iron",1,2,5,1,0});
     auto world=World::adopt(std::move(f.gh),4433);
     const auto start_seller=ledger(world).stock("SELLER","R1","iron");

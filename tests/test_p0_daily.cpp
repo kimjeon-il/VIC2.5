@@ -1044,6 +1044,9 @@ static void p1_parliamentary_cabinet_next_day_and_save() {
                  "P1 parliamentary cabinet must require confidence");
     const auto original_population=c.people().population();
     p0::Policies policy;
+    // The confidence-vote fixture has no seeded food supplier for every
+    // household. Keep endogenous hunger shocks out of this legal quorum test.
+    policy.daily_food_units_per_person=0;
     policy.elections.push_back({"A","INC","REF",2000,1,1,1'000'000});
     policy.government_formations.push_back({
         "A","headA","PM_NEXT","test:p1-vote",
