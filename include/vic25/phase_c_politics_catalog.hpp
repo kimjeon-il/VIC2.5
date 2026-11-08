@@ -23,10 +23,20 @@
 namespace vic25::phasec::politics {
 inline std::string bare_group(std::string s) {
     if(s.rfind("lawgroup_",0)==0)s.erase(0,9);
+    if(s=="labor_associations")return "labour_associations";
+    if(s=="colonial_affairs")return "colonization";
+    if(s=="edo_status_system")return "edo_social_system";
     return s;
 }
 inline std::string bare_law(std::string s) {
     if(s.rfind("law_",0)==0)s.erase(0,4);
+    if(s=="labor_suffrage")return "labour_suffrage";
+    if(s=="rigid_status_order")return "strict_edo_system";
+    if(s=="loosened_status_order")return "intermediate_edo_system";
+    if(s=="lax_status_order")return "lax_edo_system";
+    if(s=="diplomatic_fleet")return "diplomatic_navy";
+    if(s=="capital_fleet")return "professional_navy";
+    if(s=="sef_paternalism")return "chiefs_distribute_aid";
     return s;
 }
 struct Law {
@@ -99,16 +109,16 @@ inline const Catalogue& catalogue() {
         Catalogue c;
         const std::array<std::pair<const char*,const char*>,26> groups{{
             {"governance_principles","chiefdom monarchy theocracy colonial_administration social_monarchy corporate_state presidential_republic parliamentary_republic council_republic"},
-            {"distribution_of_power","autocracy bakufu neo_absolutism oligarchy organic_regulation technocracy elder_council landed_voting wealth_voting census_voting labor_suffrage single_party_state universal_suffrage anarchy"},
+            {"distribution_of_power","autocracy bakufu neo_absolutism oligarchy organic_regulation technocracy elder_council landed_voting wealth_voting census_voting labour_suffrage single_party_state universal_suffrage anarchy"},
             {"citizenship","ethnostate national_supremacy subjecthood official_nationality racial_segregation cultural_exclusion multicultural"},
             {"caste_hegemony","hindu_caste_enforced hindu_caste_codified hindu_caste_not_enforced affirmative_action"},
             {"church_and_state","millet_system people_of_the_book caesaropapism state_religion freedom_of_conscience total_separation state_atheism"},
             {"bureaucracy","hereditary_bureaucrats crownland_diets military_bureaucrats appointed_bureaucrats elected_bureaucrats communal_administration"},
             {"army_model","peasant_levies warrior_caste national_militia professional_army mass_conscription revolutionary_guard"},
-            {"navy_model","merchant_navy jeune_ecole diplomatic_fleet capital_fleet"},
+            {"navy_model","merchant_navy jeune_ecole diplomatic_navy professional_navy"},
             {"internal_security","no_home_affairs national_guard secret_police shinsengumi third_section okhrana guaranteed_liberties extraordinary_commission"},
-            {"edo_status_system","rigid_status_order loosened_status_order lax_status_order"},
-            {"colonial_affairs","no_colonial_affairs internal_colonization frontier_colonization colonial_resettlement colonial_exploitation"},
+            {"edo_social_system","strict_edo_system intermediate_edo_system lax_edo_system"},
+            {"colonization","no_colonial_affairs internal_colonization frontier_colonization colonial_resettlement colonial_exploitation"},
             {"economic_system","traditionalism industry_banned extraction_economy agrarianism interventionism laissez_faire command_economy cooperative_ownership"},
             {"education_system","no_schools religious_schools private_schools terakoya public_schools"},
             {"health_system","no_health_system charitable_health_system private_health_insurance public_health_insurance"},
@@ -119,19 +129,19 @@ inline const Catalogue& catalogue() {
             {"childrens_rights","child_labor_allowed restricted_child_labor compulsory_primary_school"},
             {"free_speech","outlawed_dissent censorship right_of_assembly protected_speech"},
             {"labor_rights","no_workers_rights regulatory_bodies worker_protections"},
-            {"labor_associations","guild_system combination_acts corporatized_unions anti_strike_laws right_to_associate factory_councils"},
+            {"labour_associations","guild_system combination_acts corporatized_unions anti_strike_laws right_to_associate factory_councils"},
             {"migration","closed_borders migration_controls no_migration_controls"},
             {"rights_of_women","no_womens_rights women_in_the_fields women_own_property women_in_the_workplace womens_suffrage"},
             {"slavery","debt_slavery slave_trade legacy_slavery colonial_slavery slavery_banned"},
-            {"welfare","sef_paternalism no_social_security poor_laws wage_subsidies old_age_pension"}
+            {"welfare","chiefs_distribute_aid no_social_security poor_laws wage_subsidies old_age_pension"}
         }};
         const std::set<std::string> power={
             "governance_principles","distribution_of_power","citizenship",
             "caste_hegemony","church_and_state","bureaucracy","army_model",
-            "navy_model","internal_security","edo_status_system"
+            "navy_model","internal_security","edo_social_system"
         };
         const std::set<std::string> economy={
-            "colonial_affairs","economic_system","education_system","health_system",
+            "colonization","economic_system","education_system","health_system",
             "land_reform","policing","taxation","trade_policy"
         };
         for(const auto& [group,words]:groups) {
