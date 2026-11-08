@@ -1197,8 +1197,11 @@ public:
                 // paid daily construction work, not a synthetic construction
                 // progress bar. Bonuses cannot create additional materials,
                 // workers or funds beyond the observed feasible work.
-                const auto trait=c.p3_trait_modifier_ppm(
-                    country,"state_construction_mult");
+                const auto trait=phaseb::add_checked(
+                    c.p3_trait_modifier_ppm(
+                        country,"state_construction_mult"),
+                    c.p1_local_decree_ppm(
+                        country,p.region,"state_construction_mult"));
                 if(trait<0&&n>0) {
                     const auto legal=std::clamp<std::int64_t>(
                         1'000'000+trait,0,1'000'000);
@@ -1206,6 +1209,19 @@ public:
                         static_cast<Quantity>(
                             phaseb::mul_checked(n/1'000'000,legal)+
                             phaseb::mul_checked(n%1'000'000,legal)/1'000'000));
+                }
+                if(trait>0&&n>0) {
+                    const auto rate=std::clamp<std::int64_t>(
+                        1'000'000+trait,1'000'000,2'000'000);
+                    const Quantity boosted=phaseb::add_checked(
+                        phaseb::mul_checked(n/1'000'000,rate),
+                        phaseb::mul_checked(n%1'000'000,rate)/1'000'000);
+                    // Extra work is permitted only with actual staff,
+                    // delivered material, funds and unfinished scope.
+                    n=std::min({boosted,p.work_required-p.accepted_work,
+                        materials,
+                        static_cast<Quantity>(staff/p.workers_per_work),
+                        affordable});
                 }
                 if(n<=0)return;
                 gh.phase_d().plan_work(investment.construction_project,n);

@@ -83,6 +83,16 @@ void fields(Archive& a,T& x) {
         V(legal_basis);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,P1Institution>){
         V(country);V(public_institution_id);V(kind);V(level);
+    } else if constexpr(std::is_same_v<X,P1Mandate>){
+        V(id);V(country);V(target);V(legal_basis);V(kind);
+        V(adopted_day);V(effective_day);
+    } else if constexpr(std::is_same_v<X,P1MandateChange>){
+        V(id);V(mandate);V(terminate);
+    } else if constexpr(std::is_same_v<X,P1StandingEvidence>){
+        V(country);V(source);V(tier);V(recognized);V(confirmed_rank);
+        V(own_gdp);V(subject_gdp);V(army_projection);V(navy_projection);
+        V(goods_leadership);V(monuments);V(other_prestige);
+        V(observed_day);V(complete);
     } else if constexpr(std::is_same_v<X,P3Stance>){
         V(preference_ppm);V(importance_ppm);
     } else if constexpr(std::is_same_v<X,P3Attitude>){
@@ -438,6 +448,13 @@ struct SnapshotCodec {
             ar(w.p1_institutions_);
             ar(w.p1_pending_);
         }
+        if(!w.p1_active_mandates_.empty()||
+           !w.p1_pending_mandates_.empty()||!w.p1_standing_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_STRATEGIC_CAPACITIES_1"));
+            ar(w.p1_active_mandates_);
+            ar(w.p1_pending_mandates_);
+            ar(w.p1_standing_);
+        }
         if(!w.p4_parties_.empty()||!w.p4_contests_.empty()) {
             ar(std::string("VIC25_PHASEC_P4_ELECTIONS_1"));
             ar(w.p4_parties_);
@@ -535,6 +552,7 @@ struct SnapshotCodec {
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
+             seen_p1_capacities=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
              seen_p3=false,seen_ideologies=false,seen_identity=false,
              seen_p5=false,
@@ -616,6 +634,16 @@ struct SnapshotCodec {
                    w.p1_institutions_.size()>1'000'000||
                    w.p1_pending_.size()>1'000'000)
                     throw std::runtime_error("invalid P1 constitutional extension");
+            } else if(extension=="VIC25_PHASEC_P1_STRATEGIC_CAPACITIES_1"&&
+                      !seen_p1_capacities) {
+                seen_p1_capacities=true;
+                ar(w.p1_active_mandates_);
+                ar(w.p1_pending_mandates_);
+                ar(w.p1_standing_);
+                if(w.p1_active_mandates_.size()>500'000||
+                   w.p1_pending_mandates_.size()>500'000||
+                   w.p1_standing_.size()>100'000)
+                    throw std::runtime_error("oversized P1 capacity commitments");
             } else if(extension=="VIC25_PHASEC_P4_ELECTIONS_1"&&!seen_p4) {
                 seen_p4=true;
                 ar(w.p4_parties_);

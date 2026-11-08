@@ -2991,7 +2991,8 @@ public:
             bool schools_allowed{true};
         };
         std::map<std::string,PoliticalRates> rates;
-        if(!p3_groups_.empty()||!p2_active_base_.empty())
+        if(!p3_groups_.empty()||!p2_active_base_.empty()||
+           !p1_active_mandates_.empty())
             for(const auto& [country,government]:governments_) {
                 (void)government;
                 const auto effect=[&](const std::string& key) {
@@ -3023,7 +3024,11 @@ public:
             if(metric=="school") {
                 if(!policy.schools_allowed)return 0;
                 const auto absolute=std::clamp<std::int64_t>(
-                    policy.school,-1'000'000,1'000'000);
+                    phaseb::add_checked(policy.school,
+                        p1_local_decree_ppm(
+                            juris->second,dem.region,
+                            "state_education_access_add")),
+                    -1'000'000,1'000'000);
                 const auto daily=vic25::daily_budget::increment(
                     std::abs(absolute),day,days_in_month);
                 return static_cast<People>(
