@@ -717,8 +717,13 @@ static void autonomous_h_treaty_risk_and_institutional_vote() {
                  "H organization with a lawful quorum and yes votes should adopt");
     require_test(!h.organizations.at("LEAGUE").decisions.at("COUNCIL-VETO").adopted,
                  "H organization veto member rejected but vote was adopted");
-    require_test(c(game).cash("A")==beforeA && c(game).cash("B")==beforeB,
-                 "H deliberation alone must not create or move treasury cash");
+    if(c(game).cash("A")!=beforeA || c(game).cash("B")!=beforeB)
+        throw std::runtime_error(
+            "H deliberation cash mismatch: A="+std::to_string(beforeA)+
+            "->"+std::to_string(c(game).cash("A"))+
+            ", B="+std::to_string(beforeB)+
+            "->"+std::to_string(c(game).cash("B"))+
+            ", organization="+std::to_string(c(game).cash("ORG:LEAGUE")));
 
     const auto checkpoint=daily::SnapshotCodec::encode(game.world());
     p0::DailyGame replay(daily::SnapshotCodec::decode(checkpoint),policy);
