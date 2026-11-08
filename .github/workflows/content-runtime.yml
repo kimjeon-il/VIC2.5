@@ -12,6 +12,6 @@ jobs:
       - name: Configure headless content test
         run: cmake -S . -B build-content -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF
       - name: Build content test only
-        run: cmake --build build-content --target vic25_content_tests --parallel 2
+        run: cmake --build build-content --target vic25_content_tests vic25_content_json_tests --parallel 2
       - name: Content event decision journal formation regression
-        run: ctest --test-dir build-content -R "^vic25_content_tests$" --output-on-failure
+        run: ctest --test-dir build-content -R "^vic25_content(_json)?_tests$" --output-on-failure
