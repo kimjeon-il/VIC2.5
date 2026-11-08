@@ -664,7 +664,7 @@ inline void fight(phasec::IntegratedWorld& c,const Engagement& e) {
     // Apply IG traits to REAL, already-armed battle casualties. The
     // original C battle() remains the sole military casualty/population
     // authority. No troops, ammunition, or phantom engagements are minted.
-    const auto deployments=c.army_deployments();
+    const auto& deployments=c.army_deployments();
     const auto atk=deployments.find(e.attacker);
     const auto def=deployments.find(e.defender);
     if(atk!=deployments.end()&&def!=deployments.end()) {
