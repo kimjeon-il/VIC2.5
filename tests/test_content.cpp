@@ -298,6 +298,62 @@ static void unsupported_native_effect_and_legacy_upgrade() {
         bad.add(invalid);
     }),"invalid formation unexpectedly registered");
 }
+static void lawful_frontier_colonization_uses_real_E_claim() {
+    auto rules=std::make_shared<Registry>("colonization-test");
+    Decision colonial;
+    colonial.id="START_FRONTIER";
+    colonial.available=Condition::domain("country.exists");
+    Effect effect;
+    effect.kind=EffectKind::external;
+    effect.external.kind=ExternalKind::colonize;
+    effect.external.target_country="A";
+    effect.external.provinces={3};
+    colonial.effects.push_back(effect);
+    rules->add(std::move(colonial));
+
+    phasegh::World gh(24000);
+    auto& geography=gh.seed_geography();
+    geography.set_dataset("real-frontier-test");
+    geography.seed_province(1,"R1","A");
+    geography.seed_province(3,"R3","UNCLAIMED");
+    geography.seed_border(1,3);
+    geography.seed_unit(101,"A","A-DISTRICT");
+    geography.seed_unit(301,"UNCLAIMED","INDEPENDENT-TERRITORY");
+    geography.seed_assignment(1,101);
+    geography.seed_assignment(3,301);
+    auto& c=geography.seed_core().seed_core();
+    c.seed_actor("A",100);
+    c.seed_government("A","HEAD","PRIME",5,3);
+    c.seed_p1_constitution("A",{
+        phasec::P1GovernancePrinciple::monarchy,
+        phasec::P1PowerDistribution::autocracy,
+        phasec::P1LegislatureKind::none,"test:colonial-legal-basis"});
+    phasec::P2BaseLaw law;
+    law.id="A:colonial_affairs";law.country="A";
+    law.domain="lawgroup_colonial_affairs";
+    law.base_choice="law_frontier_colonization";
+    law.scope="national";
+    law.legal_basis="test:colonial-legal-basis";
+    c.p2_seed_base(law);
+    gh.validate();
+    auto world=World::adopt(daily::World::adopt(std::move(gh),777),rules);
+    world.decide("START_FRONTIER",{"country","A"});
+    world.advance_day();
+    check(world.native().engine().base().core().core().sovereignty("R3")==
+          "UNCLAIMED","colonial claim illegally changed jurisdiction early");
+    for(int i=1;i<=31;++i)world.advance_day();
+    const auto& geographic=world.native().engine().base().spatial();
+    check(geographic.claims.contains(3)&&
+          geographic.claims.at(3).contains("A")&&
+          world.native().engine().base().core().core().sovereignty("R3")==
+              "UNCLAIMED",
+          "valid frontier claim missing or colonized region without settlement");
+    const auto saved=SnapshotCodec::encode(world);
+    check(SnapshotCodec::encode(SnapshotCodec::decode(saved,rules))==saved,
+          "colonization E claim lost across native content checkpoint");
+
+}
+
 int main() {
     try {
         content_local_rules();
@@ -306,6 +362,7 @@ int main() {
         journal_multibranch_and_world();
         actual_country_formation_and_protection();
         unsupported_native_effect_and_legacy_upgrade();
+        lawful_frontier_colonization_uses_real_E_claim();
         std::cout<<"VIC2.5 CONTENT EVENTS DECISIONS FORMATION JOURNALS PASS\n";
         return 0;
     } catch(const std::exception& e) {
