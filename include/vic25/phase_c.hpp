@@ -1991,6 +1991,24 @@ public:
         require_stage({8});
         if(bank_interest_annual_ppm_<=0)return;
         constexpr Money denominator=365'000'000;
+        // The Petite Bourgeoisie interest trait (and real country law
+        // modifiers) changes only the interest due on an existing country's
+        // actual financial loan. No rate is assumed for a private company
+        // without explicit country/jurisdiction evidence.
+        std::map<std::string,Money> sovereign_rates;
+        if(!p3_groups_.empty()||!p2_active_base_.empty())
+            for(const auto& [country,gov]:governments_) {
+                (void)gov;
+                if(!has_country_treasury(country))continue;
+                const auto bonus=phaseb::add_checked(
+                    p2_modifier_ppm(country,"country_loan_interest_rate_mult"),
+                    p3_trait_modifier_ppm(country,"country_loan_interest_rate_mult"));
+                const auto ppm=std::clamp<std::int64_t>(
+                    1'000'000+bonus,0,2'000'000);
+                const Money adjusted=phaseb::mul_checked(
+                    bank_interest_annual_ppm_,ppm)/1'000'000;
+                sovereign_rates.emplace(country_treasury(country),adjusted);
+            }
         if(!money_.has_account("BANK:interest_receivable"))
             money_.add_account("BANK:interest_receivable","BANK",
                                AccountType::asset);
@@ -2002,11 +2020,12 @@ public:
             if(principal<=0)continue;
             const Money carry=bank_interest_fraction_[debtor];
             ensure(carry>=0&&carry<denominator,"invalid interest carry");
+            const auto rate=sovereign_rates.contains(debtor)?
+                sovereign_rates.at(debtor):bank_interest_annual_ppm_;
             const Money high=phaseb::mul_checked(
-                principal/denominator,bank_interest_annual_ppm_);
+                principal/denominator,rate);
             const Money low=phaseb::add_checked(
-                phaseb::mul_checked(principal%denominator,
-                                    bank_interest_annual_ppm_),carry);
+                phaseb::mul_checked(principal%denominator,rate),carry);
             const Money interest=phaseb::add_checked(high,low/denominator);
             bank_interest_fraction_[debtor]=low%denominator;
             if(interest<=0)continue;
