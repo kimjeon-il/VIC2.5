@@ -75,6 +75,19 @@ static void catalogued_laws_and_stances() {
     const auto& c=politics::catalogue();
     check(c.by_group.size()==26&&c.laws.size()==148,
           "1.15-inspired catalogue missing law families");
+    // Source completeness is not 1.15 parity: the imported reference is
+    // 1.13.11 (172 ideology definitions, 136 unconditional law modifiers).
+    // The extra 18 newer 1.15 ideologies and conditional effects are not
+    // fabricated by assigning arbitrary default opinions.
+    check(c.ideologies.size()>=172&&c.modifiers.size()==136,
+          "source-qualified ideological or legal modifier rows missing");
+    check(c.modifier("serfdom",
+          "state_peasants_internal_migration_disallowed_bool").has_value()&&
+          c.modifier("mass_conscription",
+          "state_conscription_rate_add").has_value()&&
+          c.modifier("cooperative_ownership",
+          "building_group_bg_manufacturing_allowed_collectivization_add").has_value(),
+          "source-qualified economic, social and military modifiers missing");
     check(c.has("lawgroup_economic_system","law_cooperative_ownership")&&
           c.has("rights_of_women","womens_suffrage")&&
           c.has("labor_associations","factory_councils")&&
