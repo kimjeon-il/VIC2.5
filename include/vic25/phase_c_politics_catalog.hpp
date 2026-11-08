@@ -73,7 +73,7 @@ inline const Catalogue& catalogue() {
             {"distribution_of_power","autocracy bakufu neo_absolutism oligarchy organic_regulation technocracy elder_council landed_voting wealth_voting census_voting labor_suffrage single_party_state universal_suffrage anarchy"},
             {"citizenship","ethnostate national_supremacy subjecthood official_nationality racial_segregation cultural_exclusion multicultural"},
             {"caste_hegemony","hindu_caste_enforced hindu_caste_codified hindu_caste_not_enforced affirmative_action"},
-            {"church_and_state","millet_system people_of_the_book state_religion freedom_of_conscience total_separation state_atheism"},
+            {"church_and_state","millet_system people_of_the_book caesaropapism state_religion freedom_of_conscience total_separation state_atheism"},
             {"bureaucracy","hereditary_bureaucrats crownland_diets military_bureaucrats appointed_bureaucrats elected_bureaucrats communal_administration"},
             {"army_model","peasant_levies warrior_caste national_militia professional_army mass_conscription revolutionary_guard"},
             {"navy_model","merchant_navy jeune_ecole diplomatic_fleet capital_fleet"},
@@ -317,6 +317,7 @@ inline std::int32_t clout_bonus(const std::string& group,const std::string& law,
             return 250'000;
     } else if(g=="church_and_state") {
         if(l=="state_religion"&&type==T::devout)return 300'000;
+        if(l=="caesaropapism"&&type==T::devout)return 150'000;
     } else if(g=="labor_associations") {
         if(type==T::trade_unions) {
             if(l=="combination_acts")return -250'000;

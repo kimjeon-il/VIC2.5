@@ -73,12 +73,15 @@ static phasegh::World make_world(const std::string& economy_choice) {
 }
 static void catalogued_laws_and_stances() {
     const auto& c=politics::catalogue();
-    check(c.by_group.size()==26&&c.laws.size()>=140,
+    check(c.by_group.size()==26&&c.laws.size()==148,
           "1.15-inspired catalogue missing law families");
     check(c.has("lawgroup_economic_system","law_cooperative_ownership")&&
           c.has("rights_of_women","womens_suffrage")&&
           c.has("labor_associations","factory_councils")&&
           c.has("navy_model","capital_fleet")&&
+          c.has("church_and_state","caesaropapism")&&
+          c.has("citizenship","official_nationality")&&
+          c.has("colonial_affairs","internal_colonization")&&
           !c.has("economic_system","womens_suffrage"),
           "catalogue group membership incorrect");
     check(c.stance("socialist","economic_system","cooperative_ownership")
