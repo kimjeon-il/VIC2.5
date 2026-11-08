@@ -275,6 +275,53 @@ static void economic_law_restricts_real_company_ownership() {
         "state-owned company title changed on checkpoint replay");
 }
 
+static void military_peasant_levy_restricts_real_conscripts() {
+    Scenario fixture;
+    auto& core=fixture.gh.seed_geography().seed_core().seed_core();
+    core.seed_unit("LEVY");
+    law(core,"A","army_model","peasant_levies");
+    P2BaseLaw conscription;
+    conscription.id="A:lawful_conscription";
+    conscription.country="A";conscription.domain="conscription_fixture";
+    conscription.scope="national";conscription.base_choice="military-law";
+    conscription.legal_basis="fixture:conscription";
+    conscription.clauses.push_back({
+        "conscription-permitted","A",
+        P2ClauseKind::conscription_authorized,1});
+    core.p2_seed_base(conscription);
+    auto& pop=core.seed_population();
+    const auto row=pop.slice(fixture.primary);
+    const auto economic=pop.economic_profile({
+        "RA","peasant","subsistence","self_employed",
+        pop.default_education()});
+    const auto peasant=pop.seed_population(
+        row.key.demographic,economic,row.key.household,100,7001);
+    fixture.gh.validate();
+    auto world=daily::World::adopt(std::move(fixture.gh),12);
+    const auto before=daily::SnapshotCodec::encode(world);
+    phasegh::World::Plan blocked;
+    const auto civilian=fixture.primary;
+    blocked[10].push_back([civilian](phasegh::Stage& gh) {
+        gh.phase_c().mobilize(civilian,1,"LEVY");
+    });
+    check(rejects([&]{world.advance_day(blocked);})&&
+          daily::SnapshotCodec::encode(world)==before,
+          "peasant levies conscripted non-peasant workers");
+    const auto total=view(world).people().population();
+    phasegh::World::Plan actual;
+    actual[10].push_back([peasant](phasegh::Stage& gh) {
+        gh.phase_c().mobilize(peasant,3,"LEVY");
+    });
+    world.advance_day(actual);
+    check(view(world).people().population()==total&&
+          view(world).active_strength("LEVY")==3,
+          "actual lawful militia failed POP/army conservation");
+    const auto saved=daily::SnapshotCodec::encode(world);
+    check(daily::SnapshotCodec::encode(
+        daily::SnapshotCodec::decode(saved))==saved,
+          "military law actual conscripts failed checkpoint replay");
+}
+
 int main(){
     try{
         source_ideologies_laws_traits();
@@ -282,6 +329,7 @@ int main(){
         physical_migration_and_law_block();
         abolition_preserves_real_people_and_membership();
         economic_law_restricts_real_company_ownership();
+        military_peasant_levy_restricts_real_conscripts();
         std::cout<<"VIC2.5 POLICY IDENTITY AND REFERENCE DATA PASS\n";
     }catch(const std::exception& e){
         std::cerr<<"POLITICS IDENTITY FAILURE: "<<e.what()<<"\n";
