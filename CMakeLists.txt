@@ -397,3 +397,13 @@ if(BUILD_TESTING)
     target_link_libraries(vic25_p5_guerrilla_tests PRIVATE vic25_core)
     add_test(NAME vic25_p5_guerrilla_tests COMMAND vic25_p5_guerrilla_tests)
 endif()
+
+
+# Victoria 3 1.15-style shared content runtime: events, decisions, scripted
+# journal outcomes, country formation and lossless native daily save/rollback.
+if(BUILD_TESTING)
+    add_executable(vic25_content_tests tests/test_content.cpp)
+    target_link_libraries(vic25_content_tests PRIVATE vic25_core)
+    add_test(NAME vic25_content_tests COMMAND vic25_content_tests)
+    set_tests_properties(vic25_content_tests PROPERTIES TIMEOUT 180)
+endif()
