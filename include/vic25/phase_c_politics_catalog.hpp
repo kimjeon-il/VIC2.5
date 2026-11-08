@@ -84,6 +84,7 @@ struct Catalogue {
 // Only a single selected law per group belongs in the Phase-C P2 legal ledger.
 #include "vic25/phase_c_politics_reference_ideologies.hpp"
 #include "vic25/phase_c_politics_reference_modifiers.hpp"
+#include "vic25/phase_c_politics_trait_data.hpp"
 
 inline const Catalogue& catalogue() {
     static const Catalogue result=[] {
