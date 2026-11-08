@@ -1164,9 +1164,10 @@ public:
                 if(trait<0&&n>0) {
                     const auto legal=std::clamp<std::int64_t>(
                         1'000'000+trait,0,1'000'000);
-                    n=static_cast<Quantity>(
-                        phaseb::mul_checked(n/1'000'000,legal)+
-                        phaseb::mul_checked(n%1'000'000,legal)/1'000'000);
+                    n=std::max<Quantity>(legal>0?1:0,
+                        static_cast<Quantity>(
+                            phaseb::mul_checked(n/1'000'000,legal)+
+                            phaseb::mul_checked(n%1'000'000,legal)/1'000'000));
                 }
                 if(n<=0)return;
                 gh.phase_d().plan_work(investment.construction_project,n);
