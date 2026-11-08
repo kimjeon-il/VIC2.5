@@ -210,8 +210,23 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
         static_cast<std::uint8_t>(*law_level):link.level;
     const People slots=(service.monthly_slots/5)*level+
                        ((service.monthly_slots%5)*level)/5;
-    const People staffed=std::min(slots,
-        positive_product(staff,service.patients_per_worker));
+    People staff_capacity=positive_product(
+        staff,service.patients_per_worker);
+    if(link.kind==P1InstitutionKind::administration) {
+        // The Petite Bourgeoisie's Happy "Middle Managers" trait raises
+        // administration productivity, not the legal facility level or
+        // fictitious employees. Never exceed real paid site capacity.
+        const auto bonus=std::clamp<std::int64_t>(
+            p3_trait_modifier_ppm(link.country,"country_bureaucracy_mult"),
+            -1'000'000,1'000'000);
+        if(bonus>0)
+            staff_capacity=phaseb::add_checked(staff_capacity,
+                p4_scaled(staff_capacity,bonus,1'000'000));
+        else if(bonus<0)
+            staff_capacity=p4_scaled(staff_capacity,
+                                     1'000'000+bonus,1'000'000);
+    }
+    const People staffed=std::min(slots,staff_capacity);
     const bool funded=cash(service.operator_id)>0||
         (has_country_treasury(link.country)&&
          cash(country_treasury(link.country))>0);
@@ -224,8 +239,16 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
     // Existing paid staff/cash remain the upper bound. A country that
     // legally has no schools, police or health institution cannot deliver
     // those public services through a scenario's old orphaned facility.
-    const People lawful=p4_scaled(
+    People lawful=p4_scaled(
         accessible,p2_institution_factor_ppm(link.country,link.kind),1'000'000);
+    if(link.kind==P1InstitutionKind::education) {
+        // Unhappy Devout: -10% Education Access. This affects delivered
+        // services only; no population, classrooms or tuition are minted.
+        const auto penalty=std::clamp<std::int64_t>(
+            p3_trait_modifier_ppm(link.country,"state_education_access_add"),
+            -1'000'000,0);
+        lawful=p4_scaled(lawful,1'000'000+penalty,1'000'000);
+    }
     return {link.country,institution_id,link.kind,level,
             staff,slots,staffed,lawful,funded};
 }
