@@ -289,13 +289,39 @@ inline std::int64_t IntegratedWorld::p2_modifier_ppm(
 
 inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
         const std::string& country,P3GroupType group)const {
+    const auto group_id=[&]() -> const char* {
+        switch(group) {
+            case P3GroupType::landowners:return "ig_landowners";
+            case P3GroupType::industrialists:return "ig_industrialists";
+            case P3GroupType::armed_forces:return "ig_armed_forces";
+            case P3GroupType::devout:return "ig_devout";
+            case P3GroupType::intelligentsia:return "ig_intelligentsia";
+            case P3GroupType::petite_bourgeoisie:return "ig_petty_bourgeoisie";
+            case P3GroupType::rural_folk:return "ig_rural_folk";
+            case P3GroupType::trade_unions:return "ig_trade_unions";
+            case P3GroupType::custom:return "";
+        }
+        return "";
+    }();
     std::int64_t strength=1'000'000;
     for(const auto& [slot,id]:p2_active_base_) {
         (void)slot;
         const auto& law=p2_laws_.at(id);
-        if(law.country==country)
-            strength+=politics::clout_bonus(
-                law.domain,law.base_choice,group);
+        if(law.country!=country)continue;
+        // Prefer exact source IG multipliers if they exist. The previous
+        // simplified clout bonus remains a fallback for uncoded new laws.
+        const auto metric=std::string("interest_group_")+group_id+
+                          "_pol_str_mult";
+        if(*group_id) {
+            const auto original=politics::catalogue().modifier(
+                law.base_choice,metric);
+            if(original&&!original->boolean) {
+                strength=phaseb::add_checked(strength,original->value_ppm);
+                continue;
+            }
+        }
+        strength=phaseb::add_checked(strength,
+            politics::clout_bonus(law.domain,law.base_choice,group));
     }
     return static_cast<std::int32_t>(
         std::clamp<std::int64_t>(strength,250'000,2'500'000));
