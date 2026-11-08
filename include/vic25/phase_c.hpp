@@ -1686,6 +1686,8 @@ public:
         const std::string&,const std::string&,P2ClauseKind)const;
     [[nodiscard]] std::optional<std::string> p2_selected_law(
         const std::string&,const std::string&)const;
+    [[nodiscard]] P2PoliticalSupportView p2_political_support(
+        const std::string&,const std::string&,const std::string&)const;
     [[nodiscard]] std::int32_t p2_political_strength_ppm(
         const std::string&,P3GroupType)const;
     [[nodiscard]] std::int32_t p2_institution_factor_ppm(
