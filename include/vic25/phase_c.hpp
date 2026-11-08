@@ -2683,6 +2683,24 @@ public:
                 .value_or(conscription_enabled_?1:0)!=0;
         }
         ensure(permitted,"P2 military service law does not permit conscription");
+        if(jurisdiction!=sovereignty_.end()) {
+            const auto& country=jurisdiction->second;
+            if(const auto model=p2_selected_law(country,"army_model")) {
+                const auto& job=people_.economic(s.key.economic);
+                if(*model=="peasant_levies")
+                    ensure(job.profession=="peasant"||
+                           job.livelihood=="subsistence",
+                           "P2 peasant levies require actual peasant POP");
+                if(const auto rate=politics::catalogue().modifier(
+                       *model,"state_conscription_rate_add");
+                   rate&&rate->value_ppm>0&&!rate->boolean) {
+                    const auto ppm=std::clamp<std::int64_t>(
+                        rate->value_ppm,0,1'000'000);
+                    ensure(n<=p4_scaled(s.count,ppm,1'000'000),
+                           "P2 army conscription exceeds actual legal POP quota");
+                }
+            }
+        }
         ensure(service == phaseb::Service::civilian || service == phaseb::Service::reserve,
                "not mobilizable");
         ensure(n <= s.count - assigned(source), "overallocated recruit");
