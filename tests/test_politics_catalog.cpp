@@ -227,6 +227,33 @@ static void observed_clout_ideology_and_legitimacy() {
               "economic_system","cooperative_ownership"),
           "P3 ideological state or named leader corrupted during save/load");
 }
+static void source_law_incompatibilities_are_symmetric_and_real() {
+    const auto& c=politics::catalogue();
+    check(c.disallowed.size()==148 &&
+          c.disallowed.at("traditionalism").contains("graduated_taxation") &&
+          c.disallowed.at("serfdom").contains("laissez_faire"),
+          "sourced 1.15 law incompatibilities not registered");
+    phasegh::World world(24000);
+    auto& geo=world.seed_geography();
+    geo.set_dataset("law-compatibility");
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(1,"A","A");
+    geo.seed_assignment(1,1);
+    auto& core=geo.seed_core().seed_core();
+    core.seed_actor("A",1000);
+    core.seed_government("A","HEAD","PRIME",5,3);
+    core.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+        P1PowerDistribution::autocracy,P1LegislatureKind::none,
+        "constitutional:approval"});
+    law(core,"economic_system","traditionalism");
+    check(rejects([&]{law(core,"taxation","graduated_taxation");}),
+          "graduated taxation incorrectly coexists with Traditionalism");
+    law(core,"taxation","land_based_taxation");
+    check(core.p2_selected_law("A","taxation")==
+          std::optional<std::string>{"land_based_taxation"},
+          "compatible sourced law could not be enacted");
+    world.validate();
+}
 static void no_new_fictional_leader_or_dynamic_ideology() {
     auto gh=make_world("interventionism");
     auto& c=gh.seed_geography().seed_core().seed_core();
@@ -245,6 +272,7 @@ int main() {
         catalogued_laws_and_stances();
         legal_policies_and_override_priority();
         observed_clout_ideology_and_legitimacy();
+        source_law_incompatibilities_are_symmetric_and_real();
         no_new_fictional_leader_or_dynamic_ideology();
         std::cout<<"VIC2.5 POLITICAL LAWS IDEOLOGIES GROUPS PASS\n";
     } catch(const std::exception& e) {
