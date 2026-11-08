@@ -661,6 +661,41 @@ inline void fight(phasec::IntegratedWorld& c,const Engagement& e) {
     const auto rifle_b=c.assigned_equipment(e.defender,e.region,"rifle");
     auto al=tactical_losses(a,ammo_b,rifle_b,e.defender_terrain_ppm,true);
     auto bl=tactical_losses(b,ammo_a,rifle_a,e.defender_terrain_ppm,false);
+    // Apply IG traits to REAL, already-armed battle casualties. The
+    // original C battle() remains the sole military casualty/population
+    // authority. No troops, ammunition, or phantom engagements are minted.
+    const auto deployments=c.army_deployments();
+    const auto atk=deployments.find(e.attacker);
+    const auto def=deployments.find(e.defender);
+    if(atk!=deployments.end()&&def!=deployments.end()) {
+        const auto bonus=[&](const std::string& country,
+                             const std::string& key)->std::int64_t {
+            if(!c.has_government(country))return 0;
+            return c.p3_trait_modifier_ppm(country,key)+
+                   c.p2_modifier_ppm(country,key);
+        };
+        const auto adjust=[&](phasec::CombatLoss& loss,People victim,
+                              std::int64_t attacking,std::int64_t defending) {
+            const auto combined=std::clamp<std::int64_t>(
+                1'000'000+attacking-defending,0,2'000'000);
+            const auto original=phaseb::add_checked(
+                loss.killed,loss.acute);
+            const auto whole=phaseb::mul_checked(
+                original/1'000'000,combined);
+            const auto fractional=phaseb::mul_checked(
+                original%1'000'000,combined)/1'000'000;
+            const auto impact=std::min(victim,phaseb::add_checked(
+                whole,fractional));
+            loss.killed=impact/4;
+            loss.acute=impact-loss.killed;
+        };
+        adjust(al,a,
+               bonus(def->second.country,"unit_offense_mult"),
+               bonus(atk->second.country,"unit_defense_mult"));
+        adjust(bl,b,
+               bonus(atk->second.country,"unit_offense_mult"),
+               bonus(def->second.country,"unit_defense_mult"));
+    }
     al.ammunition=ammo_a;
     bl.ammunition=ammo_b;
     // Both loss counts are derived from the same pre-battle committed state.
