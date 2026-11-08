@@ -72,8 +72,6 @@ inline const std::map<std::string,std::string>& wired_law_effects() {
         {"country_can_only_conscript_peasants_bool","phase_c::mobilize"},
         {"country_military_goods_cost_mult","phasegh::Stage::plan_autonomous_trade"},
         {"state_peasants_internal_migration_disallowed_bool","phase_c::p2_migration_permitted"},
-        {"state_peasants_mass_migration_disallowed_bool","phase_c::p2_migration_permitted"},
-        {"country_migration_restrictiveness_add","phase_c::p2_migration_permitted"},
         {"country_acceptance_primary_culture_add","phase_c::p2_acceptance"},
         {"country_acceptance_shared_heritage_trait_add","phase_c::p2_acceptance"},
         {"country_acceptance_shared_heritage_trait_group_add","phase_c::p2_acceptance"},
@@ -94,9 +92,6 @@ inline const std::map<std::string,std::string>& wired_law_effects() {
         {"building_group_bg_plantations_throughput_add","phase_d::run_recipe"},
         {"building_group_bg_ranching_throughput_add","phase_d::run_recipe"},
         {"state_infrastructure_mult","phasegh::Stage::effective_edge_capacity"},
-        {"country_government_wages_mult","phase_c::wages_under_law"},
-        {"country_state_religion_wages_mult","phase_c::hire"},
-        {"country_non_state_religion_wages_mult","phase_c::hire"},
         {"state_radicalism_increases_violent_hostility_mult","phase_c::p3_daily_react"},
         {"state_radicalism_increases_cultural_erasure_mult","phase_c::p3_daily_react"},
         {"state_radicalism_increases_open_prejudice_mult","phase_c::p3_daily_react"}
