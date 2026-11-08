@@ -71,7 +71,7 @@ inline const Catalogue& catalogue() {
         const std::array<std::pair<const char*,const char*>,26> groups{{
             {"governance_principles","chiefdom monarchy theocracy colonial_administration social_monarchy corporate_state presidential_republic parliamentary_republic council_republic"},
             {"distribution_of_power","autocracy bakufu neo_absolutism oligarchy organic_regulation technocracy elder_council landed_voting wealth_voting census_voting labor_suffrage single_party_state universal_suffrage anarchy"},
-            {"citizenship","ethnostate national_supremacy subjecthood racial_segregation cultural_exclusion multicultural"},
+            {"citizenship","ethnostate national_supremacy subjecthood official_nationality racial_segregation cultural_exclusion multicultural"},
             {"caste_hegemony","hindu_caste_enforced hindu_caste_codified hindu_caste_not_enforced affirmative_action"},
             {"church_and_state","millet_system people_of_the_book state_religion freedom_of_conscience total_separation state_atheism"},
             {"bureaucracy","hereditary_bureaucrats crownland_diets military_bureaucrats appointed_bureaucrats elected_bureaucrats communal_administration"},
@@ -79,7 +79,7 @@ inline const Catalogue& catalogue() {
             {"navy_model","merchant_navy jeune_ecole diplomatic_fleet capital_fleet"},
             {"internal_security","no_home_affairs national_guard secret_police shinsengumi third_section okhrana guaranteed_liberties extraordinary_commission"},
             {"edo_status_system","rigid_status_order loosened_status_order lax_status_order"},
-            {"colonial_affairs","no_colonial_affairs frontier_colonization colonial_resettlement colonial_exploitation"},
+            {"colonial_affairs","no_colonial_affairs internal_colonization frontier_colonization colonial_resettlement colonial_exploitation"},
             {"economic_system","traditionalism industry_banned extraction_economy agrarianism interventionism laissez_faire command_economy cooperative_ownership"},
             {"education_system","no_schools religious_schools private_schools terakoya public_schools"},
             {"health_system","no_health_system charitable_health_system private_health_insurance public_health_insurance"},
