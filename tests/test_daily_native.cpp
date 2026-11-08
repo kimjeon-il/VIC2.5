@@ -212,6 +212,10 @@ static void daily_diplomacy_changes_real_trade_tariff() {
         c.seed_market("R1","iron",10,1,15);
         c.seed_market("R2","iron",20,1,30);
         f.gh.seed_tariff("B","iron",100000);
+        // Daily G trading rejects an unverified month-only transport edge.
+        // A separate synthetic lane supplies a real exact-day movement path.
+        f.gh.seed_transport_edge({"TARIFF-DAILY-LANE","CARRIER",1,2,
+                                  310,0,0,true,1,"legacy"});
         f.gh.seed_route({"TRADE-IRON","SELLER","BUYER","iron",1,2,3,1,0});
         return World::adopt(std::move(f.gh));
     };

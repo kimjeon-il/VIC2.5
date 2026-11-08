@@ -949,6 +949,9 @@ static void national_elections_are_independent_and_persistent() {
         return gh;
     };
     p0::Policies policy;
+    // This fixture isolates national voter/seat jurisdiction; no simulated
+    // food market was seeded, so disable unrelated endogenous hunger shocks.
+    policy.daily_food_units_per_person=0;
     policy.elections.push_back({"A","A_INC","A_REF",2000,1,1,1'000'000});
     policy.elections.push_back({"B","B_INC","B_REF",2000,1,1,1'000'000});
 

@@ -24,14 +24,14 @@
     "docs/phase-c/economy/README.md": "bfb90326d09bd217a678bd2a3333176479e6e907",
     "docs/phase-c/economy/ECONOMIC_ADRS.md": "3d9a7633b5f4856a2d42c205e7c4da9c4d15f843",
     "docs/phase-c/economy/ECONOMIC_ACCEPTANCE_TESTS.md": "57c4906d384d6e670c0c5bca52e4f2e634d6b141",
-    "docs/phase-c/politics/README.md": "c0ea031faf256e79208cef45e2fa40ec98bbad8c",
+    "docs/phase-c/politics/README.md": "d7f5a811c8c3b6e79b1936cdc1958628d7c9e092",
     "docs/phase-c/politics/POLITICAL_ADRS.md": "a7b01ead2009e80a9098326c93d948c9dba8f74f",
     "docs/phase-c/politics/POLITICAL_ACCEPTANCE_TESTS.md": "8dc5d810df370287a84780746c09638dd56386d5",
-    "docs/phase-c/politics/C-P1_STATE_GOVERNMENT_INSTITUTIONS.md": "0691afe1fe535f139e2ab1c6eae62325fa06e22f",
-    "docs/phase-c/politics/C-P2_LAW_POLICY_ENFORCEMENT.md": "f2f30641f78d63fb209c327b16f6261dfaefabca",
-    "docs/phase-c/politics/C-P3_POP_INTEREST_GROUPS_MOVEMENTS.md": "ef4afb3b90de446b43f49c5e10a87f909c8016f8",
-    "docs/phase-c/politics/C-P4_PARTIES_ELECTIONS_GOVERNMENT_FORMATION.md": "cf8fca179b182524ff538f2061c7c5733bba7698",
-    "docs/phase-c/politics/C-P5_UNREST_REBELLION_CIVIL_WAR.md": "fe22a4005430d97f40a7896b4367bb2831c5126c",
+    "docs/phase-c/politics/C-P1_STATE_GOVERNMENT_INSTITUTIONS.md": "46efb799f9ca0442f870ac336ce42a6f35e38198",
+    "docs/phase-c/politics/C-P2_LAW_POLICY_ENFORCEMENT.md": "ef6b91f45f59da5e837d6c69a94f07c815374a95",
+    "docs/phase-c/politics/C-P3_POP_INTEREST_GROUPS_MOVEMENTS.md": "fcfb93db9da494270541d49b6ea618e30ebeeed3",
+    "docs/phase-c/politics/C-P4_PARTIES_ELECTIONS_GOVERNMENT_FORMATION.md": "93172bf47e872050fed0bd4282d7a0b4bbcafbe2",
+    "docs/phase-c/politics/C-P5_UNREST_REBELLION_CIVIL_WAR.md": "8e6b87e08bb6765aa7b97c9b6efdd6b4242beb97",
     "docs/phase-c/politics/examples/election_three_seats.json": "aa69e04bc7b0cad66cbdd2d0cebc4c003e544692",
     "docs/phase-c/politics/examples/law_effective_next_month.json": "840d673258c654ffee58cd8d92f389475b2baad6",
     "docs/phase-c/military/README.md": "57ba9282910cf9edba586b4597e6446a1f229da8",
@@ -75,7 +75,7 @@
     "CMakeLists.txt"
   ],
   "runtime_status": "PARTIAL_IMPLEMENTATION_WITH_SYNTHETIC_INTEGRATION_ACCEPTANCE",
-  "source_lock_revision": "d4-source-lock/1.2",
+  "source_lock_revision": "d4-source-lock/1.3",
   "source_lock_history": [
     {
       "date": "2026-11-05",
@@ -97,6 +97,18 @@
         "docs/adr/ADR-TIME-001_DAILY_TICK_B-J.md",
         "docs/adr/ADR-TIME-002_LEGACY_SAVE_MIGRATION.md",
         "docs/adr/ADR-TIME-003_NATIVE_DAY_DOMAINS.md"
+      ]
+    },
+    {
+      "date": "2026-11-08",
+      "change": "Versioned canonical political-contract refresh after P1 constitutional government, P2 amended laws, P3 movements, P4 state-scoped elections and P5 coup/guerrilla daily-domain integration. Six changed political documentation Git blobs re-locked; invariants and D4 test counts unchanged. No claim of complete historic-content or military AI coverage.",
+      "modified": [
+        "docs/phase-c/politics/README.md",
+        "docs/phase-c/politics/C-P1_STATE_GOVERNMENT_INSTITUTIONS.md",
+        "docs/phase-c/politics/C-P2_LAW_POLICY_ENFORCEMENT.md",
+        "docs/phase-c/politics/C-P3_POP_INTEREST_GROUPS_MOVEMENTS.md",
+        "docs/phase-c/politics/C-P4_PARTIES_ELECTIONS_GOVERNMENT_FORMATION.md",
+        "docs/phase-c/politics/C-P5_UNREST_REBELLION_CIVIL_WAR.md"
       ]
     }
   ]
