@@ -85,12 +85,22 @@ struct Catalogue {
             if(!stances.empty())++count;
         return count;
     }
+    // The previous VIC2.5 profiles used four pre-1.15 names. Accept
+    // those historical save identifiers as explicit compatibility aliases,
+    // not as four extra invented "1.15" ideologies.
+    [[nodiscard]] static std::string canonical_ideology(std::string ideology) {
+        if(ideology=="socialist")return "socialist_movement";
+        if(ideology=="social_democrat")return "state_socialist_movement";
+        if(ideology=="proletarian_movement")return "labor_movement";
+        if(ideology=="vanguardist_movement")return "communist_movement";
+        return ideology;
+    }
     [[nodiscard]] bool knows_ideology(const std::string& ideology)const {
-        return ideologies.contains(ideology);
+        return ideologies.contains(canonical_ideology(ideology));
     }
     [[nodiscard]] std::optional<int> stance(const std::string& ideology,
                              const std::string& group,const std::string& law)const {
-        const auto it=ideologies.find(ideology);
+        const auto it=ideologies.find(canonical_ideology(ideology));
         if(it==ideologies.end())return std::nullopt;
         const auto p=it->second.find(bare_group(group)+"/"+bare_law(law));
         if(p==it->second.end())return std::nullopt;
