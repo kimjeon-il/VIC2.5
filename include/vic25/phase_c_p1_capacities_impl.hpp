@@ -7,8 +7,17 @@ inline P1FlowCapacity IntegratedWorld::p1_authority_capacity(
         const std::string& country)const {
     ensure(governments_.contains(country),"P1 authority requires sovereign government");
     const auto legal=p2_modifier_ppm(country,"country_authority_add");
+    std::int64_t popularity=0;
+    if(const auto source=p1_standing_.find(country);
+       source!=p1_standing_.end()&&
+       source->second.head_popularity_observed&&
+       source->second.observed_head==
+           governments_.at(country).head_of_state)
+        popularity=source->second.head_popularity;
     const auto base=std::max<std::int64_t>(0,
-        phaseb::add_checked(p1power::capacity_base,legal/1'000'000));
+        phaseb::add_checked(
+            phaseb::add_checked(p1power::capacity_base,legal/1'000'000),
+            popularity));
     const auto multiplier=std::clamp<std::int64_t>(
         1'000'000+phaseb::add_checked(
             p2_modifier_ppm(country,"country_authority_mult"),
@@ -145,6 +154,11 @@ inline void IntegratedWorld::p1_record_standing(P1StandingEvidence input) {
     ensure(!input.country.empty()&&governments_.contains(input.country)&&
            !input.source.empty()&&input.observed_day>=0&&
            input.tier<=P1CountryTier::hegemony&&
+           input.head_popularity>=-100&&input.head_popularity<=100&&
+           (!input.head_popularity_observed||
+            (!input.observed_head.empty()&&
+             input.observed_head==
+               governments_.at(input.country).head_of_state))&&
            (input.confirmed_rank==P1PowerRank::unobserved||
             input.confirmed_rank==P1PowerRank::decentralized_power||
             (input.recognized==(

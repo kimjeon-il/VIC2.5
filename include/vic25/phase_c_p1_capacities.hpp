@@ -23,6 +23,11 @@ struct P1StandingEvidence {
     P1CountryTier tier{P1CountryTier::kingdom};
     bool recognized{true};
     P1PowerRank confirmed_rank{P1PowerRank::unobserved};
+    // Optional, authenticated popularity of the *current* head of state.
+    // A leadership change invalidates the bonus unless new evidence arrives.
+    std::string observed_head;
+    std::int32_t head_popularity{};
+    bool head_popularity_observed{};
     // Published scenario/statistic observations, NEVER fabricated GDP from
     // cash balances or duplicated military personnel in a prestige ledger.
     std::int64_t own_gdp{},subject_gdp{},army_projection{},navy_projection{};

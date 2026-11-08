@@ -90,6 +90,7 @@ void fields(Archive& a,T& x) {
         V(id);V(mandate);V(terminate);
     } else if constexpr(std::is_same_v<X,P1StandingEvidence>){
         V(country);V(source);V(tier);V(recognized);V(confirmed_rank);
+        V(observed_head);V(head_popularity);V(head_popularity_observed);
         V(own_gdp);V(subject_gdp);V(army_projection);V(navy_projection);
         V(goods_leadership);V(monuments);V(other_prestige);
         V(observed_day);V(complete);
