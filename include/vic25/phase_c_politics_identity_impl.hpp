@@ -36,6 +36,12 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
         return std::nullopt;
     const auto law=p2_selected_law(country,"citizenship");
     if(!law)return std::nullopt;
+    const auto source=politics::catalogue().modifiers.find(*law);
+    // Newly introduced 1.15 nationality laws without verified 1.15
+    // acceptance modifiers are Unsupported, never a fabricated score 0.
+    if(source==politics::catalogue().modifiers.end()||
+       !source->second.contains("country_acceptance_primary_culture_add"))
+        return std::nullopt;
     const auto national=p2_national_identities_.find(country);
     if(national==p2_national_identities_.end())return std::nullopt;
     const auto& pop=people_.demographic(
