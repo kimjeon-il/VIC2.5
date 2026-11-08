@@ -113,6 +113,15 @@ static void legal_policies_and_override_priority() {
           "forbidden health system served patients through legacy facility");
     check(c.p2_political_strength_ppm("A",P3GroupType::industrialists)>1'000'000,
           "laissez-faire law not affecting actual company IG clout");
+    P2Amendment amendment;
+    amendment.id="Suffrage-Amendment";
+    amendment.law_id="test:rights_of_women";
+    amendment.legal_basis="test:statutory-override";
+    amendment.clauses.push_back({
+        "explicit-suffrage","A",P2ClauseKind::female_suffrage_allowed,1});
+    c.p2_seed_amendment(amendment);
+    check(c.p2_rule("A","A",P2ClauseKind::female_suffrage_allowed)==1,
+          "enacted legal amendment did not override base law catalogue");
     P2BaseLaw invalid;
     invalid.id="invalid-group-law";invalid.country="A";
     invalid.domain="lawgroup_economic_system";
