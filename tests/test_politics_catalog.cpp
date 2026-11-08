@@ -122,8 +122,11 @@ static void observed_clout_ideology_and_legitimacy() {
     phasegh::World::Plan enroll;
     enroll[9].push_back([](phasegh::Stage& gh) {
         auto& c=gh.phase_c();
-        c.join_interest_group(1,"WORKERS",35);
-        c.join_interest_group(1,"BUSINESS",35);
+        const auto& populations=c.people().slices();
+        check(populations.size()==1,"synthetic fixture has unexpected POP slices");
+        const auto actual_slice=populations.begin()->first;
+        c.join_interest_group(actual_slice,"WORKERS",35);
+        c.join_interest_group(actual_slice,"BUSINESS",35);
     });
     baseline.advance_day(enroll);
     alternative.advance_day(enroll);
