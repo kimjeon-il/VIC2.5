@@ -190,6 +190,22 @@ inline P3GroupView IntegratedWorld::p3_group_view(
     P3GroupView view{country,group};
     People country_group_members=0;
     People affiliated_weight=0,group_weight=0;
+    const auto legal_modifiers=p2_active_modifiers(country);
+    const auto profession_strength=[&](const std::string& profession) {
+        const auto it=legal_modifiers.find(
+            "country_"+profession+"_pol_str_mult");
+        return it!=legal_modifiers.end()&&!it->second.boolean?
+            it->second.value_ppm:std::int64_t{0};
+    };
+    const auto scale=[&](People actual,std::int64_t multiplier_ppm){
+        ensure(multiplier_ppm>=0&&multiplier_ppm<=3'000'000,
+               "P3 legal political strength out of range");
+        const People whole=phaseb::mul_checked(
+            actual,multiplier_ppm/1'000'000);
+        const People fractional=p4_scaled(
+            actual,multiplier_ppm%1'000'000,1'000'000);
+        return phaseb::add_checked(whole,fractional);
+    };
     for(const auto& [key,n]:membership_) {
         if(n<=0||!people_.has_slice(key.first))continue;
         const auto organization=p3_groups_.find({country,key.second});
@@ -204,15 +220,17 @@ inline P3GroupView IntegratedWorld::p3_group_view(
              p4_scaled(n,organization->second.organization_ppm,1'000'000));
         const auto legal_strength=p2_political_strength_ppm(
             country,organization->second.type);
-        People weighted=p4_scaled(organized,
-            std::min(legal_strength,1'000'000),1'000'000);
-        if(legal_strength>1'000'000)
-            weighted=phaseb::add_checked(weighted,p4_scaled(
-                organized,std::min(legal_strength-1'000'000,1'000'000),
-                1'000'000));
-        if(legal_strength>2'000'000)
-            weighted=phaseb::add_checked(weighted,p4_scaled(
-                organized,legal_strength-2'000'000,1'000'000));
+        People weighted=scale(organized,legal_strength);
+        // Occupation-specific law modifiers and acceptance penalties apply
+        // only to the actual members of this living POP slice.
+        const auto& economic=people_.economic(
+            people_.slice(key.first).key.economic);
+        const auto occupational=std::clamp<std::int64_t>(
+            1'000'000+profession_strength(economic.profession),0,3'000'000);
+        weighted=scale(weighted,occupational);
+        if(const auto acceptance=p2_acceptance_effect(country,key.first))
+            weighted=scale(weighted,std::clamp<std::int64_t>(
+                acceptance->political_strength_ppm,0,3'000'000));
         affiliated_weight=phaseb::add_checked(affiliated_weight,weighted);
         if(key.second==group) {
             country_group_members=phaseb::add_checked(country_group_members,n);
