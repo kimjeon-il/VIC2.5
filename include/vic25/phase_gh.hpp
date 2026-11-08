@@ -444,6 +444,8 @@ class Stage {
     // enacted infrastructure/IG efficiency adjusts only the derived daily
     // operational ceiling. No new roads, railways or routes are manufactured.
     [[nodiscard]] Quantity effective_edge_capacity(const TransportEdge&)const;
+    [[nodiscard]] Money military_procurement_price(
+        const std::string&,const std::string&,const std::string&,Money)const;
     [[nodiscard]] std::optional<PathQuote> quote_path(
         Id from, Id to, Month month) const;
     void plan_contracts();
@@ -1686,7 +1688,11 @@ inline void Stage::plan_autonomous_trade() {
         const auto& source_quote=core.market(origin,route.good);
         const auto& target_quote=core.market(dest,route.good);
         const auto ppm=duty_rate(from,to,route.good);
-        const Money price=source_quote.price;
+        // A government buyer really pays the source-qualified higher
+        // military-goods bid. A private firm, other commodity, or fixed-price
+        // treaty contract is never silently charged this state expense.
+        const Money price=military_procurement_price(
+            to,route.buyer,route.good,source_quote.price);
         require(price>0&&ppm>=0&&ppm<=1'000'000,
                 "G_ERR_INVALID_MARKET_QUOTE");
         const auto path=quote_path(route.origin,route.destination,core.month());

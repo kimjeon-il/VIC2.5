@@ -31,7 +31,12 @@ inline const std::map<std::string,std::string>& wired_trait_effects() {
         {"building_group_bg_agriculture_throughput_add","phase_d::run_recipe"},
         {"building_group_bg_plantations_throughput_add","phase_d::run_recipe"},
         {"building_group_bg_ranching_throughput_add","phase_d::run_recipe"},
-        {"state_construction_mult","p0_daily::investment"}
+        {"state_construction_mult","p0_daily::investment"},
+        {"state_infrastructure_mult","phasegh::Stage::effective_edge_capacity"},
+        {"country_military_goods_cost_mult","phasegh::Stage::plan_autonomous_trade"},
+        {"state_radicalism_increases_violent_hostility_mult","phasec::IntegratedWorld::p3_daily_react"},
+        {"state_radicalism_increases_cultural_erasure_mult","phasec::IntegratedWorld::p3_daily_react"},
+        {"state_radicalism_increases_open_prejudice_mult","phasec::IntegratedWorld::p3_daily_react"}
     };
     return routes;
 }

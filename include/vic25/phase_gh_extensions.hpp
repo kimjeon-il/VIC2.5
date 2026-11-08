@@ -30,6 +30,29 @@ inline Quantity Stage::effective_edge_capacity(
         return std::numeric_limits<Quantity>::max();
     return phaseb::add_checked(high,low);
 }
+inline Money Stage::military_procurement_price(
+        const std::string& country,const std::string& buyer,
+        const std::string& good,Money quoted)const {
+    static const std::set<std::string> military{
+        "small_arms","rifle","rifles","ammunition","artillery",
+        "warships","ironclads","man_o_wars","frigates","tanks",
+        "aeroplanes","airplanes","military_supplies"};
+    if(quoted<=0||!military.contains(good))return quoted;
+    const auto& core=spatial_.phase_c();
+    if(!core.has_government(country)||
+       !core.has_country_treasury(country)||
+       core.country_treasury(country)!=buyer)return quoted;
+    const auto adjustment=phaseb::add_checked(
+        core.p2_modifier_ppm(country,"country_military_goods_cost_mult"),
+        core.p3_trait_modifier_ppm(country,"country_military_goods_cost_mult"));
+    const auto ppm=std::clamp<std::int64_t>(
+        1'000'000+adjustment,0,2'000'000);
+    // The charged amount is still funded by actual buyer cash at Stage 1
+    // and is received by an existing seller at Stage 7.
+    return phaseb::add_checked(
+        phaseb::mul_checked(quoted/1'000'000,ppm),
+        phaseb::mul_checked(quoted%1'000'000,ppm)/1'000'000);
+}
 inline std::optional<PathQuote> Stage::quote_path(
         Id from,Id to,Month month) const {
     const std::function<Quantity(const TransportEdge&)> cap=
