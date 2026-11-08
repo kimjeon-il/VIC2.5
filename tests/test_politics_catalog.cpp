@@ -59,7 +59,7 @@ static phasegh::World make_world(const std::string& economy_choice) {
     c.p3_set_leader_ideology("A","WORKERS","communist");
     law(c,"economic_system",economy_choice);
     law(c,"rights_of_women","no_womens_rights");
-    law(c,"labor_associations","anti_strike_laws");
+    law(c,"labor_associations","guild_system");
     law(c,"health_system","no_health_system");
     law(c,"free_speech","protected_speech");
     law(c,"distribution_of_power","universal_suffrage");
@@ -98,7 +98,7 @@ static void legal_policies_and_override_priority() {
           "actual legal selection lost catalogue identity");
     check(c.p2_rule("A","A",P2ClauseKind::female_suffrage_allowed)==0&&
           c.p2_rule("A","A",P2ClauseKind::peaceful_strike_allowed)==0&&
-          c.p2_rule("A","A",P2ClauseKind::political_association_allowed)==0&&
+          c.p2_rule("A","A",P2ClauseKind::political_association_allowed)==1&&
           c.p2_rule("A","A",P2ClauseKind::public_healthcare_right)==0,
           "effective law choice not connected to legal rights");
     check(c.p2_institution_factor_ppm(
