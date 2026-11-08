@@ -417,6 +417,14 @@ if(BUILD_TESTING)
     set_tests_properties(vic25_content_json_tests PROPERTIES TIMEOUT 120)
 endif()
 
+# Actual day-native POP legal hazards and source modifier effects.
+if(BUILD_TESTING)
+    add_executable(vic25_politics_domain_tests tests/test_politics_domain.cpp)
+    target_link_libraries(vic25_politics_domain_tests PRIVATE vic25_core)
+    add_test(NAME vic25_politics_domain_tests COMMAND vic25_politics_domain_tests)
+    set_tests_properties(vic25_politics_domain_tests PROPERTIES TIMEOUT 180)
+endif()
+
 # P2/P3/P1: Victoria 3 wiki-informed legal catalogue, ideology preferences,
 # real organization-backed clout, service access, and coalition legitimacy.
 if(BUILD_TESTING)
