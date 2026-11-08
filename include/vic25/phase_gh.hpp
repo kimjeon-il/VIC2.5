@@ -1868,3 +1868,4 @@ inline void Stage::execute_autonomous_trade() {
 } // namespace vic25::phasegh
 #include "vic25/phase_gh_extensions.hpp"
 #include "vic25/phase_gh_diplomacy.hpp"
+#include "vic25/phase_gh_political_power.hpp"
