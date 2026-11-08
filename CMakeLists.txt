@@ -425,3 +425,12 @@ if(BUILD_TESTING)
     add_test(NAME vic25_politics_catalog_tests COMMAND vic25_politics_catalog_tests)
     set_tests_properties(vic25_politics_catalog_tests PROPERTIES TIMEOUT 180)
 endif()
+
+# Sourced 1.13.11 law/ideology modifiers and source-qualified 1.15-policy
+# migration, citizenship, real emancipation and native snapshot integrity.
+if(BUILD_TESTING)
+    add_executable(vic25_politics_identity_tests tests/test_politics_identity.cpp)
+    target_link_libraries(vic25_politics_identity_tests PRIVATE vic25_core)
+    add_test(NAME vic25_politics_identity_tests COMMAND vic25_politics_identity_tests)
+    set_tests_properties(vic25_politics_identity_tests PROPERTIES TIMEOUT 180)
+endif()

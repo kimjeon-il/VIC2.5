@@ -12,9 +12,9 @@ jobs:
       - name: Configure headless content test
         run: cmake -S . -B build-content -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF
       - name: Compile political catalogue regression first
-        run: cmake --build build-content --target vic25_politics_catalog_tests --parallel 2
+        run: cmake --build build-content --target vic25_politics_catalog_tests vic25_politics_identity_tests --parallel 2
       - name: Political laws, ideologies, interest-group regression
-        run: ctest --test-dir build-content -R "^vic25_politics_catalog_tests$" --output-on-failure
+        run: ctest --test-dir build-content -R "^vic25_politics_(catalog|identity)_tests$" --output-on-failure
       - name: Compile P0 gameplay regression first
         run: cmake --build build-content --target vic25_p0_daily_tests --parallel 2
       - name: P0 gameplay regression
