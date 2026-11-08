@@ -11,6 +11,7 @@
 #include "vic25/phase_c_p3.hpp"
 #include "vic25/phase_c_politics_catalog.hpp"
 #include "vic25/phase_c_politics_identity.hpp"
+#include "vic25/phase_c_politics_acceptance_rules.hpp"
 #include "vic25/phase_c_p5.hpp"
 #include "vic25/phase_c_p5_guerrilla.hpp"
 #include "vic25/ledgers.hpp"
@@ -1708,6 +1709,8 @@ public:
     void p2_seed_national_identity(P2NationalIdentity);
     [[nodiscard]] std::optional<P2AcceptanceView> p2_acceptance(
         const std::string& country,Id pop_slice)const;
+    [[nodiscard]] std::optional<P2AcceptanceLawEffect>
+        p2_acceptance_effect(const std::string& country,Id pop_slice)const;
     [[nodiscard]] bool p2_migration_permitted(
         Id pop_slice,const std::string& destination_region)const;
     [[nodiscard]] bool p2_citizenship_vote_allowed(
@@ -2399,7 +2402,22 @@ public:
             ensure(wage>=legal,
                    "P2 minimum wage law forbids underpaid new labor contracts");
         }
-        people_.hire(slice, count, employer, "worker", wage, phaseb::JobRequirements{});
+        // National citizenship laws change wages for lower-acceptance
+        // workers. This adjusts only an actual new C employment contract;
+        // it never manufactures or silently transfers payroll money.
+        Money contracted=wage;
+        if(country!=sovereignty_.end()) {
+            if(const auto accepted=p2_acceptance_effect(
+                    country->second,slice)) {
+                ensure(accepted->wage_ppm>=0&&
+                       accepted->wage_ppm<=1'500'000,
+                       "P2 invalid discriminated wage multiplier");
+                contracted=phaseb::mul_checked(
+                    wage,accepted->wage_ppm)/1'000'000;
+            }
+        }
+        people_.hire(slice,count,employer,"worker",contracted,
+                     phaseb::JobRequirements{});
         events_.push_back("hire");
     }
     void produce(const std::string& firm, const std::string& region,
