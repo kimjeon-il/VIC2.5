@@ -6,6 +6,7 @@
 // separate future modules (see docs/phase-c/integration/).
 #include "vic25/phase_b.hpp"
 #include "vic25/phase_c_p1.hpp"
+#include "vic25/phase_c_p1_capacities.hpp"
 #include "vic25/phase_c_p4.hpp"
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
@@ -1653,6 +1654,24 @@ public:
     [[nodiscard]] P1AuthorityView p1_authority(const std::string&)const;
     void seed_p1_coalition(const std::string&,P1Coalition);
     [[nodiscard]] P1LegitimacyView p1_legitimacy(const std::string&)const;
+    // National capacities derive from enacted laws, actual organizations and
+    // ongoing policy commitments; they are never spendable financial stocks.
+    [[nodiscard]] P1FlowCapacity p1_authority_capacity(
+        const std::string&)const;
+    [[nodiscard]] std::int64_t p1_local_decree_ppm(
+        const std::string&,const std::string&,const std::string&)const;
+    void p1_schedule_mandate(P1Mandate,const std::string&,std::int64_t);
+    void p1_schedule_mandate_termination(
+        const std::string&,const std::string&,const std::string&,
+        std::int64_t);
+    void phase_time_apply_p1_mandates(std::int64_t);
+    [[nodiscard]] const std::map<std::string,P1Mandate>&
+        p1_active_mandates()const{return p1_active_mandates_;}
+    void p1_record_standing(P1StandingEvidence);
+    [[nodiscard]] P1PrestigeView p1_prestige(const std::string&)const;
+    [[nodiscard]] P1PowerRank p1_power_rank(const std::string&)const;
+    [[nodiscard]] const std::map<std::string,P1StandingEvidence>&
+        p1_standing()const{return p1_standing_;}
     void seed_p1_institution(const std::string&,const std::string&,
                              P1InstitutionKind,std::uint8_t);
     [[nodiscard]] P1InstitutionView p1_institution_capacity(
@@ -3978,6 +3997,13 @@ private:
     std::map<std::string,P1Constitution> p1_constitutions_;
     std::map<std::string,P1Coalition> p1_coalitions_;
     std::map<std::string,P1Institution> p1_institutions_;
+    // Elected decrees and interest-group measures are policy identities, not
+    // stocks of Authority. Their continuing usage is derived when queried.
+    std::map<std::string,P1Mandate> p1_active_mandates_;
+    std::map<std::int64_t,std::vector<P1MandateChange>> p1_pending_mandates_;
+    // Source-qualified prestige/recognition observations, not an alternative
+    // GDP, manpower, treasury or diplomatic influence ledger.
+    std::map<std::string,P1StandingEvidence> p1_standing_;
     std::map<std::int64_t,std::map<std::string,P1GovernmentChange>> p1_pending_;
     // P4 party relationships are many-to-many; political headcount stays in
     // P3 memberships and the national chamber still uses country_elections_.
