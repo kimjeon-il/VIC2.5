@@ -256,7 +256,7 @@ inline std::optional<std::int64_t> law_clause(
         if(g=="free_speech")
             return l=="outlawed_dissent"?0:1;
         if(g=="labor_associations")
-            return l=="combination_acts"||l=="anti_strike_laws"?0:1;
+            return l=="combination_acts"?0:1;
     }
     if(kind==K::peaceful_strike_allowed&&g=="labor_associations")
         return l=="anti_strike_laws"||l=="combination_acts"||

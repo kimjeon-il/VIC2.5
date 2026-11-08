@@ -91,6 +91,11 @@ static void catalogued_laws_and_stances() {
           c.stance("militarist","policing","militarized_police")
              .value_or(0)>0,
           "5-step ideology positions missing");
+    check(politics::law_clause("labor_associations","anti_strike_laws",
+              P2ClauseKind::political_association_allowed)==1&&
+          politics::law_clause("labor_associations","anti_strike_laws",
+              P2ClauseKind::peaceful_strike_allowed)==0,
+          "anti-strike law must distinguish union association from strikes");
     check(politics::default_ideologies(P3GroupType::trade_unions).size()>=2&&
           politics::default_ideologies(P3GroupType::custom).empty(),
           "non-historical custom IG must not be assigned invented ideology");
