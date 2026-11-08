@@ -3534,7 +3534,8 @@ public:
             ensure(id==policy.id&&p1_constitutions_.contains(policy.country)&&
                    !policy.legal_basis.empty()&&policy.adopted_day>=0&&
                    policy.effective_day>policy.adopted_day&&
-                   policy.kind<=P1MandateKind::suppress_interest_group&&
+                   (policy.kind==P1MandateKind::decree_road_maintenance||
+                    policy.kind==P1MandateKind::decree_promote_social_mobility)&&
                    sovereignty_.contains(policy.target)&&
                    sovereignty_.at(policy.target)==policy.country,
                    "P1 unbacked active Authority mandate");
