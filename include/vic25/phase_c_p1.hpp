@@ -60,6 +60,7 @@ struct P1AuthorityView {
 struct P1LegitimacyView {
     int score{50}; // 0..100; missing components use a transparent neutral prior
     int group_support{50}, electoral_support{50}, legal_compatibility{100};
+    int ideological_incompatibility{}; // observed opposing coalition stances
     bool observed_groups{}, observed_election{}, caretaker{};
 };
 
