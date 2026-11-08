@@ -156,7 +156,9 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         std::int32_t day_of_month=0,std::int32_t days_in_month=0,
         const std::map<std::string,Quantity>* provisional_edges=nullptr,
         bool verified_day_edges_only=false,
-        const std::map<std::string,std::int32_t>* override_days=nullptr) {
+        const std::map<std::string,std::int32_t>* override_days=nullptr,
+        const std::function<Quantity(const TransportEdge&)>*
+            effective_capacity=nullptr) {
     if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
     if(trade.transport_edges.empty())return std::nullopt;
     using Item=std::tuple<Money,Month,Id>;
@@ -194,10 +196,12 @@ inline std::optional<PathQuote> quote_daily_freight_path(
                 provisional_edges->contains(edge_id))?
                 provisional_edges->at(edge_id):0;
             const Quantity used=phaseb::add_checked(committed,pending);
+            const Quantity lawful=effective_capacity?
+                (*effective_capacity)(edge):edge.monthly_capacity;
             const Quantity ceiling=day_of_month>0?
-                daily_budget::cumulative(edge.monthly_capacity,
+                daily_budget::cumulative(lawful,
                                          day_of_month,days_in_month):
-                edge.monthly_capacity;
+                lawful;
             // Actual native cargo occupies only its departing segment
             // today. Future segments are capacity-checked when the lot
             // physically reaches their hub, not months prematurely.
@@ -233,8 +237,10 @@ inline std::optional<PathQuote> quote_daily_freight_path(
             provisional_edges->contains(edge.id))?
             provisional_edges->at(edge.id):0;
         const Quantity used=phaseb::add_checked(committed,pending);
+        const Quantity lawful=effective_capacity?
+            (*effective_capacity)(edge):edge.monthly_capacity;
         const Quantity ceiling=day_of_month>0?
-            daily_budget::cumulative(edge.monthly_capacity,day_of_month,days_in_month):edge.monthly_capacity;
+            daily_budget::cumulative(lawful,day_of_month,days_in_month):lawful;
         if(day_of_month<=0||edge.from==from) {
             require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
             result.capacity=std::min(result.capacity,ceiling-used);
@@ -434,6 +440,10 @@ class Stage {
                 c.government(country).prime_minister == person,
                 "H_ERR_UNAUTHORIZED_GOVERNMENT");
     }
+    // Real verified edges retain their base capacity; the source country's
+    // enacted infrastructure/IG efficiency adjusts only the derived daily
+    // operational ceiling. No new roads, railways or routes are manufactured.
+    [[nodiscard]] Quantity effective_edge_capacity(const TransportEdge&)const;
     [[nodiscard]] std::optional<PathQuote> quote_path(
         Id from, Id to, Month month) const;
     void plan_contracts();
@@ -561,7 +571,7 @@ public:
         const auto key=std::make_pair(phase_c().month(),edge_id);
         const Quantity used=trade_.edge_usage[key];
         require(quantity<=daily_budget::remaining(
-                    edge.monthly_capacity,used,day,days),
+                    effective_edge_capacity(edge),used,day,days),
                 "F_ERR_DUPLICATE_FREIGHT_CAPACITY");
         const std::string purpose="F:"+cargo_id;
         phase_c().phase_d_reserve_material(
@@ -597,7 +607,7 @@ public:
         const auto key=std::make_pair(phase_c().month(),edge_id);
         const auto used=trade_.edge_usage[key];
         const auto capacity=daily_budget::cumulative(
-            edge.monthly_capacity,day_of_month,days_in_month);
+            effective_edge_capacity(edge),day_of_month,days_in_month);
         const auto booked=trade_.day_cargo_reservations.find(cargo_id);
         const bool reserved=booked!=trade_.day_cargo_reservations.end();
         require(used<=capacity&&
@@ -944,10 +954,14 @@ public:
             if(!ready(trade_.transport_edges.at(edge_id))) {
                 if(!geo.regions.contains(cargo.hub_region)||
                    !geo.regions.contains(cargo.destination))continue;
+                const std::function<Quantity(const TransportEdge&)> cap=
+                    [this](const TransportEdge& e) {
+                        return effective_edge_capacity(e);
+                    };
                 const auto alternate=quote_daily_freight_path(
                     trade_,geo.regions.at(cargo.hub_region),
                     geo.regions.at(cargo.destination),c.month(),
-                    day_of_month_,days_in_month_,nullptr,true);
+                    day_of_month_,days_in_month_,nullptr,true,nullptr,&cap);
                 if(!alternate||alternate->edges.empty()||
                    alternate->capacity<cargo.quantity)continue;
                 cargo.path_edges.resize(cargo.hop_index+1);
@@ -961,7 +975,8 @@ public:
             const auto key=std::make_pair(c.month(),edge_id);
             const Quantity used=trade_.edge_usage[key];
             const Quantity free=daily_budget::remaining(
-                edge.monthly_capacity,used,day_of_month_,days_in_month_);
+                effective_edge_capacity(edge),used,
+                day_of_month_,days_in_month_);
             if(free<cargo.quantity)continue;
             const Money price=phaseb::mul_checked(
                 cargo.quantity,edge.freight_per_unit);

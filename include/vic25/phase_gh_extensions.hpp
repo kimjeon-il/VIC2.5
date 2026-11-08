@@ -4,11 +4,41 @@
 
 namespace vic25::phasegh {
 
+inline Quantity Stage::effective_edge_capacity(
+        const TransportEdge& edge)const {
+    const auto& geo=spatial_.spatial();
+    const auto loc=geo.provinces.find(edge.from);
+    if(loc==geo.provinces.end())return edge.monthly_capacity;
+    const auto& core=spatial_.phase_c();
+    const auto& country=core.sovereignty(loc->second.region);
+    if(!core.has_government(country))return edge.monthly_capacity;
+    const auto delta=phaseb::add_checked(
+        core.p2_modifier_ppm(country,"state_infrastructure_mult"),
+        core.p3_trait_modifier_ppm(country,"state_infrastructure_mult"));
+    const auto multiplier=std::clamp<std::int64_t>(
+        1'000'000+delta,0,2'000'000);
+    const Quantity base=edge.monthly_capacity;
+    // Fixed-point division first: no compiler-specific 128-bit integer and
+    // saturation only when extra real throughput exceeds signed 64-bit.
+    const Quantity div=base/1'000'000;
+    if(div>0&&multiplier>std::numeric_limits<Quantity>::max()/div)
+        return std::numeric_limits<Quantity>::max();
+    const Quantity high=div*multiplier;
+    const Quantity low=phaseb::mul_checked(base%1'000'000,
+                                          multiplier)/1'000'000;
+    if(high>std::numeric_limits<Quantity>::max()-low)
+        return std::numeric_limits<Quantity>::max();
+    return phaseb::add_checked(high,low);
+}
 inline std::optional<PathQuote> Stage::quote_path(
         Id from,Id to,Month month) const {
+    const std::function<Quantity(const TransportEdge&)> cap=
+        [this](const TransportEdge& e) {
+            return effective_edge_capacity(e);
+        };
     return quote_daily_freight_path(
         trade_,from,to,month,day_of_month_,days_in_month_,
-        nullptr,day_of_month_>0);
+        nullptr,day_of_month_>0,nullptr,&cap);
 }
 inline void Stage::create_trade_contract(TradeContract c) {
     at(9);
