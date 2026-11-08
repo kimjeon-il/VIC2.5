@@ -464,6 +464,22 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
                 candidates.insert(id);
         }
     }
+    // Freeze the IG hostility modifiers BEFORE updating any population
+    // attitudes; an IG's approval can depend on those same attitudes.
+    // This avoids same-day order dependence and never creates a parallel
+    // radical population ledger.
+    std::map<std::string,std::array<std::int64_t,3>> hostility;
+    for(const auto& [country,government]:governments_) {
+        (void)government;
+        if(p3_groups_.empty())break;
+        hostility.emplace(country,std::array<std::int64_t,3>{{
+            p3_trait_modifier_ppm(country,
+                "state_radicalism_increases_violent_hostility_mult"),
+            p3_trait_modifier_ppm(country,
+                "state_radicalism_increases_cultural_erasure_mult"),
+            p3_trait_modifier_ppm(country,
+                "state_radicalism_increases_open_prejudice_mult")}});
+    }
     // Unaffiliated, unshocked POPs keep their aggregate existing profile.
     // One national movement cannot allocate millions of duplicate, mostly
     // neutral per-slice records on every tick. Explicit issue opinions and
@@ -490,8 +506,33 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
              p3_fraction(shortage,row.count):0;
         // Both changes use actually observed economic conditions. Political
         // memory evolves gradually, not a fixed trait of religion/culture.
-        const std::int64_t pressure=static_cast<std::int64_t>(
+        std::int64_t pressure=static_cast<std::int64_t>(
             unemployment)/400+scarcity/250;
+        // An actual source-qualified discriminatory law/POP identity
+        // increases *existing observed* hardship-driven radicalisation.
+        // A missing culture/religion source is Unsupported rather than
+        // automatically assuming hostile or full acceptance.
+        if(pressure>0) {
+            const auto nation=sovereignty_.find(dem.region);
+            if(nation!=sovereignty_.end()) {
+                const auto rules=hostility.find(nation->second);
+                const auto acceptance=p2_acceptance(nation->second,id);
+                if(rules!=hostility.end()&&acceptance) {
+                    const auto level=acceptance->level;
+                    int index=-1;
+                    if(level==P2AcceptanceLevel::violent_hostility)index=0;
+                    else if(level==P2AcceptanceLevel::cultural_erasure)index=1;
+                    else if(level==P2AcceptanceLevel::open_prejudice)index=2;
+                    if(index>=0) {
+                        const auto factor=std::clamp<std::int64_t>(
+                            1'000'000+rules->second.at(
+                                static_cast<std::size_t>(index)),
+                            0,2'000'000);
+                        pressure=phaseb::mul_checked(pressure,factor)/1'000'000;
+                    }
+                }
+            }
+        }
         const std::int64_t relief=(employed>0?900:250)+
                                     (scarcity==0?200:0);
         attitude.radical_ppm=static_cast<std::int32_t>(
