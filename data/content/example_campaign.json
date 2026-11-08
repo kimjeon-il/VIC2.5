@@ -1,0 +1,106 @@
+{
+  "ruleset": "vic25-example-content/1.0",
+  "events": [
+    {
+      "id": "constitutional_crisis",
+      "on_action": "government_changed",
+      "once_scope": true,
+      "choice_timeout": 7,
+      "trigger": {"domain_ge": {"name": "country.exists", "value": 1}},
+      "options": [
+        {
+          "id": "accept_compromise",
+          "ai_weight": 3,
+          "effects": [
+            {"kind": "set_flag", "id": "constitutional_compromise"},
+            {"kind": "open_journal", "id": "political_reform"}
+          ]
+        },
+        {
+          "id": "demand_further_reform",
+          "ai_weight": 1,
+          "effects": [
+            {"kind": "add_counter", "id": "reform_pressure", "amount": 2},
+            {"kind": "open_journal", "id": "political_reform"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reform_celebrated",
+      "choice_timeout": 3,
+      "default_option": "note",
+      "options": [
+        {
+          "id": "note",
+          "effects": [{"kind": "set_flag", "id": "reform_celebrated"}]
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "launch_reform_program",
+      "visible": {"domain_ge": {"name": "country.exists", "value": 1}},
+      "available": {"not": {"flag": "reform_program_started"}},
+      "once_scope": true,
+      "ai_weight": 1,
+      "effects": [
+        {"kind": "set_flag", "id": "reform_program_started"},
+        {"kind": "open_journal", "id": "political_reform"},
+        {"kind": "schedule_event", "id": "reform_celebrated", "delay": 2}
+      ]
+    }
+  ],
+  "journals": [
+    {
+      "id": "political_reform",
+      "group": "politics",
+      "activation": {"domain_ge": {"name": "country.exists", "value": 1}},
+      "progress_metric": "local:reform_pressure",
+      "progress_target": 4,
+      "timeout_days": 365,
+      "outcomes": [
+        {
+          "id": "successful_reform",
+          "trigger": {"counter_ge": {"name": "reform_pressure", "value": 4}},
+          "priority": 20
+        },
+        {
+          "id": "negotiated_compromise",
+          "trigger": {"flag": "constitutional_compromise"},
+          "priority": 10
+        },
+        {
+          "id": "incomplete",
+          "on_timeout": true
+        }
+      ]
+    }
+  ],
+  "formations": [
+    {
+      "id": "example_founding",
+      "target_country": "NEW_COUNTRY",
+      "eligibility": {
+        "all": [
+          {"domain_ge": {"name": "country.exists", "value": 1}},
+          {"flag": "reform_program_started"}
+        ]
+      },
+      "required_provinces": [101, 102],
+      "needed_ppm": 1000000,
+      "external": {
+        "kind": "independence",
+        "target_country": "NEW_COUNTRY",
+        "admin_name": "New State",
+        "admin_id": 501,
+        "head": "HEAD_NEW",
+        "prime": "PRIME_NEW",
+        "seats": 7,
+        "quorum": 4,
+        "provinces": [102]
+      }
+    }
+  ]
+}
