@@ -261,6 +261,13 @@ inline std::optional<std::int64_t> law_clause(
     if(kind==K::peaceful_strike_allowed&&g=="labor_associations")
         return l=="anti_strike_laws"||l=="combination_acts"||
                l=="guild_system"?0:1;
+    if(kind==K::income_tax_max_ppm&&g=="taxation") {
+        if(l=="consumption_based_taxation"||l=="land_based_taxation")
+            return 0; // neither tax law has wage-income tax authority
+        if(l=="per_capita_based_taxation")return 400'000;
+        if(l=="proportional_taxation")return 600'000;
+        if(l=="graduated_taxation")return 850'000;
+    }
     if(kind==K::maximum_import_tariff_ppm&&g=="trade_policy") {
         if(l=="free_trade")return 0;
         if(l=="isolationism")return 0; // no import tariff if trade prohibited
@@ -280,6 +287,8 @@ inline std::int32_t institution_factor(const std::string& group,
         return l=="no_schools"?0:1'000'000;
     if(g=="health_system"&&kind==P1InstitutionKind::healthcare)
         return l=="no_health_system"?0:1'000'000;
+    if(g=="welfare"&&kind==P1InstitutionKind::welfare)
+        return l=="no_social_security"?0:1'000'000;
     if(g=="policing"&&kind==P1InstitutionKind::policing)
         return l=="no_police"?0:1'000'000;
     if(g=="internal_security"&&kind==P1InstitutionKind::policing)
