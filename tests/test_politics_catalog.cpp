@@ -109,6 +109,22 @@ static void catalogued_laws_and_stances() {
           politics::law_clause("labor_associations","anti_strike_laws",
               P2ClauseKind::peaceful_strike_allowed)==0,
           "anti-strike law must distinguish union association from strikes");
+    const auto discontent=politics::active_ig_effects(
+        P3GroupType::trade_unions,30,100);
+    const auto stable=politics::active_ig_effects(
+        P3GroupType::trade_unions,60,100);
+    const auto empty=politics::active_ig_effects(
+        P3GroupType::trade_unions,30,0);
+    check(std::any_of(discontent.begin(),discontent.end(),
+            [](const auto& effect) {
+                return effect.modifier=="state_construction_mult"&&
+                       effect.value_ppm==-100'000;
+            })&&
+          std::none_of(stable.begin(),stable.end(),
+            [](const auto& effect) {
+                return effect.modifier=="state_construction_mult";
+            })&&empty.empty(),
+          "unhappy trade unions must affect real construction only with members");
     check(politics::default_ideologies(P3GroupType::trade_unions).size()>=2&&
           politics::default_ideologies(P3GroupType::custom).empty(),
           "non-historical custom IG must not be assigned invented ideology");
