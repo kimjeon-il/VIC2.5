@@ -87,6 +87,14 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
         ensure(law.scope.empty()||law.scope=="national",
                "P2 national law cannot impersonate regional sovereignty");
     }
+    // Existing synthetic/legacy legal domains continue to work. Recognised
+    // Victoria-style categories must use a real catalogue choice and the
+    // central legal scope. Unknown "law_*" entries may not silently bypass
+    // the catalogue's admissible law-group relation.
+    if(politics::catalogue().has_group(law.domain))
+        ensure(politics::catalogue().has(law.domain,law.base_choice)&&
+               law.tier!=P2NormTier::local_ordinance,
+               "P2 unsupported or mismatched catalogue law");
     p2_validate_clauses(law.country,law.clauses);
     if(law.tier==P2NormTier::local_ordinance) {
         for(const auto& clause:law.clauses) {
@@ -204,7 +212,63 @@ inline std::optional<std::int64_t> IntegratedWorld::p2_rule(
             value=found;
         }
     }
+    if(value)return value;
+    // Existing explicitly legislated clauses/amendments take precedence.
+    // Otherwise the effective catalogue law supplies an operational rule.
+    // A restrictive rule across distinct domains is combined rather than
+    // being an ambiguous same-rank statute.
+    if(target==country) {
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(law.country!=country)continue;
+            const auto policy=politics::law_clause(
+                law.domain,law.base_choice,kind);
+            if(policy)value=value?std::min(*value,*policy):policy;
+        }
+    }
     return value;
+}
+
+inline std::optional<std::string> IntegratedWorld::p2_selected_law(
+        const std::string& country,const std::string& group)const {
+    const auto normalized=politics::bare_group(group);
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country==country&&
+           politics::bare_group(law.domain)==normalized&&
+           politics::catalogue().has(normalized,law.base_choice))
+            return politics::bare_law(law.base_choice);
+    }
+    return std::nullopt;
+}
+
+inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
+        const std::string& country,P3GroupType group)const {
+    std::int64_t strength=1'000'000;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country==country)
+            strength+=politics::clout_bonus(
+                law.domain,law.base_choice,group);
+    }
+    return static_cast<std::int32_t>(
+        std::clamp<std::int64_t>(strength,250'000,2'500'000));
+}
+
+inline std::int32_t IntegratedWorld::p2_institution_factor_ppm(
+        const std::string& country,P1InstitutionKind kind)const {
+    std::int32_t factor=1'000'000;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country!=country)continue;
+        factor=std::min(factor,politics::institution_factor(
+            law.domain,law.base_choice,kind));
+    }
+    return factor;
 }
 
 inline int IntegratedWorld::p2_voting_age(const std::string& country)const {
