@@ -139,6 +139,12 @@ static void observed_clout_ideology_and_legitimacy() {
           "named ideology of real IG not applied to legal preference");
     check(cooperative.p1_legitimacy("A").ideological_incompatibility>0,
           "coalition policy split not reflected in derived legitimacy");
+    const auto reform=cooperative.p2_political_support(
+        "A","economic_system","laissez_faire");
+    check(reform.observed&&reform.support_ppm>0&&
+          reform.oppose_ppm>0&&reform.governing_support_ppm>0&&
+          reform.support_ppm+reform.oppose_ppm+reform.neutral_ppm==1'000'000,
+          "law-change support failed to compare current and proposed stances");
     const auto old_pop=cooperative.people().population();
     const auto old_cash=cooperative.cash("A");
     check(old_pop==rich.people().population()&&old_cash==rich.cash("A"),
