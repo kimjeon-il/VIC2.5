@@ -157,9 +157,17 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         // not minted into a separate political-point or membership ledger.
         const People organized=phaseb::add_checked(n,
              p4_scaled(n,organization->second.organization_ppm,1'000'000));
-        const People weighted=p4_scaled(
-             organized,p2_political_strength_ppm(
-                 country,organization->second.type),1'000'000);
+        const auto legal_strength=p2_political_strength_ppm(
+            country,organization->second.type);
+        People weighted=p4_scaled(organized,
+            std::min(legal_strength,1'000'000),1'000'000);
+        if(legal_strength>1'000'000)
+            weighted=phaseb::add_checked(weighted,p4_scaled(
+                organized,std::min(legal_strength-1'000'000,1'000'000),
+                1'000'000));
+        if(legal_strength>2'000'000)
+            weighted=phaseb::add_checked(weighted,p4_scaled(
+                organized,legal_strength-2'000'000,1'000'000));
         affiliated_weight=phaseb::add_checked(affiliated_weight,weighted);
         if(key.second==group) {
             country_group_members=phaseb::add_checked(country_group_members,n);
