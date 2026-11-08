@@ -30,12 +30,37 @@ inline DiplomaticCapacityView World::diplomatic_capacity(
     const auto charge=[&](std::int64_t cost) {
         commitments=phaseb::add_checked(commitments,cost);
     };
+    const auto treaty_rank_factor=[&](const std::string& peer)->std::int64_t {
+        // Source: 1.15 country_ranks; costs depend on the rank of the
+        // COUNTERPART, not on the payer's own rank.
+        if(!c.has_government(peer)) {
+            ++out.unpriced_commitments;
+            return 1'000'000;
+        }
+        switch(c.p1_power_rank(peer)) {
+            case phasec::P1PowerRank::great_power:return 2'000'000;
+            case phasec::P1PowerRank::major_power:return 1'500'000;
+            case phasec::P1PowerRank::unrecognized_regional_power:
+                return 750'000;
+            case phasec::P1PowerRank::unrecognized_power:return 500'000;
+            case phasec::P1PowerRank::unobserved:
+                ++out.unpriced_commitments;
+                return 1'000'000;
+            default:return 1'000'000;
+        }
+    };
+    const auto ranked_cost=[&](std::int64_t base,
+                               const std::string& peer) {
+        const auto factor=treaty_rank_factor(peer);
+        return phaseb::mul_checked(base,factor)/1'000'000;
+    };
     const auto month=c.month();
     // Explicit source: 1.15 /common/diplomatic_actions/19_subject_protectorate
     // cost=10, maintenance_paid_by=first_country (principal).
     for(const auto& [id,pact]:diplomacy_.protectorates) {
         (void)id;
-        if(pact.active&&pact.principal==country)charge(10);
+        if(pact.active&&pact.principal==country)
+            charge(ranked_cost(10,pact.dependent));
     }
     // The H treaty model has explicit obligor/beneficiary. Only clauses
     // mapping unambiguously to a 1.15 treaty article and payer are charged.
@@ -69,7 +94,11 @@ inline DiplomaticCapacityView World::diplomatic_capacity(
                         ++out.unpriced_commitments;
                     continue;
             }
-            if(payer==country)charge(cost);
+            if(payer==country) {
+                const auto peer=payer==clause.obligor?
+                    clause.beneficiary:clause.obligor;
+                charge(ranked_cost(cost,peer));
+            }
         }
     }
     // H's simplified bilateral daily-tariff contract has no recorded
