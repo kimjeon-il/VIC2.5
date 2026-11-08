@@ -1453,8 +1453,8 @@ public:
         for(const auto& election:decisions.elections) {
             if(date.year!=election.year||date.month!=election.month||date.day!=election.day)continue;
             plan[9].push_back([election](phasegh::Stage& gh){
-                const auto& registered=gh.phase_c().p4_contests();
-                for(const auto& [id,contest]:registered) {
+                const auto& registered_contests=gh.phase_c().p4_contests();
+                for(const auto& [id,contest]:registered_contests) {
                     (void)id;
                     if(contest.country==election.country&&
                        contest.office==phasec::P4Office::legislature)
