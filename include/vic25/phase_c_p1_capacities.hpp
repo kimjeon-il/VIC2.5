@@ -4,6 +4,7 @@
 // ACTIVE commitments. Prestige is a derived international ranking INPUT, not
 // spendable currency. All referenced actors, IGs, territories and enterprises
 // remain in the original C/D/E/G/H ledgers.
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -20,6 +21,7 @@ enum class P1PowerRank : std::uint8_t {
 struct P1StandingEvidence {
     std::string country,source;
     P1CountryTier tier{P1CountryTier::kingdom};
+    bool recognized{true};
     P1PowerRank confirmed_rank{P1PowerRank::unobserved};
     // Published scenario/statistic observations, NEVER fabricated GDP from
     // cash balances or duplicated military personnel in a prestige ledger.

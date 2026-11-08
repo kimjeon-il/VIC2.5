@@ -145,6 +145,13 @@ inline void IntegratedWorld::p1_record_standing(P1StandingEvidence input) {
     ensure(!input.country.empty()&&governments_.contains(input.country)&&
            !input.source.empty()&&input.observed_day>=0&&
            input.tier<=P1CountryTier::hegemony&&
+           (input.confirmed_rank==P1PowerRank::unobserved||
+            input.confirmed_rank==P1PowerRank::decentralized_power||
+            (input.recognized==(
+             input.confirmed_rank==P1PowerRank::great_power||
+             input.confirmed_rank==P1PowerRank::major_power||
+             input.confirmed_rank==P1PowerRank::minor_power||
+             input.confirmed_rank==P1PowerRank::insignificant_power)))&&
            input.confirmed_rank<=P1PowerRank::great_power&&
            input.own_gdp>=0&&input.subject_gdp>=0&&
            input.army_projection>=0&&input.navy_projection>=0&&
@@ -223,8 +230,7 @@ inline P1PowerRank IntegratedWorld::p1_power_rank(
     }
     const auto average=total/static_cast<std::int64_t>(governments_.size());
     const auto value=info.total;
-    const bool recognized=p1_standing_.at(country).confirmed_rank!=
-            P1PowerRank::decentralized_power;
+    const bool recognized=p1_standing_.at(country).recognized;
     if(recognized&&value>=phaseb::mul_checked(average,5)&&
        phaseb::mul_checked(value,4)>=phaseb::mul_checked(maximum,3))
         return P1PowerRank::great_power;

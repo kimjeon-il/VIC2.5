@@ -3523,6 +3523,36 @@ public:
                    "P1 constitution not backed by a legal government");
             p1_check_coalition(p1_coalitions_.at(country));
         }
+        for(const auto& [id,policy]:p1_active_mandates_) {
+            ensure(id==policy.id&&p1_constitutions_.contains(policy.country)&&
+                   !policy.legal_basis.empty()&&policy.adopted_day>=0&&
+                   policy.effective_day>policy.adopted_day&&
+                   policy.kind<=P1MandateKind::suppress_interest_group&&
+                   sovereignty_.contains(policy.target)&&
+                   sovereignty_.at(policy.target)==policy.country,
+                   "P1 unbacked active Authority mandate");
+        }
+        for(const auto& [day,changes]:p1_pending_mandates_) {
+            ensure(day>=0&&!changes.empty(),
+                   "P1 invalid scheduled Authority order");
+            for(const auto& change:changes) {
+                ensure(!change.id.empty()&&
+                       (change.terminate||
+                        (change.mandate.id==change.id&&
+                         change.mandate.effective_day==day&&
+                         p1_constitutions_.contains(change.mandate.country))),
+                       "P1 malformed Authority order");
+            }
+        }
+        for(const auto& [country,standing]:p1_standing_) {
+            ensure(country==standing.country&&governments_.contains(country)&&
+                   !standing.source.empty()&&standing.observed_day>=0&&
+                   standing.tier<=P1CountryTier::hegemony&&
+                   standing.confirmed_rank<=P1PowerRank::great_power&&
+                   standing.own_gdp>=0&&standing.subject_gdp>=0&&
+                   standing.army_projection>=0&&standing.navy_projection>=0,
+                   "P1 invalid prestige evidence");
+        }
         for(const auto& [id,entry]:p1_institutions_) {
             ensure(entry.public_institution_id==id&&
                    p1_constitutions_.contains(entry.country)&&
@@ -4313,6 +4343,7 @@ private:
 } // namespace vic25::phasec
 
 #include "vic25/phase_c_p1_impl.hpp"
+#include "vic25/phase_c_p1_capacities_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
 #include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"

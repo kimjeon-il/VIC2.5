@@ -475,6 +475,7 @@ public:
                 // A lawful change enters on its scheduled calendar day even
                 // if no P0 controller, battle or economic command is active.
                 gh.phase_c().phase_time_apply_p1_government(today);
+                gh.phase_c().phase_time_apply_p1_mandates(today);
                 gh.phase_c().phase_time_apply_p5_settlement(today);
                 gh.phase_c().phase_time_apply_p4_amendments(today);
                 gh.phase_c().phase_time_apply_p2(today);
