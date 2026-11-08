@@ -244,6 +244,43 @@ inline std::optional<std::string> IntegratedWorld::p2_selected_law(
     return std::nullopt;
 }
 
+inline std::map<std::string,politics::LawModifier>
+IntegratedWorld::p2_active_modifiers(const std::string& country)const {
+    ensure(governments_.contains(country),"P2 modifiers require actual country");
+    std::map<std::string,politics::LawModifier> combined;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& adopted=p2_laws_.at(id);
+        if(adopted.country!=country)continue;
+        const auto it=politics::catalogue().modifiers.find(
+            politics::bare_law(adopted.base_choice));
+        if(it==politics::catalogue().modifiers.end())continue;
+        for(const auto& [key,effect]:it->second) {
+            auto entry=combined.find(key);
+            if(entry==combined.end()) {
+                combined.emplace(key,effect);
+                continue;
+            }
+            ensure(entry->second.boolean==effect.boolean,
+                   "P2 mixed boolean and numeric law modifier");
+            if(effect.boolean)
+                entry->second.value_ppm=std::max(entry->second.value_ppm,
+                                                 effect.value_ppm);
+            else
+                entry->second.value_ppm=phaseb::add_checked(
+                    entry->second.value_ppm,effect.value_ppm);
+        }
+    }
+    return combined;
+}
+inline std::int64_t IntegratedWorld::p2_modifier_ppm(
+        const std::string& country,const std::string& effect_key)const {
+    const auto effects=p2_active_modifiers(country);
+    if(auto it=effects.find(effect_key);it!=effects.end())
+        return it->second.value_ppm;
+    return 0;
+}
+
 inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
         const std::string& country,P3GroupType group)const {
     std::int64_t strength=1'000'000;
