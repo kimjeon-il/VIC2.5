@@ -65,6 +65,8 @@ struct Catalogue {
 // The game combines common and national/flavour laws. These are law
 // identifiers, not a copy of scripted conditions, artwork or descriptions.
 // Only a single selected law per group belongs in the Phase-C P2 legal ledger.
+#include "vic25/phase_c_politics_reference_ideologies.hpp"
+
 inline const Catalogue& catalogue() {
     static const Catalogue result=[] {
         Catalogue c;
@@ -221,6 +223,7 @@ inline const Catalogue& catalogue() {
                     static_cast<std::int8_t>(std::stoi(token.substr(pos+1)));
             }
         }
+        install_reference_ideologies(c);
         return c;
     }();
     return result;
