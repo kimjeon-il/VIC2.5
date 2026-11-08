@@ -10,6 +10,7 @@
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
 #include "vic25/phase_c_politics_catalog.hpp"
+#include "vic25/phase_c_politics_identity.hpp"
 #include "vic25/phase_c_p5.hpp"
 #include "vic25/phase_c_p5_guerrilla.hpp"
 #include "vic25/ledgers.hpp"
@@ -1700,6 +1701,16 @@ public:
         const std::string& country,const std::string& effect_key)const;
     [[nodiscard]] std::map<std::string,politics::LawModifier>
         p2_active_modifiers(const std::string& country)const;
+    void p2_seed_culture(P2CultureTraits);
+    void p2_seed_religion(P2ReligionTraits);
+    void p2_seed_national_identity(P2NationalIdentity);
+    [[nodiscard]] std::optional<P2AcceptanceView> p2_acceptance(
+        const std::string& country,Id pop_slice)const;
+    [[nodiscard]] bool p2_migration_permitted(
+        Id pop_slice,const std::string& destination_region)const;
+    [[nodiscard]] bool p2_citizenship_vote_allowed(
+        const std::string& country,Id pop_slice)const;
+    void phase_time_enforce_abolition();
     [[nodiscard]] std::int32_t p2_institution_factor_ppm(
         const std::string&,P1InstitutionKind)const;
     [[nodiscard]] int p2_voting_age(const std::string&)const;
@@ -2976,6 +2987,25 @@ public:
                        stance.importance_ppm<=1'000'000,
                        "P3 invalid issue-specific POP preference");
         }
+        for(const auto& [id,traits]:p2_cultures_) {
+            ensure(id==traits.culture&&!id.empty(),
+                   "P2 invalid cultural traits");
+        }
+        for(const auto& [id,traits]:p2_religions_) {
+            ensure(id==traits.religion&&!id.empty(),
+                   "P2 invalid religious traits");
+        }
+        for(const auto& [country,nation]:p2_national_identities_) {
+            ensure(governments_.contains(country)&&country==nation.country&&
+                   !nation.primary_cultures.empty(),
+                   "P2 national identity lacks existing sovereign");
+            for(const auto& culture:nation.primary_cultures)
+                ensure(p2_cultures_.contains(culture),
+                       "P2 national identity has unknown primary culture");
+            for(const auto& faith:nation.state_religions)
+                ensure(p2_religions_.contains(faith),
+                       "P2 national identity has unknown state religion");
+        }
         for(const auto& [key,group]:p3_groups_) {
             ensure(key.first==group.country&&key.second==group.id&&
                    governments_.contains(group.country)&&
@@ -3707,6 +3737,12 @@ private:
     // P3: POP political attributes are preferences over existing real
     // people, never an independent count or financial account.
     std::map<Id,P3Attitude> p3_attitudes_;
+    // Legal cultural matching uses existing Phase B POP culture/religion
+    // strings; these are source-qualified trait relations, not headcounts.
+    std::map<std::string,P2CultureTraits> p2_cultures_;
+    std::map<std::string,P2ReligionTraits> p2_religions_;
+    std::map<std::string,P2NationalIdentity> p2_national_identities_;
+    std::set<std::string> p2_emancipation_due_; // transient within one staged day
     std::map<std::pair<std::string,std::string>,P3Group> p3_groups_;
     // Optional legal/leadership ideology selections; separate versioned
     // snapshot extension preserves the old P3 group record byte layout.
@@ -4061,6 +4097,7 @@ private:
 #include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
+#include "vic25/phase_c_politics_identity_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"
 #include "vic25/phase_c_p5_guerrilla_impl.hpp"
