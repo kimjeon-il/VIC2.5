@@ -88,6 +88,13 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,P3Attitude>){
         V(slice);V(radical_ppm);V(loyal_ppm);V(engagement_ppm);
         V(observed_day);V(issues);
+    } else if constexpr(std::is_same_v<X,P2CultureTraits>) {
+        V(culture);V(heritages);V(heritage_groups);
+        V(languages);V(language_groups);V(traditions);V(homelands);
+    } else if constexpr(std::is_same_v<X,P2ReligionTraits>) {
+        V(religion);V(traits);V(trait_groups);
+    } else if constexpr(std::is_same_v<X,P2NationalIdentity>) {
+        V(country);V(primary_cultures);V(state_religions);
     } else if constexpr(std::is_same_v<X,P3Group>){
         V(country);V(id);V(leader_anchor);V(issue_domain);
         V(preferred_choice);V(type);V(organization_ppm);
@@ -479,6 +486,15 @@ struct SnapshotCodec {
             ar(w.p3_ideology_overrides_);
             ar(w.p3_leader_ideologies_);
         }
+        if(!w.p2_cultures_.empty()||!w.p2_religions_.empty()||
+           !w.p2_national_identities_.empty()||
+           !w.p2_emancipation_due_.empty()) {
+            ar(std::string("VIC25_PHASEC_P2_NATIONAL_IDENTITIES_1"));
+            ar(w.p2_cultures_);
+            ar(w.p2_religions_);
+            ar(w.p2_national_identities_);
+            ar(w.p2_emancipation_due_);
+        }
         if(!w.p5_crises_.empty()||!w.p5_capitals_.empty()||
            !w.p5_actions_.empty()||
            !w.p5_settlements_.empty()||
@@ -520,7 +536,8 @@ struct SnapshotCodec {
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
-             seen_p3=false,seen_ideologies=false,seen_p5=false,
+             seen_p3=false,seen_ideologies=false,seen_identity=false,
+             seen_p5=false,
              seen_guerrilla=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
@@ -669,6 +686,19 @@ struct SnapshotCodec {
                 if(w.p3_ideology_overrides_.size()>500'000||
                    w.p3_leader_ideologies_.size()>500'000)
                     throw std::runtime_error("oversized P3 ideological profile");
+            } else if(extension=="VIC25_PHASEC_P2_NATIONAL_IDENTITIES_1"&&
+                      !seen_identity) {
+                seen_identity=true;
+                ar(w.p2_cultures_);
+                ar(w.p2_religions_);
+                ar(w.p2_national_identities_);
+                ar(w.p2_emancipation_due_);
+                if(w.p2_cultures_.size()>50'000||
+                   w.p2_religions_.size()>50'000||
+                   w.p2_national_identities_.size()>5'000||
+                   w.p2_emancipation_due_.size()>5'000)
+                    throw std::runtime_error(
+                        "oversized P2 culture/religion evidence");
             } else if(extension=="VIC25_PHASEC_P5_UNREST_1"&&!seen_p5) {
                 seen_p5=true;
                 ar(w.p5_crises_);
