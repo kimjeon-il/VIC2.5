@@ -2,6 +2,7 @@
 #include "vic25/phase_b_world.hpp"
 #include "vic25/day_budget.hpp"
 #include "vic25/monthly.hpp"
+#include <functional>
 
 namespace vic25::phaseb {
 
@@ -40,6 +41,8 @@ struct MonthReport {
 // economic production, actual goods settlement and full Ledger atomicity are future tasks.
 class Engine {
 public:
+    using RateAdjustment=std::function<People(
+        const World&,Id,const char*,People)>;
     explicit Engine(DemographyRules rules={}) : rules_(rules) { validate_rules(); }
     template<class Hook>
     MonthReport advance(World& world,Hook&& stage_hook) const {
@@ -68,7 +71,8 @@ public:
     // calendar's exact number of days using integer cumulative quotas.
     // Sum(day_ppm, 1..days_in_month) == monthly_ppm, without float drift.
     // The caller must stage the entire C/D/E/G/H world atomically.
-    MonthReport advance_day(World& w,int day,int days_in_month)const {
+    MonthReport advance_day(World& w,int day,int days_in_month,
+                            RateAdjustment adjustment={})const {
         require(days_in_month>=28&&days_in_month<=31&&day>=1&&
                 day<=days_in_month,"invalid autonomous POP calendar day");
         w.set_native_calendar_day(day);
@@ -104,6 +108,7 @@ public:
         today.training_ppm=per_day(rules_.training_ppm);
         const bool month_end=day==days_in_month;
         Engine engine{today};
+        engine.adjustment_=std::move(adjustment);
         MonthReport report;
         report.month_index=w.month();
         report.start_population=w.population();
@@ -125,6 +130,14 @@ public:
     }
 private:
     DemographyRules rules_;
+    RateAdjustment adjustment_;
+    [[nodiscard]] People adjusted_rate(const World& w,Id id,
+                                       const char* kind,People base)const {
+        if(!adjustment_)return base;
+        const auto value=adjustment_(w,id,kind,base);
+        require(value>=0&&value<=PPM,"politically adjusted POP hazard invalid");
+        return value;
+    }
     static People job_allocation(const World& w, Id id,People total){
         const auto& s=w.slice(id);const People jobs=w.employed(id);
         if(total==s.count)return jobs;
@@ -155,7 +168,8 @@ private:
             if(d.sex==Sex::female && age>=18*12 && age<45*12){
                 // Birth cohort must join a NONWORKER economic profile, never mother's profession.
                 const auto remaining_mothers=w.has_slice(id)?w.slice(id).count:0;
-                const auto births=w.allocate_rate(id,"fertility",remaining_mothers,rules_.fertility_ppm);
+                const auto births=w.allocate_rate(id,"fertility",remaining_mothers,
+                        adjusted_rate(w,id,"fertility",rules_.fertility_ppm));
                 if(births){
                     Economic child=econ;child.profession="not_assigned";child.livelihood="inactive";
                     child.labor_class="ineligible";child.education=w.default_education();
@@ -221,7 +235,8 @@ private:
                 if(rate){
                     const auto multiplier=rules_.education_access_multiplier_ppm[static_cast<std::size_t>(d.sex)];
                     rate=(rate/PPM)*multiplier + (rate%PPM)*multiplier/PPM;
-                    const auto n=w.allocate_rate(id,"school",remaining,rate);
+                    const auto n=w.allocate_rate(id,"school",remaining,
+                        adjusted_rate(w,id,"school",rate));
                     if(n){w.change_education(id,n,next,EventKind::schooling,job_allocation(w,id,n));
                           report.graduated=add_checked(report.graduated,n);}
                 }
@@ -270,7 +285,8 @@ private:
                 const auto dest_it=rules_.destination_by_region.find(d.region);
                 if(dest_it==rules_.destination_by_region.end()||dest_it->second==d.region)continue;
                 const People available=std::min(initial.count,w.slice(id).count);
-                const People moving=w.allocate_rate(id,"migration",available,rules_.migration_ppm);
+                const People moving=w.allocate_rate(id,"migration",available,
+                    adjusted_rate(w,id,"migration",rules_.migration_ppm));
                 if(!moving)continue;
                 const auto& source=w.slice(id);
                 const auto& econ=w.economic(source.key.economic);
