@@ -139,6 +139,7 @@ inline People IntegratedWorld::p4_eligible(
            (d.sex==phaseb::Sex::female&&
             p2_rule(contest.country,contest.country,
                 P2ClauseKind::female_suffrage_allowed).value_or(1)==0)||
+           !p2_citizenship_vote_allowed(contest.country,slice)||
            people_.age_months_slice(slice)<
                static_cast<std::int64_t>(p2_voting_age(contest.country))*12)continue;
         eligible=phaseb::add_checked(eligible,row.count);
@@ -198,6 +199,7 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
            (d.sex==phaseb::Sex::female&&
             p2_rule(contest.country,contest.country,
                 P2ClauseKind::female_suffrage_allowed).value_or(1)==0)||
+           !p2_citizenship_vote_allowed(contest.country,slice)||
            people_.age_months_slice(slice)<
                static_cast<std::int64_t>(p2_voting_age(contest.country))*12)continue;
         ballot.eligible=phaseb::add_checked(ballot.eligible,row.count);
