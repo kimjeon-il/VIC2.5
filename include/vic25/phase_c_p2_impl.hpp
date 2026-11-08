@@ -91,10 +91,29 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
     // Victoria-style categories must use a real catalogue choice and the
     // central legal scope. Unknown "law_*" entries may not silently bypass
     // the catalogue's admissible law-group relation.
-    if(politics::catalogue().has_group(law.domain))
-        ensure(politics::catalogue().has(law.domain,law.base_choice)&&
+    if(politics::catalogue().has_group(law.domain)) {
+        const auto& source=politics::catalogue();
+        ensure(source.has(law.domain,law.base_choice)&&
                law.tier!=P2NormTier::local_ordinance,
                "P2 unsupported or mismatched catalogue law");
+        // Mutual exclusion is checked *both* ways. A law enacted in a
+        // country cannot depend on the order in which legal categories were
+        // seeded or which disallowing_laws block declared the conflict.
+        const auto proposed=politics::bare_law(law.base_choice);
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& existing=p2_laws_.at(id);
+            if(existing.country!=law.country||
+               politics::bare_group(existing.domain)==
+               politics::bare_group(law.domain))continue;
+            const auto current=politics::bare_law(existing.base_choice);
+            if(source.disallowed.at(proposed).contains(current)||
+               (source.disallowed.contains(current)&&
+                source.disallowed.at(current).contains(proposed)))
+                throw std::invalid_argument(
+                    "P2_VIC3_115_MUTUALLY_EXCLUSIVE_LAWS");
+        }
+    }
     p2_validate_clauses(law.country,law.clauses);
     if(law.tier==P2NormTier::local_ordinance) {
         for(const auto& clause:law.clauses) {
@@ -636,6 +655,9 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
         std::string amendment_id;
         if(bill.action==P2BillAction::enact_or_replace_base) {
             const auto& next=bill.proposed_base;
+            // A conflicting law can become active while a bill is queued.
+            // Check again at the effective day inside the atomic transaction.
+            p2_validate_base(next);
             const auto slot=std::make_tuple(next.country,next.domain,next.scope);
             const auto old=p2_active_base_.find(slot);
             if(old!=p2_active_base_.end()) {
