@@ -2902,8 +2902,76 @@ public:
         require_stage({10});
         if(!demography_enabled_)return;
         const auto before=people_.events().size();
+        // Preserve the single Phase B POP registry. Country-scoped legal
+        // modifiers and activated interest-group traits are applied as
+        // *rates*, not as extra births, students, jobs or migrants.
+        struct PoliticalRates {
+            std::int64_t birth{},school{},migration{};
+            bool schools_allowed{true};
+        };
+        std::map<std::string,PoliticalRates> rates;
+        if(!p3_groups_.empty()||!p2_active_base_.empty())
+            for(const auto& [country,government]:governments_) {
+                (void)government;
+                const auto effect=[&](const std::string& key) {
+                    return phaseb::add_checked(
+                        p2_modifier_ppm(country,key),
+                        p3_trait_modifier_ppm(country,key));
+                };
+                const auto education=p2_selected_law(
+                    country,"education_system");
+                rates.emplace(country,PoliticalRates{
+                    effect("state_birth_rate_mult"),
+                    effect("state_education_access_add"),
+                    effect("state_migration_pull_mult"),
+                    education!=std::optional<std::string>("no_schools")});
+            }
+        phaseb::Engine::RateAdjustment adjustment;
+        if(!rates.empty())adjustment=[&,day,days_in_month](
+                const phaseb::World& population,Id id,
+                const char* kind,People base)->People {
+            if(!population.has_slice(id))return base;
+            const auto& dem=population.demographic(
+                population.slice(id).key.demographic);
+            const auto juris=sovereignty_.find(dem.region);
+            if(juris==sovereignty_.end())return base;
+            const auto found=rates.find(juris->second);
+            if(found==rates.end())return base;
+            const auto& policy=found->second;
+            const std::string metric(kind);
+            if(metric=="school") {
+                if(!policy.schools_allowed)return 0;
+                const auto absolute=std::clamp<std::int64_t>(
+                    policy.school,-1'000'000,1'000'000);
+                const auto daily=vic25::daily_budget::increment(
+                    std::abs(absolute),day,days_in_month);
+                return static_cast<People>(
+                    std::clamp<std::int64_t>(
+                        static_cast<std::int64_t>(base)+
+                        (absolute<0?-daily:daily),0,1'000'000));
+            }
+            std::int64_t factor=0;
+            if(metric=="fertility")factor=policy.birth;
+            else if(metric=="migration") {
+                const auto dest=demographic_rules_.destination_by_region.find(
+                    dem.region);
+                if(dest==demographic_rules_.destination_by_region.end()||
+                   !p2_migration_permitted(id,dest->second))return 0;
+                const auto next=sovereignty_.find(dest->second);
+                if(next!=sovereignty_.end())
+                    if(const auto target=rates.find(next->second);
+                       target!=rates.end())
+                        factor=target->second.migration;
+            } else return base;
+            const auto scaled=std::clamp<std::int64_t>(
+                1'000'000+factor,0,2'000'000);
+            const auto adjusted=phaseb::mul_checked(
+                static_cast<std::int64_t>(base),scaled)/1'000'000;
+            return static_cast<People>(
+                std::clamp<std::int64_t>(adjusted,0,1'000'000));
+        };
         (void)phaseb::Engine{demographic_rules_}.advance_day(
-            people_,day,days_in_month);
+            people_,day,days_in_month,std::move(adjustment));
         sync_service_transitions(before);
         events_.push_back("daily-auto-demography");
     }
