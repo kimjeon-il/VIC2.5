@@ -39,6 +39,7 @@ inline const std::map<std::string,std::string>& wired_trait_effects() {
         {"state_capitalists_investment_pool_efficiency_mult","p0_daily::investment"},
         {"state_aristocrats_investment_pool_efficiency_mult","p0_daily::investment"},
         {"state_infrastructure_mult","phasegh::Stage::effective_edge_capacity"},
+        {"state_working_adult_ratio_add","p0_daily::hire_available"},
         {"country_military_goods_cost_mult","phasegh::Stage::plan_autonomous_trade"},
         {"state_radicalism_increases_violent_hostility_mult","phasec::IntegratedWorld::p3_daily_react"},
         {"state_radicalism_increases_cultural_erasure_mult","phasec::IntegratedWorld::p3_daily_react"},

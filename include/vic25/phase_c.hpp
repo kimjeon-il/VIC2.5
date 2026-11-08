@@ -1506,6 +1506,11 @@ public:
     // share ledger. No virtual investment pool, contributions or currency.
     [[nodiscard]] std::int64_t p3_private_investment_bonus_ppm(
         const std::string& country,const std::string& investor)const;
+    // Activates a bounded share of *existing* inactive adult POP only when
+    // real vacancies and a country with the IG participation trait exist.
+    // Returns the real new Phase B slice and its reclassified headcount.
+    [[nodiscard]] std::pair<Id,People> p3_activate_working_adults(
+        Id source,People wanted);
     [[nodiscard]] std::vector<politics::IGEffect> p3_active_traits(
         const std::string& country,const std::string& group)const;
     [[nodiscard]] P3MovementView p3_movement_view(const std::string&)const;

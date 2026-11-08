@@ -382,6 +382,47 @@ inline std::int64_t IntegratedWorld::p3_private_investment_bonus_ppm(
     return weighted;
 }
 
+inline std::pair<Id,People> IntegratedWorld::p3_activate_working_adults(
+        Id source,People wanted) {
+    require_stage({2});
+    if(wanted<=0||!people_.has_slice(source))return {0,0};
+    const auto source_row=people_.slice(source);
+    if(source_row.count<=1||people_.employed(source)>0||
+       assigned(source)>0)return {0,0};
+    const auto& dem=people_.demographic(source_row.key.demographic);
+    const auto juris=sovereignty_.find(dem.region);
+    if(juris==sovereignty_.end()||
+       !governments_.contains(juris->second))return {0,0};
+    const auto& econ=people_.economic(source_row.key.economic);
+    if(econ.livelihood!="inactive"||
+       !people_.eligible_for(source,phaseb::JobRequirements{}))
+        return {0,0};
+    // Never split a cohort whose organization or named actual persons could
+    // become detached. All new workers come from unassigned real persons.
+    for(const auto& [key,members]:membership_)
+        if(key.first==source&&members>0)return {0,0};
+    if(anchor_counts_.contains(source)&&anchor_counts_.at(source)>0)
+        return {0,0};
+    const auto effect=p3_trait_modifier_ppm(
+        juris->second,"state_working_adult_ratio_add");
+    if(effect<=0)return {0,0};
+    const auto fraction=std::clamp<std::int64_t>(
+        effect,0,1'000'000);
+    const People permitted=std::min(
+        wanted,p4_scaled(source_row.count,fraction,1'000'000));
+    if(permitted<=0||permitted>=source_row.count)return {0,0};
+    const Id separated=people_.split_partition(source,permitted,0);
+    auto working=people_.economic(
+        people_.slice(separated).key.economic);
+    working.profession="worker";
+    working.livelihood="wage";
+    working.labor_class="employee";
+    const Id reclassified=people_.reclassify_economic(
+        separated,permitted,working,0);
+    events_.push_back("p3-verified-adult-labor-participation");
+    return {reclassified,permitted};
+}
+
 inline P3MovementView IntegratedWorld::p3_movement_view(
         const std::string& id)const {
     const auto& movement=p3_movements_.at(id);

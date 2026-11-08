@@ -577,6 +577,26 @@ inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
             need-=n;
         }
     }
+    if(need<=0||!c.has_government(c.sovereignty(p.region))||
+       c.p3_trait_modifier_ppm(c.sovereignty(p.region),
+                              "state_working_adult_ratio_add")<=0)return;
+    // The positive working-adult-ratio trait draws from existing unemployed
+    // adult nonworkers only if an actual open vacancy remains. The source
+    // headcount is split in Phase B; no fictional labor units are minted.
+    std::vector<Id> inactive;
+    for(const auto& [id,row]:c.people().slices()) {
+        if(c.people().demographic(row.key.demographic).region!=p.region)
+            continue;
+        if(c.people().economic(row.key.economic).livelihood=="inactive")
+            inactive.push_back(id);
+    }
+    for(const auto id:inactive) {
+        if(need<=0)break;
+        const auto [worker,count]=c.p3_activate_working_adults(id,need);
+        if(worker==0||count<=0)continue;
+        c.hire(worker,count,p.employer,p.monthly_wage);
+        need-=count;
+    }
 }
 
 inline Quantity available_production(const phased::Stage& d,
