@@ -308,10 +308,10 @@ inline std::optional<std::int64_t> law_clause(
     if(kind==K::political_association_allowed) {
         if(g=="free_speech")
             return l=="outlawed_dissent"?0:1;
-        if(g=="labor_associations")
+        if(g=="labour_associations")
             return l=="combination_acts"?0:1;
     }
-    if(kind==K::peaceful_strike_allowed&&g=="labor_associations")
+    if(kind==K::peaceful_strike_allowed&&g=="labour_associations")
         return l=="anti_strike_laws"||l=="combination_acts"||
                l=="guild_system"?0:1;
     if(kind==K::income_tax_max_ppm&&g=="taxation") {
@@ -371,7 +371,7 @@ inline std::int32_t clout_bonus(const std::string& group,const std::string& law,
     } else if(g=="church_and_state") {
         if(l=="state_religion"&&type==T::devout)return 300'000;
         if(l=="caesaropapism"&&type==T::devout)return 150'000;
-    } else if(g=="labor_associations") {
+    } else if(g=="labour_associations") {
         if(type==T::trade_unions) {
             if(l=="combination_acts")return -250'000;
             if(l=="anti_strike_laws")return -100'000;
