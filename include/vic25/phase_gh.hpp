@@ -401,6 +401,7 @@ struct DiplomaticCapacityView {
     std::int64_t rank_bonus{},legal_bonus{},ongoing_pacts{};
     std::int64_t prestige_before{},prestige_after{};
     std::size_t unpriced_commitments{};
+    std::int32_t infamy_decay_bonus_ppm{},prestige_loss_ppm{};
     bool rank_observed{},prestige_observed{},prestige_complete{};
 };
 struct InfluenceView {

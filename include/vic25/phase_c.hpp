@@ -1658,6 +1658,8 @@ public:
     // ongoing policy commitments; they are never spendable financial stocks.
     [[nodiscard]] P1FlowCapacity p1_authority_capacity(
         const std::string&)const;
+    [[nodiscard]] P1AuthorityConsequences p1_authority_consequences(
+        const std::string&)const;
     [[nodiscard]] std::int64_t p1_local_decree_ppm(
         const std::string&,const std::string&,const std::string&)const;
     void p1_schedule_mandate(P1Mandate,const std::string&,std::int64_t);

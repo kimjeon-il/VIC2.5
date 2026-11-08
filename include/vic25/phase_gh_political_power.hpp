@@ -120,6 +120,10 @@ inline DiplomaticCapacityView World::diplomatic_capacity(
     out.influence=phasec::p1power::flow(
         generated,commitments,
         out.rank_observed&&out.unpriced_commitments==0);
+    out.infamy_decay_bonus_ppm=static_cast<std::int32_t>(
+        phaseb::mul_checked(out.influence.excess_ppm,250'000)/1'000'000);
+    out.prestige_loss_ppm=static_cast<std::int32_t>(
+        phaseb::mul_checked(out.influence.shortage_ppm,500'000)/1'000'000);
     const auto prestige=c.p1_prestige(country);
     out.prestige_observed=prestige.observed;
     out.prestige_before=prestige.partial_total;
@@ -128,7 +132,7 @@ inline DiplomaticCapacityView World::diplomatic_capacity(
     // prestige score from incomplete military/GDP or unpriced H treaties.
     if(prestige.complete&&out.influence.complete) {
         out.prestige_complete=true;
-        const auto reduction=out.influence.shortage_ppm/2;
+        const auto reduction=out.prestige_loss_ppm;
         out.prestige_after=phaseb::mul_checked(
             prestige.total,1'000'000-reduction)/1'000'000;
     }

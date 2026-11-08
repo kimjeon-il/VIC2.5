@@ -52,6 +52,15 @@ struct P1FlowCapacity {
     std::int32_t excess_ppm{},shortage_ppm{};
     bool complete{true}; // false if any existing commitment lacks a known cost
 };
+struct P1AuthorityConsequences {
+    P1FlowCapacity capacity;
+    // Victoria 3 1.15 capacity excess/deficit static modifiers.
+    // Separate outputs so legal enactment and POP systems can consume them
+    // without creating a second law-progress or radical-population ledger.
+    std::int32_t enactment_speed_bonus_ppm{};
+    std::int32_t opposition_approval_delta{};
+    std::int32_t movement_radicals_bonus_ppm{};
+};
 enum class P1MandateKind : std::uint8_t {
     decree_road_maintenance, decree_promote_social_mobility,
     bolster_interest_group, suppress_interest_group

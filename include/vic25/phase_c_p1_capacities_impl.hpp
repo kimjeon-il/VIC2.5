@@ -34,6 +34,19 @@ inline P1FlowCapacity IntegratedWorld::p1_authority_capacity(
     return p1power::flow(generated,committed);
 }
 
+inline P1AuthorityConsequences
+IntegratedWorld::p1_authority_consequences(const std::string& country)const {
+    P1AuthorityConsequences result;
+    result.capacity=p1_authority_capacity(country);
+    result.enactment_speed_bonus_ppm=static_cast<std::int32_t>(
+        phaseb::mul_checked(result.capacity.excess_ppm,250'000)/1'000'000);
+    result.opposition_approval_delta=-static_cast<std::int32_t>(
+        phaseb::mul_checked(result.capacity.shortage_ppm,10)/1'000'000);
+    result.movement_radicals_bonus_ppm=static_cast<std::int32_t>(
+        phaseb::mul_checked(result.capacity.shortage_ppm,200'000)/1'000'000);
+    return result;
+}
+
 inline std::int64_t IntegratedWorld::p1_local_decree_ppm(
         const std::string& country,const std::string& region,
         const std::string& metric)const {
