@@ -297,6 +297,7 @@ inline External external(const Value& v) {
     if(kind=="independence")result.kind=ExternalKind::independence;
     else if(kind=="transfer")result.kind=ExternalKind::transfer;
     else if(kind=="claim")result.kind=ExternalKind::claim;
+    else if(kind=="colonize")result.kind=ExternalKind::colonize;
     else throw std::invalid_argument("CONTENT_UNKNOWN_EXTERNAL_KIND");
     result.target_country=str(o,"target_country");
     result.admin_name=str(o,"admin_name");

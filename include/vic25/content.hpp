@@ -46,7 +46,7 @@ struct Condition {
     }
 };
 enum class ExternalKind : std::uint8_t {
-    none,independence,transfer,claim
+    none,independence,transfer,claim,colonize
 };
 struct External {
     ExternalKind kind{ExternalKind::none};

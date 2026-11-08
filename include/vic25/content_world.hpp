@@ -119,6 +119,42 @@ class World {
                 geo.queue_claim(provenance,effect.provinces.front(),
                                 effect.target_country,true);
                 return;
+            case ExternalKind::colonize: {
+                const auto rule=core.p2_selected_law(
+                    scope.id,"colonial_affairs");
+                require(rule.has_value()&&
+                        (*rule=="frontier_colonization"||
+                         *rule=="colonial_resettlement"||
+                         *rule=="colonial_exploitation")&&
+                        effect.target_country==scope.id,
+                        "CONTENT_COLONIZATION_REQUIRES_LAWFUL_POLICY");
+                for(const auto target:effect.provinces) {
+                    const auto it=provinces.find(target);
+                    require(it!=provinces.end(),
+                            "CONTENT_COLONIZATION_UNKNOWN_TARGET");
+                    const auto owner=core.sovereignty(it->second.region);
+                    require(owner!=scope.id&&!core.has_government(owner),
+                            "CONTENT_COLONIZATION_CANNOT_ANNEX_SOVEREIGN");
+                    if(*rule=="frontier_colonization") {
+                        bool frontier=false;
+                        for(const auto adjacent:it->second.neighbors) {
+                            const auto near=provinces.find(adjacent);
+                            if(near!=provinces.end()&&
+                               core.sovereignty(near->second.region)==scope.id)
+                                frontier=true;
+                        }
+                        require(frontier,
+                                "CONTENT_FRONTIER_COLONIZATION_NOT_ADJACENT");
+                    }
+                    // The original E sovereignty and administrative title
+                    // do not change merely because a claim was registered.
+                    // Settlement and actual statehood require later verified
+                    // C/E/H commands, never ghost settlers.
+                    geo.queue_claim(provenance+"#"+std::to_string(target),
+                                    target,scope.id,true);
+                }
+                return;
+            }
             case ExternalKind::none:
                 throw std::invalid_argument("CONTENT_UNSUPPORTED_NATIVE_EFFECT");
         }
