@@ -31,7 +31,7 @@ struct Scenario {
     phaseb::Id foreign_household{};
     explicit Scenario(std::string b_migration="migration_controls",
                       std::string a_citizenship="ethnostate",
-                      bool abolition=true) {
+                      bool abolition=true,bool allow_serfdom=true) {
         auto& geo=gh.seed_geography();
         geo.set_dataset("political-identity-fixture");
         geo.seed_province(1,"RA","A");
@@ -91,7 +91,7 @@ struct Scenario {
         law(c,"A","citizenship",a_citizenship);
         law(c,"A","church_and_state","state_religion");
         law(c,"A","migration","no_migration_controls");
-        law(c,"A","land_reform","serfdom");
+        law(c,"A","land_reform",allow_serfdom?"serfdom":"tenant_farmers");
         if(abolition)law(c,"A","slavery","slavery_banned");
         law(c,"B","citizenship","multicultural");
         law(c,"B","migration",b_migration);
@@ -244,7 +244,9 @@ static void abolition_preserves_real_people_and_membership() {
           "new legal-status transition lost saving deterministic");
 }
 static void economic_law_restricts_real_company_ownership() {
-    Scenario fixture;
+    // Source 1.15 forbids Command Economy while serfdom remains enacted.
+    // Use lawful Tenant Farmers instead of an impossible mixed-law scenario.
+    Scenario fixture("migration_controls","ethnostate",true,false);
     auto& c=fixture.gh.seed_geography().seed_core().seed_core();
     c.seed_actor("OWNER",100);
     c.seed_actor("PRIVATE",100);
