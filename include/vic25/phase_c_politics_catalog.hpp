@@ -5,6 +5,7 @@
 // catalogue informed by the Victoria 3 Laws/Ideologies wiki and 1.15 data.
 // Numeric gameplay hooks below are VIC2.5 rules, not a verbatim port of every
 // proprietary Victoria 3 modifier. No alternate treasury/POP/world registry.
+#include "vic25/phase_c_p1.hpp"
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
 #include <algorithm>
