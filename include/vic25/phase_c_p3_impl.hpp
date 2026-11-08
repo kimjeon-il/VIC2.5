@@ -93,6 +93,51 @@ inline std::optional<int> IntegratedWorld::p3_law_stance(
     return std::clamp(sum/weight,-2,2);
 }
 
+inline P2PoliticalSupportView IntegratedWorld::p2_political_support(
+        const std::string& country,const std::string& law_group,
+        const std::string& proposed_law)const {
+    const auto group=politics::bare_group(law_group);
+    const auto proposed=politics::bare_law(proposed_law);
+    ensure(politics::catalogue().has(group,proposed)&&
+           governments_.contains(country),
+           "P2 legislative support requires known national proposed law");
+    P2PoliticalSupportView view{country,group,proposed};
+    const auto adopted=p2_selected_law(country,group);
+    std::int64_t total=0,support=0,oppose=0,governing=0;
+    const auto coalition=p1_coalitions_.find(country);
+    for(const auto& [key,profile]:p3_groups_) {
+        (void)profile;
+        if(key.first!=country)continue;
+        const auto weight=p3_group_view(country,key.second).clout_ppm;
+        if(weight<=0)continue;
+        total+=weight;
+        if(adopted&&*adopted==proposed)continue;
+        const auto current=adopted?
+            p3_law_stance(country,key.second,group,*adopted):
+            std::optional<int>{};
+        const auto candidate=p3_law_stance(
+            country,key.second,group,proposed);
+        if(!current&&!candidate)continue;
+        const auto delta=candidate.value_or(0)-current.value_or(0);
+        if(delta>0) {
+            support+=weight;
+            if(coalition!=p1_coalitions_.end()&&
+               std::find(coalition->second.ruling_groups.begin(),
+                         coalition->second.ruling_groups.end(),key.second)!=
+                         coalition->second.ruling_groups.end())
+                governing+=weight;
+        } else if(delta<0)oppose+=weight;
+    }
+    if(total>0) {
+        view.observed=true;
+        view.support_ppm=p3_fraction(support,total);
+        view.oppose_ppm=p3_fraction(oppose,total);
+        view.neutral_ppm=1'000'000-view.support_ppm-view.oppose_ppm;
+        view.governing_support_ppm=p3_fraction(governing,total);
+    }
+    return view;
+}
+
 inline void IntegratedWorld::p3_set_stance(
         Id slice,const std::string& issue,P3Stance stance) {
     ensure((stage_==-1&&commit_id_==0)||stage_==9,
