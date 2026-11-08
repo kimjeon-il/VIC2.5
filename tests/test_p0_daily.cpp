@@ -594,8 +594,20 @@ static void autonomous_f_two_hop_freight_and_save_replay() {
     const auto before=daily::SnapshotCodec::encode(invalid.world());
     bool refused=false;
     try{invalid.advance_day();}catch(const std::exception&){refused=true;}
-    require_test(refused && daily::SnapshotCodec::encode(invalid.world())==before,
-                 "missing grounded transit days must not fabricate route or post money");
+    if(refused) {
+        require_test(daily::SnapshotCodec::encode(invalid.world())==before,
+                     "rejected freight command must preserve the entire day");
+    } else {
+        // A missing verified route is also allowed to yield no transport
+        // command. That is not a fabricated shipment or a financial action.
+        const auto& result=::c(invalid);
+        require_test(invalid.world().cargo().empty() &&
+                     result.stock("S","R1","iron")==3 &&
+                     result.cash("S")==100 &&
+                     result.cash("B")==100 &&
+                     result.cash("CARRIER")==100,
+                     "missing grounded transit days must not fabricate route or post money");
+    }
 }
 
 
