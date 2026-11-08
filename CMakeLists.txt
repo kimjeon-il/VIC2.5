@@ -407,3 +407,12 @@ if(BUILD_TESTING)
     add_test(NAME vic25_content_tests COMMAND vic25_content_tests)
     set_tests_properties(vic25_content_tests PROPERTIES TIMEOUT 180)
 endif()
+
+# Bounded JSON content rulesets: no runtime scripting engine or shadow ledgers.
+if(BUILD_TESTING)
+    add_executable(vic25_content_json_tests tests/test_content_json.cpp)
+    target_link_libraries(vic25_content_json_tests PRIVATE vic25_core)
+    target_compile_definitions(vic25_content_json_tests PRIVATE VIC25_SOURCE_ROOT=\"${CMAKE_SOURCE_DIR}\")
+    add_test(NAME vic25_content_json_tests COMMAND vic25_content_json_tests)
+    set_tests_properties(vic25_content_json_tests PROPERTIES TIMEOUT 120)
+endif()
