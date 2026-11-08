@@ -91,6 +91,13 @@ struct P2ChamberDecision {
     std::int64_t lower_poll_day{-1},upper_poll_day{-1};
     bool lower_passed{},upper_passed{};
 };
+// Read-only national political response to a proposed *change* of law.
+struct P2PoliticalSupportView {
+    std::string country,law_group,proposed_law;
+    std::int32_t support_ppm{},oppose_ppm{},neutral_ppm{};
+    std::int32_t governing_support_ppm{};
+    bool observed{};
+};
 struct P2TermView {
     std::string contest_id, legal_basis;
     std::int32_t term_months{}, max_consecutive_terms{}, max_lifetime_terms{};
