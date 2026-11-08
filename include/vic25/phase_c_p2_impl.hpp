@@ -155,6 +155,12 @@ inline void IntegratedWorld::p2_seed_base(P2BaseLaw law) {
     const auto id=law.id;
     p2_laws_.emplace(id,std::move(law));
     p2_active_base_.emplace(slot,id);
+    if(politics::bare_group(p2_laws_.at(id).domain)=="slavery"&&
+       politics::bare_law(p2_laws_.at(id).base_choice)=="slavery_banned")
+        p2_emancipation_due_.insert(p2_laws_.at(id).country);
+    if(politics::bare_group(p2_laws_.at(id).domain)=="land_reform"&&
+       politics::bare_law(p2_laws_.at(id).base_choice)!="serfdom")
+        p2_emancipation_due_.insert(p2_laws_.at(id).country);
     p2_sync_country_rules(p2_laws_.at(id).country,{},-1);
 }
 
@@ -634,6 +640,14 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             law_id=next.id;
             p2_laws_.emplace(next.id,next);
             p2_active_base_[slot]=next.id;
+            // Actual bonded POPs are emancipated at Stage10 of the
+            // lawful effective day, not on the preceding enactment day.
+            if(politics::bare_group(next.domain)=="slavery"&&
+               politics::bare_law(next.base_choice)=="slavery_banned")
+                p2_emancipation_due_.insert(next.country);
+            if(politics::bare_group(next.domain)=="land_reform"&&
+               politics::bare_law(next.base_choice)!="serfdom")
+                p2_emancipation_due_.insert(next.country);
             if(const auto negotiated=p2_negotiated_.find(id);
                negotiated!=p2_negotiated_.end()) {
                 for(const auto& accepted:negotiated->second) {
