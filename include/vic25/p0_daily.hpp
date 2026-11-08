@@ -85,6 +85,9 @@ struct Extractor {
 struct ResearchPolicy {
     std::string project;
     Quantity maximum_daily_work{1};
+    // Evidence-backed discipline: military, production, society, or spread.
+    // An unclassified project cannot receive a fictional specialty bonus.
+    std::string discipline;
 };
 struct Buyer {
     Id population_slice{};
@@ -1296,7 +1299,30 @@ public:
                                     p.holder,p.region,p.material_good);
                 const Money funds=c.phase_d_cash_available(p.sponsor);
                 if(funds<=0)return;
-                const Quantity n=std::min({research.maximum_daily_work,
+                Quantity budget=research.maximum_daily_work;
+                const auto country=c.sovereignty(p.region);
+                if(c.has_government(country)&&!research.discipline.empty()) {
+                    std::string key;
+                    if(research.discipline=="military")
+                        key="country_military_tech_research_speed_mult";
+                    else if(research.discipline=="production")
+                        key="country_production_tech_research_speed_mult";
+                    else if(research.discipline=="society")
+                        key="country_society_tech_research_speed_mult";
+                    else if(research.discipline=="spread")
+                        key="country_tech_spread_mult";
+                    if(!key.empty()) {
+                        const auto bonus=phaseb::add_checked(
+                            c.p2_modifier_ppm(country,key),
+                            c.p3_trait_modifier_ppm(country,key));
+                        const auto ppm=std::clamp<std::int64_t>(
+                            1'000'000+bonus,0,2'000'000);
+                        budget=phaseb::add_checked(
+                            phaseb::mul_checked(budget/1'000'000,ppm),
+                            phaseb::mul_checked(budget%1'000'000,ppm)/1'000'000);
+                    }
+                }
+                const Quantity n=std::min({budget,
                     p.required_evidence-p.verified_work,cap-used,
                     material/p.material_per_work,
                     static_cast<Quantity>(labor/p.workers_per_work),
