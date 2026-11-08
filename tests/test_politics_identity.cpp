@@ -105,7 +105,7 @@ static void source_ideologies_laws_traits(){
     const auto& c=politics::catalogue();
     check(c.by_group.size()==26&&c.laws.size()==148,
           "1.15 law catalogue not complete");
-    check(c.ideologies.size()>=172,
+    check(c.ideologies.size()==190,
           "1.13.11 verified ideology references omitted");
     check(c.stance("paternalistic","governance_principles","monarchy").value_or(0)>0,
           "imported source ideology positions missing");
@@ -116,8 +116,8 @@ static void source_ideologies_laws_traits(){
         check(c.laws.contains(law),"unmapped verified law modifier");
         effects+=items.size();
     }
-    check(c.modifiers.size()==136&&effects==730,
-          "verified 1.13 modifier count changed without source review");
+    check(c.modifiers.size()==148&&effects==812,
+          "verified 1.15 modifier count changed without source review");
     const auto serf=c.modifier("serfdom","state_peasants_internal_migration_disallowed_bool");
     check(serf.has_value()&&serf->boolean&&serf->value_ppm==1'000'000,
           "V3 serf mobility restriction missing from sourced modifiers");
