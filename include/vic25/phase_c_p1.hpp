@@ -9,11 +9,14 @@ namespace vic25::phasec {
 
 enum class P1GovernancePrinciple : std::uint8_t {
     chiefdom, monarchy, theocracy, presidential_republic,
-    parliamentary_republic, council_republic
+    parliamentary_republic, council_republic,
+    colonial_administration, social_monarchy, corporate_state
 };
 enum class P1PowerDistribution : std::uint8_t {
     autocracy, oligarchy, landed_vote, wealth_vote,
-    universal_vote, single_party, technocracy
+    universal_vote, single_party, technocracy,
+    bakufu, neo_absolutism, organic_regulation, elder_council,
+    census_vote, labor_suffrage, anarchy
 };
 enum class P1LegislatureKind : std::uint8_t { none, unicameral, bicameral };
 enum class P1FormationRule : std::uint8_t {
@@ -74,28 +77,33 @@ struct P1InstitutionView {
 
 [[nodiscard]] constexpr bool valid_p1_constitution(const P1Constitution& c) {
     if(static_cast<unsigned>(c.governance)>
-           static_cast<unsigned>(P1GovernancePrinciple::council_republic)||
+           static_cast<unsigned>(P1GovernancePrinciple::corporate_state)||
        static_cast<unsigned>(c.power)>
-           static_cast<unsigned>(P1PowerDistribution::technocracy)||
+           static_cast<unsigned>(P1PowerDistribution::anarchy)||
        static_cast<unsigned>(c.legislature)>
            static_cast<unsigned>(P1LegislatureKind::bicameral)||
        c.legal_basis.empty())return false;
     if((c.governance==P1GovernancePrinciple::parliamentary_republic ||
-        c.governance==P1GovernancePrinciple::council_republic) &&
+        c.governance==P1GovernancePrinciple::council_republic ||
+        c.governance==P1GovernancePrinciple::social_monarchy) &&
        c.legislature==P1LegislatureKind::none)return false;
     return true;
 }
 
 [[nodiscard]] constexpr P1FormationRule p1_formation_rule(
         const P1Constitution& c) {
-    if(c.governance==P1GovernancePrinciple::council_republic)
+    if(c.governance==P1GovernancePrinciple::council_republic ||
+       c.power==P1PowerDistribution::anarchy)
         return P1FormationRule::council_confidence;
     if(c.governance==P1GovernancePrinciple::parliamentary_republic ||
+       c.governance==P1GovernancePrinciple::social_monarchy ||
        (c.governance==P1GovernancePrinciple::monarchy &&
         c.legislature!=P1LegislatureKind::none &&
         (c.power==P1PowerDistribution::landed_vote ||
          c.power==P1PowerDistribution::wealth_vote ||
-         c.power==P1PowerDistribution::universal_vote)))
+         c.power==P1PowerDistribution::universal_vote ||
+          c.power==P1PowerDistribution::census_vote ||
+          c.power==P1PowerDistribution::labor_suffrage)))
         return P1FormationRule::parliamentary_confidence;
     return P1FormationRule::head_appointment;
 }

@@ -165,6 +165,52 @@ inline void IntegratedWorld::p2_check_amendment(const P2Amendment& amendment)con
     }
 }
 
+inline void IntegratedWorld::p2_sync_constitution(
+        const P2BaseLaw& law) {
+    const auto group=politics::bare_group(law.domain);
+    const auto id=politics::bare_law(law.base_choice);
+    if(group!="governance_principles"&&
+       group!="distribution_of_power")return;
+    auto proposed=p1_constitutions_.at(law.country);
+    if(group=="governance_principles") {
+        const std::map<std::string,P1GovernancePrinciple> table{
+            {"chiefdom",P1GovernancePrinciple::chiefdom},
+            {"monarchy",P1GovernancePrinciple::monarchy},
+            {"theocracy",P1GovernancePrinciple::theocracy},
+            {"presidential_republic",P1GovernancePrinciple::presidential_republic},
+            {"parliamentary_republic",P1GovernancePrinciple::parliamentary_republic},
+            {"council_republic",P1GovernancePrinciple::council_republic},
+            {"colonial_administration",P1GovernancePrinciple::colonial_administration},
+            {"social_monarchy",P1GovernancePrinciple::social_monarchy},
+            {"corporate_state",P1GovernancePrinciple::corporate_state}
+        };
+        proposed.governance=table.at(id);
+    } else {
+        const std::map<std::string,P1PowerDistribution> table{
+            {"autocracy",P1PowerDistribution::autocracy},
+            {"oligarchy",P1PowerDistribution::oligarchy},
+            {"landed_voting",P1PowerDistribution::landed_vote},
+            {"wealth_voting",P1PowerDistribution::wealth_vote},
+            {"universal_suffrage",P1PowerDistribution::universal_vote},
+            {"single_party_state",P1PowerDistribution::single_party},
+            {"technocracy",P1PowerDistribution::technocracy},
+            {"bakufu",P1PowerDistribution::bakufu},
+            {"neo_absolutism",P1PowerDistribution::neo_absolutism},
+            {"organic_regulation",P1PowerDistribution::organic_regulation},
+            {"elder_council",P1PowerDistribution::elder_council},
+            {"census_voting",P1PowerDistribution::census_vote},
+            {"labor_suffrage",P1PowerDistribution::labor_suffrage},
+            {"anarchy",P1PowerDistribution::anarchy}
+        };
+        proposed.power=table.at(id);
+    }
+    proposed.legal_basis=law.legal_basis;
+    ensure(valid_p1_constitution(proposed),
+           "P2 constitutional law requires an existing lawful legislature");
+    p1_constitutions_[law.country]=std::move(proposed);
+    events_.push_back("p2-constitutional-law-effective:"+id);
+}
+
 inline void IntegratedWorld::p2_seed_base(P2BaseLaw law) {
     ensure(stage_==-1&&commit_id_==0,"P2 law must seed before simulation");
     p2_validate_base(law);
@@ -174,6 +220,7 @@ inline void IntegratedWorld::p2_seed_base(P2BaseLaw law) {
     const auto id=law.id;
     p2_laws_.emplace(id,std::move(law));
     p2_active_base_.emplace(slot,id);
+    p2_sync_constitution(p2_laws_.at(id));
     if(politics::bare_group(p2_laws_.at(id).domain)=="slavery"&&
        politics::bare_law(p2_laws_.at(id).base_choice)=="slavery_banned")
         p2_emancipation_due_.insert(p2_laws_.at(id).country);
@@ -731,6 +778,8 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
                    "P2 base law has already been replaced");
             law_id=bill.target_id;
             const auto& base=p2_laws_.at(law_id);
+            ensure(!politics::catalogue().has_group(base.domain),
+                   "P2 cannot repeal a 1.15 law group without replacement");
             for(const auto& clause:base.clauses)
                 if(clause.kind==P2ClauseKind::term_months||
                    clause.kind==P2ClauseKind::term_cycle_mode||
@@ -746,6 +795,8 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             p2_active_base_.erase(
                 std::make_tuple(base.country,base.domain,base.scope));
         }
+        if(bill.action==P2BillAction::enact_or_replace_base)
+            p2_sync_constitution(p2_laws_.at(law_id));
         p2_sync_country_rules(bill.country,bill.transitions,today);
         const auto lowest=p2_rule(bill.country,bill.country,
                                  P2ClauseKind::income_tax_min_ppm).value_or(0);

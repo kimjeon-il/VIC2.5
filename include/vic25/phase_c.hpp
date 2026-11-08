@@ -1701,6 +1701,8 @@ public:
     // P2: legal authority and effective clauses; P1/P4/C retain their own
     // office, election, tax and demographic state and transaction ownership.
     void p2_seed_base(P2BaseLaw);
+    // Native government form is the P1 authority; enacted law modifies it.
+    void p2_sync_constitution(const P2BaseLaw&);
     void p2_seed_amendment(P2Amendment);
     void p2_register_upper_chamber(const std::string&,const std::string&);
     void p2_approve_upper_bill(const std::string&,
