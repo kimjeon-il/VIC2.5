@@ -16,6 +16,9 @@ struct EffectAudit {
 };
 inline const std::map<std::string,std::string>& wired_trait_effects() {
     static const std::map<std::string,std::string> routes={
+        {"country_authority_mult","phasec::IntegratedWorld::p1_authority_capacity"},
+        {"country_prestige_mult","phasec::IntegratedWorld::p1_prestige"},
+        {"country_influence_mult","phasegh::World::diplomatic_capacity"},
         {"unit_offense_mult","p0_daily::fight"},
         {"unit_defense_mult","p0_daily::fight"},
         {"country_military_tech_research_speed_mult","p0_daily::research"},
@@ -57,6 +60,11 @@ struct LawEffectAudit {
 };
 inline const std::map<std::string,std::string>& wired_law_effects() {
     static const std::map<std::string,std::string> routes={
+        {"country_authority_add","phasec::IntegratedWorld::p1_authority_capacity"},
+        {"country_authority_mult","phasec::IntegratedWorld::p1_authority_capacity"},
+        {"country_influence_add","phasegh::World::diplomatic_capacity"},
+        {"country_influence_mult","phasegh::World::diplomatic_capacity"},
+        {"country_prestige_mult","phasec::IntegratedWorld::p1_prestige"},
         {"state_birth_rate_mult","phase_c::phase_time_auto_demography"},
         {"state_education_access_add","phase_c::phase_time_auto_demography"},
         {"state_migration_pull_mult","phase_c::phase_time_auto_demography"},
