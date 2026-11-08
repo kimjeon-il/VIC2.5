@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <string>
@@ -189,7 +190,8 @@ class Parser {
             if(!eat('}')) {
                 do {
                     whitespace();
-                    require(source_[position_]=='"',"CONTENT_JSON_EXPECTED_KEY");
+                    require(position_<source_.size()&&source_[position_]=='"',
+                            "CONTENT_JSON_EXPECTED_KEY");
                     const auto key=parse_string();
                     expect(':');
                     require(o.emplace(key,parse_value(depth+1)).second,
@@ -385,8 +387,11 @@ inline Outcome outcome(const Value& v) {
     result.id=must(o,"id").string();
     result.trigger=cond(o,"trigger");
     result.effects=effects(o);
-    result.priority=static_cast<int>(num(o,"priority"));
-    require(result.priority==num(o,"priority"),"CONTENT_JSON_PRIORITY_OVERFLOW");
+    const auto priority=num(o,"priority");
+    require(priority>=std::numeric_limits<int>::min()&&
+            priority<=std::numeric_limits<int>::max(),
+            "CONTENT_JSON_PRIORITY_OVERFLOW");
+    result.priority=static_cast<int>(priority);
     result.on_timeout=boolean(o,"on_timeout");
     return result;
 }
@@ -423,7 +428,8 @@ inline Formation formation(const Value& v) {
     return result;
 }
 inline Registry load(std::string_view contents) {
-    const auto& root=parse(contents).object();
+    const auto parsed=parse(contents);
+    const auto& root=parsed.object();
     keys(root,{"ruleset","events","decisions","journals","formations"});
     Registry registry(must(root,"ruleset").string());
     if(const auto* p=maybe(root,"events"))
