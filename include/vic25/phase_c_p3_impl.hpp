@@ -300,6 +300,28 @@ inline P3GroupView IntegratedWorld::p3_group_view(
     return view;
 }
 
+inline std::vector<politics::IGEffect>
+IntegratedWorld::p3_active_traits(
+        const std::string& country,const std::string& group)const {
+    const auto& profile=p3_groups_.at({country,group});
+    const auto view=p3_group_view(country,group);
+    return politics::active_ig_effects(profile.type,view.approval,view.members);
+}
+inline std::int64_t IntegratedWorld::p3_trait_modifier_ppm(
+        const std::string& country,const std::string& effect_key)const {
+    ensure(governments_.contains(country),
+           "P3 IG trait requires existing sovereign government");
+    std::int64_t sum=0;
+    for(const auto& [key,profile]:p3_groups_) {
+        (void)profile;
+        if(key.first!=country)continue;
+        for(const auto& trait:p3_active_traits(key.first,key.second))
+            if(trait.modifier==effect_key)
+                sum=phaseb::add_checked(sum,trait.value_ppm);
+    }
+    return sum;
+}
+
 inline P3MovementView IntegratedWorld::p3_movement_view(
         const std::string& id)const {
     const auto& movement=p3_movements_.at(id);
