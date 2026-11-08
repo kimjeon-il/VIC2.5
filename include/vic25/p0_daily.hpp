@@ -1151,9 +1151,23 @@ public:
                               p.contractor,p.region,p.material_good)/p.material_per_work;
                 const People staff=c.phase_d_workforce(p.contractor);
                 const Quantity affordable=(free-investment.reserve_cash)/p.cash_price_per_work;
-                const Quantity n=std::min({investment.maximum_daily_work,
+                Quantity n=std::min({investment.maximum_daily_work,
                      p.work_required-p.accepted_work,materials,
                      static_cast<Quantity>(staff/p.workers_per_work),affordable});
+                // The actual Trade Unions "work to rule" trait modifies
+                // paid daily construction work, not a synthetic construction
+                // progress bar. Bonuses cannot create additional materials,
+                // workers or funds beyond the observed feasible work.
+                const auto country=c.sovereignty(p.region);
+                const auto trait=c.p3_trait_modifier_ppm(
+                    country,"state_construction_mult");
+                if(trait<0&&n>0) {
+                    const auto legal=std::clamp<std::int64_t>(
+                        1'000'000+trait,0,1'000'000);
+                    n=static_cast<Quantity>(
+                        phaseb::mul_checked(n/1'000'000,legal)+
+                        phaseb::mul_checked(n%1'000'000,legal)/1'000'000);
+                }
                 if(n<=0)return;
                 gh.phase_d().plan_work(investment.construction_project,n);
                 *work=n;
