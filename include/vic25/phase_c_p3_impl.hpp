@@ -34,6 +34,65 @@ inline void IntegratedWorld::p3_seed_group(P3Group group) {
     p3_groups_.emplace(key,std::move(group));
 }
 
+inline void IntegratedWorld::p3_set_ideologies(
+        const std::string& country,const std::string& group,
+        std::vector<std::string> ideologies) {
+    ensure((stage_==-1&&commit_id_==0)||stage_==9,
+           "P3 ideologies can change only at opening or politics stage");
+    ensure(p3_groups_.contains({country,group})&&!ideologies.empty()&&
+           ideologies.size()<=8,"P3 missing interest-group ideology authority");
+    std::set<std::string> unique;
+    for(const auto& ideology:ideologies)
+        ensure(politics::catalogue().knows_ideology(ideology)&&
+               unique.insert(ideology).second,
+               "P3 unsupported or duplicate political ideology");
+    p3_ideology_overrides_[{country,group}]=std::move(ideologies);
+    events_.push_back("p3-ideological-group-profile-changed:"+country+":"+group);
+}
+inline void IntegratedWorld::p3_set_leader_ideology(
+        const std::string& country,const std::string& group,
+        const std::string& ideology) {
+    ensure((stage_==-1&&commit_id_==0)||stage_==9,
+           "P3 leader ideology changes require political stage");
+    const auto it=p3_groups_.find({country,group});
+    ensure(it!=p3_groups_.end()&&!it->second.leader_anchor.empty()&&
+           person_anchors_.contains(it->second.leader_anchor)&&
+           politics::catalogue().knows_ideology(ideology),
+           "P3 political leader ideology must bind existing named person");
+    p3_leader_ideologies_[{country,group}]=ideology;
+    events_.push_back("p3-named-leader-ideology-changed:"+country+":"+group);
+}
+inline std::vector<std::string> IntegratedWorld::p3_ideologies(
+        const std::string& country,const std::string& group)const {
+    const auto& profile=p3_groups_.at({country,group});
+    if(auto it=p3_ideology_overrides_.find({country,group});
+       it!=p3_ideology_overrides_.end())return it->second;
+    return politics::default_ideologies(profile.type);
+}
+inline std::optional<int> IntegratedWorld::p3_law_stance(
+        const std::string& country,const std::string& group,
+        const std::string& law_group,const std::string& law)const {
+    if(!politics::catalogue().has(law_group,law))return std::nullopt;
+    int sum=0,weight=0;
+    for(const auto& ideology:p3_ideologies(country,group)) {
+        if(const auto stance=politics::catalogue().stance(
+               ideology,law_group,law)) {
+            sum+=*stance;
+            ++weight;
+        }
+    }
+    if(const auto leader=p3_leader_ideologies_.find({country,group});
+       leader!=p3_leader_ideologies_.end()) {
+        if(const auto stance=politics::catalogue().stance(
+               leader->second,law_group,law)) {
+            sum+=2*(*stance);
+            weight+=2;
+        }
+    }
+    if(!weight)return std::nullopt;
+    return std::clamp(sum/weight,-2,2);
+}
+
 inline void IntegratedWorld::p3_set_stance(
         Id slice,const std::string& issue,P3Stance stance) {
     ensure((stage_==-1&&commit_id_==0)||stage_==9,
@@ -96,8 +155,11 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         if(nation==sovereignty_.end()||nation->second!=country)continue;
         // Organizational efficiency is applied to REAL affiliated people,
         // not minted into a separate political-point or membership ledger.
-        const People weighted=phaseb::add_checked(n,
+        const People organized=phaseb::add_checked(n,
              p4_scaled(n,organization->second.organization_ppm,1'000'000));
+        const People weighted=p4_scaled(
+             organized,p2_political_strength_ppm(
+                 country,organization->second.type),1'000'000);
         affiliated_weight=phaseb::add_checked(affiliated_weight,weighted);
         if(key.second==group) {
             country_group_members=phaseb::add_checked(country_group_members,n);
@@ -135,6 +197,23 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         if(!current_choice.empty())
             approval=current_choice==profile.preferred_choice?75:30;
     }
+    // A group's live laws are evaluated through ideology preferences.
+    // The legacy single-issue preference remains a fallback for custom
+    // groups with no stance on any adopted catalogued law.
+    std::int64_t ideological_score=0,ideological_observations=0;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& adopted=p2_laws_.at(id);
+        if(adopted.country!=country)continue;
+        const auto stance=p3_law_stance(country,group,
+                         adopted.domain,adopted.base_choice);
+        if(!stance)continue;
+        ideological_score+=*stance;
+        ++ideological_observations;
+    }
+    if(ideological_observations>0)
+        approval=static_cast<int>(std::clamp<std::int64_t>(
+            50+12*ideological_score/ideological_observations,0,100));
     People members=0;
     std::int64_t sum_radical=0,sum_engagement=0;
     for(const auto& [key,n]:membership_) {
