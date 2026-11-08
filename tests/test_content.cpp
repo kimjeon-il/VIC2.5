@@ -193,12 +193,12 @@ static void decision_cooldown_ai_and_followup() {
     check(ai.content_state().last_decisions.contains("modernize|country:A"),
           "AI did not use valid decision");
     ai.advance_day();
-    check(ai.content_state().pending_choices.size()==1,
-          "scheduled followup event did not fire on next day");
-    ai.advance_day();
     check(ai.content_state().pending_choices.empty() &&
           ai.content_state().counters.at("followup|country:A")==1,
-          "timeout default followup was not applied");
+          "AI did not resolve next-day followup using actual choice rules");
+    ai.advance_day();
+    check(ai.content_state().counters.at("followup|country:A")==1,
+          "AI repeated an already consumed followup");
 }
 static void journal_multibranch_and_world() {
     auto reg=rules();

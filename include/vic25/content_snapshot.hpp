@@ -75,7 +75,9 @@ template<class A>void state(A& a,State& st) {
     length(a,count);
     if constexpr(std::is_same_v<A,Writer>) {
         for(const auto& [key,v]:st.pending_choices) {
-            auto k=key,copy=v;a(k);event(a,copy);
+            auto k=key;
+            auto copy=v;
+            a(k);event(a,copy);
         }
     } else {
         for(std::uint64_t i=0;i<count;++i) {
@@ -91,7 +93,9 @@ template<class A>void state(A& a,State& st) {
         length(a,n);
         if constexpr(std::is_same_v<A,Writer>) {
             for(const auto& [key,j]:entries) {
-                auto k=key,copy=j;a(k);journal(a,copy);
+                auto k=key;
+                auto copy=j;
+                a(k);journal(a,copy);
             }
         } else {
             for(std::uint64_t i=0;i<n;++i) {

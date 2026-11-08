@@ -366,6 +366,7 @@ inline void record(State& st,Day day,std::string kind,
 inline void apply_effects(const Registry& rules,State& st,const Scope& s,
             const std::vector<Effect>& effects,Day day,
             const ApplyExternal& external,const std::string& source) {
+    std::size_t ordinal=0;
     for(const auto& e:effects) {
         const auto key=scoped(e.id,s);
         switch(e.kind) {
@@ -406,9 +407,10 @@ inline void apply_effects(const Registry& rules,State& st,const Scope& s,
                 break;
             }
             case EffectKind::external:
-                external(s,e.external,source);
+                external(s,e.external,source+"#"+std::to_string(ordinal));
                 break;
         }
+        ++ordinal;
     }
 }
 inline bool cooldown_ok(const std::map<std::string,Day>& last,
@@ -426,8 +428,13 @@ inline void step(const Registry& rules,State& st,Day day,
     // integration coordinator, so a later domain failure rolls them back.
     auto due=st.scheduled.begin();
     while(due!=st.scheduled.end()&&due->first<=day) {
-        const auto scheduled=std::move(due->second);
+        auto scheduled=std::move(due->second);
         due=st.scheduled.erase(due);
+        std::sort(scheduled.begin(),scheduled.end(),
+            [](const auto& a,const auto& b){
+                if(a.first!=b.first)return a.first<b.first;
+                return a.second<b.second;
+            });
         for(const auto& [id,scope]:scheduled) {
             const auto it=rules.events.find(id);
             require(it!=rules.events.end(),"CONTENT_UNKNOWN_SCHEDULED_EVENT");
@@ -597,7 +604,7 @@ inline void step(const Registry& rules,State& st,Day day,
                            day-instance.opened>=def.timeout_days;
         std::vector<const Outcome*> candidates;
         for(const auto& out:def.outcomes)
-            if(out.on_timeout==timeout &&
+            if((!out.on_timeout||timeout) &&
                test(out.trigger,st,instance.scope,read))
                 candidates.push_back(&out);
         std::sort(candidates.begin(),candidates.end(),
@@ -606,14 +613,15 @@ inline void step(const Registry& rules,State& st,Day day,
                 return a->id<b->id;
             });
         if(candidates.empty()){++it;continue;}
+        const auto key=it->first;
         auto completed=instance;
         const auto* outcome=candidates.front();
         completed.closed=day;completed.outcome=outcome->id;
-        apply_effects(rules,st,completed.scope,outcome->effects,day,external,
-                      "journal:"+it->first+":"+outcome->id);
-        record(st,day,"journal_outcome",def.id,completed.scope,outcome->id);
-        st.finished_journals.emplace(it->first,std::move(completed));
         it=st.active_journals.erase(it);
+        st.finished_journals.emplace(key,completed);
+        apply_effects(rules,st,completed.scope,outcome->effects,day,external,
+                      "journal:"+key+":"+outcome->id);
+        record(st,day,"journal_outcome",def.id,completed.scope,outcome->id);
     }
 }
 } // namespace vic25::content

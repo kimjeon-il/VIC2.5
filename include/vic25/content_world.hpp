@@ -72,6 +72,10 @@ class World {
         auto& geo=gh.geography();
         require(gh.phase()==9,"CONTENT_NATIVE_EFFECT_WRONG_STAGE");
         require(!provenance.empty(),"CONTENT_MISSING_CAUSAL_PROVENANCE");
+        const auto& provinces=geo.spatial().provinces;
+        const auto& core=gh.phase_c();
+        require(scope.kind=="country"&&core.has_government(scope.id),
+                "CONTENT_NATIVE_COUNTRY_AUTHORITY_REQUIRED");
         switch(effect.kind) {
             case ExternalKind::independence:
                 require(scope.kind=="country"&&
@@ -82,14 +86,27 @@ class World {
                         effect.seats>0&&effect.quorum>0&&
                         effect.quorum<=effect.seats,
                         "CONTENT_INCOMPLETE_INDEPENDENCE");
+                for(const auto id:effect.provinces) {
+                    const auto it=provinces.find(id);
+                    require(it!=provinces.end()&&
+                            core.sovereignty(it->second.region)==scope.id,
+                            "CONTENT_INDEPENDENCE_REQUIRES_SOURCE_SOVEREIGNTY");
+                }
                 geo.queue_independence(provenance,effect.provinces,
                     effect.target_country,effect.admin_id,effect.admin_name,
                     effect.head,effect.prime,effect.seats,effect.quorum);
                 return;
             case ExternalKind::transfer:
                 require(scope.kind=="country"&&effect.admin_id!=0&&
-                        !effect.target_country.empty(),
+                        !effect.target_country.empty()&&
+                        effect.target_country==scope.id,
                         "CONTENT_INVALID_UNIFICATION_TRANSFER");
+                for(const auto id:effect.provinces) {
+                    const auto it=provinces.find(id);
+                    require(it!=provinces.end()&&
+                            core.sovereignty(it->second.region)==scope.id,
+                            "CONTENT_UNIFICATION_REQUIRES_COMPLETED_CESSION");
+                }
                 // Legitimacy, consent or a peace settlement must be expressed
                 // in the formation's eligibility and actual C/H domain.
                 geo.queue_transfer(provenance,effect.provinces,
@@ -97,7 +114,7 @@ class World {
                 return;
             case ExternalKind::claim:
                 require(effect.provinces.size()==1&&
-                        !effect.target_country.empty(),
+                        effect.target_country==scope.id,
                         "CONTENT_INVALID_PROVINCE_CLAIM");
                 geo.queue_claim(provenance,effect.provinces.front(),
                                 effect.target_country,true);
@@ -136,6 +153,10 @@ public:
         state_.scheduled[due].push_back({event,std::move(scope)});
     }
     void choose(std::string occurrence,std::string option) {
+        const auto it=state_.pending_choices.find(occurrence);
+        require(it!=state_.pending_choices.end()&&
+                native_.day_index()<=it->second.expires,
+                "CONTENT_CHOICE_NO_LONGER_AVAILABLE");
         content::choose(state_,std::move(occurrence),std::move(option));
     }
     void decide(std::string decision,Scope scope) {
