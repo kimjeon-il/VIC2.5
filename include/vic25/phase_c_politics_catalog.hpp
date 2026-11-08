@@ -111,7 +111,8 @@ struct Catalogue {
 // identifiers, not a copy of scripted conditions, artwork or descriptions.
 // Only a single selected law per group belongs in the Phase-C P2 legal ledger.
 #include "vic25/phase_c_politics_reference_ideologies.hpp"
-#include "vic25/phase_c_politics_reference_modifiers.hpp"
+#include "vic25/phase_c_politics_115_laws_a.hpp"
+#include "vic25/phase_c_politics_115_laws_b.hpp"
 #include "vic25/phase_c_politics_trait_data.hpp"
 
 inline const Catalogue& catalogue() {
@@ -271,7 +272,8 @@ inline const Catalogue& catalogue() {
             }
         }
         install_reference_ideologies(c);
-        install_reference_modifiers(c);
+        install_vic3_115_law_effects_a(c);
+        install_vic3_115_law_effects_b(c);
         return c;
     }();
     return result;
