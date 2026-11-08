@@ -59,7 +59,7 @@ static phasegh::World make_world(const std::string& economy_choice) {
     c.p3_set_leader_ideology("A","WORKERS","communist");
     law(c,"economic_system",economy_choice);
     law(c,"rights_of_women","no_womens_rights");
-    law(c,"labor_associations","guild_system");
+    law(c,"labor_associations","anti_strike_laws");
     law(c,"health_system","no_health_system");
     law(c,"free_speech","protected_speech");
     law(c,"taxation","consumption_based_taxation");
