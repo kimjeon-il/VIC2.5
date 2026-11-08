@@ -1,5 +1,6 @@
 #include "vic25/daily_snapshot.hpp"
 #include "vic25/phase_c_politics_catalog.hpp"
+#include "vic25/phase_c_politics_effect_audit.hpp"
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -121,6 +122,21 @@ static void catalogued_laws_and_stances() {
           politics::law_clause("labor_associations","anti_strike_laws",
               P2ClauseKind::peaceful_strike_allowed)==0,
           "anti-strike law must distinguish union association from strikes");
+    const auto coverage=politics::audit_ig_traits();
+    std::set<std::string> traits;
+    std::size_t connected=0,unsupported=0;
+    for(const auto& entry:coverage) {
+        traits.insert(entry.trait);
+        if(entry.wired) {
+            ++connected;
+            check(!entry.executor.empty(),"wired trait has no native executor");
+        } else {
+            ++unsupported;
+            check(entry.executor.empty(),"unsupported trait pretends to execute");
+        }
+    }
+    check(traits.size()==24&&connected>0&&unsupported>0,
+          "trait coverage audit must expose 24 traits and incomplete routes");
     const auto discontent=politics::active_ig_effects(
         P3GroupType::trade_unions,30,100);
     const auto stable=politics::active_ig_effects(
