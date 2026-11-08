@@ -2552,7 +2552,8 @@ public:
     }
     void wages_under_law(const std::string& payer,const std::string& worker,
                          const std::string& treasury,Money gross,
-                         const std::string& country="") {
+                         const std::string& country="",
+                         const std::string& source_industry="") {
         require_stage({5});
         ensure(gross>0,"invalid gross wage");
         std::string authority=country;
@@ -2571,7 +2572,38 @@ public:
             else if(governments_.size()>1)
                 ensure(treasury==authority,"national treasury binding required");
         }
-        const auto withholding=positive_product(gross,rate)/1'000'000;
+        // Sector-specific IG tax traits change a real taxable payroll
+        // withholding, never create government receipts. Industry is
+        // sourced from the actual Phase D recipe rather than product names.
+        int effective_rate=rate;
+        if(!authority.empty()&&governments_.contains(authority)&&
+           !source_industry.empty()) {
+            const auto key=[&]()->std::string {
+                if(source_industry=="bg_manufacturing"||
+                   source_industry=="manufacturing")
+                    return "building_group_bg_manufacturing_tax_mult";
+                if(source_industry=="bg_agriculture"||
+                   source_industry=="agriculture")
+                    return "building_group_bg_agriculture_tax_mult";
+                if(source_industry=="bg_ranching"||
+                   source_industry=="ranching")
+                    return "building_group_bg_ranching_tax_mult";
+                if(source_industry=="bg_plantations"||
+                   source_industry=="plantations")
+                    return "building_group_bg_plantations_tax_mult";
+                return "";
+            }();
+            if(!key.empty()) {
+                const auto adjustment=phaseb::add_checked(
+                    p2_modifier_ppm(authority,key),
+                    p3_trait_modifier_ppm(authority,key));
+                const auto multiplier=std::clamp<std::int64_t>(
+                    1'000'000+adjustment,0,2'000'000);
+                effective_rate=static_cast<int>(std::min<std::int64_t>(
+                    1'000'000,phaseb::mul_checked(rate,multiplier)/1'000'000));
+            }
+        }
+        const auto withholding=positive_product(gross,effective_rate)/1'000'000;
         wages(payer,worker,treasury,gross,withholding);
     }
     void enact_voting_age(int new_age) {

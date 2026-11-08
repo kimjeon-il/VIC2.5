@@ -1227,7 +1227,8 @@ public:
                     const Money gross=times(*workers,firm.wage_per_worker_per_day);
                     gh.phase_c().wages_under_law(f.owner,firm.employee_wallet,
                                                   firm.treasury_wallet,gross,
-                                                  gh.phase_c().sovereignty(f.region));
+                                                  gh.phase_c().sovereignty(f.region),
+                                                  r.industry_class);
                 });
         }
         // A site operator chooses a real output quantity from target stock,
