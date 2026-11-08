@@ -249,14 +249,14 @@ inline const Catalogue& catalogue() {
 }
 inline std::vector<std::string> default_ideologies(P3GroupType type) {
     switch(type) {
-        case P3GroupType::landowners:return {"paternalistic","stratocratic"};
-        case P3GroupType::industrialists:return {"laissez_faire","individualist"};
-        case P3GroupType::armed_forces:return {"militarist","stratocratic"};
-        case P3GroupType::devout:return {"moralist","pious"};
-        case P3GroupType::intelligentsia:return {"liberal","anti_clerical","republican"};
-        case P3GroupType::petite_bourgeoisie:return {"patriotic","reactionary"};
-        case P3GroupType::rural_folk:return {"agrarian","populist"};
-        case P3GroupType::trade_unions:return {"proletarian","egalitarian"};
+        case P3GroupType::landowners:return {"paternalistic","hierarchic","patriarchal"};
+        case P3GroupType::industrialists:return {"plutocratic","laissez_faire","individualist"};
+        case P3GroupType::armed_forces:return {"jingoist","loyalist","militarist"};
+        case P3GroupType::devout:return {"pious","moralist","patriarchal"};
+        case P3GroupType::intelligentsia:return {"liberal","anti_clerical","republican","anti_slavery"};
+        case P3GroupType::petite_bourgeoisie:return {"reactionary","meritocratic","patriotic"};
+        case P3GroupType::rural_folk:return {"agrarian","particularist","isolationist"};
+        case P3GroupType::trade_unions:return {"proletarian","egalitarian","populist","anti_slavery"};
         case P3GroupType::custom:return {};
     }
     return {};
