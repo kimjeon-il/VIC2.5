@@ -62,6 +62,8 @@ static phasegh::World make_world(const std::string& economy_choice) {
     law(c,"labor_associations","guild_system");
     law(c,"health_system","no_health_system");
     law(c,"free_speech","protected_speech");
+    law(c,"taxation","consumption_based_taxation");
+    law(c,"welfare","no_social_security");
     law(c,"distribution_of_power","universal_suffrage");
     c.seed_public_institution("HOSPITAL","CLINIC","R","medicine",100,3);
     c.seed_p1_institution("A","HOSPITAL",
@@ -99,8 +101,12 @@ static void legal_policies_and_override_priority() {
     check(c.p2_rule("A","A",P2ClauseKind::female_suffrage_allowed)==0&&
           c.p2_rule("A","A",P2ClauseKind::peaceful_strike_allowed)==0&&
           c.p2_rule("A","A",P2ClauseKind::political_association_allowed)==1&&
-          c.p2_rule("A","A",P2ClauseKind::public_healthcare_right)==0,
+          c.p2_rule("A","A",P2ClauseKind::public_healthcare_right)==0&&
+          c.p2_rule("A","A",P2ClauseKind::income_tax_max_ppm)==0,
           "effective law choice not connected to legal rights");
+    check(c.p2_institution_factor_ppm(
+              "A",P1InstitutionKind::welfare)==0,
+          "no social-security law unexpectedly funded public welfare");
     check(c.p2_institution_factor_ppm(
               "A",P1InstitutionKind::healthcare)==0&&
           c.p1_institution_capacity("HOSPITAL").usable_slots==0,
