@@ -1,0 +1,17 @@
+name: VIC2.5 content engine focused regression
+on:
+  push:
+    branches: [work/politics]
+  workflow_dispatch:
+jobs:
+  content-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure headless content test
+        run: cmake -S . -B build-content -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DVIC25_ENABLE_GL=OFF
+      - name: Build content test only
+        run: cmake --build build-content --target vic25_content_tests --parallel 2
+      - name: Content event decision journal formation regression
+        run: ctest --test-dir build-content -R "^vic25_content_tests$" --output-on-failure
