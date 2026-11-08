@@ -394,6 +394,15 @@ struct DiplomacyState {
     std::uint64_t revision{};
 };
 
+struct DiplomaticCapacityView {
+    std::string country;
+    phasec::P1PowerRank rank{phasec::P1PowerRank::unobserved};
+    phasec::P1FlowCapacity influence;
+    std::int64_t rank_bonus{},legal_bonus{},ongoing_pacts{};
+    std::int64_t prestige_before{},prestige_after{};
+    std::size_t unpriced_commitments{};
+    bool rank_observed{},prestige_observed{},prestige_complete{};
+};
 struct InfluenceView {
     bool observed{};                 // false means unknown, NOT zero influence.
     Money bilateral_imports{};       // Only G's actually settled trade evidence.
@@ -1492,6 +1501,11 @@ public:
     [[nodiscard]] const CreditFacility& trade_credit(const std::string& id)const{
         return trade_.credit.at(id);
     }
+    // National diplomatic capacity is a derived concurrent commitment flow.
+    // Bilateral trade dependency (assess_influence) remains an independent
+    // factual diplomatic-exposure view, never spendable influence points.
+    [[nodiscard]] DiplomaticCapacityView diplomatic_capacity(
+        const std::string& country)const;
     [[nodiscard]] InfluenceView assess_influence(const std::string& source,
                                                   const std::string& target) const;
     [[nodiscard]] CrisisAdvice advise_crisis(const std::string& id,
