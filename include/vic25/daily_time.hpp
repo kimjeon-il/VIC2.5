@@ -542,16 +542,16 @@ public:
             if(gh.phase_c().p1_has_ai_review(today))
                 gh.phase_c().p1_autonomous_politics(today);
         });
-        // Authority spends persistent capacity, not cash or synthetic POP.
-        // Content events are references to actual enactments/movements.
-        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
-            gh.phase_c().p1_advance_political_policies(today);
-        });
         // Ongoing movements generate warnings and observable responses;
         // actual armed actions still require verified army and equipment.
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p5_needs_daily_tick())
                 gh.phase_c().p5_daily_advance(today);
+        });
+        // Evaluate authority mandates and real-source political events
+        // after P5 warning changes so crisis notifications are not missed.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            gh.phase_c().p1_advance_political_policies(today);
         });
         // Revolution readiness uses only actual unit manpower, arms and IG
         // support. A full clock without rebel assets cannot spawn an army.

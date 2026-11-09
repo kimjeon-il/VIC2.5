@@ -3377,7 +3377,13 @@ public:
                    "P2 amendment active without saved legal record");
         for(const auto& [id,bill]:p2_bills_) {
             ensure(id==bill.id&&governments_.contains(bill.country)&&
-                   bill.introduced_day>=0&&bill.effective_day>bill.introduced_day&&
+                   bill.introduced_day>=0&&
+                    ((bill.status==P2BillStatus::submitted||
+                      bill.status==P2BillStatus::approved||
+                      bill.status==P2BillStatus::rejected)?
+                       (bill.effective_day==-1||
+                        bill.effective_day>bill.introduced_day):
+                       bill.effective_day>bill.introduced_day)&&
                    static_cast<unsigned>(bill.action)<=
                      static_cast<unsigned>(P2BillAction::repeal_base)&&
                    static_cast<unsigned>(bill.status)<=

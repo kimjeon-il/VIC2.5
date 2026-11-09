@@ -110,6 +110,8 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 else {
                     votes=p1_coalitions_.at(country).ruling_parties;
                     const auto& chamber=country_elections_.at(country);
+                    for(const auto& party:votes)
+                        if(!chamber.seats.contains(party))feasible=false;
                     const auto tier=bill.action==P2BillAction::enact_or_replace_base?
                        bill.proposed_base.tier:
                        p2_laws_.at(bill.action==P2BillAction::attach_amendment?
@@ -119,7 +121,8 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                           p2_amendments_.at(bill.target_id).law_id).tier;
                     const People quorum=tier==P2NormTier::constitution?
                         chamber.total_seats-chamber.total_seats/3:g.quorum;
-                    if(coalition_seats(votes,chamber)<quorum)feasible=false;
+                    if(feasible&&coalition_seats(votes,chamber)<quorum)
+                        feasible=false;
                 }
             } else if(!order.direct_executive)feasible=false;
             if(p1_constitution(country).legislature==
@@ -136,7 +139,19 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                         for(const auto& p:votes)
                             if(upper.seats.contains(p))
                                 voted=phaseb::add_checked(voted,upper.seats.at(p));
-                        if(voted<=p4_contests_.at(id).seats/2)feasible=false;
+                        const auto tier=bill.action==
+                            P2BillAction::enact_or_replace_base?
+                            bill.proposed_base.tier:
+                            p2_laws_.at(bill.action==P2BillAction::attach_amendment?
+                                bill.proposed_amendment.law_id:
+                                bill.action==P2BillAction::repeal_base?
+                                bill.target_id:
+                                p2_amendments_.at(bill.target_id).law_id).tier;
+                        const People required=tier==P2NormTier::constitution?
+                            p4_contests_.at(id).seats-
+                                p4_contests_.at(id).seats/3:
+                            p4_contests_.at(id).seats/2+1;
+                        if(voted<required)feasible=false;
                     }
                 }
             }
