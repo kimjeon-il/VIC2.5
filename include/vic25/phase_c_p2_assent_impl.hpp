@@ -103,14 +103,18 @@ inline void IntegratedWorld::p2_veto_bill(
     p2_assent_due_[a.decision_deadline].erase(bill_id);
     if(p2_assent_due_[a.decision_deadline].empty())
         p2_assent_due_.erase(a.decision_deadline);
-    a.status=P2AssentStatus::vetoed;
     a.veto_day=today;
-    if(a.veto!=P1VetoMode::absolute) {
+    if(a.veto==P1VetoMode::absolute) {
+        a.status=P2AssentStatus::expired;
+        p2_bills_.at(bill_id).status=P2BillStatus::rejected;
+        events_.push_back("p2-absolute-national-head-veto-final:"+bill_id);
+    } else {
+        a.status=P2AssentStatus::vetoed;
         const auto config=p1_legislative_checks(a.country);
         a.override_deadline=today+config.override_days;
         p2_assent_due_[a.override_deadline].insert(bill_id);
+        events_.push_back("p2-national-head-veto:"+bill_id);
     }
-    events_.push_back("p2-national-head-veto:"+bill_id);
 }
 inline void IntegratedWorld::p2_override_veto(
         const std::string& bill_id,
@@ -135,6 +139,9 @@ inline void IntegratedWorld::p2_override_veto(
             p2_bills_.at(bill_id).proposed_base.tier==
                 P2NormTier::constitution?
             std::max(a.override_ppm,666'667):a.override_ppm);
+        // An exact two-thirds majority must not be rounded up twice
+        // when the chamber has a multiple of three seats.
+        if(ppm==666'667)return seats-seats/3;
         return (seats*ppm+999'999)/1'000'000;
     };
     const auto& lower=country_elections_.at(a.country);
