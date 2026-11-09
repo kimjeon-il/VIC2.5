@@ -131,6 +131,14 @@ inline void IntegratedWorld::p2_check_amendment(const P2Amendment& amendment)con
            !amendment.clauses.empty(),
            "P2 amendment must belong to existing base law");
     p2_validate_clauses(it->second.country,amendment.clauses);
+    // Constitutional authority changes must be applied by a complete
+    // replacement law, never silently by a disconnected amendment.
+    for(const auto& clause:amendment.clauses)
+        ensure(clause.kind!=P2ClauseKind::constitutional_veto_rule&&
+               clause.kind!=P2ClauseKind::constitutional_override_ppm&&
+               clause.kind!=P2ClauseKind::constitutional_assent_days&&
+               clause.kind!=P2ClauseKind::constitutional_party_initiative,
+               "P2 legislative authority requires a constitutional replacement");
     // Mirrored P4 mandate fields need a base value to restore on repeal.
     for(const auto& clause:amendment.clauses) {
         if(clause.kind!=P2ClauseKind::term_months&&
