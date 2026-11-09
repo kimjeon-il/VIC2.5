@@ -72,6 +72,14 @@ struct P2Bill {
 enum class P2AssentStatus : std::uint8_t {
     pending, vetoed, overridden, signed, expired
 };
+enum class P2SponsorKind : std::uint8_t {
+    government, parliamentary_party, elected_member
+};
+struct P2Sponsor {
+    std::string bill_id,country,party,person;
+    P2SponsorKind kind{P2SponsorKind::government};
+    std::int64_t submitted_day{-1};
+};
 struct P2Assent {
     std::string bill_id,country,head_at_vote;
     P1VetoMode veto{P1VetoMode::none};

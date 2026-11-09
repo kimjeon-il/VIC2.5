@@ -143,7 +143,7 @@ struct ElectionTermReform {
 };
 enum class LegislativeAction :std::uint8_t {
     introduce, approve, promulgate, approve_upper,
-    veto, override_veto
+    veto, override_veto, introduce_parliamentary
 };
 struct LegislativeOrder {
     daily::Date date{};
@@ -152,6 +152,7 @@ struct LegislativeOrder {
     std::string bill_id,head;
     std::vector<std::string> supporting_parties;
     std::vector<std::string> upper_supporting_parties;
+    std::string sponsor_party,sponsor_person;
 };
 enum class PoliticalOrderKind : std::uint8_t {
     activate_mandate, cancel_mandate, event_decision, register_lobby
@@ -1540,6 +1541,11 @@ public:
                 switch(order.action) {
                     case LegislativeAction::introduce:
                         c.p2_submit_bill(order.bill,today);
+                        break;
+                    case LegislativeAction::introduce_parliamentary:
+                        c.p2_submit_parliamentary_bill(
+                            order.bill,order.sponsor_party,
+                            order.sponsor_person,today);
                         break;
                     case LegislativeAction::approve:
                         c.p2_approve_bill(order.bill_id,

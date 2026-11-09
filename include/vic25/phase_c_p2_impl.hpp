@@ -353,7 +353,7 @@ inline void IntegratedWorld::p2_sync_country_rules(
 inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
     require_stage({9});
     ensure(today>=0&&!bill.id.empty()&&!bill.country.empty()&&
-           bill.proposer==governments_.at(bill.country).prime_minister&&
+           p2_sponsor_authorized(bill)&&
            !bill.legal_basis.empty()&&
            bill.introduced_day==-1&&bill.promulgated_day==-1&&
            bill.status==P2BillStatus::submitted&&
@@ -456,7 +456,7 @@ inline void IntegratedWorld::p2_approve_bill(
     auto& bill=p2_bills_.at(bill_id);
     ensure(bill.status==P2BillStatus::submitted&&
            p2_enactment_ready(bill_id)&&
-           bill.proposer==governments_.at(bill.country).prime_minister,
+           p2_sponsor_authorized(bill),
            "P2 rejected unauthorized legislative sponsor");
     const auto order=p1_authority(bill.country);
     const auto tier=(bill.action==P2BillAction::enact_or_replace_base)?

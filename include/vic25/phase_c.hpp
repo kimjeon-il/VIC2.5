@@ -1721,6 +1721,9 @@ public:
     [[nodiscard]] bool p2_candidate_eligible(
         const std::string&,const std::string&)const;
     void p2_submit_bill(P2Bill,std::int64_t);
+    void p2_submit_parliamentary_bill(P2Bill,const std::string&,
+                                      const std::string&,std::int64_t);
+    [[nodiscard]] bool p2_sponsor_authorized(const P2Bill&)const;
     void p2_review_due(std::int64_t);
     [[nodiscard]] bool p2_has_review_due(std::int64_t)const;
     [[nodiscard]] bool p2_enactment_ready(const std::string&)const;
@@ -3844,6 +3847,7 @@ private:
     std::set<std::string> p2_active_amendments_;
     std::map<std::string,P2Bill> p2_bills_;
     std::map<std::string,P2Assent> p2_assents_;
+    std::map<std::string,P2Sponsor> p2_sponsors_;
     std::map<std::int64_t,std::set<std::string>> p2_assent_due_; // derived
     std::map<std::string,P2Enactment> p2_enactments_;
     std::map<std::string,std::int64_t> p2_retry_after_;
@@ -4144,6 +4148,7 @@ private:
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p1_law_impl.hpp"
 #include "vic25/phase_c_p2_assent_impl.hpp"
+#include "vic25/phase_c_p2_sponsor_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_p2_enactment_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
