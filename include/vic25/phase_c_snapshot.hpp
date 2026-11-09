@@ -108,6 +108,8 @@ void fields(Archive& a,T& x) {
         V(pressure_days);V(calm_days);V(last_checked_day);
         V(armed_day);V(settled_day);V(pledged_units);
         V(contested_regions);V(verified_engagements);
+    } else if constexpr(std::is_same_v<X,P5RevolutionPreparation>){
+        V(crisis_id);V(progress_ppm);V(started_day);V(last_review_day);
     } else if constexpr(std::is_same_v<X,P5ControlReconciliation>){
         V(crisis_id);V(country);V(successor_head);V(verified_regions);
     } else if constexpr(std::is_same_v<X,P5Settlement>){
@@ -504,6 +506,14 @@ struct SnapshotCodec {
             ar(w.p3_movements_);
             ar(w.p3_last_reaction_day_);
         }
+        if(!w.p3_movement_types_.empty()||
+           !w.p3_movement_calm_days_.empty()||
+           !w.p5_revolution_preparations_.empty()) {
+            ar(std::string("VIC25_PHASEC_P3P5_DYNAMICS_1"));
+            ar(w.p3_movement_types_);
+            ar(w.p3_movement_calm_days_);
+            ar(w.p5_revolution_preparations_);
+        }
         if(!w.p5_crises_.empty()||!w.p5_capitals_.empty()||
            !w.p5_actions_.empty()||
            !w.p5_settlements_.empty()||
@@ -547,7 +557,7 @@ struct SnapshotCodec {
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
              seen_p3=false,seen_p5=false,seen_guerrilla=false,
              seen_enactment=false,seen_campaigns=false,
-             seen_characters=false;
+             seen_characters=false,seen_political_dynamics=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -712,6 +722,16 @@ struct SnapshotCodec {
                    w.p3_groups_.size()>500'000||
                    w.p3_movements_.size()>100'000)
                     throw std::runtime_error("oversized POP political state");
+            } else if(extension=="VIC25_PHASEC_P3P5_DYNAMICS_1"&&
+                       !seen_political_dynamics) {
+                seen_political_dynamics=true;
+                ar(w.p3_movement_types_);
+                ar(w.p3_movement_calm_days_);
+                ar(w.p5_revolution_preparations_);
+                if(w.p3_movement_types_.size()>100'000||
+                   w.p3_movement_calm_days_.size()>100'000||
+                   w.p5_revolution_preparations_.size()>100'000)
+                    throw std::runtime_error("oversized political dynamics");
             } else if(extension=="VIC25_PHASEC_P5_UNREST_1"&&!seen_p5) {
                 seen_p5=true;
                 ar(w.p5_crises_);
