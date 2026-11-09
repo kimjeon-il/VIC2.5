@@ -1709,6 +1709,7 @@ public:
         Quantity,Money);
     void p1_set_incorporation(const std::string&,bool);
     void p1_register_office(P1OfficeEvidence);
+    void phase_time_consume_administration_inputs();
     void p1_register_national_building_level(const std::string&,std::uint32_t);
     void p1_register_commander(P1CommanderEvidence);
     [[nodiscard]] P1BureaucracyView p1_bureaucracy(
@@ -4142,6 +4143,8 @@ private:
     std::vector<P1ValueAddedEvent> p1_value_added_;
     std::map<std::string,bool> p1_incorporation_;
     std::map<std::string,P1OfficeEvidence> p1_offices_;
+    std::map<std::string,std::pair<std::int64_t,std::int32_t>>
+        p1_office_consumed_; // day-native actual input-consumption evidence
     std::map<std::string,std::uint32_t> p1_public_building_levels_;
     std::map<std::string,P1CommanderEvidence> p1_commanders_;
     // Elected decrees and interest-group measures are policy identities, not

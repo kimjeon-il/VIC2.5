@@ -467,6 +467,9 @@ public:
                 });
             }
         }
+        real_actions[7].push_back([](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_consume_administration_inputs();
+        });
         // Exact birth day and age eligibility must be known at Stage0,
         // before any same-day labor, election or explicit birth command.
         real_actions[0].insert(real_actions[0].begin(),

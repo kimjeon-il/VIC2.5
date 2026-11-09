@@ -475,6 +475,10 @@ struct SnapshotCodec {
             ar(w.p1_army_ratings_);
             ar(w.p1_verified_navies_);
         }
+        if(!w.p1_office_consumed_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_ADMIN_INPUTS_1"));
+            ar(w.p1_office_consumed_);
+        }
         if(!w.p1_value_added_.empty()) {
             ar(std::string("VIC25_PHASEC_VALUE_ADDED_1"));
             ar(w.p1_value_added_);
@@ -586,6 +590,7 @@ struct SnapshotCodec {
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p1_capacities=false,seen_p1_bureaucracy=false,
              seen_value_added=false,seen_military_standing=false,
+             seen_admin_inputs=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
              seen_p3=false,seen_ideologies=false,seen_identity=false,
              seen_p5=false,
@@ -687,6 +692,12 @@ struct SnapshotCodec {
                    w.p1_army_ratings_.size()>500'000||
                    w.p1_verified_navies_.size()>100'000)
                     throw std::runtime_error("oversized real military standing");
+            } else if(extension=="VIC25_PHASEC_P1_ADMIN_INPUTS_1"&&
+                      !seen_admin_inputs) {
+                seen_admin_inputs=true;
+                ar(w.p1_office_consumed_);
+                if(w.p1_office_consumed_.size()>500'000)
+                    throw std::runtime_error("oversized daily office input journal");
             } else if(extension=="VIC25_PHASEC_VALUE_ADDED_1"&&
                       !seen_value_added) {
                 seen_value_added=true;

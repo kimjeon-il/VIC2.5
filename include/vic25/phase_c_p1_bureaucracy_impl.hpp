@@ -66,6 +66,53 @@ inline void IntegratedWorld::p1_register_commander(P1CommanderEvidence officer) 
     }
     p1_commanders_.emplace(officer.id,std::move(officer));
 }
+inline void IntegratedWorld::phase_time_consume_administration_inputs() {
+    require_stage({7});
+    const auto day=people_.native_calendar_day();
+    if(day<=0)return; // legacy month engine is not re-executed daily
+    const auto year=month()/12;
+    const int mo=static_cast<int>(month()%12)+1;
+    const bool leap=year%4==0&&(year%100!=0||year%400==0);
+    const int dim=mo==2?(leap?29:28):
+        ((mo==4||mo==6||mo==9||mo==11)?30:31);
+    const auto usage=[&](std::int64_t monthly)->Quantity {
+        return (monthly*day)/dim-(monthly*(day-1))/dim;
+    };
+    for(const auto& [id,office]:p1_offices_) {
+        if(p1_office_consumed_.contains(id)&&
+           p1_office_consumed_.at(id)==std::make_pair(month(),day))continue;
+        const auto& service=public_institutions_.at(id);
+        const auto& site=facilities_.at(office.site);
+        if(site.capacity<site.damaged||
+           site.capacity-site.damaged<office.levels||
+           employed_by(service.operator_id)<=0)continue;
+        const auto paper=usage(phaseb::mul_checked(
+            office.levels,office.method==P1OfficeMethod::simple?0:
+            office.method==P1OfficeMethod::horizontal?10:20));
+        const auto phones=usage(phaseb::mul_checked(
+            office.levels,office.method==P1OfficeMethod::switchboards?5:0));
+        if((paper>0&&stock(service.operator_id,service.region,"paper")<paper)||
+           (phones>0&&stock(service.operator_id,service.region,"telephones")<phones))
+            continue;
+        if(paper>0) {
+            if(phase_d_reservation_mode_)
+                resources_.assert_goods_available(
+                    {service.operator_id,service.region,"paper"},
+                    paper,stock(service.operator_id,service.region,"paper"));
+            goods_.consume({service.operator_id,service.region,"paper"},paper);
+        }
+        if(phones>0) {
+            if(phase_d_reservation_mode_)
+                resources_.assert_goods_available(
+                    {service.operator_id,service.region,"telephones"},
+                    phones,stock(service.operator_id,service.region,"telephones"));
+            goods_.consume({service.operator_id,service.region,"telephones"},phones);
+        }
+        p1_office_consumed_[id]={month(),day};
+        events_.push_back("p1-real-government-office-inputs:"+id);
+    }
+}
+
 inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
         const std::string& country)const {
     ensure(governments_.contains(country),
@@ -104,6 +151,10 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
                 population/100'000,4),
                 (phaseb::mul_checked(population%100'000,4)+99'999)/100'000));
     }
+    for(const auto& [id,link]:p1_institutions_)
+        if(link.country==country&&
+           link.kind==P1InstitutionKind::administration&&
+           !p1_offices_.contains(id))known=false;
     for(const auto& [id,office]:p1_offices_) {
         const auto& link=p1_institutions_.at(id);
         if(link.country!=country)continue;
@@ -112,6 +163,27 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
         if(site.capacity<site.damaged||
            site.capacity-site.damaged<office.levels)continue;
         const auto workers=employed_by(service.operator_id);
+        const auto day=people_.native_calendar_day();
+        if(day>0&&office.method!=P1OfficeMethod::simple) {
+            const auto year=month()/12;
+            const auto mo=static_cast<int>(month()%12)+1;
+            const bool leap=year%4==0&&(year%100!=0||year%400==0);
+            const int dim=mo==2?(leap?29:28):
+                ((mo==4||mo==6||mo==9||mo==11)?30:31);
+            const auto usage=[&](std::int64_t monthly)->Quantity {
+                return (monthly*day)/dim-(monthly*(day-1))/dim;
+            };
+            const auto paper=usage(phaseb::mul_checked(
+                office.levels,office.method==P1OfficeMethod::horizontal?10:20));
+            const auto phones=usage(phaseb::mul_checked(
+                office.levels,office.method==P1OfficeMethod::switchboards?5:0));
+            const bool consumed=p1_office_consumed_.contains(id)&&
+                p1_office_consumed_.at(id)==std::make_pair(month(),day);
+            if(!consumed&&
+               ((paper>0&&stock(service.operator_id,service.region,"paper")<paper)||
+                (phones>0&&stock(service.operator_id,service.region,"telephones")<phones)))
+                continue;
+        }
         const auto needed=phaseb::mul_checked(office.levels,
                                              office.workers_per_level);
         const auto productive=std::min(workers,needed);
