@@ -44,28 +44,15 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
                 bill.target_id:p2_amendments_.at(bill.target_id).law_id).domain;
         const auto desired=bill.action==P2BillAction::enact_or_replace_base?
             bill.proposed_base.base_choice:std::string{};
-        std::int64_t support=0,opposition=0,movement_activism=0;
-        for(const auto& [key,group]:p3_groups_) {
-            if(key.first!=bill.country||group.issue_domain!=law_domain)continue;
-            const auto clout=p3_group_view(key.first,key.second).clout_ppm;
-            const auto& coalition=p1_coalitions_.at(bill.country);
-            const bool governing=std::find(coalition.ruling_groups.begin(),
-              coalition.ruling_groups.end(),key.second)!=coalition.ruling_groups.end();
-            if(!desired.empty()&&p1_group_legal_preference(group)==desired) {
-                if(governing)support+=clout;
-            } else if(!p1_group_legal_preference(group).empty()&&
-                      p1_group_legal_preference(group)!=desired)opposition+=clout;
-        }
+        std::int64_t movement_activism=0;
         for(const auto& [mid,m]:p3_movements_) {
             if(!m.active||m.country!=bill.country||
                m.issue_domain!=law_domain)continue;
             const auto view=p3_movement_view(mid);
             if((!desired.empty()&&m.desired_choice==desired)||
-               (desired.empty()&&m.goal==P3MovementGoal::legal_reform)) {
-                support+=view.support_ppm;
+               (desired.empty()&&m.goal==P3MovementGoal::legal_reform))
                 movement_activism=std::max<std::int64_t>(
                     movement_activism,view.activism_ppm);
-            } else opposition+=view.support_ppm;
         }
         e.last_review_day=today;
         if(legit<25&&movement_activism<250'000) {
@@ -74,34 +61,13 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
             events_.push_back("p2-legitimacy-pauses-law:"+id);
             continue;
         }
-        // Favorites and the incumbent head can influence procedure only
-        // through their existing, eligible PersonAnchor political identities.
-        std::int64_t personal_modifier=0;
-        const auto assess=[&](const std::string& id,int weight) {
-            const auto it=p1_characters_.find(id);
-            if(it==p1_characters_.end()||!it->second.active||
-               it->second.politically_exiled||
-               !p1_character_available(id))return;
-            const auto stance=it->second.law_preferences.find(law_domain);
-            if(stance==it->second.law_preferences.end())return;
-            if(!desired.empty()&&stance->second==desired)
-                personal_modifier+=weight;
-            else personal_modifier-=weight;
-        };
-        assess(governments_.at(bill.country).head_of_state,20'000);
-        if(const auto fav=p1_favorites_.find(bill.country);
-           fav!=p1_favorites_.end())assess(fav->second,25'000);
-        std::int64_t success=std::clamp<std::int64_t>(
-            support+e.success_bonus_ppm+personal_modifier,0,900'000);
-        std::int64_t stall=std::clamp<std::int64_t>(
-            opposition+e.setbacks*25'000,0,900'000);
-        if(success+stall>1'000'000){
-            const auto total=success+stall;
-            success=success*1'000'000/total;
-            stall=1'000'000-success;
-        }
-        const auto advance=std::clamp<std::int64_t>(
-            2*success-stall,0,1'000'000-success-stall);
+        const auto probabilities=p2_enactment_odds(id);
+        const auto success=static_cast<std::int64_t>(
+            probabilities.success_ppm);
+        const auto advance=static_cast<std::int64_t>(
+            probabilities.advance_ppm);
+        const auto stall=static_cast<std::int64_t>(
+            probabilities.stall_ppm);
         std::uint64_t seed=14695981039346656037ULL;
         const auto key=e.country+":"+id+":"+std::to_string(today)+":"+
                        std::to_string(e.checks);
