@@ -465,11 +465,15 @@ struct Policies {
                 order.bill.id:order.bill_id;
             if(bill_id.empty()||
                static_cast<unsigned>(order.action)>
-                   static_cast<unsigned>(LegislativeAction::approve_upper)||
+                   static_cast<unsigned>(LegislativeAction::withdraw)||
                !p2_legislative_events.insert({day,bill_id,order.action}).second||
                (order.action==LegislativeAction::introduce&&
                 (order.bill.proposer.empty()||order.bill.country.empty()))||
-               (order.action==LegislativeAction::promulgate&&order.head.empty()))
+               ((order.action==LegislativeAction::promulgate||
+                 order.action==LegislativeAction::sign||
+                 order.action==LegislativeAction::veto)&&order.head.empty())||
+               (order.action==LegislativeAction::override_veto&&
+                 order.supporting_parties.empty()))
                 throw std::invalid_argument("P0_INVALID_P2_LEGISLATIVE_ORDER");
         }
         for(const auto& e:elections)
