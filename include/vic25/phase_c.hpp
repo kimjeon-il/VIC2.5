@@ -1695,6 +1695,8 @@ public:
     // P2: legal authority and effective clauses; P1/P4/C retain their own
     // office, election, tax and demographic state and transaction ownership.
     void p2_seed_base(P2BaseLaw);
+    void p2_validate_constitution_choice(const P2BaseLaw&)const;
+    void p2_apply_constitution_choice(const P2BaseLaw&);
     void p2_seed_amendment(P2Amendment);
     void p2_register_upper_chamber(const std::string&,const std::string&);
     void p2_approve_upper_bill(const std::string&,
@@ -4121,6 +4123,7 @@ private:
 #include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p4_campaign_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
+#include "vic25/phase_c_p1_law_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_p2_enactment_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"

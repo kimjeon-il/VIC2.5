@@ -380,6 +380,7 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
     }
     if(bill.action==P2BillAction::enact_or_replace_base) {
         p2_validate_base(bill.proposed_base);
+        p2_validate_constitution_choice(bill.proposed_base);
         ensure(bill.proposed_base.country==bill.country&&
                !p2_laws_.contains(bill.proposed_base.id),
                "P2 replacement law must belong to one real sovereign");
@@ -415,6 +416,11 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
             ensure(p2_is_active_base(target)&&
                    p2_laws_.at(target).country==bill.country,
                    "P2 cannot repeal inactive or foreign base law");
+            const auto& domain=p2_laws_.at(target).domain;
+            ensure(domain!="governance_principles"&&
+                   domain!="distribution_of_power"&&
+                   domain!="legislature_structure",
+                   "P2 fundamental constitutional law must be replaced, not removed");
         }
     }
     bill.introduced_day=today;
@@ -555,6 +561,9 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             law_id=next.id;
             p2_laws_.emplace(next.id,next);
             p2_active_base_[slot]=next.id;
+            // The constitutional choice is part of Stage 0's same atomic
+            // transaction, not a secondary calendar or title ledger.
+            p2_apply_constitution_choice(next);
             if(const auto negotiated=p2_negotiated_.find(id);
                negotiated!=p2_negotiated_.end()) {
                 for(const auto& accepted:negotiated->second) {
