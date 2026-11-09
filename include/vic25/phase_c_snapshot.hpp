@@ -83,6 +83,15 @@ void fields(Archive& a,T& x) {
         V(legal_basis);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,P1Institution>){
         V(country);V(public_institution_id);V(kind);V(level);
+    } else if constexpr(std::is_same_v<X,P1Mandate>){
+        V(id);V(country);V(target);V(kind);V(authority_cost);
+        V(started_day);V(active);
+    } else if constexpr(std::is_same_v<X,P1PoliticalEvent>){
+        V(id);V(country);V(source);V(kind);V(day);V(resolved);
+    } else if constexpr(std::is_same_v<X,P1Lobby>){
+        V(id);V(source_country);V(target_country);V(interest_group);
+        V(issue_domain);V(desired_choice);V(pressure_ppm);
+        V(satisfaction_ppm);V(created_day);V(last_review_day);V(active);
     } else if constexpr(std::is_same_v<X,PoliticalAgenda>){
         V(country);V(last_bill_id);V(last_reform_choice);
         V(last_review_day);V(next_review_day);V(last_election_day);
@@ -477,6 +486,11 @@ struct SnapshotCodec {
             ar(std::string("VIC25_PHASEC_POLITICAL_AI_1"));
             ar(w.p1_political_agendas_);ar(w.p1_player_countries_);
         }
+        if(!w.p1_mandates_.empty()||!w.p1_political_events_.empty()||
+           !w.p1_lobbies_.empty()) {
+            ar(std::string("VIC25_PHASEC_POLITICAL_POLICIES_1"));
+            ar(w.p1_mandates_);ar(w.p1_political_events_);ar(w.p1_lobbies_);
+        }
         if(!w.p2_laws_.empty()||!w.p2_bills_.empty()) {
             ar(std::string("VIC25_PHASEC_P2_LAWS_1"));
             ar(w.p2_laws_);
@@ -566,7 +580,7 @@ struct SnapshotCodec {
              seen_p3=false,seen_p5=false,seen_guerrilla=false,
              seen_enactment=false,seen_campaigns=false,
              seen_characters=false,seen_political_dynamics=false,
-             seen_political_ai=false;
+             seen_political_ai=false,seen_political_policies=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -685,6 +699,16 @@ struct SnapshotCodec {
                 if(w.p1_political_agendas_.size()>100'000||
                    w.p1_player_countries_.size()>100'000)
                     throw std::runtime_error("oversized political AI state");
+            } else if(extension=="VIC25_PHASEC_POLITICAL_POLICIES_1"&&
+                       !seen_political_policies) {
+                seen_political_policies=true;
+                ar(w.p1_mandates_);
+                ar(w.p1_political_events_);
+                ar(w.p1_lobbies_);
+                if(w.p1_mandates_.size()>100'000||
+                   w.p1_political_events_.size()>1'000'000||
+                   w.p1_lobbies_.size()>100'000)
+                    throw std::runtime_error("oversized political policies");
             } else if(extension=="VIC25_PHASEC_P2_LAWS_1"&&!seen_p2) {
                 seen_p2=true;
                 ar(w.p2_laws_);
