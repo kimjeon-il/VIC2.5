@@ -75,6 +75,8 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         const auto roll=static_cast<std::int64_t>(seed%1'000'000);
         ++e.checks;
         if(success==0) {
+            p2_checkpoint_results_[id]={id,
+                P2CheckpointKind::zero_success,today};
             // 1.15 immediately fails reform of an entire government layout
             // at zero enactment chance; other laws suffer one setback.
             if(law_domain=="governance_principles"||
@@ -83,6 +85,7 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
             else ++e.setbacks;
             events_.push_back("p2-zero-success:"+id);
         } else if(roll<success) {
+            p2_checkpoint_results_[id]={id,P2CheckpointKind::success,today};
             if(e.phase==3) {
                 e.phase=4;e.ready=true;e.next_review_day=-1;
                 events_.push_back("p2-ready-for-chamber-vote:"+id);
@@ -91,13 +94,16 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
             ++e.phase;
             events_.push_back("p2-phase-success:"+id);
         } else if(roll<success+advance) {
+            p2_checkpoint_results_[id]={id,P2CheckpointKind::advance,today};
             e.success_bonus_ppm=std::min(500'000,e.success_bonus_ppm+50'000);
             events_.push_back("p2-advance-debate:"+id);
         } else if(roll<success+advance+stall) {
+            p2_checkpoint_results_[id]={id,P2CheckpointKind::stall,today};
             e.success_bonus_ppm=std::max(-500'000,e.success_bonus_ppm-40'000);
             ++e.setbacks;
             events_.push_back("p2-stalled:"+id);
         } else {
+            p2_checkpoint_results_[id]={id,P2CheckpointKind::debate,today};
             e.success_bonus_ppm=std::max(-500'000,e.success_bonus_ppm-10'000);
             events_.push_back("p2-debate:"+id);
         }
