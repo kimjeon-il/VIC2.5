@@ -66,6 +66,10 @@ inline P1MilitaryPowerView IntegratedWorld::p1_military_power(
     result.army_complete=true;
     result.navy_complete=p1_verified_navies_.contains(country);
     std::set<std::string> crew_units;
+    // Preserve fractional prestige across individual ships and battalions.
+    // Truncating each hull's 1.15 coefficient before summing would make
+    // modest but real navies yield zero total prestige indefinitely.
+    std::int64_t naval_numerator=0,army_power_ppm=0;
     for(const auto& [id,hull]:p1_naval_hulls_) {
         (void)id;
         crew_units.insert(hull.unit);
@@ -87,12 +91,16 @@ inline P1MilitaryPowerView IntegratedWorld::p1_military_power(
         // Victoria 3 1.15: projection * maxHP /1150 * .0077.
         // Only crew-backed commissioned hulls count. Fractional crew
         // staffing scales available naval power (a VIC2.5 constraint).
-        const auto power=phaseb::mul_checked(
-            phaseb::mul_checked(hull.projection,hull.max_hp),77)/
-            (1150*10'000);
+        const auto numerator=phaseb::mul_checked(
+            phaseb::mul_checked(hull.projection,hull.max_hp),77);
         const auto real_crew=std::min(crew,hull.required_crew);
-        result.navy=phaseb::add_checked(result.navy,
-            phaseb::mul_checked(power,real_crew)/hull.required_crew);
+        // Divide by the crew ratio first, but leave the 1.15 navy
+        // prestige denominator until all actual hulls are accumulated.
+        const auto crewed=phaseb::add_checked(
+            phaseb::mul_checked(numerator/hull.required_crew,real_crew),
+            phaseb::mul_checked(numerator%hull.required_crew,real_crew)/
+                hull.required_crew);
+        naval_numerator=phaseb::add_checked(naval_numerator,crewed);
         ++result.commissioned_ships;
     }
     for(const auto& [id,deployment]:army_deployments_) {
@@ -112,13 +120,20 @@ inline P1MilitaryPowerView IntegratedWorld::p1_military_power(
                     people=phaseb::add_checked(people,count);
             }
             // 1.15 army prestige coefficient is 0.03 per verified point.
-            const auto power=phaseb::mul_checked(
-                people,rating->second.power_per_person_ppm)/1'000'000;
-            result.army=phaseb::add_checked(result.army,
-                phaseb::mul_checked(power,3)/100);
+            army_power_ppm=phaseb::add_checked(army_power_ppm,
+                phaseb::mul_checked(
+                    people,rating->second.power_per_person_ppm));
             result.army_observed=true;
         }
     }
+    result.navy=naval_numerator/(1150*10'000);
+    // 0.03 prestige per military-power point; retain fractional military
+    // power across units before the once-per-country integer conversion.
+    constexpr std::int64_t army_denominator=100'000'000;
+    result.army=phaseb::add_checked(
+        phaseb::mul_checked(army_power_ppm/army_denominator,3),
+        phaseb::mul_checked(army_power_ppm%army_denominator,3)/
+            army_denominator);
     return result;
 }
 } // namespace vic25::phasec

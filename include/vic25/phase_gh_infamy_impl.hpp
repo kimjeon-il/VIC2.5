@@ -35,7 +35,15 @@ inline void Stage::phase_time_infamy_decay(
         require(today==state.last_day+1,
                 "H Infamy calendar gap must not silently lose decay");
         const auto& core=phase_c();
-        if(!core.has_government(country))continue;
+        if(!core.has_government(country)) {
+            // The historical infamy register outlives a government. Decay
+            // cannot accrue while there is no valid sovereign authority;
+            // advance the calendar anyway so a restored state never fails
+            // with a spurious multi-day catch-up gap.
+            state.last_day=today;
+            state.carry=0;
+            continue;
+        }
         const auto legal=phaseb::add_checked(
             core.p2_modifier_ppm(country,"country_infamy_decay_mult"),
             core.p3_trait_modifier_ppm(country,"country_infamy_decay_mult"));

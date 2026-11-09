@@ -131,6 +131,16 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
             actual_population[dem.region]=phaseb::add_checked(
                 actual_population[dem.region],row.count);
     }
+    // Base administrative cost per incorporated POP is law-sensitive.
+    // The flat state overhead is unchanged; hereditary/local bureaucracy
+    // and other enacted policy modifiers affect only population base cost.
+    const auto population_cost_factor=std::clamp<std::int64_t>(
+        phaseb::add_checked(1'000'000,phaseb::add_checked(
+            p2_modifier_ppm(country,
+                "state_bureaucracy_population_base_cost_factor_mult"),
+            p3_trait_modifier_ppm(country,
+                "state_bureaucracy_population_base_cost_factor_mult"))),
+        0,5'000'000);
     for(const auto& [region,owner]:sovereignty_) {
         if(owner!=country)continue;
         auto it=p1_incorporation_.find(region);
@@ -146,10 +156,19 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
         v.state_cost=phaseb::add_checked(v.state_cost,10);
         // 1.15 STATE_BUREAUCRACY_POP_MULTIPLE=100000,
         // POP_BASE_COST=4. Integer ceilings avoid ignoring small regions.
-        v.state_cost=phaseb::add_checked(v.state_cost,
-            phaseb::add_checked(phaseb::mul_checked(
-                population/100'000,4),
-                (phaseb::mul_checked(population%100'000,4)+99'999)/100'000));
+        const auto base_population_cost=phaseb::add_checked(
+            phaseb::mul_checked(population/100'000,4),
+            (phaseb::mul_checked(population%100'000,4)+99'999)/100'000);
+        // Fixed-point ceiling: a small but incorporated population still
+        // incurs real administration demand, without rounding every
+        // policy multiplier to zero before its national aggregation.
+        const auto scaled_population_cost=phaseb::add_checked(
+            phaseb::mul_checked(base_population_cost/1'000'000,
+                                population_cost_factor),
+            (phaseb::mul_checked(base_population_cost%1'000'000,
+                                 population_cost_factor)+999'999)/1'000'000);
+        v.state_cost=phaseb::add_checked(
+            v.state_cost,scaled_population_cost);
     }
     for(const auto& [id,link]:p1_institutions_)
         if(link.country==country&&
@@ -210,13 +229,35 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
         institutions[link.kind]=std::max(institutions[link.kind],link.level);
     }
     for(const auto& [kind,level]:institutions) {
-        (void)kind;
         const auto rate=phaseb::add_checked(
             phaseb::mul_checked(v.incorporated_population/100'000,10),
             phaseb::mul_checked(v.incorporated_population%100'000,10)/
             100'000);
-        v.institution_cost=phaseb::add_checked(v.institution_cost,
-            phaseb::mul_checked(rate,level));
+        const char* law_key=nullptr;
+        switch(kind) {
+            case P1InstitutionKind::healthcare:
+                law_key="country_institution_cost_institution_health_system_mult";
+                break;
+            case P1InstitutionKind::education:
+                law_key="country_institution_cost_institution_schools_mult";
+                break;
+            case P1InstitutionKind::policing:
+                law_key="country_institution_cost_institution_home_affairs_mult";
+                break;
+            default:break;
+        }
+        auto cost=phaseb::mul_checked(rate,level);
+        if(law_key) {
+            const auto factor=std::clamp<std::int64_t>(
+                phaseb::add_checked(1'000'000,phaseb::add_checked(
+                    p2_modifier_ppm(country,law_key),
+                    p3_trait_modifier_ppm(country,law_key))),
+                0,5'000'000);
+            cost=phaseb::add_checked(
+                phaseb::mul_checked(cost/1'000'000,factor),
+                phaseb::mul_checked(cost%1'000'000,factor)/1'000'000);
+        }
+        v.institution_cost=phaseb::add_checked(v.institution_cost,cost);
     }
     // Only confirmed owned building levels are billable. Other sovereign
     // facilities require explicit source level data, never assumed to be 1.
