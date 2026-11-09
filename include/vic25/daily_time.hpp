@@ -482,18 +482,19 @@ public:
                 gh.phase_c().phase_time_apply_p5_guerrilla_access(today);
                 gh.enforce_p2_tariff_ceiling();
             });
-        // P0 domain decisions run on the real calendar day, in the same
-        // C/D/E/G/H transaction as scheduled commands and POP dynamics.
-        for(std::size_t n=0;n<native_day_plan.size();++n)
-            for(const auto& action:native_day_plan[n])
-                real_actions[n].push_back(action);
-        // Opt-in political reaction consumes the real economic results and
-        // membership changes completed earlier in this same native day.
-        // It is not a second population or political-money simulation.
+        // Stage 9 is ordered deliberately: first observe today's actual POP
+        // conditions, then execute P0/player political commands and elections,
+        // then settle bargains and political crises. The same staged C/D/E/G/H
+        // transaction owns every mutation; no second political clock exists.
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p3_needs_daily_tick())
                 gh.phase_c().p3_daily_react(today);
         });
+        // P0 domain decisions run on the real calendar day and may consume
+        // the freshly computed POP political response.
+        for(std::size_t n=0;n<native_day_plan.size();++n)
+            for(const auto& action:native_day_plan[n])
+                real_actions[n].push_back(action);
         // Native election fallback. P0 plans its contested election earlier
         // in Stage9 (after P3 political reactions); the due index is then
         // cleared, so the fallback does not count the same ballot twice.
