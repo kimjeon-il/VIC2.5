@@ -74,8 +74,25 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
             events_.push_back("p2-legitimacy-pauses-law:"+id);
             continue;
         }
+        // Favorites and the incumbent head can influence procedure only
+        // through their existing, eligible PersonAnchor political identities.
+        std::int64_t personal_modifier=0;
+        const auto assess=[&](const std::string& id,int weight) {
+            const auto it=p1_characters_.find(id);
+            if(it==p1_characters_.end()||!it->second.active||
+               it->second.politically_exiled||
+               !p1_character_available(id))return;
+            const auto stance=it->second.law_preferences.find(law_domain);
+            if(stance==it->second.law_preferences.end())return;
+            if(!desired.empty()&&stance->second==desired)
+                personal_modifier+=weight;
+            else personal_modifier-=weight;
+        };
+        assess(governments_.at(bill.country).head_of_state,20'000);
+        if(const auto fav=p1_favorites_.find(bill.country);
+           fav!=p1_favorites_.end())assess(fav->second,25'000);
         std::int64_t success=std::clamp<std::int64_t>(
-            support/2+e.success_bonus_ppm,0,900'000);
+            support/2+e.success_bonus_ppm+personal_modifier,0,900'000);
         std::int64_t stall=std::clamp<std::int64_t>(
             opposition/2+e.setbacks*25'000,0,900'000);
         if(success+stall>1'000'000){
@@ -124,8 +141,12 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         const int days=law_domain=="governance_principles"?200:
            (law_domain=="distribution_of_power"||
             law_domain=="economic_system"||law_domain=="slavery")?150:100;
-        e.next_review_day=today+std::clamp(
+        const int authority_surplus=std::clamp(
+            p1_authority_budget(bill.country).available,0,1000);
+        const auto baseline=std::clamp(
             days*(150-std::clamp(legit,0,100))/100,30,300);
+        const auto accelerated=baseline*1000/(1000+authority_surplus);
+        e.next_review_day=today+std::clamp(accelerated,30,300);
         p2_review_due_[e.next_review_day].insert(id);
     }
 }

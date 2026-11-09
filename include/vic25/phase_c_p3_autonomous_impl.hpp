@@ -70,7 +70,14 @@ inline void IntegratedWorld::p3_autonomous_movements(std::int64_t today) {
         movement.activism_ppm=std::clamp(view.engagement_ppm,50'000,1'000'000);
         movement.radical_ppm=view.radical_ppm;
         p3_seed_movement(std::move(movement));
-        p3_movement_types_[id]=P3MovementType::ideological;
+        const auto& domain=group.issue_domain;
+        p3_movement_types_[id]=domain.rfind("culture:",0)==0?
+            P3MovementType::cultural:
+            domain.rfind("religion:",0)==0?
+            P3MovementType::religious:
+            domain.rfind("national:",0)==0?
+            P3MovementType::national:
+            P3MovementType::ideological;
     }
 }
 } // namespace vic25::phasec
