@@ -152,6 +152,10 @@ void fields(Archive& a,T& x) {
         V(id);V(country);V(proposer);V(legal_basis);V(action);V(status);
         V(proposed_base);V(proposed_amendment);V(target_id);V(transitions);
         V(introduced_day);V(promulgated_day);V(effective_day);
+    } else if constexpr(std::is_same_v<X,P2Enactment>){
+        V(bill_id);V(country);V(law_key);V(phase);
+        V(success_bonus_ppm);V(setbacks);V(checks);
+        V(next_review_day);V(last_review_day);V(ready);
     } else if constexpr(std::is_same_v<X,P2LawEvent>){
         V(bill_id);V(country);V(law_id);V(amendment_id);V(legal_basis);
         V(action);V(effective_day);
@@ -465,6 +469,10 @@ struct SnapshotCodec {
             ar(w.p2_group_demands_);
             ar(w.p2_negotiated_);
         }
+        if(!w.p2_enactments_.empty()||!w.p2_retry_after_.empty()) {
+            ar(std::string("VIC25_PHASEC_P2_ENACTMENT_1"));
+            ar(w.p2_enactments_);ar(w.p2_retry_after_);
+        }
         if(!w.p3_groups_.empty()||!w.p3_attitudes_.empty()||
            !w.p3_movements_.empty()) {
             ar(std::string("VIC25_PHASEC_P3_POLITICS_1"));
@@ -514,7 +522,8 @@ struct SnapshotCodec {
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
-             seen_p3=false,seen_p5=false,seen_guerrilla=false;
+             seen_p3=false,seen_p5=false,seen_guerrilla=false,
+             seen_enactment=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -644,6 +653,14 @@ struct SnapshotCodec {
                    w.p2_group_demands_.size()>1'000'000||
                    w.p2_negotiated_.size()>1'000'000)
                     throw std::runtime_error("oversized P2 parliamentary record");
+            } else if(extension=="VIC25_PHASEC_P2_ENACTMENT_1"&&
+                       !seen_enactment) {
+                seen_enactment=true;
+                ar(w.p2_enactments_);ar(w.p2_retry_after_);
+                if(w.p2_enactments_.size()>1'000'000||
+                   w.p2_retry_after_.size()>1'000'000)
+                    throw std::runtime_error("oversized P2 enactment state");
+                w.p2_rebuild_review_due_index();
             } else if(extension=="VIC25_PHASEC_P3_POLITICS_1"&&!seen_p3) {
                 seen_p3=true;
                 ar(w.p3_attitudes_);
