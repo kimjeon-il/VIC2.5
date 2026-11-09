@@ -142,7 +142,8 @@ struct ElectionTermReform {
     daily::Date decision_date{};
 };
 enum class LegislativeAction :std::uint8_t {
-    introduce, approve, promulgate, approve_upper
+    introduce, approve, promulgate, approve_upper,
+    sign, veto, override_veto, withdraw
 };
 struct LegislativeOrder {
     daily::Date date{};
@@ -150,6 +151,7 @@ struct LegislativeOrder {
     phasec::P2Bill bill; // populated for introduction only
     std::string bill_id,head;
     std::vector<std::string> supporting_parties;
+    std::vector<std::string> upper_supporting_parties;
 };
 enum class PoliticalOrderKind : std::uint8_t {
     activate_mandate, cancel_mandate, event_decision, register_lobby
@@ -1536,6 +1538,16 @@ public:
                              (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 switch(order.action) {
+                    case LegislativeAction::sign:
+                        c.p2_sign_bill(order.bill_id,order.head,today);break;
+                    case LegislativeAction::veto:
+                        c.p2_veto_bill(order.bill_id,order.head,today);break;
+                    case LegislativeAction::override_veto:
+                        c.p2_override_veto(order.bill_id,
+                           order.supporting_parties,
+                           order.upper_supporting_parties,today);break;
+                    case LegislativeAction::withdraw:
+                        c.p2_cancel_bill(order.bill_id,today);break;
                     case LegislativeAction::introduce:
                         c.p2_submit_bill(order.bill,today);
                         break;

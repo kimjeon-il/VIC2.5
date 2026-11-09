@@ -131,6 +131,14 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 bill.status!=P2BillStatus::approved))continue;
             pending_enactment=true;
             if(bill.status==P2BillStatus::approved) {
+                if(p1_legislative_powers(country).veto!=P1VetoRule::none) {
+                    const auto& assent=p2_assents_.at(bill_id);
+                    if(assent.vetoed&&!assent.overridden)continue;
+                    if(!assent.signed_by_head&&!assent.overridden) {
+                        // AI executive may sign, but not bypass a veto.
+                        p2_sign_bill(bill_id,g.head_of_state,today);
+                    }
+                }
                 p2_promulgate_bill(bill_id,g.head_of_state,today);
                 events_.push_back("p1-ai-legal-promulgation:"+bill_id);
                 continue;
@@ -197,6 +205,8 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
             if(p1_constitution(country).legislature==
                P1LegislatureKind::bicameral)
                 p2_approve_upper_bill(bill_id,upper_votes);
+            if(p1_legislative_powers(country).veto!=P1VetoRule::none)
+                p2_sign_bill(bill_id,g.head_of_state,today);
             p2_promulgate_bill(bill_id,g.head_of_state,today);
             events_.push_back("p1-ai-actual-bill-approved:"+bill_id);
         }
