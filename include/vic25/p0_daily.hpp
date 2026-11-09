@@ -1190,6 +1190,18 @@ public:
                         phaseb::mul_checked(work_budget/1'000'000,rate),
                         phaseb::mul_checked(work_budget%1'000'000,rate)/1'000'000);
                 }
+                // 1.15: excess Bureaucracy increases feasible paid
+                // construction speed, without manufacturing inputs or cash.
+                const auto administration=c.p1_bureaucracy(country);
+                if(administration.capacity.complete&&
+                   administration.construction_bonus_ppm>0) {
+                    const auto rate=static_cast<std::int64_t>(
+                        1'000'000+administration.construction_bonus_ppm);
+                    work_budget=phaseb::add_checked(
+                        phaseb::mul_checked(work_budget/1'000'000,rate),
+                        phaseb::mul_checked(work_budget%1'000'000,rate)/
+                        1'000'000);
+                }
                 Quantity n=std::min({work_budget,
                      p.work_required-p.accepted_work,materials,
                      static_cast<Quantity>(staff/p.workers_per_work),affordable});

@@ -564,11 +564,26 @@ public:
             resources_.assert_cash_available(d.payer,d.amount,cash(d.payer));
         ensure(d.due <= month() && cash(d.payer) >= d.amount,
                "dividend not yet due or unfunded");
-        money_.post({unique("dividend"), "dividend settles shareholder payable", {
-            {account(d.payer, "capital"), d.amount, 0},
-            {account(d.payer, "cash"), 0, d.amount},
-            {account(holder, "cash"), d.amount, 0},
-            {account(holder, "revenue"), 0, d.amount}}});
+        Money paid=d.amount;
+        // The unfunded fraction of a government dividend stays as the
+        // firm's actual retained capital, never a fictional transfer.
+        for(const auto& [country,government]:governments_) {
+            (void)government;
+            if(!has_country_treasury(country)||
+               country_treasury(country)!=holder)continue;
+            const auto admin=p1_bureaucracy(country);
+            if(admin.capacity.complete)
+                paid=phaseb::mul_checked(d.amount,
+                    1'000'000-admin.dividend_waste_ppm)/1'000'000;
+            break;
+        }
+        if(paid>0)
+            money_.post({unique("dividend"),
+                "net shareholder dividend after administrative waste", {
+                {account(d.payer, "capital"), paid, 0},
+                {account(d.payer, "cash"), 0, paid},
+                {account(holder, "cash"), paid, 0},
+                {account(holder, "revenue"), 0, paid}}});
         dividends_.erase(id);
         events_.push_back("dividend-paid");
     }
@@ -2637,7 +2652,13 @@ public:
                     1'000'000,phaseb::mul_checked(rate,multiplier)/1'000'000));
             }
         }
-        const auto withholding=positive_product(gross,effective_rate)/1'000'000;
+        Money withholding=positive_product(gross,effective_rate)/1'000'000;
+        if(!authority.empty()&&governments_.contains(authority)) {
+            const auto admin=p1_bureaucracy(authority);
+            if(admin.capacity.complete)
+                withholding=phaseb::mul_checked(withholding,
+                    1'000'000-admin.tax_waste_ppm)/1'000'000;
+        }
         wages(payer,worker,treasury,gross,withholding);
     }
     void enact_voting_age(int new_age) {
