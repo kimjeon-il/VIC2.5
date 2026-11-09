@@ -537,6 +537,11 @@ struct SnapshotCodec {
             ar(std::string("VIC25_PHASEC_P2_SPONSORS_1"));
             ar(w.p2_sponsors_);
         }
+        if(!w.p2_law_stances_.empty()||!w.p2_law_templates_.empty()) {
+            ar(std::string("VIC25_PHASEC_P2_IDEOLOGY_CATALOG_1"));
+            ar(w.p2_law_stances_);
+            ar(w.p2_law_templates_);
+        }
         if(!w.p2_assents_.empty()) {
             ar(std::string("VIC25_PHASEC_P2_ASSENT_1"));
             ar(w.p2_assents_);
@@ -603,7 +608,7 @@ struct SnapshotCodec {
              seen_characters=false,seen_political_dynamics=false,
              seen_political_ai=false,seen_political_policies=false,
              seen_legislative_checks=false,seen_assents=false,
-             seen_sponsors=false;
+             seen_sponsors=false,seen_law_catalog=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -788,6 +793,14 @@ struct SnapshotCodec {
                 ar(w.p2_sponsors_);
                 if(w.p2_sponsors_.size()>1'000'000)
                     throw std::runtime_error("oversized legislative initiators");
+            } else if(extension=="VIC25_PHASEC_P2_IDEOLOGY_CATALOG_1"&&
+                       !seen_law_catalog) {
+                seen_law_catalog=true;
+                ar(w.p2_law_stances_);
+                ar(w.p2_law_templates_);
+                if(w.p2_law_stances_.size()>2'000'000||
+                   w.p2_law_templates_.size()>300'000)
+                    throw std::runtime_error("oversized law preference catalog");
             } else if(extension=="VIC25_PHASEC_P2_ASSENT_1"&&
                        !seen_assents) {
                 seen_assents=true;

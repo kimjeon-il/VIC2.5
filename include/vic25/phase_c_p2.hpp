@@ -88,6 +88,9 @@ struct P2Assent {
     std::int64_t started_day{-1},decision_deadline{-1};
     std::int64_t veto_day{-1},override_deadline{-1};
 };
+struct P2EnactmentOdds {
+    std::int32_t success_ppm{},advance_ppm{},debate_ppm{},stall_ppm{};
+};
 struct P2Enactment {
     std::string bill_id,country,law_key;
     std::uint8_t phase{1}; // 1..3; fourth state is ready for a legal vote

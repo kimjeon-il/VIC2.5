@@ -143,7 +143,7 @@ struct ElectionTermReform {
 };
 enum class LegislativeAction :std::uint8_t {
     introduce, approve, promulgate, approve_upper,
-    veto, override_veto, introduce_parliamentary
+    veto, override_veto, introduce_parliamentary, cancel
 };
 struct LegislativeOrder {
     daily::Date date{};
@@ -1569,6 +1569,9 @@ public:
                         c.p2_override_veto(order.bill_id,
                             order.supporting_parties,
                             order.upper_supporting_parties,today);
+                        break;
+                    case LegislativeAction::cancel:
+                        c.p2_cancel_bill(order.bill_id,order.head,today);
                         break;
                 }
             });
