@@ -121,6 +121,13 @@ void fields(Archive& a,T& x) {
         V(through_day);V(penalty_ppm);
     } else if constexpr(std::is_same_v<X,P5GuerrillaOutcome>){
         V(campaign);V(legal_basis);V(kind);V(day);
+    } else if constexpr(std::is_same_v<X,P4PartyIdentity>){
+        V(party);V(type);V(founded_day);V(disbanded_day);
+    } else if constexpr(std::is_same_v<X,P4OfficialAffiliation>){
+        V(country);V(group);V(party);V(since_day);
+    } else if constexpr(std::is_same_v<X,P4Campaign>){
+        V(contest_id);V(party_id);V(start_day);V(last_review_day);
+        V(momentum_ppm);
     } else if constexpr(std::is_same_v<X,P4Party>){
         V(id);V(country);V(head_candidate);V(organization_ppm);
         V(registered);V(active);
@@ -444,6 +451,14 @@ struct SnapshotCodec {
             ar(w.p4_history_);
             ar(w.p4_amendments_);
         }
+        if(!w.p4_party_identities_.empty()||
+           !w.p4_official_affiliations_.empty()||
+           !w.p4_campaigns_.empty()) {
+            ar(std::string("VIC25_PHASEC_P4_CAMPAIGNS_1"));
+            ar(w.p4_party_identities_);
+            ar(w.p4_official_affiliations_);
+            ar(w.p4_campaigns_);
+        }
         if(!w.p2_laws_.empty()||!w.p2_bills_.empty()) {
             ar(std::string("VIC25_PHASEC_P2_LAWS_1"));
             ar(w.p2_laws_);
@@ -523,7 +538,7 @@ struct SnapshotCodec {
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
              seen_p3=false,seen_p5=false,seen_guerrilla=false,
-             seen_enactment=false;
+             seen_enactment=false,seen_campaigns=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -617,6 +632,16 @@ struct SnapshotCodec {
                    w.p4_amendments_.size()>1'000'000)
                     throw std::runtime_error("oversized P4 election extension");
                 w.p4_rebuild_due_index();
+            } else if(extension=="VIC25_PHASEC_P4_CAMPAIGNS_1"&&
+                       !seen_campaigns) {
+                seen_campaigns=true;
+                ar(w.p4_party_identities_);
+                ar(w.p4_official_affiliations_);
+                ar(w.p4_campaigns_);
+                if(w.p4_party_identities_.size()>100'000||
+                   w.p4_official_affiliations_.size()>500'000||
+                   w.p4_campaigns_.size()>1'000'000)
+                    throw std::runtime_error("oversized P4 campaign extension");
             } else if(extension=="VIC25_PHASEC_P2_LAWS_1"&&!seen_p2) {
                 seen_p2=true;
                 ar(w.p2_laws_);
