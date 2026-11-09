@@ -1488,6 +1488,7 @@ public:
     }
     [[nodiscard]] bool p5_needs_daily_tick()const;
     void p5_daily_advance(std::int64_t);
+    void p5_auto_prepare_revolutions(std::int64_t);
     [[nodiscard]] bool p5_has_due_daily_strike(std::int64_t)const;
     void phase_time_apply_p5_strikes(std::int64_t);
     void p5_perform_action(P5CollectiveAction);
@@ -3692,6 +3693,7 @@ private:
     std::map<std::string,std::int32_t> p3_movement_calm_days_;
     std::int64_t p3_last_reaction_day_{-1};
     std::map<std::string,P5Crisis> p5_crises_;
+    std::map<std::string,P5RevolutionPreparation> p5_revolution_preparations_;
     // Political capital is a reference into the existing C sovereignty map.
     std::map<std::string,std::string> p5_capitals_;
     std::vector<P5CollectiveAction> p5_actions_;
@@ -4049,5 +4051,6 @@ private:
 #include "vic25/phase_c_p3_impl.hpp"
 #include "vic25/phase_c_p3_autonomous_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"
+#include "vic25/phase_c_p5_revolution_impl.hpp"
 #include "vic25/phase_c_characters_impl.hpp"
 #include "vic25/phase_c_p5_guerrilla_impl.hpp"

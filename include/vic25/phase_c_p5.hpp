@@ -42,6 +42,11 @@ struct P5Crisis {
     std::vector<std::string> contested_regions; // legal claims, not title changes
     std::int32_t verified_engagements{};
 };
+struct P5RevolutionPreparation {
+    std::string crisis_id;
+    std::int32_t progress_ppm{};
+    std::int64_t started_day{-1},last_review_day{-1};
+};
 struct P5ControlReconciliation {
     std::string crisis_id,country,successor_head;
     std::vector<std::string> verified_regions;
