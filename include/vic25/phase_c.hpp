@@ -3299,6 +3299,26 @@ public:
                 p1_check_coalition(change.coalition);
             }
         }
+        // All optional politics state remains a set of references to the
+        // original P1/P2/P3/P4/P5 ledgers, never a second headcount.
+        for(const auto& [id,character]:p1_characters_)
+            ensure(id==character.person_id&&person_anchors_.contains(id)&&
+                   governments_.contains(character.country)&&
+                   character.roles>0&&character.roles<=31&&
+                   character.popularity_ppm>=-1'000'000&&
+                   character.popularity_ppm<=1'000'000,
+                   "P1 political character is not POP backed");
+        for(const auto& [id,mandate]:p1_mandates_)
+            ensure(id==mandate.id&&p1_constitutions_.contains(mandate.country)&&
+                   mandate.authority_cost>=0&&mandate.authority_cost<=1000,
+                   "P1 invalid persistent authority mandate");
+        for(const auto& [id,agenda]:p1_political_agendas_)
+            ensure(id==agenda.country&&governments_.contains(id)&&
+                   agenda.next_review_day>=-1,
+                   "P1 AI agenda missing constitutional country");
+        ensure(p1_political_events_.size()<=1'000'000&&
+               p1_lobbies_.size()<=100'000,
+               "P1 excessive event or lobbying registry");
         ensure(p4_parties_.size()<=100'000&&p4_contests_.size()<=100'000&&
                p4_history_.size()<=1'000'000&&
                p4_nonparliament_results_.size()<=p4_contests_.size(),
@@ -3312,6 +3332,18 @@ public:
                    interest_groups_.contains(key.second)&&
                    affinity>=1&&affinity<=1'000'000,
                    "P4 affiliation without real party or interest group");
+        for(const auto& [key,membership]:p4_official_affiliations_)
+            ensure(key==std::make_pair(membership.country,membership.group)&&
+                   p3_groups_.contains(key)&&
+                   p4_parties_.contains(membership.party)&&
+                   p4_parties_.at(membership.party).country==membership.country,
+                   "P4 official IG membership has no real national party");
+        for(const auto& [key,campaign]:p4_campaigns_)
+            ensure(key==std::make_pair(campaign.contest_id,campaign.party_id)&&
+                   p4_contests_.contains(key.first)&&
+                   p4_parties_.contains(key.second)&&
+                   campaign.momentum_ppm>=0&&campaign.momentum_ppm<=500'000,
+                   "P4 campaign lacks a genuine election or registered party");
         for(const auto& [id,contest]:p4_contests_) {
             ensure(id==contest.id&&p1_constitutions_.contains(contest.country)&&
                    !contest.law_id.empty()&&contest.term_months>=1&&
@@ -3405,6 +3437,19 @@ public:
                        p2_bills_.at(id).status==P2BillStatus::promulgated&&
                        p2_bills_.at(id).effective_day==day,
                        "P2 stale legal event index");
+        for(const auto& [id,entry]:p2_enactments_) {
+            ensure(id==entry.bill_id&&p2_bills_.contains(id)&&
+                   entry.country==p2_bills_.at(id).country&&
+                   entry.phase>=1&&entry.phase<=4&&
+                   entry.setbacks>=0&&entry.setbacks<=3&&
+                   entry.checks>=0,
+                   "P2 invalid staged enactment");
+            if(!entry.ready&&
+               p2_bills_.at(id).status==P2BillStatus::submitted)
+                ensure(p2_review_due_.contains(entry.next_review_day)&&
+                       p2_review_due_.at(entry.next_review_day).contains(id),
+                       "P2 missing scheduled enactment checkpoint");
+        }
         for(const auto& [id,contest]:p4_contests_) {
             if(!p2_laws_.empty()) {
                 const auto legal=p2_term(id);
