@@ -185,10 +185,22 @@ inline bool IntegratedWorld::p1_has_policy_work()const {
 }
 inline void IntegratedWorld::p1_advance_political_policies(std::int64_t today) {
     require_stage({9});
-    for(const auto& [id,m]:p1_mandates_) {
-        if(!m.active||m.kind==P1MandateKind::regional_decree)continue;
+    for(auto& [id,m]:p1_mandates_) {
+        if(!m.active)continue;
+        if(m.kind==P1MandateKind::regional_decree) {
+            if(!sovereignty_.contains(m.target)||
+               sovereignty_.at(m.target)!=m.country) {
+                m.active=false;
+                events_.push_back("p1-regional-decree-right-expired:"+id);
+            }
+            continue;
+        }
         const auto it=p3_movements_.find(m.target);
-        if(it==p3_movements_.end()||!it->second.active)continue;
+        if(it==p3_movements_.end()||!it->second.active) {
+            m.active=false;
+            events_.push_back("p1-political-movement-directive-expired:"+id);
+            continue;
+        }
         const auto& movement=it->second;
         // Apply persuasion to actual POP political opinions, not imaginary
         // protester headcount or an Interest Group's political power stock.
