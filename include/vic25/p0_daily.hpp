@@ -151,6 +151,18 @@ struct LegislativeOrder {
     std::string bill_id,head;
     std::vector<std::string> supporting_parties;
 };
+enum class PoliticalOrderKind : std::uint8_t {
+    activate_mandate, cancel_mandate, event_decision, register_lobby
+};
+struct PoliticalOrder {
+    daily::Date date{};
+    PoliticalOrderKind kind{PoliticalOrderKind::activate_mandate};
+    phasec::P1Mandate mandate;
+    std::string mandate_id,event_id;
+    phasec::P1PoliticalEventDecision choice{
+        phasec::P1PoliticalEventDecision::acknowledge};
+    phasec::P1Lobby lobby;
+};
 struct CountryAI {
     std::string country,prime_minister,domestic_region,good,domestic_seller;
     Money protect_below_price{};
@@ -286,6 +298,7 @@ struct Policies {
     std::vector<ElectionTermReform> election_term_reforms;
     std::vector<LegislativeOrder> legislative_orders; // append-only
     std::set<std::string> player_controlled_countries; // never autonomously governed
+    std::vector<PoliticalOrder> political_orders; // date-scoped lawful P1 commands
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -1572,6 +1585,24 @@ public:
                                            formation.caretaker},
                         tomorrow,formation.legal_basis);
                 });
+        }
+        for(const auto& order:decisions.political_orders) {
+            if(date!=order.date)continue;
+            plan[9].push_back([order,today=world_.day_index()]
+                              (phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                switch(order.kind) {
+                  case PoliticalOrderKind::activate_mandate:
+                    c.p1_activate_mandate(order.mandate,today);break;
+                  case PoliticalOrderKind::cancel_mandate:
+                    c.p1_deactivate_mandate(order.mandate_id);break;
+                  case PoliticalOrderKind::event_decision:
+                    c.p1_resolve_political_event(
+                       order.event_id,order.choice,today);break;
+                  case PoliticalOrderKind::register_lobby:
+                    c.p1_register_lobby(order.lobby,today);break;
+                }
+            });
         }
         for(const auto& dues:decisions.organization_dues)
             plan[5].push_back([dues](phasegh::Stage& gh) {
