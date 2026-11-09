@@ -93,6 +93,10 @@ inline P1GoodsLeadershipView IntegratedWorld::p1_goods_leadership(
     }
     view.complete=complete;
     if(!complete)return view;
+    // Preserve sub-point contributions from multiple small commodity
+    // leaders. Integer rounding is applied once to the national total,
+    // not once per good (which could erase all low-GDP leader prestige).
+    std::int64_t summed_prestige_milli=0;
     const auto scale=phaseb::add_checked(250'000,
         phaseb::mul_checked(
             std::min<std::int64_t>(world_gdp,10'000'000'000LL),
@@ -112,12 +116,14 @@ inline P1GoodsLeadershipView IntegratedWorld::p1_goods_leadership(
             if(producer!=country)continue;
             const auto multiplier=rank==1?4:rank==2?2:1;
             const auto raw=phaseb::mul_checked(factor,multiplier);
-            view.prestige=phaseb::add_checked(view.prestige,
-                phaseb::mul_checked(raw,scale)/1'000'000/1000);
+            summed_prestige_milli=phaseb::add_checked(
+                summed_prestige_milli,
+                phaseb::mul_checked(raw,scale)/1'000'000);
             view.rank.emplace(good,rank);
             view.observed=true;
         }
     }
+    view.prestige=summed_prestige_milli/1000;
     return view;
 }
 } // namespace vic25::phasec
