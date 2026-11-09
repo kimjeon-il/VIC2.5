@@ -42,6 +42,9 @@ struct P3Movement {
     std::int32_t activism_ppm{300'000},radical_ppm{100'000};
     bool active{true};
 };
+enum class P3MovementType : std::uint8_t {
+    ideological, cultural, religious, national, reform, reactionary
+};
 struct P3MovementView {
     std::string id,country;
     std::int64_t supporters{},potential_activists{};

@@ -1472,6 +1472,7 @@ public:
     [[nodiscard]] P3MovementView p3_movement_view(const std::string&)const;
     [[nodiscard]] bool p3_needs_daily_tick()const;
     void p3_daily_react(std::int64_t);
+    void p3_autonomous_movements(std::int64_t);
     void p3_reconcile_population();
     // P5's political actions and civil-conflict evidence must bind real POP
     // participation, institutional capacity, and already-deployed C armies.
@@ -3687,6 +3688,8 @@ private:
     std::map<Id,P3Attitude> p3_attitudes_;
     std::map<std::pair<std::string,std::string>,P3Group> p3_groups_;
     std::map<std::string,P3Movement> p3_movements_;
+    std::map<std::string,P3MovementType> p3_movement_types_;
+    std::map<std::string,std::int32_t> p3_movement_calm_days_;
     std::int64_t p3_last_reaction_day_{-1};
     std::map<std::string,P5Crisis> p5_crises_;
     // Political capital is a reference into the existing C sovereignty map.
@@ -4044,6 +4047,7 @@ private:
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_p2_enactment_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
+#include "vic25/phase_c_p3_autonomous_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"
 #include "vic25/phase_c_characters_impl.hpp"
 #include "vic25/phase_c_p5_guerrilla_impl.hpp"

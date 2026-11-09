@@ -365,6 +365,7 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
             events_.push_back("p3-social-demand-formed-persistent-movement:"+id);
         }
     }
+    p3_autonomous_movements(today);
     p3_last_reaction_day_=today;
     events_.push_back("p3-real-pop-daily-political-reaction");
 }
