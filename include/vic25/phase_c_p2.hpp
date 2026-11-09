@@ -98,6 +98,14 @@ struct P2Enactment {
     std::int64_t next_review_day{-1},last_review_day{-1};
     bool ready{};
 };
+enum class P2CheckpointKind : std::uint8_t {
+    success,advance,debate,stall,zero_success
+};
+struct P2CheckpointResult {
+    std::string bill_id;
+    P2CheckpointKind kind{P2CheckpointKind::debate};
+    std::int64_t day{-1};
+};
 struct P2LawEvent {
     std::string bill_id,country,law_id,amendment_id,legal_basis;
     P2BillAction action{P2BillAction::enact_or_replace_base};

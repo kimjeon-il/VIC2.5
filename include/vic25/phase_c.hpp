@@ -3903,6 +3903,7 @@ private:
     std::map<std::string,P2Bill> p2_bills_;
     std::map<std::string,P2Assent> p2_assents_;
     std::map<std::string,P2Sponsor> p2_sponsors_;
+    std::map<std::string,P2CheckpointResult> p2_checkpoint_results_;
     // Historical scenario content; P3 remains authoritative for IG clout.
     std::map<std::tuple<std::string,std::string,std::string,std::string>,
              std::int32_t> p2_law_stances_;

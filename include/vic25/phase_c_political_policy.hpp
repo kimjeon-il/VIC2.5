@@ -21,7 +21,8 @@ struct P1AuthorityBudget {
     std::int32_t supply{},reserved{},available{};
 };
 enum class P1PoliticalEventKind : std::uint8_t {
-    enactment_debate, political_petition, crisis_warning, political_scandal
+    enactment_debate, political_petition, crisis_warning, political_scandal,
+    enactment_advance, enactment_stall
 };
 struct P1PoliticalEvent {
     std::string id,country,source;
@@ -30,7 +31,7 @@ struct P1PoliticalEvent {
     bool resolved{};
 };
 enum class P1PoliticalEventDecision : std::uint8_t {
-    acknowledge, negotiate, bolster, suppress
+    acknowledge, negotiate, bolster, suppress, accept_setback
 };
 struct P1Lobby {
     std::string id,source_country,target_country,interest_group,issue_domain;
