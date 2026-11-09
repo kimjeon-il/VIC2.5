@@ -131,8 +131,8 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 bill.status!=P2BillStatus::approved))continue;
             pending_enactment=true;
             if(bill.status==P2BillStatus::approved) {
-                p2_promulgate_bill(bill_id,g.head_of_state,today);
-                events_.push_back("p1-ai-legal-promulgation:"+bill_id);
+                p2_ai_resolve_assent(bill_id,today);
+                events_.push_back("p1-ai-legal-executive-review:"+bill_id);
                 continue;
             }
             if(!p2_enactment_ready(bill_id))continue;
@@ -197,8 +197,8 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
             if(p1_constitution(country).legislature==
                P1LegislatureKind::bicameral)
                 p2_approve_upper_bill(bill_id,upper_votes);
-            p2_promulgate_bill(bill_id,g.head_of_state,today);
-            events_.push_back("p1-ai-actual-bill-approved:"+bill_id);
+            p2_ai_resolve_assent(bill_id,today);
+            events_.push_back("p1-ai-actual-bill-reviewed:"+bill_id);
         }
         if(pending_enactment) {agenda.next_review_day=today+7;continue;}
         // Choose an active political demand, not an invented ideological

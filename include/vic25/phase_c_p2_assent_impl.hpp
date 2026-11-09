@@ -176,6 +176,70 @@ inline void IntegratedWorld::p2_override_veto(
     // Mandatory publication requires no discretionary second signature.
     p2_promulgate_bill(bill_id,governments_.at(a.country).head_of_state,today);
 }
+inline void IntegratedWorld::p2_ai_resolve_assent(
+        const std::string& bill_id,std::int64_t today) {
+    require_stage({9});
+    p2_begin_assent(bill_id,today);
+    auto& a=p2_assents_.at(bill_id);
+    const auto& b=p2_bills_.at(bill_id);
+    const auto head=governments_.at(a.country).head_of_state;
+    if(a.status==P2AssentStatus::pending) {
+        bool opposes=false;
+        if(b.action==P2BillAction::enact_or_replace_base) {
+            if(const auto ch=p1_characters_.find(head);
+               ch!=p1_characters_.end()&&ch->second.active&&
+               !ch->second.politically_exiled&&
+               p1_character_available(head)) {
+                const auto preference=ch->second.law_preferences.find(
+                    b.proposed_base.domain);
+                opposes=preference!=ch->second.law_preferences.end()&&
+                    preference->second!=b.proposed_base.base_choice;
+            }
+        }
+        if(opposes&&a.veto!=P1VetoMode::none)
+            p2_veto_bill(bill_id,head,today);
+        else p2_promulgate_bill(bill_id,head,today);
+        return;
+    }
+    if(a.status!=P2AssentStatus::vetoed)return;
+    // The AI may attempt an override using only its existing ruling
+    // parties' actual P4 seats; nobody receives imaginary or proxy votes.
+    const auto& constitution=p1_constitution(a.country);
+    if(constitution.legislature==P1LegislatureKind::none||
+       !country_elections_.contains(a.country)||
+       p4_parliament_dissolved(a.country))return;
+    const auto& current=country_elections_.at(a.country);
+    const auto& coalition=p1_coalitions_.at(a.country);
+    std::vector<std::string> lower,upper;
+    People lower_votes=0,upper_votes=0;
+    for(const auto& party:coalition.ruling_parties)
+        if(current.seats.contains(party)) {
+            lower.push_back(party);
+            lower_votes=phaseb::add_checked(lower_votes,current.seats.at(party));
+        }
+    const auto threshold=[&](People seats) {
+        const auto ppm=b.action==P2BillAction::enact_or_replace_base&&
+                 b.proposed_base.tier==P2NormTier::constitution?
+                 std::max(666'667,a.override_ppm):a.override_ppm;
+        return ppm==666'667?seats-seats/3:
+            (seats*static_cast<People>(ppm)+999'999)/1'000'000;
+    };
+    if(lower_votes<threshold(current.total_seats))return;
+    if(constitution.legislature==P1LegislatureKind::bicameral) {
+        if(!p2_upper_chambers_.contains(a.country))return;
+        const auto cid=p2_upper_chambers_.at(a.country);
+        if(!p4_nonparliament_results_.contains(cid))return;
+        const auto& senate=p4_nonparliament_results_.at(cid);
+        for(const auto& party:coalition.ruling_parties)
+            if(senate.seats.contains(party)) {
+                upper.push_back(party);
+                upper_votes=phaseb::add_checked(upper_votes,
+                                                senate.seats.at(party));
+            }
+        if(upper_votes<threshold(p4_contests_.at(cid).seats))return;
+    }
+    p2_override_veto(bill_id,lower,upper,today);
+}
 inline void IntegratedWorld::p2_process_assent_due(std::int64_t today) {
     require_stage({9});
     const auto it=p2_assent_due_.find(today);

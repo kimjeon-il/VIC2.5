@@ -1730,6 +1730,7 @@ public:
     void p2_approve_bill(const std::string&,const std::vector<std::string>&);
     void p2_begin_assent(const std::string&,std::int64_t);
     void p2_veto_bill(const std::string&,const std::string&,std::int64_t);
+    void p2_ai_resolve_assent(const std::string&,std::int64_t);
     void p2_override_veto(const std::string&,
                           const std::vector<std::string>&,
                           const std::vector<std::string>&,std::int64_t);
