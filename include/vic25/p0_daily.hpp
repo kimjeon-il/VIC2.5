@@ -285,6 +285,7 @@ struct Policies {
     std::vector<ParliamentDissolution> dissolutions;
     std::vector<ElectionTermReform> election_term_reforms;
     std::vector<LegislativeOrder> legislative_orders; // append-only
+    std::set<std::string> player_controlled_countries; // never autonomously governed
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -1436,6 +1437,14 @@ public:
                 if(protest>0)c.protest(p.population_slice,p.interest_group,protest);
             });
         }
+        // Human-controlled countries never receive autonomous political
+        // decisions. Their own dated P0 commands remain the authority.
+        if(!decisions.player_controlled_countries.empty())
+            plan[9].push_back([countries=decisions.player_controlled_countries]
+                  (phasegh::Stage& gh) {
+                for(const auto& country:countries)
+                    gh.phase_c().p1_mark_player_country(country,true);
+            });
         // Execute independent national parliamentary, local and elected-head
         // contests only on their scheduled day. Voters and party preference
         // are read from actual Phase B/P3 state in the Stage9 transaction.

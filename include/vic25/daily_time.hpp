@@ -356,6 +356,7 @@ public:
            !engine_.base().core().core().p2_has_review_due(day_)&&
            !engine_.base().core().core().p4_has_campaign_due(day_)&&
            !engine_.base().core().core().p1_has_character_work()&&
+           !engine_.base().core().core().p1_has_ai_review(day_)&&
            !engine_.base().core().core().p2_has_negotiable_bills()&&
            !engine_.base().core().core().p3_needs_daily_tick()&&
            !engine_.base().core().core().p5_needs_daily_tick()&&
@@ -533,6 +534,12 @@ public:
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p2_has_review_due(today))
                 gh.phase_c().p2_review_due(today);
+        });
+        // AI selects only lawful P1/P2 commands after real election results
+        // and the current enactment checkpoint have been resolved.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p1_has_ai_review(today))
+                gh.phase_c().p1_autonomous_politics(today);
         });
         // Ongoing movements generate warnings and observable responses;
         // actual armed actions still require verified army and equipment.

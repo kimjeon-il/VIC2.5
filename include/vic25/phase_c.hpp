@@ -11,6 +11,7 @@
 #include "vic25/phase_c_p3.hpp"
 #include "vic25/phase_c_p5.hpp"
 #include "vic25/phase_c_characters.hpp"
+#include "vic25/phase_c_political_ai.hpp"
 #include "vic25/phase_c_p5_guerrilla.hpp"
 #include "vic25/ledgers.hpp"
 #include "vic25/shared_reservations.hpp"
@@ -1450,6 +1451,11 @@ public:
     void p3_seed_group(P3Group);
     void p3_seed_movement(P3Movement);
     void p1_register_political_character(PoliticalCharacter);
+    void p1_mark_player_country(const std::string&,bool);
+    [[nodiscard]] bool p1_has_ai_review(std::int64_t)const;
+    void p1_autonomous_politics(std::int64_t);
+    [[nodiscard]] const std::map<std::string,PoliticalAgenda>&
+         p1_political_agendas()const{return p1_political_agendas_;}
     void p1_set_political_exile(const std::string&,bool);
     void p1_set_favorite(const std::string&,const std::string&);
     [[nodiscard]] std::string p1_group_legal_preference(const P3Group&)const;
@@ -3679,6 +3685,8 @@ private:
     std::map<std::string, Id> person_anchors_;
     std::map<std::string,PoliticalCharacter> p1_characters_;
     std::map<std::string,std::string> p1_favorites_;
+    std::set<std::string> p1_player_countries_;
+    std::map<std::string,PoliticalAgenda> p1_political_agendas_;
     std::map<Id, People> anchor_counts_;
     std::set<std::pair<std::string,std::string>> ballot_ids_;
     std::map<std::string,std::map<std::string,People>> ballot_votes_;
@@ -4053,4 +4061,5 @@ private:
 #include "vic25/phase_c_p5_impl.hpp"
 #include "vic25/phase_c_p5_revolution_impl.hpp"
 #include "vic25/phase_c_characters_impl.hpp"
+#include "vic25/phase_c_political_ai_impl.hpp"
 #include "vic25/phase_c_p5_guerrilla_impl.hpp"

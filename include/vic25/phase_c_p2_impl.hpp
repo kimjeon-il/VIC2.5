@@ -385,7 +385,8 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
                "P2 replacement law must belong to one real sovereign");
         for(const auto& [id,previous]:p2_bills_) {
             (void)id;
-            ensure(previous.status==P2BillStatus::effective||
+            ensure((previous.status==P2BillStatus::effective||
+                     previous.status==P2BillStatus::rejected)||
                    previous.action!=P2BillAction::enact_or_replace_base||
                    std::make_tuple(previous.proposed_base.country,
                                    previous.proposed_base.domain,
