@@ -76,6 +76,9 @@ void fields(Archive& a,T& x) {
         V(country);V(head_of_state);V(prime_minister);V(chamber_seats);V(quorum);V(revision);
     } else if constexpr(std::is_same_v<X,P1Constitution>){
         V(governance);V(power);V(legislature);V(legal_basis);
+    } else if constexpr(std::is_same_v<X,P1LegislativeChecks>){
+        V(veto);V(override_ppm);V(assent_days);V(override_days);
+        V(parliamentary_initiative);
     } else if constexpr(std::is_same_v<X,P1Coalition>){
         V(ruling_groups);V(ruling_parties);V(caretaker);
     } else if constexpr(std::is_same_v<X,P1GovernmentChange>){
@@ -177,6 +180,10 @@ void fields(Archive& a,T& x) {
         V(id);V(country);V(proposer);V(legal_basis);V(action);V(status);
         V(proposed_base);V(proposed_amendment);V(target_id);V(transitions);
         V(introduced_day);V(promulgated_day);V(effective_day);
+    } else if constexpr(std::is_same_v<X,P2Assent>){
+        V(bill_id);V(country);V(head_at_vote);V(veto);V(status);
+        V(override_ppm);V(started_day);V(decision_deadline);
+        V(veto_day);V(override_deadline);
     } else if constexpr(std::is_same_v<X,P2Enactment>){
         V(bill_id);V(country);V(law_key);V(phase);
         V(success_bonus_ppm);V(setbacks);V(checks);
@@ -460,6 +467,10 @@ struct SnapshotCodec {
             ar(w.p1_institutions_);
             ar(w.p1_pending_);
         }
+        if(!w.p1_legislative_checks_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_LEGISLATIVE_CHECKS_1"));
+            ar(w.p1_legislative_checks_);
+        }
         if(!w.p4_parties_.empty()||!w.p4_contests_.empty()) {
             ar(std::string("VIC25_PHASEC_P4_ELECTIONS_1"));
             ar(w.p4_parties_);
@@ -519,6 +530,10 @@ struct SnapshotCodec {
         if(!w.p2_enactments_.empty()||!w.p2_retry_after_.empty()) {
             ar(std::string("VIC25_PHASEC_P2_ENACTMENT_1"));
             ar(w.p2_enactments_);ar(w.p2_retry_after_);
+        }
+        if(!w.p2_assents_.empty()) {
+            ar(std::string("VIC25_PHASEC_P2_ASSENT_1"));
+            ar(w.p2_assents_);
         }
         if(!w.p3_groups_.empty()||!w.p3_attitudes_.empty()||
            !w.p3_movements_.empty()) {
@@ -580,7 +595,8 @@ struct SnapshotCodec {
              seen_p3=false,seen_p5=false,seen_guerrilla=false,
              seen_enactment=false,seen_campaigns=false,
              seen_characters=false,seen_political_dynamics=false,
-             seen_political_ai=false,seen_political_policies=false;
+             seen_political_ai=false,seen_political_policies=false,
+             seen_legislative_checks=false,seen_assents=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -658,6 +674,12 @@ struct SnapshotCodec {
                    w.p1_institutions_.size()>1'000'000||
                    w.p1_pending_.size()>1'000'000)
                     throw std::runtime_error("invalid P1 constitutional extension");
+            } else if(extension=="VIC25_PHASEC_P1_LEGISLATIVE_CHECKS_1"&&
+                       !seen_legislative_checks) {
+                seen_legislative_checks=true;
+                ar(w.p1_legislative_checks_);
+                if(w.p1_legislative_checks_.size()>100'000)
+                    throw std::runtime_error("oversized P1 legislative rules");
             } else if(extension=="VIC25_PHASEC_P4_ELECTIONS_1"&&!seen_p4) {
                 seen_p4=true;
                 ar(w.p4_parties_);
@@ -753,6 +775,12 @@ struct SnapshotCodec {
                    w.p2_retry_after_.size()>1'000'000)
                     throw std::runtime_error("oversized P2 enactment state");
                 w.p2_rebuild_review_due_index();
+            } else if(extension=="VIC25_PHASEC_P2_ASSENT_1"&&
+                       !seen_assents) {
+                seen_assents=true;
+                ar(w.p2_assents_);
+                if(w.p2_assents_.size()>1'000'000)
+                    throw std::runtime_error("oversized P2 assent records");
             } else if(extension=="VIC25_PHASEC_P3_POLITICS_1"&&!seen_p3) {
                 seen_p3=true;
                 ar(w.p3_attitudes_);
@@ -821,6 +849,7 @@ struct SnapshotCodec {
         // Negotiation's derived due index depends on the optional chamber
         // decisions trailer, which may appear AFTER the P2 base-law trailer.
         if(seen_p2)w.p2_rebuild_due_index();
+        if(seen_assents)w.p2_rebuild_assent_index();
         w.validate();
         return w;
     }
