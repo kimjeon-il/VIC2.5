@@ -9,8 +9,11 @@ inline bool IntegratedWorld::p1_character_available(
        people_.slice(it->second).count<=0)return false;
     const auto& demo=people_.demographic(
         people_.slice(it->second).key.demographic);
-    return sovereignty_.contains(demo.region)&&
-           people_.age_months_slice(it->second)>=16*12;
+    if(!sovereignty_.contains(demo.region)||
+       people_.age_months_slice(it->second)<16*12)return false;
+    const auto recorded=p1_characters_.find(person);
+    return recorded==p1_characters_.end()||
+           recorded->second.country==sovereignty_.at(demo.region);
 }
 inline void IntegratedWorld::p1_register_political_character(
         PoliticalCharacter person) {
@@ -104,7 +107,12 @@ inline void IntegratedWorld::p1_advance_characters(std::int64_t day) {
     }
     // Leadership succession selects an already existing, viable POP anchor.
     for(auto& [key,g]:p3_groups_) {
-        if(g.leader_anchor.empty()||p1_character_available(g.leader_anchor))
+        if(g.leader_anchor.empty())continue;
+        const auto leadership=p1_characters_.find(g.leader_anchor);
+        if(p1_character_available(g.leader_anchor)&&
+           (leadership==p1_characters_.end()||
+            (leadership->second.active&&
+             !leadership->second.politically_exiled)))
             continue;
         std::string best;std::int32_t approval=-1'000'001;
         for(const auto& [id,c]:p1_characters_)

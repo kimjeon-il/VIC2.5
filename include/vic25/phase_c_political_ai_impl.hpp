@@ -45,6 +45,40 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
         agenda.last_review_day=today;
         agenda.last_election_day=latest_election;
         const auto order=p1_authority(country);
+        // Respond to a real warning using an affordable P1 mandate, rather
+        // than increasing governmental clout or manufacturing loyalists.
+        for(const auto& [crisis_id,crisis]:p5_crises_) {
+            if(crisis.country!=country||
+               crisis.stage!=P5CrisisStage::warning||
+               !p3_movements_.contains(crisis.movement)||
+               !p3_movements_.at(crisis.movement).active)continue;
+            bool ordered=false;
+            for(const auto& [id,m]:p1_mandates_) {
+                (void)id;
+                if(m.country==country&&m.target==crisis.movement&&
+                   m.active&&(m.kind==P1MandateKind::bolster_movement||
+                             m.kind==P1MandateKind::suppress_movement))
+                    ordered=true;
+            }
+            if(ordered||p1_authority_budget(country).available<200)continue;
+            const auto& movement=p3_movements_.at(crisis.movement);
+            bool governing_support=false;
+            for(const auto& group:movement.groups) {
+                const auto& ruling=p1_coalitions_.at(country).ruling_groups;
+                if(std::find(ruling.begin(),ruling.end(),group)!=ruling.end())
+                    governing_support=true;
+            }
+            P1Mandate mandate;
+            mandate.id="P1:AI:crisis:"+crisis_id;
+            mandate.country=country;mandate.target=crisis.movement;
+            mandate.kind=governing_support?
+                P1MandateKind::bolster_movement:
+                P1MandateKind::suppress_movement;
+            if(!p1_mandates_.contains(mandate.id)) {
+                p1_activate_mandate(std::move(mandate),today);
+                events_.push_back("p1-ai-lawful-political-movement-response:"+crisis_id);
+            }
+        }
         if(order.assembly_confidence_required&&
            country_elections_.contains(country)&&
            !p4_parliament_dissolved(country)&&

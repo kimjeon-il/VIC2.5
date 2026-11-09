@@ -7,6 +7,11 @@ inline void IntegratedWorld::p3_autonomous_movements(std::int64_t today) {
     // First reconcile active movements against enacted law and live support.
     for(auto& [id,m]:p3_movements_) {
         if(!m.active)continue;
+        const auto crisis=p5_crises_.find("P5:"+id);
+        // A live armed faction must end by a real P5 settlement; enacting
+        // a sympathetic law must not delete a continuing civil conflict.
+        if(crisis!=p5_crises_.end()&&
+           crisis->second.stage==P5CrisisStage::armed_conflict)continue;
         bool fulfilled=false;
         for(const auto& [slot,law]:p2_active_base_) {
             (void)slot;
