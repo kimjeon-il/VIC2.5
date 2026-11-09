@@ -20,7 +20,9 @@ enum class P2ClauseKind : std::uint8_t {
     minimum_monthly_contract_wage, public_institution_level,
     maximum_import_tariff_ppm,
     female_suffrage_allowed, political_association_allowed,
-    peaceful_strike_allowed
+    peaceful_strike_allowed,
+    constitutional_veto_rule, constitutional_override_ppm,
+    constitutional_assent_days, constitutional_party_initiative
 };
 enum class P2BillAction : std::uint8_t {
     enact_or_replace_base, attach_amendment,

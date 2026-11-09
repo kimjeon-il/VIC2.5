@@ -32,11 +32,39 @@ inline void IntegratedWorld::p2_apply_constitutional_choice(
         ensure(it!=choices.end(),"P2 unknown constitutional power choice");
         current.power=it->second;changed=true;
     }
-    if(!changed)return;
-    current.legal_basis=law.id;
-    ensure(valid_p1_constitution(current),
-           "P2 constitutional reform incompatible with actual legislature");
-    p1_constitutions_[law.country]=std::move(current);
-    events_.push_back("p2-p1-constitutional-form-effective:"+law.id);
+    if(changed) {
+        current.legal_basis=law.id;
+        ensure(valid_p1_constitution(current),
+               "P2 constitutional reform incompatible with actual legislature");
+        p1_constitutions_[law.country]=std::move(current);
+        events_.push_back("p2-p1-constitutional-form-effective:"+law.id);
+    }
+    bool legislative_amendment=false;
+    auto powers=p1_legislative_powers(law.country);
+    for(const auto& clause:law.clauses) {
+        switch(clause.kind) {
+          case P2ClauseKind::constitutional_veto_rule:
+            powers.veto=static_cast<P1VetoRule>(clause.value);
+            legislative_amendment=true;break;
+          case P2ClauseKind::constitutional_override_ppm:
+            powers.override_ppm=static_cast<std::int32_t>(clause.value);
+            legislative_amendment=true;break;
+          case P2ClauseKind::constitutional_assent_days:
+            powers.assent_days=static_cast<std::int32_t>(clause.value);
+            legislative_amendment=true;break;
+          case P2ClauseKind::constitutional_party_initiative:
+            powers.party_initiative=clause.value!=0;
+            legislative_amendment=true;break;
+          default:break;
+        }
+    }
+    if(legislative_amendment) {
+        ensure(powers.override_ppm>=500'000&&
+               powers.override_ppm<=1'000'000&&
+               powers.assent_days>=1&&powers.assent_days<=365,
+               "P2 invalid constitutional legislative power");
+        p1_legislative_powers_[law.country]=powers;
+        events_.push_back("p2-p1-separation-powers-effective:"+law.id);
+    }
 }
 } // namespace vic25::phasec

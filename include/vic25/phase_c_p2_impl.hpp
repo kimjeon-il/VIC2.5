@@ -7,9 +7,17 @@ namespace vic25::phasec {
 inline bool IntegratedWorld::p2_valid_clause(const P2Clause& c) {
     if(c.id.empty()||c.target.empty()||
        static_cast<unsigned>(c.kind)>
-           static_cast<unsigned>(P2ClauseKind::peaceful_strike_allowed))
+           static_cast<unsigned>(P2ClauseKind::constitutional_party_initiative))
         return false;
     switch(c.kind) {
+      case P2ClauseKind::constitutional_veto_rule:
+        return c.value>=0&&c.value<=2;
+      case P2ClauseKind::constitutional_override_ppm:
+        return c.value>=500'000&&c.value<=1'000'000;
+      case P2ClauseKind::constitutional_assent_days:
+        return c.value>=1&&c.value<=365;
+      case P2ClauseKind::constitutional_party_initiative:
+        return c.value==0||c.value==1;
       case P2ClauseKind::term_months:
         return c.value>=1&&c.value<=240;
       case P2ClauseKind::max_consecutive_terms:
@@ -56,7 +64,11 @@ inline void IntegratedWorld::p2_validate_clauses(
            c.kind==P2ClauseKind::maximum_import_tariff_ppm||
            c.kind==P2ClauseKind::female_suffrage_allowed||
            c.kind==P2ClauseKind::political_association_allowed||
-           c.kind==P2ClauseKind::peaceful_strike_allowed) {
+           c.kind==P2ClauseKind::peaceful_strike_allowed||
+           c.kind==P2ClauseKind::constitutional_veto_rule||
+           c.kind==P2ClauseKind::constitutional_override_ppm||
+           c.kind==P2ClauseKind::constitutional_assent_days||
+           c.kind==P2ClauseKind::constitutional_party_initiative) {
             ensure(c.target==country,
                    "P2 sovereign economic, civil or military rule needs its country");
         } else if(c.kind==P2ClauseKind::public_institution_level) {
@@ -88,6 +100,13 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
                "P2 national law cannot impersonate regional sovereignty");
     }
     p2_validate_clauses(law.country,law.clauses);
+    for(const auto& clause:law.clauses)
+        if(clause.kind==P2ClauseKind::constitutional_veto_rule||
+           clause.kind==P2ClauseKind::constitutional_override_ppm||
+           clause.kind==P2ClauseKind::constitutional_assent_days||
+           clause.kind==P2ClauseKind::constitutional_party_initiative)
+            ensure(law.tier==P2NormTier::constitution,
+                   "P2 separation of powers requires constitutional rank");
     if(law.tier==P2NormTier::local_ordinance) {
         for(const auto& clause:law.clauses) {
             ensure(clause.target!=law.country,
