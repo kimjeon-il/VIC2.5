@@ -39,6 +39,19 @@ inline P1AuthorityBudget IntegratedWorld::p1_authority_budget(
         }
     return {country,supply,reserved,supply-reserved};
 }
+inline std::int32_t IntegratedWorld::p1_region_decree_bonus_ppm(
+        const std::string& country,const std::string& region,
+        P1DecreeKind type)const {
+    // Real edicts modify only paid/staffed services or material-backed work.
+    for(const auto& [id,mandate]:p1_mandates_) {
+        (void)id;
+        if(mandate.active&&mandate.kind==P1MandateKind::regional_decree&&
+           mandate.country==country&&mandate.target==region&&
+           mandate.decree==type)
+            return 200'000;
+    }
+    return 0;
+}
 inline void IntegratedWorld::p1_activate_mandate(
         P1Mandate mandate,std::int64_t today) {
     require_stage({9});
@@ -59,8 +72,19 @@ inline void IntegratedWorld::p1_activate_mandate(
     } else if(mandate.kind==P1MandateKind::regional_decree) {
         ensure(sovereignty_.contains(mandate.target)&&
                sovereignty_.at(mandate.target)==mandate.country&&
-               mandate.authority_cost>=100,
-               "P1 decree must be limited to a real sovereign region");
+               mandate.authority_cost==100&&
+               static_cast<unsigned>(mandate.decree)<=
+                 static_cast<unsigned>(P1DecreeKind::public_service_reach),
+               "P1 decree needs a real region and 100 authority");
+        for(const auto& [other_id,existing]:p1_mandates_) {
+            (void)other_id;
+            ensure(!existing.active||
+                   existing.kind!=P1MandateKind::regional_decree||
+                   existing.country!=mandate.country||
+                   existing.target!=mandate.target||
+                   existing.decree!=mandate.decree,
+                   "P1 regional edict of each kind cannot stack");
+        }
     } else {
         // Do not allow phantom consumption-tax revenue. Finance owns the
         // real consumption tax and must provide an executable fiscal order.

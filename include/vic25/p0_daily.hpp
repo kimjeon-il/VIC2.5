@@ -1117,7 +1117,17 @@ public:
                               p.contractor,p.region,p.material_good)/p.material_per_work;
                 const People staff=c.phase_d_workforce(p.contractor);
                 const Quantity affordable=(free-investment.reserve_cash)/p.cash_price_per_work;
-                const Quantity n=std::min({investment.maximum_daily_work,
+                const auto bonus=c.p1_region_decree_bonus_ppm(
+                     c.sovereignty(p.region),p.region,
+                     phasec::P1DecreeKind::construction_drive);
+                const Quantity extra=phaseb::add_checked(
+                     phaseb::mul_checked(investment.maximum_daily_work/
+                        1'000'000,bonus),
+                     phaseb::mul_checked(investment.maximum_daily_work%
+                        1'000'000,bonus)/1'000'000);
+                const Quantity ceiling=phaseb::add_checked(
+                     investment.maximum_daily_work,extra);
+                const Quantity n=std::min({ceiling,
                      p.work_required-p.accepted_work,materials,
                      static_cast<Quantity>(staff/p.workers_per_work),affordable});
                 if(n<=0)return;

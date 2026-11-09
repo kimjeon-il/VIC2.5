@@ -1455,6 +1455,8 @@ public:
     void p1_mark_player_country(const std::string&,bool);
     [[nodiscard]] P1AuthorityBudget p1_authority_budget(const std::string&)const;
     void p1_activate_mandate(P1Mandate,std::int64_t);
+    [[nodiscard]] std::int32_t p1_region_decree_bonus_ppm(
+        const std::string&,const std::string&,P1DecreeKind)const;
     void p1_deactivate_mandate(const std::string&);
     void p1_register_lobby(P1Lobby,std::int64_t);
     [[nodiscard]] bool p1_has_policy_work()const;

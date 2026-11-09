@@ -191,8 +191,13 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
     const People accessible=p4_scaled(
         staffed_and_funded,
         1'000'000-p5_guerrilla_disruption_ppm(service.region),1'000'000);
+    const auto decree=p1_region_decree_bonus_ppm(
+        link.country,service.region,P1DecreeKind::public_service_reach);
+    const auto improved=std::min(staffed_and_funded,
+        phaseb::add_checked(accessible,
+            p4_scaled(accessible,decree,1'000'000)));
     return {link.country,institution_id,link.kind,level,
-            staff,slots,staffed,accessible,funded};
+            staff,slots,staffed,improved,funded};
 }
 
 inline bool IntegratedWorld::has_due_p1_government(std::int64_t day)const {

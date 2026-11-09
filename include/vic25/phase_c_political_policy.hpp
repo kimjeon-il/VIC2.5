@@ -5,9 +5,13 @@ namespace vic25::phasec {
 enum class P1MandateKind : std::uint8_t {
     regional_decree, bolster_movement, suppress_movement, consumption_tax
 };
+enum class P1DecreeKind : std::uint8_t {
+    construction_drive, public_service_reach
+};
 struct P1Mandate {
     std::string id,country,target;
     P1MandateKind kind{P1MandateKind::bolster_movement};
+    P1DecreeKind decree{P1DecreeKind::construction_drive};
     std::int32_t authority_cost{200};
     std::int64_t started_day{-1};
     bool active{true};

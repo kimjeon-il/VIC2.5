@@ -84,7 +84,7 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,P1Institution>){
         V(country);V(public_institution_id);V(kind);V(level);
     } else if constexpr(std::is_same_v<X,P1Mandate>){
-        V(id);V(country);V(target);V(kind);V(authority_cost);
+        V(id);V(country);V(target);V(kind);V(decree);V(authority_cost);
         V(started_day);V(active);
     } else if constexpr(std::is_same_v<X,P1PoliticalEvent>){
         V(id);V(country);V(source);V(kind);V(day);V(resolved);
