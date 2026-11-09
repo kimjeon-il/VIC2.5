@@ -241,6 +241,25 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
                         phaseb::add_checked(weight,interest/4));
                 }
             }
+            // Official IG affiliation and campaign momentum change a
+            // real voter's preference weight, never electorate size.
+            if(const auto campaign=p4_campaigns_.find({contest_id,party->id});
+               campaign!=p4_campaigns_.end())
+                weight=std::min<People>(5'000'000,
+                    phaseb::add_checked(weight,
+                        p4_scaled(party->organization_ppm,
+                                  campaign->second.momentum_ppm,1'000'000)));
+            if(const auto groups=slice_groups.find(slice);
+               groups!=slice_groups.end())
+                for(const auto& [group,n]:groups->second) {
+                    const auto official=p4_official_affiliations_.find(
+                        {contest.country,group});
+                    if(official!=p4_official_affiliations_.end()&&
+                       official->second.party==party->id)
+                        weight=std::min<People>(5'000'000,
+                            phaseb::add_checked(weight,
+                                p4_scaled(100'000,n,row.count)));
+                }
             weights.emplace_back(party->id,weight);
             weight_sum=phaseb::add_checked(weight_sum,weight);
         }

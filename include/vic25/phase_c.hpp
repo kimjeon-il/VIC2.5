@@ -1614,6 +1614,14 @@ public:
     // P4's real electoral calendar: each elected institution/region has
     // its own contest, legal term, outcome and due date.
     void p4_register_party(P4Party);
+    void p4_set_official_affiliation(const std::string&,const std::string&,
+                                      const std::string&,std::int64_t);
+    void p4_daily_party_campaigns(std::int64_t);
+    [[nodiscard]] bool p4_has_campaign_due(std::int64_t)const;
+    [[nodiscard]] const std::map<std::pair<std::string,std::string>,
+          P4OfficialAffiliation>& p4_official_affiliations()const {
+        return p4_official_affiliations_;
+    }
     void p4_set_group_affinity(const std::string&,const std::string&,int);
     void p4_seed_contest(P4Contest);
     // Named nominees must bind to actual P1 PersonAnchor/POP, not phantom
@@ -3704,6 +3712,10 @@ private:
     // P4 party relationships are many-to-many; political headcount stays in
     // P3 memberships and the national chamber still uses country_elections_.
     std::map<std::string,P4Party> p4_parties_;
+    std::map<std::string,P4PartyIdentity> p4_party_identities_;
+    std::map<std::pair<std::string,std::string>,P4OfficialAffiliation>
+        p4_official_affiliations_;
+    std::map<std::pair<std::string,std::string>,P4Campaign> p4_campaigns_;
     std::map<std::pair<std::string,std::string>,int> p4_affinities_;
     std::map<std::string,P4Contest> p4_contests_;
     std::map<std::pair<std::string,std::string>,
@@ -4015,6 +4027,7 @@ private:
 #include "vic25/phase_c_p1_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
 #include "vic25/phase_c_p4_personal_impl.hpp"
+#include "vic25/phase_c_p4_campaign_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_p2_enactment_impl.hpp"
