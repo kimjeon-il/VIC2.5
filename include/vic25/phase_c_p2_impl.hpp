@@ -357,7 +357,8 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
            !bill.legal_basis.empty()&&
            bill.introduced_day==-1&&bill.promulgated_day==-1&&
            bill.status==P2BillStatus::submitted&&
-           bill.effective_day>today&&!p2_bills_.contains(bill.id),
+           (bill.effective_day==-1||bill.effective_day>today)&&
+           !p2_bills_.contains(bill.id),
            "P2 unauthorized, retroactive or duplicate bill");
     ensure(static_cast<unsigned>(bill.action)<=
                static_cast<unsigned>(P2BillAction::repeal_base),
@@ -419,7 +420,25 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
     const auto id=bill.id;
     if(bill.action==P2BillAction::enact_or_replace_base)
         p2_negotiation_watch_.insert(id);
+    const auto key=bill.country+":"+
+        std::to_string(static_cast<int>(bill.action))+":"+
+        (bill.action==P2BillAction::enact_or_replace_base?
+           bill.proposed_base.domain+":"+bill.proposed_base.scope+":"+
+           bill.proposed_base.base_choice:
+         bill.action==P2BillAction::attach_amendment?
+           bill.proposed_amendment.id:bill.target_id);
+    ensure(!p2_retry_after_.contains(key)||p2_retry_after_.at(key)<=today,
+           "P2 reform is under the two-year cooldown");
+    const auto domain=bill.action==P2BillAction::enact_or_replace_base?
+        bill.proposed_base.domain:std::string{};
+    const int review_days=domain=="governance_principles"?200:
+       (domain=="distribution_of_power"||domain=="economic_system"||
+        domain=="slavery")?150:100;
+    const auto country=bill.country;
     p2_bills_.emplace(id,std::move(bill));
+    p2_enactments_.emplace(id,P2Enactment{
+        id,country,key,1,0,0,0,today+review_days,-1,false});
+    p2_review_due_[today+review_days].insert(id);
     events_.push_back("p2-bill-introduced");
 }
 
@@ -429,6 +448,7 @@ inline void IntegratedWorld::p2_approve_bill(
     require_stage({9});
     auto& bill=p2_bills_.at(bill_id);
     ensure(bill.status==P2BillStatus::submitted&&
+           p2_enactment_ready(bill_id)&&
            bill.proposer==governments_.at(bill.country).prime_minister,
            "P2 rejected unauthorized legislative sponsor");
     const auto order=p1_authority(bill.country);
@@ -476,9 +496,10 @@ inline void IntegratedWorld::p2_promulgate_bill(
     require_stage({9});
     auto& bill=p2_bills_.at(bill_id);
     ensure(bill.status==P2BillStatus::approved&&
-           today>=bill.introduced_day&&bill.effective_day>today&&
+           today>=bill.introduced_day&&
            governments_.at(bill.country).head_of_state==incumbent_head,
            "P2 invalid approval, promulgator or effective date");
+    if(bill.effective_day<=today)bill.effective_day=today+1;
     bill.promulgated_day=today;
     bill.status=P2BillStatus::promulgated;
     p2_due_[bill.effective_day].insert(bill_id);
