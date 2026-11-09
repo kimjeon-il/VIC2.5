@@ -1696,6 +1696,8 @@ public:
     void p1_retire_ship(const std::string&);
     [[nodiscard]] P1MilitaryPowerView p1_military_power(
         const std::string&)const;
+    [[nodiscard]] P1GoodsLeadershipView p1_goods_leadership(
+        const std::string&,std::int64_t,std::int64_t)const;
     [[nodiscard]] P1PrestigeView p1_prestige(const std::string&)const;
     [[nodiscard]] P1PowerRank p1_power_rank(const std::string&)const;
     [[nodiscard]] const std::map<std::string,P1StandingEvidence>&
@@ -4474,6 +4476,7 @@ private:
 #include "vic25/phase_c_p1_impl.hpp"
 #include "vic25/phase_c_p1_capacities_impl.hpp"
 #include "vic25/phase_c_p1_power_projection_impl.hpp"
+#include "vic25/phase_c_p1_goods_prestige_impl.hpp"
 #include "vic25/phase_c_p1_bureaucracy_impl.hpp"
 #include "vic25/phase_c_economic_statistics_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"

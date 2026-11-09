@@ -244,6 +244,11 @@ inline P1PrestigeView IntegratedWorld::p1_prestige(
         view.navy=projection.navy;
         view.observed=true;
     }
+    const auto goods=p1_goods_leadership(country,from,month());
+    if(goods.complete) {
+        view.goods=goods.prestige;
+        view.observed=true;
+    }
     if(!has_source&&(gdp.observed||projection.army_observed||
                       projection.navy_observed)) {
         view.observed=true;

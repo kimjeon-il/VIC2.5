@@ -31,8 +31,11 @@ inline void IntegratedWorld::p1_observe_value_added(
     };
     for(const auto& [good,amount]:inputs)
         price(good,amount,row.intermediate_input);
-    for(const auto& [good,amount]:outputs)
+    for(const auto& [good,amount]:outputs) {
         price(good,amount,row.gross_output);
+        row.produced_goods[good]=phaseb::add_checked(
+            row.produced_goods[good],amount);
+    }
     p1_value_added_.push_back(std::move(row));
 }
 inline void IntegratedWorld::phase_d_record_paid_construction_value(

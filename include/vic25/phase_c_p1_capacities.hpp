@@ -5,6 +5,7 @@
 // spendable currency. All referenced actors, IGs, territories and enterprises
 // remain in the original C/D/E/G/H ledgers.
 #include <algorithm>
+#include <map>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -48,6 +49,12 @@ struct P1MilitaryPowerView {
     std::int64_t army{},navy{};
     std::uint64_t commissioned_ships{};
     bool army_observed{},navy_observed{},army_complete{},navy_complete{};
+};
+struct P1GoodsLeadershipView {
+    std::string country;
+    std::int64_t prestige{};
+    std::map<std::string,int> rank;
+    bool observed{},complete{};
 };
 struct P1PrestigeView {
     std::string country,source;

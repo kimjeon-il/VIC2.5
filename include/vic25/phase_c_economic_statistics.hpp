@@ -2,6 +2,7 @@
 // GDP statistics are immutable observations of C's REAL goods transformation
 // and D's PAID construction. Not a treasury, company profit or price ledger.
 #include <cstdint>
+#include <map>
 #include <string>
 namespace vic25::phasec {
 struct P1ValueAddedEvent {
@@ -10,6 +11,7 @@ struct P1ValueAddedEvent {
     std::int32_t day{};
     std::int64_t gross_output{},intermediate_input{};
     bool fully_priced{};
+    std::map<std::string,std::int64_t> produced_goods;
 };
 struct P1GdpView {
     std::string country;

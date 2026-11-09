@@ -91,6 +91,7 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,P1ValueAddedEvent>){
         V(source);V(country);V(region);V(month);V(day);
         V(gross_output);V(intermediate_input);V(fully_priced);
+        V(produced_goods);
     } else if constexpr(std::is_same_v<X,P1OfficeEvidence>){
         V(institution);V(site);V(method);V(levels);V(workers_per_level);
     } else if constexpr(std::is_same_v<X,P1CommanderEvidence>){
@@ -480,7 +481,7 @@ struct SnapshotCodec {
             ar(w.p1_office_consumed_);
         }
         if(!w.p1_value_added_.empty()) {
-            ar(std::string("VIC25_PHASEC_VALUE_ADDED_1"));
+            ar(std::string("VIC25_PHASEC_VALUE_ADDED_2"));
             ar(w.p1_value_added_);
         }
         if(!w.p1_incorporation_.empty()||!w.p1_offices_.empty()||
@@ -699,6 +700,20 @@ struct SnapshotCodec {
                 if(w.p1_office_consumed_.size()>500'000)
                     throw std::runtime_error("oversized daily office input journal");
             } else if(extension=="VIC25_PHASEC_VALUE_ADDED_1"&&
+                      !seen_value_added) {
+                seen_value_added=true;
+                std::uint64_t n{};ar(n);
+                if(n>5'000'000)
+                    throw std::runtime_error("oversized legacy GDP history");
+                w.p1_value_added_.reserve(static_cast<std::size_t>(n));
+                for(std::uint64_t i=0;i<n;++i) {
+                    P1ValueAddedEvent event;
+                    ar(event.source);ar(event.country);ar(event.region);
+                    ar(event.month);ar(event.day);ar(event.gross_output);
+                    ar(event.intermediate_input);ar(event.fully_priced);
+                    w.p1_value_added_.push_back(std::move(event));
+                }
+            } else if(extension=="VIC25_PHASEC_VALUE_ADDED_2"&&
                       !seen_value_added) {
                 seen_value_added=true;
                 ar(w.p1_value_added_);
