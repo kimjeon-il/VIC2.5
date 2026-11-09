@@ -120,6 +120,64 @@ inline void IntegratedWorld::p1_register_lobby(
     lobby.created_day=today;
     p1_lobbies_.emplace(lobby.id,std::move(lobby));
 }
+inline void IntegratedWorld::p1_resolve_political_event(
+        const std::string& event_id,P1PoliticalEventDecision decision,
+        std::int64_t today) {
+    require_stage({9});
+    auto& event=p1_political_events_.at(event_id);
+    ensure(!event.resolved&&today>=event.day&&
+           static_cast<unsigned>(decision)<=
+               static_cast<unsigned>(P1PoliticalEventDecision::suppress),
+           "P1 political choice must be timely and not repeated");
+    if(event.kind==P1PoliticalEventKind::enactment_debate) {
+        ensure(decision==P1PoliticalEventDecision::acknowledge||
+               decision==P1PoliticalEventDecision::negotiate,
+               "P1 debate may only be observed or lawfully negotiated");
+        ensure(p2_enactments_.contains(event.source)&&
+               p2_bills_.contains(event.source)&&
+               p2_bills_.at(event.source).country==event.country,
+               "P1 debate must reference a real national enactment");
+        if(decision==P1PoliticalEventDecision::negotiate&&
+           p2_bills_.at(event.source).status==P2BillStatus::submitted) {
+            p2_auto_negotiate_pending(today);
+            // Only an actually accepted P3 group demand can improve the
+            // procedural chances of the bill; no invented support points.
+            if(const auto it=p2_negotiated_.find(event.source);
+               it!=p2_negotiated_.end()&&!it->second.empty()) {
+                auto& process=p2_enactments_.at(event.source);
+                process.success_bonus_ppm=std::min(500'000,
+                                        process.success_bonus_ppm+25'000);
+            }
+        }
+    } else if(event.kind==P1PoliticalEventKind::crisis_warning) {
+        ensure(p5_crises_.contains(event.source)&&
+               p5_crises_.at(event.source).country==event.country,
+               "P1 political crisis event lacks a real movement");
+        if(decision==P1PoliticalEventDecision::bolster||
+           decision==P1PoliticalEventDecision::suppress) {
+            const auto& crisis=p5_crises_.at(event.source);
+            const auto& m=p3_movements_.at(crisis.movement);
+            ensure(m.active&&
+                   crisis.stage!=P5CrisisStage::settled,
+                   "P1 may not issue a movement mandate for resolved crisis");
+            P1Mandate mandate;
+            mandate.id="P1:event:mandate:"+event_id;
+            mandate.country=event.country;
+            mandate.target=crisis.movement;
+            mandate.kind=decision==P1PoliticalEventDecision::bolster?
+                P1MandateKind::bolster_movement:
+                P1MandateKind::suppress_movement;
+            mandate.authority_cost=200;
+            p1_activate_mandate(std::move(mandate),today);
+        } else ensure(decision==P1PoliticalEventDecision::acknowledge,
+                      "P1 warning requires lawful movement response");
+    } else {
+        ensure(decision==P1PoliticalEventDecision::acknowledge,
+               "P1 event lacks lawful executable political decision");
+    }
+    event.resolved=true;
+    events_.push_back("p1-resolved-lawful-political-event:"+event_id);
+}
 inline bool IntegratedWorld::p1_has_policy_work()const {
     for(const auto& [id,m]:p1_mandates_)if(m.active)return true;
     for(const auto& [id,l]:p1_lobbies_)if(l.active)return true;

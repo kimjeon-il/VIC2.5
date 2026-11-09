@@ -1459,6 +1459,8 @@ public:
         const std::string&,const std::string&,P1DecreeKind)const;
     void p1_deactivate_mandate(const std::string&);
     void p1_register_lobby(P1Lobby,std::int64_t);
+    void p1_resolve_political_event(
+        const std::string&,P1PoliticalEventDecision,std::int64_t);
     [[nodiscard]] bool p1_has_policy_work()const;
     void p1_advance_political_policies(std::int64_t);
     [[nodiscard]] const std::map<std::string,P1PoliticalEvent>&

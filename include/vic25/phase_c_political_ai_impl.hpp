@@ -102,7 +102,7 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 continue;
             }
             if(!p2_enactment_ready(bill_id))continue;
-            std::vector<std::string> votes;
+            std::vector<std::string> votes,upper_votes;
             bool feasible=true;
             if(order.legislature_exists) {
                 if(!country_elections_.contains(country)||
@@ -137,8 +137,11 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                         const auto& upper=p4_nonparliament_results_.at(id);
                         People voted=0;
                         for(const auto& p:votes)
-                            if(upper.seats.contains(p))
+                            if(upper.seats.contains(p)&&
+                               upper.seats.at(p)>0) {
+                                upper_votes.push_back(p);
                                 voted=phaseb::add_checked(voted,upper.seats.at(p));
+                            }
                         const auto tier=bill.action==
                             P2BillAction::enact_or_replace_base?
                             bill.proposed_base.tier:
@@ -159,7 +162,7 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
             p2_approve_bill(bill_id,votes);
             if(p1_constitution(country).legislature==
                P1LegislatureKind::bicameral)
-                p2_approve_upper_bill(bill_id,votes);
+                p2_approve_upper_bill(bill_id,upper_votes);
             p2_promulgate_bill(bill_id,g.head_of_state,today);
             events_.push_back("p1-ai-actual-bill-approved:"+bill_id);
         }

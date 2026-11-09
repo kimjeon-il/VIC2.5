@@ -29,6 +29,9 @@ struct P1PoliticalEvent {
     std::int64_t day{};
     bool resolved{};
 };
+enum class P1PoliticalEventDecision : std::uint8_t {
+    acknowledge, negotiate, bolster, suppress
+};
 struct P1Lobby {
     std::string id,source_country,target_country,interest_group,issue_domain;
     std::string desired_choice;
