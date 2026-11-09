@@ -353,7 +353,15 @@ inline void IntegratedWorld::p2_sync_country_rules(
 inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
     require_stage({9});
     ensure(today>=0&&!bill.id.empty()&&!bill.country.empty()&&
-           bill.proposer==governments_.at(bill.country).prime_minister&&
+           (bill.proposer==governments_.at(bill.country).prime_minister||
+            (p1_legislative_powers(bill.country).party_initiative&&
+             p1_constitution(bill.country).legislature!=P1LegislatureKind::none&&
+             p4_parties_.contains(bill.proposer)&&
+             p4_parties_.at(bill.proposer).country==bill.country&&
+             p4_parties_.at(bill.proposer).active&&
+             country_elections_.contains(bill.country)&&
+             country_elections_.at(bill.country).seats.contains(bill.proposer)&&
+             country_elections_.at(bill.country).seats.at(bill.proposer)>0))&&
            !bill.legal_basis.empty()&&
            bill.introduced_day==-1&&bill.promulgated_day==-1&&
            bill.status==P2BillStatus::submitted&&
@@ -450,7 +458,12 @@ inline void IntegratedWorld::p2_approve_bill(
     auto& bill=p2_bills_.at(bill_id);
     ensure(bill.status==P2BillStatus::submitted&&
            p2_enactment_ready(bill_id)&&
-           bill.proposer==governments_.at(bill.country).prime_minister,
+           (bill.proposer==governments_.at(bill.country).prime_minister||
+            (p4_parties_.contains(bill.proposer)&&
+             p4_parties_.at(bill.proposer).country==bill.country&&
+             country_elections_.contains(bill.country)&&
+             country_elections_.at(bill.country).seats.contains(bill.proposer)&&
+             country_elections_.at(bill.country).seats.at(bill.proposer)>0)),
            "P2 rejected unauthorized legislative sponsor");
     const auto order=p1_authority(bill.country);
     const auto tier=(bill.action==P2BillAction::enact_or_replace_base)?
@@ -487,6 +500,7 @@ inline void IntegratedWorld::p2_approve_bill(
     } else {
         p2_negotiation_watch_.erase(bill.id);
         bill.status=P2BillStatus::approved;
+        p2_open_assent(bill.id);
         events_.push_back("p2-law-approved:"+bill.id);
     }
 }
@@ -500,6 +514,11 @@ inline void IntegratedWorld::p2_promulgate_bill(
            today>=bill.introduced_day&&
            governments_.at(bill.country).head_of_state==incumbent_head,
            "P2 invalid approval, promulgator or effective date");
+    if(p1_legislative_powers(bill.country).veto!=P1VetoRule::none) {
+        const auto& a=p2_assents_.at(bill_id);
+        ensure(a.signed_by_head||a.overridden,
+               "P2 presidential assent or parliamentary override required");
+    }
     if(bill.effective_day<=today)bill.effective_day=today+1;
     bill.promulgated_day=today;
     bill.status=P2BillStatus::promulgated;

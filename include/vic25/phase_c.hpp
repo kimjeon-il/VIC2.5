@@ -1722,6 +1722,16 @@ public:
         return p2_enactments_;
     }
     void p2_approve_bill(const std::string&,const std::vector<std::string>&);
+    [[nodiscard]] P1LegislativePowers p1_legislative_powers(const std::string&)const;
+    void p1_set_legislative_powers(const std::string&,P1LegislativePowers);
+    void p2_open_assent(const std::string&);
+    void p2_sign_bill(const std::string&,const std::string&,std::int64_t);
+    void p2_veto_bill(const std::string&,const std::string&,std::int64_t);
+    void p2_override_veto(const std::string&,const std::vector<std::string>&,
+                          const std::vector<std::string>&,std::int64_t);
+    void p2_cancel_bill(const std::string&,std::int64_t);
+    void p2_assent_due(std::int64_t);
+    [[nodiscard]] bool p2_has_assent_work()const;
     void p2_promulgate_bill(const std::string&,const std::string&,std::int64_t);
     [[nodiscard]] bool p2_has_due(std::int64_t)const;
     void phase_time_apply_p2(std::int64_t);
@@ -3825,6 +3835,8 @@ private:
     std::set<std::string> p2_active_amendments_;
     std::map<std::string,P2Bill> p2_bills_;
     std::map<std::string,P2Enactment> p2_enactments_;
+    std::map<std::string,P2Assent> p2_assents_;
+    std::map<std::string,P1LegislativePowers> p1_legislative_powers_;
     std::map<std::string,std::int64_t> p2_retry_after_;
     std::map<std::int64_t,std::set<std::string>> p2_review_due_; // derived
     std::map<std::string,std::string> p2_upper_chambers_;
@@ -4123,6 +4135,7 @@ private:
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_p2_enactment_impl.hpp"
+#include "vic25/phase_c_p2_separation_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
 #include "vic25/phase_c_p3_autonomous_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"

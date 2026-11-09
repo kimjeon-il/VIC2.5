@@ -61,6 +61,7 @@ inline void IntegratedWorld::p2_approve_upper_bill(
     approval.upper_poll_day=senate.day;
     approval.upper_passed=true;
     bill.status=P2BillStatus::approved;
+    p2_open_assent(bill_id);
     events_.push_back("p2-upper-chamber-approved:"+bill_id);
 }
 

@@ -177,6 +177,11 @@ void fields(Archive& a,T& x) {
         V(id);V(country);V(proposer);V(legal_basis);V(action);V(status);
         V(proposed_base);V(proposed_amendment);V(target_id);V(transitions);
         V(introduced_day);V(promulgated_day);V(effective_day);
+    } else if constexpr(std::is_same_v<X,P1LegislativePowers>){
+        V(veto);V(override_ppm);V(assent_days);V(party_initiative);
+    } else if constexpr(std::is_same_v<X,P2Assent>){
+        V(bill_id);V(country);V(deadline);V(veto_day);
+        V(signed_by_head);V(vetoed);V(overridden);
     } else if constexpr(std::is_same_v<X,P2Enactment>){
         V(bill_id);V(country);V(law_key);V(phase);
         V(success_bonus_ppm);V(setbacks);V(checks);
@@ -516,6 +521,10 @@ struct SnapshotCodec {
             ar(w.p2_group_demands_);
             ar(w.p2_negotiated_);
         }
+        if(!w.p2_assents_.empty()||!w.p1_legislative_powers_.empty()) {
+            ar(std::string("VIC25_PHASEC_SEPARATION_POWERS_1"));
+            ar(w.p1_legislative_powers_);ar(w.p2_assents_);
+        }
         if(!w.p2_enactments_.empty()||!w.p2_retry_after_.empty()) {
             ar(std::string("VIC25_PHASEC_P2_ENACTMENT_1"));
             ar(w.p2_enactments_);ar(w.p2_retry_after_);
@@ -580,7 +589,8 @@ struct SnapshotCodec {
              seen_p3=false,seen_p5=false,seen_guerrilla=false,
              seen_enactment=false,seen_campaigns=false,
              seen_characters=false,seen_political_dynamics=false,
-             seen_political_ai=false,seen_political_policies=false;
+             seen_political_ai=false,seen_political_policies=false,
+             seen_separation=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -745,6 +755,13 @@ struct SnapshotCodec {
                    w.p2_group_demands_.size()>1'000'000||
                    w.p2_negotiated_.size()>1'000'000)
                     throw std::runtime_error("oversized P2 parliamentary record");
+            } else if(extension=="VIC25_PHASEC_SEPARATION_POWERS_1"&&
+                       !seen_separation) {
+                seen_separation=true;
+                ar(w.p1_legislative_powers_);ar(w.p2_assents_);
+                if(w.p1_legislative_powers_.size()>100'000||
+                   w.p2_assents_.size()>1'000'000)
+                    throw std::runtime_error("oversized legislative assent");
             } else if(extension=="VIC25_PHASEC_P2_ENACTMENT_1"&&
                        !seen_enactment) {
                 seen_enactment=true;

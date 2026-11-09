@@ -76,6 +76,11 @@ struct P2Enactment {
     std::int64_t next_review_day{-1},last_review_day{-1};
     bool ready{};
 };
+struct P2Assent {
+    std::string bill_id,country;
+    std::int64_t deadline{-1},veto_day{-1};
+    bool signed_by_head{},vetoed{},overridden{};
+};
 struct P2LawEvent {
     std::string bill_id,country,law_id,amendment_id,legal_basis;
     P2BillAction action{P2BillAction::enact_or_replace_base};
