@@ -1674,6 +1674,14 @@ public:
     [[nodiscard]] P1PowerRank p1_power_rank(const std::string&)const;
     [[nodiscard]] const std::map<std::string,P1StandingEvidence>&
         p1_standing()const{return p1_standing_;}
+    // E's real territory and C's real POP registry determine incorporated
+    // state costs; offices must be physically backed by C facility and staff.
+    void p1_set_incorporation(const std::string&,bool);
+    void p1_register_office(P1OfficeEvidence);
+    void p1_register_national_building_level(const std::string&,std::uint32_t);
+    void p1_register_commander(P1CommanderEvidence);
+    [[nodiscard]] P1BureaucracyView p1_bureaucracy(
+        const std::string&)const;
     void seed_p1_institution(const std::string&,const std::string&,
                              P1InstitutionKind,std::uint8_t);
     [[nodiscard]] P1InstitutionView p1_institution_capacity(
@@ -2861,6 +2869,8 @@ public:
         ensure(sovereignty_.contains(region) && !sovereign.empty(),
                "phase E invalid territory or sovereign");
         require_typed(typed_id(EntityKind::region,region), EntityKind::region);
+        if(sovereignty_.at(region)!=sovereign)
+            p1_incorporation_.erase(region); // sovereignty change requires reintegration
         sovereignty_[region]=sovereign;
         events_.push_back("phase-e-sovereignty-transfer");
     }
@@ -3561,6 +3571,34 @@ public:
                    standing.army_projection>=0&&standing.navy_projection>=0,
                    "P1 invalid prestige evidence");
         }
+        for(const auto& [region,incorporated]:p1_incorporation_) {
+            (void)incorporated;
+            ensure(sovereignty_.contains(region),
+                   "P1 incorporation references missing real region");
+        }
+        for(const auto& [id,office]:p1_offices_) {
+            ensure(id==office.institution&&p1_institutions_.contains(id)&&
+                   p1_institutions_.at(id).kind==P1InstitutionKind::administration&&
+                   public_institutions_.contains(id)&&
+                   facilities_.contains(office.site)&&office.levels>0&&
+                   office.workers_per_level>0&&
+                   facilities_.at(office.site).owner==
+                       public_institutions_.at(id).operator_id&&
+                   facilities_.at(office.site).region==
+                       public_institutions_.at(id).region,
+                   "P1 unbacked public administrative office");
+        }
+        for(const auto& [id,levels]:p1_public_building_levels_)
+            ensure(facilities_.contains(id)&&levels>0&&
+                   levels<=facilities_.at(id).capacity,
+                   "P1 nationalized site has no real building capacity");
+        for(const auto& [id,commander]:p1_commanders_) {
+            ensure(id==commander.id&&
+                   person_anchors_.contains(commander.anchor)&&
+                   army_deployments_.contains(commander.unit)&&
+                   commander.cost>=0&&commander.cost<=1000,
+                   "P1 commander cost lacks real named officer");
+        }
         for(const auto& [id,entry]:p1_institutions_) {
             ensure(entry.public_institution_id==id&&
                    p1_constitutions_.contains(entry.country)&&
@@ -4035,6 +4073,11 @@ private:
     std::map<std::string,P1Constitution> p1_constitutions_;
     std::map<std::string,P1Coalition> p1_coalitions_;
     std::map<std::string,P1Institution> p1_institutions_;
+    // Derived Bureaucracy inputs, not a separately spendable resource.
+    std::map<std::string,bool> p1_incorporation_;
+    std::map<std::string,P1OfficeEvidence> p1_offices_;
+    std::map<std::string,std::uint32_t> p1_public_building_levels_;
+    std::map<std::string,P1CommanderEvidence> p1_commanders_;
     // Elected decrees and interest-group measures are policy identities, not
     // stocks of Authority. Their continuing usage is derived when queried.
     std::map<std::string,P1Mandate> p1_active_mandates_;
@@ -4352,6 +4395,7 @@ private:
 
 #include "vic25/phase_c_p1_impl.hpp"
 #include "vic25/phase_c_p1_capacities_impl.hpp"
+#include "vic25/phase_c_p1_bureaucracy_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
 #include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"

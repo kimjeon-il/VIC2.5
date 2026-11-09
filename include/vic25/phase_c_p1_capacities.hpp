@@ -52,6 +52,27 @@ struct P1FlowCapacity {
     std::int32_t excess_ppm{},shortage_ppm{};
     bool complete{true}; // false if any existing commitment lacks a known cost
 };
+enum class P1OfficeMethod : std::uint8_t {
+    simple, horizontal, vertical, switchboards
+};
+struct P1OfficeEvidence {
+    std::string institution,site;
+    P1OfficeMethod method{P1OfficeMethod::simple};
+    std::uint32_t levels{1},workers_per_level{500};
+};
+struct P1CommanderEvidence {
+    std::string id,unit,anchor;
+    std::int32_t cost{};
+};
+struct P1BureaucracyView {
+    std::string country;
+    P1FlowCapacity capacity;
+    std::int64_t office_output{},state_cost{},institution_cost{},
+                 nationalized_cost{},commander_cost{};
+    std::int64_t incorporated_population{},incorporated_regions{};
+    std::int32_t construction_bonus_ppm{},tax_waste_ppm{},
+                 dividend_waste_ppm{};
+};
 struct P1AuthorityConsequences {
     P1FlowCapacity capacity;
     // Victoria 3 1.15 capacity excess/deficit static modifiers.
