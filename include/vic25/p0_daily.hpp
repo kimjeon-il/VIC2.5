@@ -142,7 +142,8 @@ struct ElectionTermReform {
     daily::Date decision_date{};
 };
 enum class LegislativeAction :std::uint8_t {
-    introduce, approve, promulgate, approve_upper
+    introduce, approve, promulgate, approve_upper,
+    veto, override_veto
 };
 struct LegislativeOrder {
     daily::Date date{};
@@ -150,6 +151,7 @@ struct LegislativeOrder {
     phasec::P2Bill bill; // populated for introduction only
     std::string bill_id,head;
     std::vector<std::string> supporting_parties;
+    std::vector<std::string> upper_supporting_parties;
 };
 enum class PoliticalOrderKind : std::uint8_t {
     activate_mandate, cancel_mandate, event_decision, register_lobby
@@ -1542,6 +1544,9 @@ public:
                     case LegislativeAction::approve:
                         c.p2_approve_bill(order.bill_id,
                                           order.supporting_parties);
+                        if(c.p2_bills().at(order.bill_id).status==
+                           phasec::P2BillStatus::approved)
+                            c.p2_begin_assent(order.bill_id,today);
                         break;
                     case LegislativeAction::promulgate:
                         c.p2_promulgate_bill(order.bill_id,order.head,today);
@@ -1549,6 +1554,15 @@ public:
                     case LegislativeAction::approve_upper:
                         c.p2_approve_upper_bill(order.bill_id,
                                                 order.supporting_parties);
+                        c.p2_begin_assent(order.bill_id,today);
+                        break;
+                    case LegislativeAction::veto:
+                        c.p2_veto_bill(order.bill_id,order.head,today);
+                        break;
+                    case LegislativeAction::override_veto:
+                        c.p2_override_veto(order.bill_id,
+                            order.supporting_parties,
+                            order.upper_supporting_parties,today);
                         break;
                 }
             });

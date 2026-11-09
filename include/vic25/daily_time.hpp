@@ -354,6 +354,7 @@ public:
            !engine_.base().core().core().p4_has_due_amendment(day_)&&
            !engine_.base().core().core().p2_has_due(day_)&&
            !engine_.base().core().core().p2_has_review_due(day_)&&
+           !engine_.base().core().core().p2_has_assent_due(day_)&&
            !engine_.base().core().core().p4_has_campaign_due(day_)&&
            !engine_.base().core().core().p1_has_character_work()&&
            !engine_.base().core().core().p1_has_ai_review(day_)&&
@@ -541,6 +542,12 @@ public:
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p1_has_ai_review(today))
                 gh.phase_c().p1_autonomous_politics(today);
+        });
+        // Executive assent and veto reconsideration deadlines are indexed;
+        // neither alters law effects before the following Stage 0.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p2_has_assent_due(today))
+                gh.phase_c().p2_process_assent_due(today);
         });
         // Ongoing movements generate warnings and observable responses;
         // actual armed actions still require verified army and equipment.
