@@ -83,6 +83,11 @@ void fields(Archive& a,T& x) {
         V(legal_basis);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,P1Institution>){
         V(country);V(public_institution_id);V(kind);V(level);
+    } else if constexpr(std::is_same_v<X,P1NavalHull>){
+        V(id);V(unit);V(type);V(source);V(projection);V(max_hp);
+        V(current_hp);V(required_crew);V(commissioned);
+    } else if constexpr(std::is_same_v<X,P1ArmyRating>){
+        V(unit);V(source);V(power_per_person_ppm);
     } else if constexpr(std::is_same_v<X,P1ValueAddedEvent>){
         V(source);V(country);V(region);V(month);V(day);
         V(gross_output);V(intermediate_input);V(fully_priced);
@@ -463,6 +468,13 @@ struct SnapshotCodec {
             ar(w.p1_pending_mandates_);
             ar(w.p1_standing_);
         }
+        if(!w.p1_naval_hulls_.empty()||!w.p1_army_ratings_.empty()||
+           !w.p1_verified_navies_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_MILITARY_STANDING_1"));
+            ar(w.p1_naval_hulls_);
+            ar(w.p1_army_ratings_);
+            ar(w.p1_verified_navies_);
+        }
         if(!w.p1_value_added_.empty()) {
             ar(std::string("VIC25_PHASEC_VALUE_ADDED_1"));
             ar(w.p1_value_added_);
@@ -573,7 +585,7 @@ struct SnapshotCodec {
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p1_capacities=false,seen_p1_bureaucracy=false,
-             seen_value_added=false,
+             seen_value_added=false,seen_military_standing=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
              seen_p3=false,seen_ideologies=false,seen_identity=false,
              seen_p5=false,
@@ -665,6 +677,16 @@ struct SnapshotCodec {
                    w.p1_pending_mandates_.size()>500'000||
                    w.p1_standing_.size()>100'000)
                     throw std::runtime_error("oversized P1 capacity commitments");
+            } else if(extension=="VIC25_PHASEC_P1_MILITARY_STANDING_1"&&
+                      !seen_military_standing) {
+                seen_military_standing=true;
+                ar(w.p1_naval_hulls_);
+                ar(w.p1_army_ratings_);
+                ar(w.p1_verified_navies_);
+                if(w.p1_naval_hulls_.size()>500'000||
+                   w.p1_army_ratings_.size()>500'000||
+                   w.p1_verified_navies_.size()>100'000)
+                    throw std::runtime_error("oversized real military standing");
             } else if(extension=="VIC25_PHASEC_VALUE_ADDED_1"&&
                       !seen_value_added) {
                 seen_value_added=true;

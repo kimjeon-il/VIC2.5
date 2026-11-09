@@ -199,25 +199,58 @@ inline P1PrestigeView IntegratedWorld::p1_prestige(
     P1PrestigeView view;
     view.country=country;
     const auto source=p1_standing_.find(country);
-    if(source==p1_standing_.end())return view;
-    const auto& data=source->second;
-    view.observed=true;
-    view.complete=data.complete;
-    view.observed_day=data.observed_day;
-    view.source=data.source;
-    view.tier=p1power::prestige_tier(data.tier);
-    // 1.15 source defines: £1m own GDP -> 3 prestige, £1m subject GDP
-    // -> 1.5 prestige. These GDP numbers are explicit SOURCE OBSERVATIONS
-    // until a GDP authority is implemented; never substitute bank cash.
-    view.own_gdp=phaseb::mul_checked(data.own_gdp/1'000'000,3)+
-                  phaseb::mul_checked(data.own_gdp%1'000'000,3)/1'000'000;
-    view.subject_gdp=phaseb::mul_checked(data.subject_gdp/2'000'000,3)+
-                  phaseb::mul_checked(data.subject_gdp%2'000'000,3)/2'000'000;
-    view.army=data.army_projection;
-    view.navy=data.navy_projection;
-    view.goods=data.goods_leadership;
-    view.monuments=data.monuments;
-    view.other=data.other_prestige;
+    const bool has_source=source!=p1_standing_.end();
+    const auto projection=p1_military_power(country);
+    // Production GDP is observed in C's existing real manufacture,
+    // extraction and paid-construction events. A partial priced history is
+    // NOT silently annualised to a fictitious complete national GDP.
+    const auto from=std::max<std::int64_t>(0,month()-11);
+    const auto gdp=p1_gdp(country,from,month());
+    std::set<std::int64_t> observed_months;
+    for(const auto& event:p1_value_added_)
+        if(event.country==country&&event.month>=from&&event.month<=month())
+            observed_months.insert(event.month);
+    const bool annual_gdp_complete=gdp.complete&&
+        observed_months.size()==12;
+    if(has_source) {
+        const auto& data=source->second;
+        view.observed=true;
+        view.complete=data.complete;
+        view.observed_day=data.observed_day;
+        view.source=data.source;
+        view.tier=p1power::prestige_tier(data.tier);
+        view.own_gdp=phaseb::mul_checked(data.own_gdp,3)/1'000'000;
+        view.subject_gdp=phaseb::mul_checked(data.subject_gdp,3)/2'000'000;
+        view.army=data.army_projection;
+        view.navy=data.navy_projection;
+        view.goods=data.goods_leadership;
+        view.monuments=data.monuments;
+        view.other=data.other_prestige;
+        view.rank=data.confirmed_rank;
+        view.rank_confirmed=data.confirmed_rank!=P1PowerRank::unobserved;
+    }
+    // New observed real simulation output takes precedence over earlier
+    // scenario estimates only when a complete, correctly priced year exists.
+    if(annual_gdp_complete) {
+        view.own_gdp=phaseb::mul_checked(
+            std::max<std::int64_t>(0,gdp.value_added),3)/1'000'000;
+        view.observed=true;
+    }
+    if(projection.army_complete&&projection.army_observed) {
+        view.army=projection.army;
+        view.observed=true;
+    }
+    if(projection.navy_complete) {
+        view.navy=projection.navy;
+        view.observed=true;
+    }
+    if(!has_source&&(gdp.observed||projection.army_observed||
+                      projection.navy_observed)) {
+        view.observed=true;
+        view.source="C/PhaseD:real-production-and-commissioned-units";
+        view.complete=false; // national tier/monuments/goods not sourced
+    }
+    if(!view.observed)return view;
     view.partial_total=std::max<std::int64_t>(0,
         phaseb::add_checked(
             phaseb::add_checked(
@@ -231,10 +264,9 @@ inline P1PrestigeView IntegratedWorld::p1_prestige(
             p2_modifier_ppm(country,"country_prestige_mult"),
             p3_trait_modifier_ppm(country,"country_prestige_mult")),
         0,5'000'000);
-    view.partial_total=phaseb::mul_checked(view.partial_total,mult)/1'000'000;
-    if(data.complete)view.total=view.partial_total;
-    view.rank=data.confirmed_rank;
-    view.rank_confirmed=data.confirmed_rank!=P1PowerRank::unobserved;
+    view.partial_total=phaseb::mul_checked(
+        view.partial_total,mult)/1'000'000;
+    if(view.complete)view.total=view.partial_total;
     return view;
 }
 

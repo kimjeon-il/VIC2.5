@@ -35,6 +35,20 @@ struct P1StandingEvidence {
     std::int64_t observed_day{-1};
     bool complete{}; // all required inputs individually source-qualified
 };
+struct P1NavalHull {
+    std::string id,unit,type,source;
+    std::int64_t projection{},max_hp{},current_hp{},required_crew{};
+    bool commissioned{true};
+};
+struct P1ArmyRating {
+    std::string unit,source;
+    std::int64_t power_per_person_ppm{};
+};
+struct P1MilitaryPowerView {
+    std::int64_t army{},navy{};
+    std::uint64_t commissioned_ships{};
+    bool army_observed{},navy_observed{},army_complete{},navy_complete{};
+};
 struct P1PrestigeView {
     std::string country,source;
     std::int64_t observed_day{-1};

@@ -1690,6 +1690,12 @@ public:
     [[nodiscard]] const std::map<std::string,P1Mandate>&
         p1_active_mandates()const{return p1_active_mandates_;}
     void p1_record_standing(P1StandingEvidence);
+    void p1_register_ship(P1NavalHull);
+    void p1_register_army_rating(P1ArmyRating);
+    void p1_set_navy_inventory_verified(const std::string&,bool);
+    void p1_retire_ship(const std::string&);
+    [[nodiscard]] P1MilitaryPowerView p1_military_power(
+        const std::string&)const;
     [[nodiscard]] P1PrestigeView p1_prestige(const std::string&)const;
     [[nodiscard]] P1PowerRank p1_power_rank(const std::string&)const;
     [[nodiscard]] const std::map<std::string,P1StandingEvidence>&
@@ -3595,6 +3601,24 @@ public:
                        "P1 malformed Authority order");
             }
         }
+        for(const auto& [id,hull]:p1_naval_hulls_) {
+            ensure(id==hull.id&&!hull.unit.empty()&&
+                   army_deployments_.contains(hull.unit)&&
+                   units_.contains(hull.unit)&&hull.projection>0&&
+                   hull.max_hp>=hull.current_hp&&
+                   hull.max_hp>0&&hull.required_crew>0,
+                   "P1 registered ship must have an actual C unit and hull");
+        }
+        for(const auto& [unit,rating]:p1_army_ratings_) {
+            ensure(unit==rating.unit&&
+                   army_deployments_.contains(unit)&&
+                   !rating.source.empty()&&
+                   rating.power_per_person_ppm>0,
+                   "P1 national military power unbacked by real unit");
+        }
+        for(const auto& country:p1_verified_navies_)
+            ensure(governments_.contains(country),
+                   "P1 verified fleet must have recognized country");
         for(const auto& [country,standing]:p1_standing_) {
             ensure(country==standing.country&&governments_.contains(country)&&
                    !standing.source.empty()&&standing.observed_day>=0&&
@@ -4127,6 +4151,11 @@ private:
     // Source-qualified prestige/recognition observations, not an alternative
     // GDP, manpower, treasury or diplomatic influence ledger.
     std::map<std::string,P1StandingEvidence> p1_standing_;
+    // Actual commissioned hull identity and sourced ratings; a ship must be
+    // crewed by a real existing C military unit/POP, not synthetic seamen.
+    std::map<std::string,P1NavalHull> p1_naval_hulls_;
+    std::map<std::string,P1ArmyRating> p1_army_ratings_;
+    std::set<std::string> p1_verified_navies_;
     std::map<std::int64_t,std::map<std::string,P1GovernmentChange>> p1_pending_;
     // P4 party relationships are many-to-many; political headcount stays in
     // P3 memberships and the national chamber still uses country_elections_.
@@ -4441,6 +4470,7 @@ private:
 
 #include "vic25/phase_c_p1_impl.hpp"
 #include "vic25/phase_c_p1_capacities_impl.hpp"
+#include "vic25/phase_c_p1_power_projection_impl.hpp"
 #include "vic25/phase_c_p1_bureaucracy_impl.hpp"
 #include "vic25/phase_c_economic_statistics_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
