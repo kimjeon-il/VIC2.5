@@ -233,7 +233,17 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 bill.country=country;
                 bill.proposer=g.prime_minister;
                 bill.legal_basis="ai-response-to:"+target;
-                bill.proposed_base=current; // preserve actual clause effects
+                const auto template_key=std::make_tuple(
+                    country,current.domain,m.desired_choice);
+                const bool constitutional=
+                    current.domain=="governance_principles"||
+                    current.domain=="distribution_of_power"||
+                    current.domain=="legislature_structure";
+                if(!constitutional&&!p2_law_templates_.contains(template_key))
+                    break; // no fictional unchanged legal effects
+                if(p2_law_templates_.contains(template_key))
+                    bill.proposed_base=p2_law_templates_.at(template_key);
+                else bill.proposed_base=current; // P1 legal choice drives effects
                 bill.proposed_base.id=bill.id+":norm";
                 bill.proposed_base.base_choice=m.desired_choice;
                 bill.proposed_base.legal_basis=bill.legal_basis;

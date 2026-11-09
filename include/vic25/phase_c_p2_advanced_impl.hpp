@@ -138,6 +138,38 @@ inline void IntegratedWorld::p2_auto_negotiate_pending(
                 if(proposal.demand_id==id)accepted=true;
             if(accepted)continue;
             const People support=members[{bill.country,demand.interest_group}];
+            const auto group=p3_groups_.find(
+                {bill.country,demand.interest_group});
+            if(group==p3_groups_.end())continue;
+            const auto preferred=p1_group_legal_preference(group->second);
+            const bool opposed=!preferred.empty()&&
+                preferred!=bill.proposed_base.base_choice;
+            if(opposed) {
+                // 1.15: an opposing IG does not offer a concession when the
+                // bill cannot pass, when the bill is likely to fail without
+                // it, or when an active coup is a better alternative.
+                if(!p2_enactments_.contains(bill_id))continue;
+                const auto odds=p2_enactment_odds(bill_id);
+                if(odds.success_ppm<150'000)continue;
+                bool coup_possible=false;
+                for(const auto& [crisis_id,crisis]:p5_crises_) {
+                    if(crisis.country!=bill.country||
+                       crisis.stage==P5CrisisStage::settled||
+                       !p3_movements_.contains(crisis.movement))continue;
+                    const auto& movement=p3_movements_.at(crisis.movement);
+                    if(std::find(movement.groups.begin(),
+                                 movement.groups.end(),demand.interest_group)==
+                                    movement.groups.end())continue;
+                    if((crisis.kind==P5CrisisKind::coup||
+                        crisis.kind==P5CrisisKind::revolution)&&
+                       (crisis.stage==P5CrisisStage::warning||
+                        crisis.stage==P5CrisisStage::armed_conflict)&&
+                       p5_risk(crisis.movement).pressure_ppm>=550'000) {
+                        coup_possible=true;break;
+                    }
+                }
+                if(coup_possible)continue;
+            }
             if(support<=0||compare_nonnegative_ratios(
                 static_cast<std::uint64_t>(support),
                 static_cast<std::uint64_t>(total),
