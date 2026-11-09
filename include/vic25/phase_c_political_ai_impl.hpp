@@ -134,7 +134,42 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 if(p1_legislative_powers(country).veto!=P1VetoRule::none&&
                    p2_assents_.contains(bill_id)) {
                     const auto& assent=p2_assents_.at(bill_id);
-                    if(assent.vetoed&&!assent.overridden)continue;
+                    if(assent.vetoed&&!assent.overridden) {
+                        const auto powers=p1_legislative_powers(country);
+                        if(powers.veto!=P1VetoRule::suspensive||
+                           !country_elections_.contains(country)||
+                           p4_parliament_dissolved(country))continue;
+                        const auto& chamber=country_elections_.at(country);
+                        const auto& ruling=p1_coalitions_.at(country).ruling_parties;
+                        const auto required=[&](People seats)->People {
+                            return static_cast<People>(
+                                (static_cast<std::uint64_t>(seats)*
+                                 powers.override_ppm+999'999)/1'000'000);
+                        };
+                        bool enough=true;
+                        for(const auto& party:ruling)
+                            if(!chamber.seats.contains(party))enough=false;
+                        if(!enough||coalition_seats(ruling,chamber)<
+                           required(chamber.total_seats))continue;
+                        std::vector<std::string> senate_support;
+                        if(p1_constitution(country).legislature==
+                           P1LegislatureKind::bicameral) {
+                            if(!p2_upper_chambers_.contains(country))continue;
+                            const auto senate_id=p2_upper_chambers_.at(country);
+                            if(!p4_nonparliament_results_.contains(senate_id))continue;
+                            const auto& upper=p4_nonparliament_results_.at(senate_id);
+                            People senate_votes=0;
+                            for(const auto& party:ruling)
+                                if(upper.seats.contains(party)) {
+                                    senate_support.push_back(party);
+                                    senate_votes=phaseb::add_checked(
+                                        senate_votes,upper.seats.at(party));
+                                }
+                            if(senate_votes<required(p4_contests_.at(senate_id).seats))
+                                continue;
+                        }
+                        p2_override_veto(bill_id,ruling,senate_support,today);
+                    }
                     if(!assent.signed_by_head&&!assent.overridden) {
                         const auto character=p1_characters_.find(g.head_of_state);
                         const auto domain=bill.action==
