@@ -515,8 +515,9 @@ inline void IntegratedWorld::p2_promulgate_bill(
            governments_.at(bill.country).head_of_state==incumbent_head,
            "P2 invalid approval, promulgator or effective date");
     if(p1_legislative_powers(bill.country).veto!=P1VetoRule::none) {
-        const auto& a=p2_assents_.at(bill_id);
-        ensure(a.signed_by_head||a.overridden,
+        const auto it=p2_assents_.find(bill_id);
+        ensure(it==p2_assents_.end()||
+               it->second.signed_by_head||it->second.overridden,
                "P2 presidential assent or parliamentary override required");
     }
     if(bill.effective_day<=today)bill.effective_day=today+1;

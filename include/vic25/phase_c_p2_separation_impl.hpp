@@ -81,27 +81,40 @@ inline void IntegratedWorld::p2_override_veto(
         ensure(votes>=threshold(p4_contests_.at(contest).seats),
                "P2 senate override lacks votes");
     }
+    ensure(day>=a.veto_day&&day<=a.veto_day+30,
+           "P2 veto override must occur within the 30-day reconsideration");
     a.overridden=true;
     events_.push_back("p2-veto-overridden:"+id);
 }
 inline bool IntegratedWorld::p2_has_assent_work()const {
     for(const auto& [id,a]:p2_assents_)
         if(p2_bills_.at(id).status==P2BillStatus::approved&&
-           !a.signed_by_head&&!a.vetoed&&!a.overridden)return true;
+           !a.signed_by_head&&!a.overridden)return true;
     return false;
 }
 inline void IntegratedWorld::p2_assent_due(std::int64_t day) {
     require_stage({9});
-    for(auto& [id,a]:p2_assents_)
-        if(p2_bills_.at(id).status==P2BillStatus::approved&&
-           !a.signed_by_head&&!a.vetoed&&!a.overridden) {
-            if(a.deadline<0)
-                a.deadline=day+p1_legislative_powers(a.country).assent_days;
-            if(a.deadline<=day) {
-                a.signed_by_head=true;
-                events_.push_back("p2-assent-deadline:"+id);
+    for(auto& [id,a]:p2_assents_) {
+        auto& bill=p2_bills_.at(id);
+        if(bill.status!=P2BillStatus::approved||
+           a.signed_by_head||a.overridden)continue;
+        if(a.vetoed) {
+            if(day>=a.veto_day+30) {
+                bill.status=P2BillStatus::rejected;
+                if(const auto process=p2_enactments_.find(id);
+                   process!=p2_enactments_.end())
+                    p2_retry_after_[process->second.law_key]=day+730;
+                events_.push_back("p2-veto-sustained-bill-failed:"+id);
             }
+            continue;
         }
+        if(a.deadline<0)
+            a.deadline=day+p1_legislative_powers(a.country).assent_days;
+        if(a.deadline<=day) {
+            a.signed_by_head=true;
+            events_.push_back("p2-assent-deadline:"+id);
+        }
+    }
 }
 inline void IntegratedWorld::p2_cancel_bill(
         const std::string& id,std::int64_t day) {
