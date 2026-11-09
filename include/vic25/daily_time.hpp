@@ -353,6 +353,7 @@ public:
            !engine_.base().core().core().has_due_p1_government(day_)&&
            !engine_.base().core().core().p4_has_due_amendment(day_)&&
            !engine_.base().core().core().p2_has_due(day_)&&
+           !engine_.base().core().core().p2_has_review_due(day_)&&
            !engine_.base().core().core().p2_has_negotiable_bills()&&
            !engine_.base().core().core().p3_needs_daily_tick()&&
            !engine_.base().core().core().p5_needs_daily_tick()&&
@@ -513,6 +514,11 @@ public:
         // It never creates POPs, votes or fictional proposal resources.
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             gh.phase_c().p2_auto_negotiate_pending(today);
+        });
+        // Only due enactment checkpoints are checked, after P0 negotiation.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p2_has_review_due(today))
+                gh.phase_c().p2_review_due(today);
         });
         // Ongoing movements generate warnings and observable responses;
         // actual armed actions still require verified army and equipment.
