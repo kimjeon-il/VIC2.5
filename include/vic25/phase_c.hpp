@@ -7,6 +7,7 @@
 #include "vic25/phase_b.hpp"
 #include "vic25/phase_c_p1.hpp"
 #include "vic25/phase_c_p1_capacities.hpp"
+#include "vic25/phase_c_economic_statistics.hpp"
 #include "vic25/phase_c_p4.hpp"
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
@@ -906,6 +907,8 @@ public:
             resources_.record_stage4_output({actor,region,good},qty);
             tracked_goods_.insert(good);
         }
+        p1_observe_value_added("phase-d-input-output-production",
+                               region,inputs,outputs);
         events_.push_back("phase-d-input-output-production");
     }
     // A nonrenewable/renewable resource lot is emitted only after Phase D
@@ -922,6 +925,8 @@ public:
         goods_.produce({holder,region,good},qty);
         resources_.record_stage4_output({holder,region,good},qty);
         tracked_goods_.insert(good);
+        p1_observe_value_added("phase-d-extraction:"+deposit_id,
+                               region,{},{{good,qty}});
         events_.push_back("phase-d-verified-extraction:"+deposit_id);
     }
     // Cash-settled pilot path only: a verified cost was already paid via
@@ -1691,6 +1696,11 @@ public:
         p1_standing()const{return p1_standing_;}
     // E's real territory and C's real POP registry determine incorporated
     // state costs; offices must be physically backed by C facility and staff.
+    [[nodiscard]] P1GdpView p1_gdp(
+        const std::string&,std::int64_t,std::int64_t)const;
+    void phase_d_record_paid_construction_value(
+        const std::string&,const std::string&,const std::string&,
+        Quantity,Money);
     void p1_set_incorporation(const std::string&,bool);
     void p1_register_office(P1OfficeEvidence);
     void p1_register_national_building_level(const std::string&,std::uint32_t);
@@ -2534,6 +2544,8 @@ public:
         if(phase_d_reservation_mode_)
             resources_.record_stage4_output({firm,region,output},qty);
         tracked_goods_.insert(output);
+        p1_observe_value_added("phase-c-production",region,
+                               {{input,qty}},{{output,qty}});
         events_.push_back("production");
     }
     void trade(const std::string& seller, const std::string& buyer,
@@ -3592,6 +3604,14 @@ public:
                    standing.army_projection>=0&&standing.navy_projection>=0,
                    "P1 invalid prestige evidence");
         }
+        ensure(p1_value_added_.size()<=5'000'000,
+               "P1 oversize immutable GDP evidence");
+        for(const auto& event:p1_value_added_)
+            ensure(!event.source.empty()&&!event.country.empty()&&
+                   !event.region.empty()&&event.month>=0&&event.day>=0&&
+                   event.day<=31&&event.gross_output>=0&&
+                   event.intermediate_input>=0,
+                   "P1 illegal GDP production observation");
         for(const auto& [region,incorporated]:p1_incorporation_) {
             (void)incorporated;
             ensure(sovereignty_.contains(region),
@@ -4095,6 +4115,7 @@ private:
     std::map<std::string,P1Coalition> p1_coalitions_;
     std::map<std::string,P1Institution> p1_institutions_;
     // Derived Bureaucracy inputs, not a separately spendable resource.
+    std::vector<P1ValueAddedEvent> p1_value_added_;
     std::map<std::string,bool> p1_incorporation_;
     std::map<std::string,P1OfficeEvidence> p1_offices_;
     std::map<std::string,std::uint32_t> p1_public_building_levels_;
@@ -4193,6 +4214,10 @@ private:
             direction = -direction;
         }
     }
+    void p1_observe_value_added(
+        const std::string&,const std::string&,
+        const std::vector<std::pair<std::string,Quantity>>&,
+        const std::vector<std::pair<std::string,Quantity>>&);
     static std::string security_account(const std::string& who, const std::string& asset) {
         return who + ":security:" + asset;
     }
@@ -4417,6 +4442,7 @@ private:
 #include "vic25/phase_c_p1_impl.hpp"
 #include "vic25/phase_c_p1_capacities_impl.hpp"
 #include "vic25/phase_c_p1_bureaucracy_impl.hpp"
+#include "vic25/phase_c_economic_statistics_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
 #include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"

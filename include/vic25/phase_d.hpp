@@ -638,6 +638,12 @@ public:
         c_.phase_d_release_cash(p.client,"construction:"+project,amount);
         c_.pay(p.client,p.contractor,amount);
         p.paid_work=phaseb::add_checked(p.paid_work,units);
+        // Construction GDP is recorded exactly when the original
+        // contractor's actual money receipt has settled. A work invoice
+        // settled later is not GDP again.
+        c_.phase_d_record_paid_construction_value(
+            project,p.region,p.material_good,
+            product(units,p.material_per_work),amount);
         d_.append(c_.month(),"work-paid",project);
     }
     void accrue_work_invoice(const std::string& project,Quantity units) {

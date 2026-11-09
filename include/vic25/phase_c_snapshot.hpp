@@ -83,6 +83,9 @@ void fields(Archive& a,T& x) {
         V(legal_basis);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,P1Institution>){
         V(country);V(public_institution_id);V(kind);V(level);
+    } else if constexpr(std::is_same_v<X,P1ValueAddedEvent>){
+        V(source);V(country);V(region);V(month);V(day);
+        V(gross_output);V(intermediate_input);V(fully_priced);
     } else if constexpr(std::is_same_v<X,P1OfficeEvidence>){
         V(institution);V(site);V(method);V(levels);V(workers_per_level);
     } else if constexpr(std::is_same_v<X,P1CommanderEvidence>){
@@ -460,6 +463,10 @@ struct SnapshotCodec {
             ar(w.p1_pending_mandates_);
             ar(w.p1_standing_);
         }
+        if(!w.p1_value_added_.empty()) {
+            ar(std::string("VIC25_PHASEC_VALUE_ADDED_1"));
+            ar(w.p1_value_added_);
+        }
         if(!w.p1_incorporation_.empty()||!w.p1_offices_.empty()||
            !w.p1_public_building_levels_.empty()||!w.p1_commanders_.empty()) {
             ar(std::string("VIC25_PHASEC_P1_BUREAUCRACY_1"));
@@ -566,6 +573,7 @@ struct SnapshotCodec {
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p1_capacities=false,seen_p1_bureaucracy=false,
+             seen_value_added=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
              seen_p3=false,seen_ideologies=false,seen_identity=false,
              seen_p5=false,
@@ -657,6 +665,12 @@ struct SnapshotCodec {
                    w.p1_pending_mandates_.size()>500'000||
                    w.p1_standing_.size()>100'000)
                     throw std::runtime_error("oversized P1 capacity commitments");
+            } else if(extension=="VIC25_PHASEC_VALUE_ADDED_1"&&
+                      !seen_value_added) {
+                seen_value_added=true;
+                ar(w.p1_value_added_);
+                if(w.p1_value_added_.size()>5'000'000)
+                    throw std::runtime_error("oversized GDP observation history");
             } else if(extension=="VIC25_PHASEC_P1_BUREAUCRACY_1"&&
                       !seen_p1_bureaucracy) {
                 seen_p1_bureaucracy=true;
