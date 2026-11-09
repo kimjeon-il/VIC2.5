@@ -138,6 +138,18 @@ inline void IntegratedWorld::p2_auto_negotiate_pending(
             for(const auto& proposal:negotiations)
                 if(proposal.demand_id==id)accepted=true;
             if(accepted)continue;
+            const auto profile=p3_groups_.find(
+                {bill.country,demand.interest_group});
+            if(profile==p3_groups_.end())continue;
+            const auto sentiment=p3_group_view(bill.country,demand.interest_group);
+            // A radicalized opponent can refuse compromise; a satisfied
+            // group is not forced into negotiating an unwanted reform.
+            if(sentiment.radical_ppm>=700'000&&
+               p1_group_legal_preference(profile->second)!=
+                   bill.proposed_base.base_choice) {
+                events_.push_back("p2-ig-refuses-negotiation:"+id);
+                continue;
+            }
             const People support=members[{bill.country,demand.interest_group}];
             if(support<=0||compare_nonnegative_ratios(
                 static_cast<std::uint64_t>(support),

@@ -243,9 +243,19 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 bill.country=country;
                 bill.proposer=g.prime_minister;
                 bill.legal_basis="ai-response-to:"+target;
-                bill.proposed_base=current; // preserve actual clause effects
+                // Never copy the *old* choice's material effects onto
+                // a different law. Only a validated historical template
+                // can supply the new choice's substantive clauses.
+                const P2BaseLaw* template_law=nullptr;
+                for(const auto& [law_id,known]:p2_laws_)
+                    if(known.country==country&&known.domain==m.issue_domain&&
+                       known.base_choice==m.desired_choice&&
+                       known.scope==current.scope&&known.tier==current.tier) {
+                        template_law=&known;break;
+                    }
+                if(!template_law)break;
+                bill.proposed_base=*template_law;
                 bill.proposed_base.id=bill.id+":norm";
-                bill.proposed_base.base_choice=m.desired_choice;
                 bill.proposed_base.legal_basis=bill.legal_basis;
                 for(auto& clause:bill.proposed_base.clauses)
                     clause.id=bill.proposed_base.id+":"+clause.id;

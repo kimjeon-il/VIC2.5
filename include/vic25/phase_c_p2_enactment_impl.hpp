@@ -47,14 +47,21 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         std::int64_t support=0,opposition=0,movement_activism=0;
         for(const auto& [key,group]:p3_groups_) {
             if(key.first!=bill.country||group.issue_domain!=law_domain)continue;
-            const auto clout=p3_group_view(key.first,key.second).clout_ppm;
+            const auto view=p3_group_view(key.first,key.second);
+            const auto clout=static_cast<std::int64_t>(view.clout_ppm);
+            // Distinguish committed, dissatisfied and indifferent groups
+            // using the existing political approval and POP radicalism.
+            const auto intensity=std::clamp<std::int64_t>(
+                500'000+(50-view.approval)*10'000+
+                view.radical_ppm/4,250'000,1'000'000);
             const auto& coalition=p1_coalitions_.at(bill.country);
             const bool governing=std::find(coalition.ruling_groups.begin(),
               coalition.ruling_groups.end(),key.second)!=coalition.ruling_groups.end();
             if(!desired.empty()&&p1_group_legal_preference(group)==desired) {
-                if(governing)support+=clout;
+                if(governing)support+=clout*intensity/1'000'000;
             } else if(!p1_group_legal_preference(group).empty()&&
-                      p1_group_legal_preference(group)!=desired)opposition+=clout;
+                      p1_group_legal_preference(group)!=desired)
+                opposition+=clout*intensity/1'000'000;
         }
         for(const auto& [mid,m]:p3_movements_) {
             if(!m.active||m.country!=bill.country||

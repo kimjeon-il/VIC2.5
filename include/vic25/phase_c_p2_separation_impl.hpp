@@ -117,6 +117,12 @@ inline void IntegratedWorld::p2_cancel_bill(
         it->second.next_review_day=-1;
     }
     p2_negotiation_watch_.erase(id);
+    if(b.action==P2BillAction::enact_or_replace_base)
+        for(auto& [mid,m]:p3_movements_)
+            if(m.active&&m.country==b.country&&
+               m.issue_domain==b.proposed_base.domain&&
+               m.desired_choice==b.proposed_base.base_choice)
+                m.radical_ppm=std::min(1'000'000,m.radical_ppm+50'000);
     events_.push_back("p2-bill-withdrawn:"+id);
 }
 } // namespace vic25::phasec
