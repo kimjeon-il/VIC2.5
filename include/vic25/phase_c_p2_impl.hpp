@@ -624,6 +624,8 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             p2_active_base_.erase(
                 std::make_tuple(base.country,base.domain,base.scope));
         }
+        if(bill.action==P2BillAction::enact_or_replace_base)
+            p2_apply_constitutional_choice(bill.proposed_base);
         p2_sync_country_rules(bill.country,bill.transitions,today);
         const auto lowest=p2_rule(bill.country,bill.country,
                                  P2ClauseKind::income_tax_min_ppm).value_or(0);

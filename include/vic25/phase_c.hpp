@@ -1725,6 +1725,7 @@ public:
     [[nodiscard]] P1LegislativePowers p1_legislative_powers(const std::string&)const;
     void p1_set_legislative_powers(const std::string&,P1LegislativePowers);
     void p2_open_assent(const std::string&);
+    void p2_apply_constitutional_choice(const P2BaseLaw&);
     void p2_sign_bill(const std::string&,const std::string&,std::int64_t);
     void p2_veto_bill(const std::string&,const std::string&,std::int64_t);
     void p2_override_veto(const std::string&,const std::vector<std::string>&,
@@ -4136,6 +4137,7 @@ private:
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_p2_enactment_impl.hpp"
 #include "vic25/phase_c_p2_separation_impl.hpp"
+#include "vic25/phase_c_p2_constitution_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
 #include "vic25/phase_c_p3_autonomous_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"
