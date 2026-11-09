@@ -69,6 +69,13 @@ struct P2Bill {
     std::int64_t introduced_day{-1},promulgated_day{-1},effective_day{-1};
 };
 
+struct P2Enactment {
+    std::string bill_id,country,law_key;
+    std::uint8_t phase{1}; // 1..3; fourth state is ready for a legal vote
+    std::int32_t success_bonus_ppm{},setbacks{},checks{};
+    std::int64_t next_review_day{-1},last_review_day{-1};
+    bool ready{};
+};
 struct P2LawEvent {
     std::string bill_id,country,law_id,amendment_id,legal_basis;
     P2BillAction action{P2BillAction::enact_or_replace_base};

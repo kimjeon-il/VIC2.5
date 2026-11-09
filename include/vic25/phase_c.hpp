@@ -1676,6 +1676,12 @@ public:
     [[nodiscard]] bool p2_candidate_eligible(
         const std::string&,const std::string&)const;
     void p2_submit_bill(P2Bill,std::int64_t);
+    void p2_review_due(std::int64_t);
+    [[nodiscard]] bool p2_has_review_due(std::int64_t)const;
+    [[nodiscard]] bool p2_enactment_ready(const std::string&)const;
+    [[nodiscard]] const std::map<std::string,P2Enactment>& p2_enactments()const {
+        return p2_enactments_;
+    }
     void p2_approve_bill(const std::string&,const std::vector<std::string>&);
     void p2_promulgate_bill(const std::string&,const std::string&,std::int64_t);
     [[nodiscard]] bool p2_has_due(std::int64_t)const;
@@ -3714,6 +3720,9 @@ private:
     std::map<std::string,P2Amendment> p2_amendments_;
     std::set<std::string> p2_active_amendments_;
     std::map<std::string,P2Bill> p2_bills_;
+    std::map<std::string,P2Enactment> p2_enactments_;
+    std::map<std::string,std::int64_t> p2_retry_after_;
+    std::map<std::int64_t,std::set<std::string>> p2_review_due_; // derived
     std::map<std::string,std::string> p2_upper_chambers_;
     std::map<std::string,P2ChamberDecision> p2_chamber_decisions_;
     std::map<std::string,P2GroupDemand> p2_group_demands_;
@@ -3764,6 +3773,7 @@ private:
         const std::string&,const std::vector<P2ElectionTransition>&,
         std::int64_t);
     void p2_rebuild_due_index();
+    void p2_rebuild_review_due_index();
     static int compare_nonnegative_ratios(std::uint64_t a, std::uint64_t b,
                                           std::uint64_t c, std::uint64_t d) {
         ensure(b != 0 && d != 0, "zero election divisor");
@@ -4007,6 +4017,7 @@ private:
 #include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
+#include "vic25/phase_c_p2_enactment_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"
 #include "vic25/phase_c_p5_guerrilla_impl.hpp"
