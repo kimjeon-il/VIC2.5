@@ -83,6 +83,10 @@ void fields(Archive& a,T& x) {
         V(legal_basis);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,P1Institution>){
         V(country);V(public_institution_id);V(kind);V(level);
+    } else if constexpr(std::is_same_v<X,PoliticalCharacter>){
+        V(person_id);V(country);V(interest_group);V(ideology);V(movement);
+        V(law_preferences);V(popularity_ppm);V(roles);V(active);
+        V(politically_exiled);V(last_review_day);
     } else if constexpr(std::is_same_v<X,P3Stance>){
         V(preference_ppm);V(importance_ppm);
     } else if constexpr(std::is_same_v<X,P3Attitude>){
@@ -459,6 +463,10 @@ struct SnapshotCodec {
             ar(w.p4_official_affiliations_);
             ar(w.p4_campaigns_);
         }
+        if(!w.p1_characters_.empty()||!w.p1_favorites_.empty()) {
+            ar(std::string("VIC25_PHASEC_POLITICAL_CHARACTERS_1"));
+            ar(w.p1_characters_);ar(w.p1_favorites_);
+        }
         if(!w.p2_laws_.empty()||!w.p2_bills_.empty()) {
             ar(std::string("VIC25_PHASEC_P2_LAWS_1"));
             ar(w.p2_laws_);
@@ -538,7 +546,8 @@ struct SnapshotCodec {
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
              seen_p3=false,seen_p5=false,seen_guerrilla=false,
-             seen_enactment=false,seen_campaigns=false;
+             seen_enactment=false,seen_campaigns=false,
+             seen_characters=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -642,6 +651,13 @@ struct SnapshotCodec {
                    w.p4_official_affiliations_.size()>500'000||
                    w.p4_campaigns_.size()>1'000'000)
                     throw std::runtime_error("oversized P4 campaign extension");
+            } else if(extension=="VIC25_PHASEC_POLITICAL_CHARACTERS_1"&&
+                       !seen_characters) {
+                seen_characters=true;
+                ar(w.p1_characters_);ar(w.p1_favorites_);
+                if(w.p1_characters_.size()>1'000'000||
+                   w.p1_favorites_.size()>100'000)
+                    throw std::runtime_error("oversized political-person trailer");
             } else if(extension=="VIC25_PHASEC_P2_LAWS_1"&&!seen_p2) {
                 seen_p2=true;
                 ar(w.p2_laws_);
