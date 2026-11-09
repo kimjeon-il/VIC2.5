@@ -506,6 +506,17 @@ inline void IntegratedWorld::p2_promulgate_bill(
            today>=bill.introduced_day&&
            governments_.at(bill.country).head_of_state==incumbent_head,
            "P2 invalid approval, promulgator or effective date");
+    p2_begin_assent(bill_id,today); // legacy direct approval is still legal
+    auto& assent=p2_assents_.at(bill_id);
+    ensure(assent.status==P2AssentStatus::pending||
+           assent.status==P2AssentStatus::overridden,
+           "P2 publication cannot bypass a national head veto");
+    const auto due=p2_assent_due_.find(assent.decision_deadline);
+    if(due!=p2_assent_due_.end()) {
+        due->second.erase(bill_id);
+        if(due->second.empty())p2_assent_due_.erase(due);
+    }
+    assent.status=P2AssentStatus::signed;
     if(bill.effective_day<=today)bill.effective_day=today+1;
     bill.promulgated_day=today;
     bill.status=P2BillStatus::promulgated;
