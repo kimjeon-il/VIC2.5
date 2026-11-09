@@ -354,6 +354,7 @@ public:
            !engine_.base().core().core().p4_has_due_amendment(day_)&&
            !engine_.base().core().core().p2_has_due(day_)&&
            !engine_.base().core().core().p2_has_review_due(day_)&&
+           !engine_.base().core().core().p4_has_campaign_due(day_)&&
            !engine_.base().core().core().p2_has_negotiable_bills()&&
            !engine_.base().core().core().p3_needs_daily_tick()&&
            !engine_.base().core().core().p5_needs_daily_tick()&&
@@ -490,6 +491,12 @@ public:
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p3_needs_daily_tick())
                 gh.phase_c().p3_daily_react(today);
+        });
+        // Registered national IGs and real contest dates determine party
+        // formation and campaign momentum before today's ballots are counted.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p4_has_campaign_due(today))
+                gh.phase_c().p4_daily_party_campaigns(today);
         });
         // P0 domain decisions run on the real calendar day and may consume
         // the freshly computed POP political response.
