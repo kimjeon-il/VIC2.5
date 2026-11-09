@@ -62,10 +62,10 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
             const auto view=p3_movement_view(mid);
             if((!desired.empty()&&m.desired_choice==desired)||
                (desired.empty()&&m.goal==P3MovementGoal::legal_reform)) {
-                support+=view.support_ppm/2;
+                support+=view.support_ppm;
                 movement_activism=std::max<std::int64_t>(
                     movement_activism,view.activism_ppm);
-            } else opposition+=view.support_ppm/2;
+            } else opposition+=view.support_ppm;
         }
         e.last_review_day=today;
         if(legit<25&&movement_activism<250'000) {
@@ -92,9 +92,9 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         if(const auto fav=p1_favorites_.find(bill.country);
            fav!=p1_favorites_.end())assess(fav->second,25'000);
         std::int64_t success=std::clamp<std::int64_t>(
-            support/2+e.success_bonus_ppm+personal_modifier,0,900'000);
+            support+e.success_bonus_ppm+personal_modifier,0,900'000);
         std::int64_t stall=std::clamp<std::int64_t>(
-            opposition/2+e.setbacks*25'000,0,900'000);
+            opposition+e.setbacks*25'000,0,900'000);
         if(success+stall>1'000'000){
             const auto total=success+stall;
             success=success*1'000'000/total;
@@ -109,7 +109,12 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         const auto roll=static_cast<std::int64_t>(seed%1'000'000);
         ++e.checks;
         if(success==0) {
-            ++e.setbacks;
+            // 1.15 immediately fails reform of an entire government layout
+            // at zero enactment chance; other laws suffer one setback.
+            if(law_domain=="governance_principles"||
+               law_domain=="distribution_of_power")
+                e.setbacks=3;
+            else ++e.setbacks;
             events_.push_back("p2-zero-success:"+id);
         } else if(roll<success) {
             if(e.phase==3) {
@@ -141,12 +146,16 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         const int days=law_domain=="governance_principles"?200:
            (law_domain=="distribution_of_power"||
             law_domain=="economic_system"||law_domain=="slavery")?150:100;
-        const int authority_surplus=std::clamp(
-            p1_authority_budget(bill.country).available,0,1000);
-        const auto baseline=std::clamp(
-            days*(150-std::clamp(legit,0,100))/100,30,300);
-        const auto accelerated=baseline*1000/(1000+authority_surplus);
-        e.next_review_day=today+std::clamp(accelerated,30,300);
+        // Victoria 3 thresholds: qualified 25..49 +50%, 90+ -25%,
+        // with up to another -25% from unused national authority.
+        const auto budget=p1_authority_budget(bill.country);
+        const auto unused=budget.supply>0?
+            std::clamp(budget.available*1000/budget.supply,0,1000):0;
+        const int legitimacy_multiplier=legit>=90?750:
+                                        legit<50?1500:1000;
+        const auto period=days*legitimacy_multiplier/1000*
+                          (1000-unused/4)/1000;
+        e.next_review_day=today+std::clamp(period,30,300);
         p2_review_due_[e.next_review_day].insert(id);
     }
 }
