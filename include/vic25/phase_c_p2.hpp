@@ -69,6 +69,17 @@ struct P2Bill {
     std::int64_t introduced_day{-1},promulgated_day{-1},effective_day{-1};
 };
 
+enum class P2AssentStatus : std::uint8_t {
+    pending, vetoed, overridden, signed, expired
+};
+struct P2Assent {
+    std::string bill_id,country,head_at_vote;
+    P1VetoMode veto{P1VetoMode::none};
+    P2AssentStatus status{P2AssentStatus::pending};
+    std::int32_t override_ppm{666'667};
+    std::int64_t started_day{-1},decision_deadline{-1};
+    std::int64_t veto_day{-1},override_deadline{-1};
+};
 struct P2Enactment {
     std::string bill_id,country,law_key;
     std::uint8_t phase{1}; // 1..3; fourth state is ready for a legal vote

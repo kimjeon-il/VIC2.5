@@ -1628,6 +1628,10 @@ public:
     [[nodiscard]] const P1Constitution& p1_constitution(const std::string&)const;
     [[nodiscard]] const P1Coalition& p1_coalition(const std::string&)const;
     [[nodiscard]] P1AuthorityView p1_authority(const std::string&)const;
+    [[nodiscard]] P1LegislativeChecks p1_legislative_checks(
+        const std::string&)const;
+    void p1_seed_legislative_checks(
+        const std::string&,P1LegislativeChecks);
     void seed_p1_coalition(const std::string&,P1Coalition);
     [[nodiscard]] P1LegitimacyView p1_legitimacy(const std::string&)const;
     void seed_p1_institution(const std::string&,const std::string&,
@@ -1724,6 +1728,17 @@ public:
         return p2_enactments_;
     }
     void p2_approve_bill(const std::string&,const std::vector<std::string>&);
+    void p2_begin_assent(const std::string&,std::int64_t);
+    void p2_veto_bill(const std::string&,const std::string&,std::int64_t);
+    void p2_override_veto(const std::string&,
+                          const std::vector<std::string>&,
+                          const std::vector<std::string>&,std::int64_t);
+    [[nodiscard]] bool p2_has_assent_due(std::int64_t)const;
+    void p2_process_assent_due(std::int64_t);
+    void p2_rebuild_assent_index();
+    [[nodiscard]] const std::map<std::string,P2Assent>& p2_assents()const {
+        return p2_assents_;
+    }
     void p2_promulgate_bill(const std::string&,const std::string&,std::int64_t);
     [[nodiscard]] bool p2_has_due(std::int64_t)const;
     void phase_time_apply_p2(std::int64_t);
@@ -3800,6 +3815,7 @@ private:
     std::map<std::string, GovernmentState> governments_;
     // P1 stores constitutional choices and coalition identity only.
     std::map<std::string,P1Constitution> p1_constitutions_;
+    std::map<std::string,P1LegislativeChecks> p1_legislative_checks_;
     std::map<std::string,P1Coalition> p1_coalitions_;
     std::map<std::string,P1Institution> p1_institutions_;
     std::map<std::int64_t,std::map<std::string,P1GovernmentChange>> p1_pending_;
@@ -3826,6 +3842,8 @@ private:
     std::map<std::string,P2Amendment> p2_amendments_;
     std::set<std::string> p2_active_amendments_;
     std::map<std::string,P2Bill> p2_bills_;
+    std::map<std::string,P2Assent> p2_assents_;
+    std::map<std::int64_t,std::set<std::string>> p2_assent_due_; // derived
     std::map<std::string,P2Enactment> p2_enactments_;
     std::map<std::string,std::int64_t> p2_retry_after_;
     std::map<std::int64_t,std::set<std::string>> p2_review_due_; // derived
@@ -4124,6 +4142,7 @@ private:
 #include "vic25/phase_c_p4_campaign_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p1_law_impl.hpp"
+#include "vic25/phase_c_p2_assent_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_p2_enactment_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"

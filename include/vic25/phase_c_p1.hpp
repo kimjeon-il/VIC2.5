@@ -31,6 +31,17 @@ struct P1Constitution {
     std::string legal_basis;
 };
 
+enum class P1VetoMode : std::uint8_t {
+    none, suspensive, qualified, absolute
+};
+// This is constitutional procedure, not a second seat or political-power
+// ledger. Missing entries are calculated from the P1 form of government.
+struct P1LegislativeChecks {
+    P1VetoMode veto{P1VetoMode::none};
+    std::int32_t override_ppm{666'667}; // fraction of the whole chamber
+    std::int32_t assent_days{10},override_days{30};
+    bool parliamentary_initiative{true};
+};
 struct P1Coalition {
     // Groups belong to the existing Phase C/P3 membership registry.
     // Parties belong to the existing Phase C/P4 national election result.
