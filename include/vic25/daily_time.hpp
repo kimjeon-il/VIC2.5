@@ -552,9 +552,11 @@ public:
         static_assert(std::is_nothrow_move_assignable_v<
                       std::map<std::string,DailyCargo>>);
         static_assert(std::is_nothrow_move_assignable_v<std::vector<Entry>>);
+        const bool leap=(current.year%4==0&&
+            (current.year%100!=0||current.year%400==0));
         engine_.advance_daily(real_actions,day_,first_calendar_day,
                               current.day,days_in_month(current.year,current.month),
-                              close);
+                              close,leap?366:365);
         scheduled_=std::move(next_scheduled);
         journal_=std::move(next_journal);
         cargo_=std::move(next_cargo);

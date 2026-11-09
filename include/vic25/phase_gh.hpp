@@ -376,12 +376,32 @@ struct WarState {
     std::int64_t started_day{},last_combat_day{-1},ended_day{-1};
     bool active{true},armistice{};
 };
+enum class InfamyTier:std::uint8_t {
+    reputable,infamous,notorious,pariah
+};
+struct InfamyRecord {
+    std::int64_t value_ppm{},carry{},last_day{-1};
+};
+struct InfamyEvent {
+    std::string id,country,source;
+    std::int64_t amount_ppm{},day{};
+};
+struct InfamyView {
+    std::string country;
+    std::int64_t value_ppm{},last_day{-1};
+    InfamyTier tier{InfamyTier::reputable};
+    std::int32_t conquest_radicals_ppm{},separatism_resistance_ppm{};
+};
 struct DiplomacyState {
     std::map<std::pair<std::string,std::string>,Tariff> tariffs;
     std::vector<PendingTariff> scheduled_tariffs;
     std::map<std::string,Treaty> treaties;
     std::map<std::string,DailyTreaty> daily_treaties;
     std::map<std::string,WarState> wars; // legal war state only, never duplicate army ledger
+    // H's only persistent Infamy register and immutable real-event audit.
+    std::map<std::string,InfamyRecord> infamy;
+    std::vector<InfamyEvent> infamy_events;
+    std::set<std::string> infamy_ids; // derived on checkpoint restore
     std::map<std::string,Organization> organizations;
     std::map<std::string,Protectorate> protectorates;
     std::map<std::string,Crisis> crises;
@@ -528,6 +548,11 @@ public:
     [[nodiscard]] phasec::IntegratedWorld& phase_c() { return spatial_.phase_c(); }
     [[nodiscard]] const DiplomacyState& diplomacy() const { return diplomacy_; }
     [[nodiscard]] const TradeState& commerce() const { return trade_; }
+    void record_infamy(const std::string&,const std::string&,
+                       const std::string&,std::int64_t);
+    void phase_time_infamy_decay(
+        std::int64_t,int,
+        const std::map<std::string,std::int32_t>&);
 
     // New daily H treaties use the same authenticated government identities
     // and one H-owned diplomacy registry. Terms are active from exact days,
@@ -1126,6 +1151,11 @@ public:
         const auto id="WAR:"+crisis_id;
         diplomacy_.wars.emplace(id,WarState{
             id,crisis_id,claimant,crisis.respondent,day_index_,-1,-1,true,false});
+        // Real armed escalation of an existing territorial claim incurs
+        // the 1.15 state-goal baseline of one point. Full GDP/population
+        // weights require the source-complete state/world GDP and remain
+        // separate from this backed one-time war event.
+        record_infamy("H:WAR-GOAL:"+crisis_id,claimant,id,1'000'000);
         crisis.status=CrisisStatus::escalated;
         ++diplomacy_.revision;
         return true;
@@ -1314,6 +1344,15 @@ private:
                     war.ended_day>=-1&&
                     (war.ended_day<0||!war.active),
                     "H_ERR_WAR_RECORD_INVARIANT");
+        require(h.infamy_events.size()<=1'000'000&&
+                h.infamy.size()<=100'000&&
+                h.infamy_ids.size()==h.infamy_events.size(),
+                "H Infamy history or identity mismatch");
+        for(const auto& [country,record]:h.infamy)
+            require(!country.empty()&&record.value_ppm>=0&&
+                    record.value_ppm<=1'000'000'000&&record.carry>=0&&
+                    record.carry<=366&&record.last_day>=-1,
+                    "H Infamy record outside sourced game scale");
         for(const auto& [id,cargo]:g.daily_shipments) {
             require(id==cargo.id&&!id.empty()&&!cargo.buyer.empty()&&
                     !cargo.destination.empty()&&!cargo.good.empty()&&
@@ -1347,9 +1386,19 @@ public:
                                          bool first_calendar_day=false,
                                          std::int32_t day_of_month=0,
                                          std::int32_t days_in_month=0,
-                                         bool final_calendar_day=false) {
+                                         bool final_calendar_day=false,
+                                         int days_in_year=365) {
         TradeState new_trade=trade_;
         DiplomacyState new_diplomacy=diplomacy_;
+        // Last committed treaty/rank state sets the day's diplomatic
+        // mitigation; this avoids circular prestige/rank/Influence updates.
+        std::map<std::string,std::int32_t> infamy_bonuses;
+        for(const auto& [country,record]:diplomacy_.infamy) {
+            (void)record;
+            const auto cap=diplomatic_capacity(country);
+            if(cap.influence.complete)
+                infamy_bonuses[country]=cap.infamy_decay_bonus_ppm;
+        }
         phasee::World::Plan bridge;
         for(int n=0;n<12;++n)
             bridge[static_cast<std::size_t>(n)].push_back(
@@ -1357,6 +1406,9 @@ public:
                     Stage stage{spatial,new_trade,new_diplomacy,n,
                                 day_of_month,days_in_month,day};
                     if(n==0){
+                        if(day_of_month>0)
+                            stage.phase_time_infamy_decay(day,days_in_year,
+                                                          infamy_bonuses);
                         if(first_calendar_day)stage.advance_legal_state();
                         if(day_of_month>0) {
                             stage.settle_due_daily_trade_cargo();
@@ -1507,6 +1559,7 @@ public:
     // factual diplomatic-exposure view, never spendable influence points.
     [[nodiscard]] DiplomaticCapacityView diplomatic_capacity(
         const std::string& country)const;
+    [[nodiscard]] InfamyView infamy_view(const std::string&)const;
     [[nodiscard]] InfluenceView assess_influence(const std::string& source,
                                                   const std::string& target) const;
     [[nodiscard]] CrisisAdvice advise_crisis(const std::string& id,
@@ -1870,3 +1923,4 @@ inline void Stage::execute_autonomous_trade() {
 #include "vic25/phase_gh_extensions.hpp"
 #include "vic25/phase_gh_diplomacy.hpp"
 #include "vic25/phase_gh_political_power.hpp"
+#include "vic25/phase_gh_infamy_impl.hpp"

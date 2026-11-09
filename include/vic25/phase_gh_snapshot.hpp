@@ -220,6 +220,12 @@ template<class A>void war(A& a,WarState& w) {
     a(w.started_day);a(w.last_combat_day);a(w.ended_day);
     a(w.active);a(w.armistice);
 }
+template<class A>void infamy_record(A& a,InfamyRecord& x) {
+    a(x.value_ppm);a(x.carry);a(x.last_day);
+}
+template<class A>void infamy_event(A& a,InfamyEvent& x) {
+    a(x.id);a(x.country);a(x.source);a(x.amount_ppm);a(x.day);
+}
 template<class A>void h_state(A& a,DiplomacyState& x,bool include_daily=true,
                               bool include_wars=false) {
     checked_map(a,x.tariffs,tariff<A>);
@@ -286,6 +292,11 @@ struct SnapshotCodec {
         persisted::h_state(a,h,
                            upgraded||native_transport||multimodal||has_wars||intermodal||verified,
                            has_wars||intermodal||verified);
+        if(!h.infamy.empty()||!h.infamy_events.empty()) {
+            a(std::string("VIC25_PHASE_GH_INFAMY_1"));
+            persisted::checked_map(a,h.infamy,persisted::infamy_record<decltype(a)>);
+            persisted::checked_vector(a,h.infamy_events,persisted::infamy_event<decltype(a)>);
+        }
         const std::string payload=out.str();
         std::ostringstream end(std::ios::binary|std::ios::out);
         persisted::Writer check{end};
@@ -317,6 +328,20 @@ struct SnapshotCodec {
                            v==version);
         persisted::h_state(a,next.diplomacy_,v!=legacy_version,
                            v==version||v==intermodal_version||v==war_version);
+        const auto digest_offset=static_cast<std::streamoff>(
+            bytes.size()-sizeof(std::uint64_t));
+        if(in.tellg()<digest_offset) {
+            std::string extension;a(extension);
+            if(extension!="VIC25_PHASE_GH_INFAMY_1")
+                throw std::runtime_error("unsupported H Infamy snapshot trailer");
+            persisted::checked_map(a,next.diplomacy_.infamy,
+                persisted::infamy_record<decltype(a)>);
+            persisted::checked_vector(a,next.diplomacy_.infamy_events,
+                persisted::infamy_event<decltype(a)>);
+            for(const auto& event:next.diplomacy_.infamy_events)
+                if(!next.diplomacy_.infamy_ids.insert(event.id).second)
+                    throw std::runtime_error("duplicate H Infamy event identity");
+        }
         std::uint64_t crc{};a(crc);
         if(in.peek()!=std::char_traits<char>::eof()||
            crc!=phasec::persistence_detail::checksum(
