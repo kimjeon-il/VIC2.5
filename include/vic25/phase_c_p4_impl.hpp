@@ -260,6 +260,15 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
                             phaseb::add_checked(weight,
                                 p4_scaled(100'000,n,row.count)));
                 }
+            const auto character=p1_characters_.find(party->head_candidate);
+            if(character!=p1_characters_.end()&&
+               p1_character_available(character->first)&&
+               character->second.country==contest.country) {
+                const auto favor=character->second.popularity_ppm;
+                const auto adjustment=static_cast<People>(
+                   party->organization_ppm)*favor/1'000'000;
+                weight=std::clamp<People>(weight+adjustment,1,5'000'000);
+            }
             weights.emplace_back(party->id,weight);
             weight_sum=phaseb::add_checked(weight_sum,weight);
         }

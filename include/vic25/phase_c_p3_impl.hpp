@@ -122,7 +122,8 @@ inline P3GroupView IntegratedWorld::p3_group_view(
                  static_cast<std::int64_t>(share)*9/10+institutional));
     }
     int approval=50;
-    if(!profile.issue_domain.empty()&&!profile.preferred_choice.empty()) {
+    const auto preferred=p1_group_legal_preference(profile);
+    if(!profile.issue_domain.empty()&&!preferred.empty()) {
         std::string current_choice;
         for(const auto& [slot,id]:p2_active_base_) {
             (void)slot;
@@ -133,7 +134,7 @@ inline P3GroupView IntegratedWorld::p3_group_view(
             }
         }
         if(!current_choice.empty())
-            approval=current_choice==profile.preferred_choice?75:30;
+            approval=current_choice==preferred?75:30;
     }
     People members=0;
     std::int64_t sum_radical=0,sum_engagement=0;

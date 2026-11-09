@@ -51,10 +51,10 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
             const auto& coalition=p1_coalitions_.at(bill.country);
             const bool governing=std::find(coalition.ruling_groups.begin(),
               coalition.ruling_groups.end(),key.second)!=coalition.ruling_groups.end();
-            if(!desired.empty()&&group.preferred_choice==desired) {
+            if(!desired.empty()&&p1_group_legal_preference(group)==desired) {
                 if(governing)support+=clout;
-            } else if(!group.preferred_choice.empty()&&
-                      group.preferred_choice!=desired)opposition+=clout;
+            } else if(!p1_group_legal_preference(group).empty()&&
+                      p1_group_legal_preference(group)!=desired)opposition+=clout;
         }
         for(const auto& [mid,m]:p3_movements_) {
             if(!m.active||m.country!=bill.country||

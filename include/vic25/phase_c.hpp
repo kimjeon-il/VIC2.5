@@ -10,6 +10,7 @@
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
 #include "vic25/phase_c_p5.hpp"
+#include "vic25/phase_c_characters.hpp"
 #include "vic25/phase_c_p5_guerrilla.hpp"
 #include "vic25/ledgers.hpp"
 #include "vic25/shared_reservations.hpp"
@@ -1448,6 +1449,15 @@ public:
     // Names and evidence are scenario data, not fixed social-class bonuses.
     void p3_seed_group(P3Group);
     void p3_seed_movement(P3Movement);
+    void p1_register_political_character(PoliticalCharacter);
+    void p1_set_political_exile(const std::string&,bool);
+    void p1_set_favorite(const std::string&,const std::string&);
+    [[nodiscard]] std::string p1_group_legal_preference(const P3Group&)const;
+    [[nodiscard]] bool p1_character_available(const std::string&)const;
+    [[nodiscard]] bool p1_has_character_work()const;
+    void p1_advance_characters(std::int64_t);
+    [[nodiscard]] const std::map<std::string,PoliticalCharacter>&
+           p1_characters()const{return p1_characters_;}
     void p3_set_stance(Id,const std::string&,P3Stance);
     [[nodiscard]] const std::map<Id,P3Attitude>& p3_attitudes()const {
         return p3_attitudes_;
@@ -3665,6 +3675,8 @@ private:
     std::map<Id, Quantity> household_output_;
     std::map<std::pair<Id,std::string>, Quantity> household_consumed_;
     std::map<std::string, Id> person_anchors_;
+    std::map<std::string,PoliticalCharacter> p1_characters_;
+    std::map<std::string,std::string> p1_favorites_;
     std::map<Id, People> anchor_counts_;
     std::set<std::pair<std::string,std::string>> ballot_ids_;
     std::map<std::string,std::map<std::string,People>> ballot_votes_;
@@ -4033,4 +4045,5 @@ private:
 #include "vic25/phase_c_p2_enactment_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"
+#include "vic25/phase_c_characters_impl.hpp"
 #include "vic25/phase_c_p5_guerrilla_impl.hpp"
