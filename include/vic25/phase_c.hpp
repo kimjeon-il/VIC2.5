@@ -3336,6 +3336,14 @@ public:
                    character.popularity_ppm>=-1'000'000&&
                    character.popularity_ppm<=1'000'000,
                    "P1 political character is not POP backed");
+        for(const auto& [country,cfg]:p1_legislative_checks_)
+            ensure(p1_constitutions_.contains(country)&&
+                   static_cast<unsigned>(cfg.veto)<=
+                       static_cast<unsigned>(P1VetoMode::absolute)&&
+                   cfg.override_ppm>=500'001&&cfg.override_ppm<=1'000'000&&
+                   cfg.assent_days>=1&&cfg.assent_days<=90&&
+                   cfg.override_days>=1&&cfg.override_days<=180,
+                   "P1 corrupt state separation charter");
         for(const auto& [id,mandate]:p1_mandates_)
             ensure(id==mandate.id&&p1_constitutions_.contains(mandate.country)&&
                    mandate.authority_cost>=0&&mandate.authority_cost<=1000,
@@ -3465,6 +3473,46 @@ public:
                        p2_bills_.at(id).status==P2BillStatus::promulgated&&
                        p2_bills_.at(id).effective_day==day,
                        "P2 stale legal event index");
+        for(const auto& [id,a]:p2_assents_) {
+            ensure(id==a.bill_id&&p2_bills_.contains(id)&&
+                   a.country==p2_bills_.at(id).country&&
+                   a.started_day>=0&&
+                   a.decision_deadline>=a.started_day&&
+                   static_cast<unsigned>(a.status)<=
+                       static_cast<unsigned>(P2AssentStatus::expired)&&
+                   a.override_ppm>=500'001&&a.override_ppm<=1'000'000,
+                   "P2 invalid constitutional assent identity");
+            if(a.status==P2AssentStatus::pending)
+                ensure(p2_bills_.at(id).status==P2BillStatus::approved&&
+                       p2_assent_due_.contains(a.decision_deadline)&&
+                       p2_assent_due_.at(a.decision_deadline).contains(id),
+                       "P2 unsigned law missing legal review deadline");
+            if(a.status==P2AssentStatus::vetoed)
+                ensure(p2_bills_.at(id).status==P2BillStatus::approved&&
+                       a.override_deadline>a.veto_day&&
+                       p2_assent_due_.contains(a.override_deadline)&&
+                       p2_assent_due_.at(a.override_deadline).contains(id),
+                       "P2 veto lacks actual reconsideration window");
+        }
+        for(const auto& [id,sponsor]:p2_sponsors_)
+            ensure(id==sponsor.bill_id&&p2_bills_.contains(id)&&
+                   p2_bills_.at(id).country==sponsor.country&&
+                   !sponsor.party.empty()&&sponsor.submitted_day>=0&&
+                   static_cast<unsigned>(sponsor.kind)<=
+                       static_cast<unsigned>(P2SponsorKind::elected_member),
+                   "P2 historical legislative sponsor lacks actual bill");
+        for(const auto& [key,rank]:p2_law_stances_)
+            ensure(p3_groups_.contains(
+                       {std::get<0>(key),std::get<1>(key)})&&
+                   !std::get<2>(key).empty()&&!std::get<3>(key).empty()&&
+                   rank>=-2&&rank<=2,
+                   "P2 ideology score outside legal five-point scale");
+        for(const auto& [key,law]:p2_law_templates_)
+            ensure(std::get<0>(key)==law.country&&
+                   std::get<1>(key)==law.domain&&
+                   std::get<2>(key)==law.base_choice&&
+                   p1_constitutions_.contains(law.country),
+                   "P2 historical law template lacks source country");
         for(const auto& [id,entry]:p2_enactments_) {
             ensure(id==entry.bill_id&&p2_bills_.contains(id)&&
                    entry.country==p2_bills_.at(id).country&&

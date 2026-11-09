@@ -123,6 +123,10 @@ inline void IntegratedWorld::p2_apply_constitution_choice(
         p4_rebuild_due_index();
     }
     charter.legal_basis=law.legal_basis;
+    // A replacement charter invalidates ad-hoc veto overrides inherited
+    // from the previous regime; otherwise presidential vetoes could survive
+    // the enactment of a parliamentary republic.
+    p1_legislative_checks_.erase(law.country);
     ensure(valid_p1_constitution(charter),"P1 invalid ratified charter");
     ++governments_.at(law.country).revision;
     events_.push_back("p2-constitutional-law-effective-in-p1:"+law.country);
