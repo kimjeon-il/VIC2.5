@@ -255,7 +255,8 @@ inline P3GroupView IntegratedWorld::p3_group_view(
                  static_cast<std::int64_t>(share)*9/10+institutional));
     }
     int approval=50;
-    if(!profile.issue_domain.empty()&&!profile.preferred_choice.empty()) {
+    const auto preferred=p1_group_legal_preference(profile);
+    if(!profile.issue_domain.empty()&&!preferred.empty()) {
         std::string current_choice;
         for(const auto& [slot,id]:p2_active_base_) {
             (void)slot;
@@ -266,7 +267,7 @@ inline P3GroupView IntegratedWorld::p3_group_view(
             }
         }
         if(!current_choice.empty())
-            approval=current_choice==profile.preferred_choice?75:30;
+            approval=current_choice==preferred?75:30;
     }
     // A group's live laws are evaluated through ideology preferences.
     // The legacy single-issue preference remains a fallback for custom
@@ -660,6 +661,7 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
             events_.push_back("p3-social-demand-formed-persistent-movement:"+id);
         }
     }
+    p3_autonomous_movements(today);
     p3_last_reaction_day_=today;
     events_.push_back("p3-real-pop-daily-political-reaction");
 }
