@@ -679,10 +679,16 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
        (domain=="distribution_of_power"||domain=="economic_system"||
         domain=="slavery")?150:100;
     const auto country=bill.country;
+    // Old dated fixtures already carry a legislative effective date. Retain
+    // their lawful chamber vote and historical save contract; new undated
+    // bills pass the three-stage political enactment process.
+    const bool process=bill.effective_day==-1;
     p2_bills_.emplace(id,std::move(bill));
-    p2_enactments_.emplace(id,P2Enactment{
-        id,country,key,1,0,0,0,today+review_days,-1,false});
-    p2_review_due_[today+review_days].insert(id);
+    if(process) {
+        p2_enactments_.emplace(id,P2Enactment{
+            id,country,key,1,0,0,0,today+review_days,-1,false});
+        p2_review_due_[today+review_days].insert(id);
+    }
     events_.push_back("p2-bill-introduced");
 }
 

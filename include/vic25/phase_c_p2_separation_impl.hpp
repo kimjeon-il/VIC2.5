@@ -22,7 +22,8 @@ inline void IntegratedWorld::p1_set_legislative_powers(
 }
 inline void IntegratedWorld::p2_open_assent(const std::string& id) {
     const auto& b=p2_bills_.at(id);
-    if(p1_legislative_powers(b.country).veto!=P1VetoRule::none)
+    if(p1_legislative_powers(b.country).veto!=P1VetoRule::none&&
+       p2_enactments_.contains(id))
         p2_assents_.try_emplace(id,P2Assent{id,b.country,-1,-1,false,false,false});
 }
 inline void IntegratedWorld::p2_sign_bill(
