@@ -424,6 +424,15 @@ if(BUILD_TESTING)
     set_tests_properties(vic25_content_json_tests PROPERTIES TIMEOUT 120)
 endif()
 
+# Native political content commands reuse P2 law, P1 government and
+# P3/P5 actual POP and military contracts with atomic save/rollback.
+if(BUILD_TESTING)
+    add_executable(vic25_political_content_tests tests/test_politics_content_integration.cpp)
+    target_link_libraries(vic25_political_content_tests PRIVATE vic25_core)
+    add_test(NAME vic25_political_content_tests COMMAND vic25_political_content_tests)
+    set_tests_properties(vic25_political_content_tests PROPERTIES TIMEOUT 180)
+endif()
+
 # Actual day-native POP legal hazards and source modifier effects.
 if(BUILD_TESTING)
     add_executable(vic25_politics_domain_tests tests/test_politics_domain.cpp)
