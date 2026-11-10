@@ -4,6 +4,7 @@
 #include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <limits>
 #include <iterator>
 #include <map>
@@ -753,7 +754,7 @@ public:
         }
         for(const auto& [id,research]:industry.researches) {
             if(game_c.firm_bankrupt(research.sponsor) ||
-               research.reviewed||research.verified_work>=research.required_evidence||
+               research.reviewed||
                std::any_of(decisions.researches.begin(),decisions.researches.end(),
                     [&](const ResearchPolicy& p){return p.project==id;}))
                 continue;
@@ -1146,7 +1147,19 @@ public:
                         1'000'000,bonus)/1'000'000);
                 const Quantity ceiling=phaseb::add_checked(
                      investment.maximum_daily_work,extra);
-                const Quantity n=std::min({ceiling,
+                // Private-construction allocation changes how much *paid*
+                // work an investor may request, never the physical stock,
+                // employment or cash consumed for each accepted work unit.
+                const auto nation=c.sovereignty(p.region);
+                const double allocation=std::clamp(
+                    1.0+c.p2_catalog_modifier_value(nation,
+                        "country_private_construction_allocation_mult"),
+                    0.0,4.0);
+                const Quantity lawful_work=static_cast<Quantity>(
+                    std::min(static_cast<double>(
+                        std::numeric_limits<Quantity>::max()/4),
+                        std::floor(static_cast<double>(ceiling)*allocation)));
+                const Quantity n=std::min({lawful_work,
                      p.work_required-p.accepted_work,materials,
                      static_cast<Quantity>(staff/p.workers_per_work),affordable});
                 if(n<=0)return;
@@ -1260,7 +1273,8 @@ public:
             plan[1].push_back([research,date,dim,work](phasegh::Stage& gh) {
                 const auto& ds=gh.phase_d().state();
                 const auto& p=ds.researches.at(research.project);
-                if(p.reviewed||p.verified_work>=p.required_evidence)return;
+                const auto needed=phased::effective_research_evidence(p,ds,c);
+                if(p.reviewed||p.verified_work>=needed)return;
                 auto& c=gh.phase_c();
                 const auto& lab=c.facility(p.lab_site);
                 if(lab.capacity<=lab.damaged)return;
@@ -1277,7 +1291,7 @@ public:
                 const Money funds=c.phase_d_cash_available(p.sponsor);
                 if(funds<=0)return;
                 const Quantity n=std::min({research.maximum_daily_work,
-                    p.required_evidence-p.verified_work,cap-used,
+                    needed-p.verified_work,cap-used,
                     material/p.material_per_work,
                     static_cast<Quantity>(labor/p.workers_per_work),
                     static_cast<Quantity>(funds/p.cash_cost_per_work)});
@@ -1295,8 +1309,10 @@ public:
             });
             plan[9].push_back([research](phasegh::Stage& gh){
                 const auto& p=gh.phase_d().state().researches.at(research.project);
-                if(!p.reviewed&&p.verified_work>=p.required_evidence&&
-                   p.paid_work>=p.required_evidence)
+                const auto needed=phased::effective_research_evidence(
+                    p,gh.phase_d().state(),gh.phase_c());
+                if(!p.reviewed&&p.verified_work>=needed&&
+                   p.paid_work>=needed)
                     gh.phase_d().review_research(research.project);
             });
         }

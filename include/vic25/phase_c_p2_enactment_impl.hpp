@@ -102,9 +102,19 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         const auto enacted_bonus=static_cast<std::int64_t>(
             p2_catalog_modifier_value(
                 bill.country,"country_law_enactment_success_add")*1'000'000.0);
+        // 1.15 conditional modifiers name an exact law to be enacted.
+        // Do not incorrectly apply an Autocracy penalty to every reform
+        // in the same constitutional law group.
+        std::int64_t choice_bonus=0;
+        if(!desired.empty()&&p2_catalog_law(desired)) {
+            const auto name="country_enactment_success_chance_"+
+                p2_catalog_canonical_choice(desired)+"_add";
+            choice_bonus=static_cast<std::int64_t>(
+                p2_catalog_modifier_value(bill.country,name)*1'000'000.0);
+        }
         std::int64_t success=std::clamp<std::int64_t>(
-            support+e.success_bonus_ppm+personal_modifier+enacted_bonus,
-            0,900'000);
+            support+e.success_bonus_ppm+personal_modifier+
+            enacted_bonus+choice_bonus,0,900'000);
         std::int64_t stall=std::clamp<std::int64_t>(
             opposition+e.setbacks*25'000,0,900'000);
         if(success+stall>1'000'000){

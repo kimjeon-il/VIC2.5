@@ -226,8 +226,19 @@ inline void IntegratedWorld::p1_advance_political_policies(std::int64_t today) {
             auto& attitude=p3_attitudes_[key.first];
             attitude.slice=key.first;
             auto& stance=attitude.issues[movement.issue_domain];
-            const auto direction=m.kind==P1MandateKind::bolster_movement?
-                2'000:-2'000;
+            // The law affects a genuinely supported movement policy.
+            // Suppression-attraction penalties reduce support more strongly;
+            // no new phantom interest-group membership is created.
+            const auto law_key=m.kind==P1MandateKind::bolster_movement?
+                "country_bolster_attraction_factor":
+                "country_suppression_attraction_factor";
+            const double modifier=p2_region_modifier_value(d.region,law_key);
+            const double scale=std::clamp(
+                m.kind==P1MandateKind::bolster_movement?
+                    1.0+modifier:1.0-modifier,0.0,3.0);
+            const int magnitude=static_cast<int>(2'000*scale);
+            const int direction=m.kind==P1MandateKind::bolster_movement?
+                magnitude:-magnitude;
             stance.preference_ppm=std::clamp(
                 stance.preference_ppm+direction,-1'000'000,1'000'000);
             stance.importance_ppm=std::max(stance.importance_ppm,100'000);

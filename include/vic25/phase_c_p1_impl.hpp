@@ -170,9 +170,40 @@ inline P1LegitimacyView IntegratedWorld::p1_legitimacy(
                              20*result.legal_compatibility)/100;
     const double head_legal=legal("country_legitimacy_headofstate_add");
     const double base_legal=legal("country_legitimacy_base_add");
+    // Incoherence is observed only for ruling groups with an explicit
+    // policy stance and a real active law. Unknown ideologies are neutral,
+    // not guessed into an extra legitimacy penalty.
+    int contradictory_groups=0;
+    for(const auto& group:coalition.ruling_groups) {
+        const auto it=p3_groups_.find({country,group});
+        if(it==p3_groups_.end()||it->second.issue_domain.empty())continue;
+        const auto preferred=p1_group_legal_preference(it->second);
+        if(preferred.empty())continue;
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(law.country!=country||
+               law.domain!=it->second.issue_domain)continue;
+            const auto preferred_id=p2_catalog_law(preferred)?
+                p2_catalog_canonical_choice(preferred):preferred;
+            const auto active_id=p2_catalog_law(law.base_choice)?
+                p2_catalog_canonical_choice(law.base_choice):law.base_choice;
+            if(preferred_id!=active_id)++contradictory_groups;
+            break;
+        }
+    }
+    const auto included=static_cast<int>(coalition.ruling_groups.size());
+    const auto allowed=std::max(1,static_cast<int>(
+        2+legal("country_legitimacy_govt_size_add")));
+    const int excess=std::max(0,included-allowed);
+    const double incoherence_factor=std::clamp(
+        1.0+legal("country_legitimacy_ideological_incoherence_mult"),
+        0.0,4.0);
+    const double penalty=static_cast<double>(
+        5*contradictory_groups+3*excess)*incoherence_factor;
     result.score=std::clamp(
         static_cast<int>(institutional+base_legal+
-                         head_legal*0.25),0,100);
+                         head_legal*0.25-penalty),0,100);
     return result;
 }
 

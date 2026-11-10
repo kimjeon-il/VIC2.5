@@ -1,6 +1,6 @@
 # VIC2.5 Victoria 3 1.15 — 법률 효과 실제 소비자 연결 현황
 
-기준: 2026-11-05 공개 1.15 원본 미러의 법률·증보 수치/boolean modifier. 조사일 2026-11-10. 작업 브랜치 `work/law-effects-115-20261110`.
+기준: 2026-11-05 공개 1.15 원본 미러의 법률·증보 수치/boolean modifier. 조사일 2026-11-10. 작업 브랜치 `work/law-effects-115-20261110`. 해당 브랜치의 2차 연결은 빌드·CTest 미실행 상태.
 
 ## 판정 규칙
 
@@ -12,8 +12,8 @@
 
 - 법률 **148개**, 법률군 **26개**, 증보 **71개**
 - 정적 modifier 행 **1117개**, 고유 effect key **350종**
-- 실행 경로 매핑된 key **63종** (부분 구현/미검증), 소비자가 아직 없는 key **287종**
-- 매핑된 source 행 **310개**, 미연결 source 행 **807개**
+- 실행 경로 매핑된 key **80종** (부분 구현/미검증), 소비자가 아직 없는 key **270종**
+- 매핑된 source 행 **415개**, 미연결 source 행 **702개**
 
 ## 법률군별 정적 modifier 매핑
 
@@ -24,16 +24,16 @@
 | `caste_hegemony` | 4 | 51 | 2 | 49 |
 | `childrens_rights` | 3 | 11 | 7 | 4 |
 | `church_and_state` | 7 | 87 | 13 | 74 |
-| `citizenship` | 7 | 92 | 6 | 86 |
+| `citizenship` | 7 | 92 | 18 | 74 |
 | `colonization` | 5 | 14 | 0 | 14 |
-| `distribution_of_power` | 14 | 108 | 58 | 50 |
-| `economic_system` | 8 | 95 | 6 | 89 |
+| `distribution_of_power` | 14 | 108 | 81 | 27 |
+| `economic_system` | 8 | 95 | 16 | 79 |
 | `edo_social_system` | 3 | 53 | 0 | 53 |
-| `education_system` | 5 | 14 | 7 | 7 |
-| `free_speech` | 4 | 31 | 3 | 28 |
-| `governance_principles` | 9 | 35 | 23 | 12 |
+| `education_system` | 5 | 14 | 8 | 6 |
+| `free_speech` | 4 | 31 | 16 | 15 |
+| `governance_principles` | 9 | 35 | 34 | 1 |
 | `health_system` | 4 | 13 | 4 | 9 |
-| `internal_security` | 8 | 48 | 11 | 37 |
+| `internal_security` | 8 | 48 | 36 | 12 |
 | `labor_rights` | 3 | 1 | 1 | 0 |
 | `labour_associations` | 6 | 37 | 9 | 28 |
 | `land_reform` | 9 | 32 | 11 | 21 |
@@ -43,10 +43,10 @@
 | `rights_of_women` | 5 | 15 | 6 | 9 |
 | `slavery` | 5 | 5 | 3 | 2 |
 | `taxation` | 5 | 2 | 0 | 2 |
-| `trade_policy` | 6 | 44 | 12 | 32 |
+| `trade_policy` | 6 | 44 | 16 | 28 |
 | `welfare` | 5 | 15 | 5 | 10 |
 
-## 실행 경로가 존재하는 modifier 키 — 의미와 원작 동등성은 별도 검증 필요
+## 실행 경로가 존재하는 modifier 키 — 원작 동등성은 별도 검증 필요
 
 | 원본 modifier key | 해당 원본 정의 행 | 연결 소유 계산 | 비고 |
 |---|---:|---|---|
@@ -57,27 +57,43 @@
 | `country_authority_add` | 39 | C/P 정치 | 정적 소비자 연결 |
 | `country_authority_cost_add` | 5 | C/P 정치 | 정적 소비자 연결 |
 | `country_authority_mult` | 10 | C/P 정치 | 정적 소비자 연결 |
+| `country_bolster_attraction_factor` | 3 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_bureaucrats_pol_str_mult` | 8 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_can_only_conscript_peasants_bool` | 2 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_capitalists_pol_str_mult` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_clergymen_pol_str_mult` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_clerks_pol_str_mult` | 1 | 별도 실행 대상 필요 | 정적 소비자 연결 |
+| `country_coup_resistance_add` | 7 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_disallow_trade_bool` | 1 | G/H 무역·외교 | VIC2.5 단순화 계산·조건부 |
+| `country_enactment_success_chance_law_anarchy_add` | 1 | P2 입법 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `country_enactment_success_chance_law_autocracy_add` | 1 | P2 입법 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `country_enactment_success_chance_law_oligarchy_add` | 1 | P2 입법 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `country_enactment_success_chance_law_technocracy_add` | 1 | P2 입법 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_engineers_pol_str_mult` | 1 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_farmers_pol_str_mult` | 2 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_law_enactment_speed_mult` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_law_enactment_success_add` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_legitimacy_base_add` | 6 | C/P 정치 | VIC2.5 단순화 계산·조건부 |
+| `country_legitimacy_govt_size_add` | 17 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_legitimacy_govt_total_clout_add` | 15 | C/P 정치 | VIC2.5 단순화 계산·조건부 |
 | `country_legitimacy_govt_total_votes_add` | 11 | C/P 정치 | VIC2.5 단순화 계산·조건부 |
 | `country_legitimacy_headofstate_add` | 13 | C/P 정치 | VIC2.5 단순화 계산·조건부 |
+| `country_legitimacy_ideological_incoherence_mult` | 19 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_loan_interest_rate_add` | 5 | C/D 경제·재정 | 정적 소비자 연결 |
 | `country_loan_interest_rate_mult` | 5 | C/D 경제·재정 | 정적 소비자 연결 |
 | `country_migration_restrictiveness_add` | 3 | B/POP·C/P1 | VIC2.5 단순화 계산·조건부 |
 | `country_officers_pol_str_mult` | 21 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_peasants_pol_str_mult` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
+| `country_private_construction_allocation_mult` | 8 | P0/Phase D 민간 건설 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `country_production_tech_research_speed_mult` | 1 | Phase D 기술·연구 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `country_production_tech_spread_mult` | 1 | Phase D 기술·연구 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_shopkeepers_pol_str_mult` | 4 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_soldiers_pol_str_mult` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
+| `country_support_separatism_resistance_mult` | 14 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `country_support_separatism_strength_mult` | 9 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `country_suppression_attraction_factor` | 9 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `country_tech_research_speed_mult` | 1 | Phase D 기술·연구 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `country_tech_spread_mult` | 6 | Phase D 기술·연구 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `interest_group_ig_armed_forces_approval_add` | 1 | C/P 정치 | 정적 소비자 연결 |
 | `interest_group_ig_armed_forces_pol_str_mult` | 4 | C/P 정치 | 정적 소비자 연결 |
 | `interest_group_ig_devout_approval_add` | 1 | C/P 정치 | 정적 소비자 연결 |
@@ -93,6 +109,7 @@
 | `interest_group_ig_trade_unions_pol_str_mult` | 7 | C/P 정치 | VIC2.5 단순화 계산·조건부 |
 | `interest_group_in_government_approval_add` | 4 | C/P 정치 | 정적 소비자 연결 |
 | `interest_group_pol_str_mult` | 6 | C/P 정치 | 정적 소비자 연결 |
+| `political_movement_radicalism_add` | 6 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `state_birth_rate_mult` | 4 | B/POP·C/P1 | 정적 소비자 연결 |
 | `state_conscription_rate_add` | 8 | C/E/H 군사 | VIC2.5 단순화 계산·조건부 |
 | `state_education_access_add` | 3 | B/POP·C/P1 | 정적 소비자 연결 |
@@ -110,12 +127,11 @@
 | `state_pop_qualifications_mult` | 1 | B/POP·C/P1 | VIC2.5 단순화 계산·조건부 |
 | `state_radicals_from_political_movements_mult` | 9 | C/P 정치 | 정적 소비자 연결 |
 | `state_tariff_import_add` | 5 | G/H 무역·외교 | VIC2.5 단순화 계산·조건부 |
-| `state_trade_capacity_mult` | 2 | G/H 무역·외교 | VIC2.5 단순화 계산·조건부 |
-
 | `state_tax_capacity_mult` | 5 | C/D 경제·재정 | 행정인력에 기반한 원천징수 실효율(단순화) |
 | `state_tax_collection_mult` | 1 | C/D 경제·재정 | 행정인력에 기반한 원천징수 실효율(단순화) |
+| `state_trade_capacity_mult` | 2 | G/H 무역·외교 | VIC2.5 단순화 계산·조건부 |
 
-## 아직 연결되지 않은 modifier 키 — 모두 실제 계산 연결이 필요함
+## 아직 연결되지 않은 modifier 키 — 실제 계산 연결 필요
 
 | 원본 modifier key | 해당 정의 행 | 연결해야 할 영역 |
 |---|---:|---|
@@ -188,7 +204,6 @@
 | `country_aristocrats_voting_power_add` | 3 | C/P 정치 |
 | `country_basque_cultural_acceptance_add` | 1 | B/POP·C/P1 |
 | `country_block_government_reform_bool` | 3 | 별도 실행 대상 필요 |
-| `country_bolster_attraction_factor` | 3 | 별도 실행 대상 필요 |
 | `country_brahmins_acceptance_min_add` | 3 | B/POP·C/P1 |
 | `country_brahmins_qualification_growth_other_class_mult` | 1 | B/POP·C/P1 |
 | `country_brahmins_qualification_growth_same_class_mult` | 2 | B/POP·C/P1 |
@@ -202,7 +217,6 @@
 | `country_clerks_voting_power_add` | 1 | C/P 정치 |
 | `country_company_construction_efficiency_bonus_add` | 1 | C/D 경제·재정 |
 | `country_consumption_tax_cost_mult` | 1 | C/D 경제·재정 |
-| `country_coup_resistance_add` | 7 | C/P 정치 |
 | `country_dalit_acceptance_max_add` | 2 | B/POP·C/P1 |
 | `country_dalit_cultural_acceptance_mult` | 2 | B/POP·C/P1 |
 | `country_dalit_education_access_mult` | 1 | B/POP·C/P1 |
@@ -220,10 +234,6 @@
 | `country_economic_dependence_on_overlord_add` | 2 | 별도 실행 대상 필요 |
 | `country_education_fervor_add` | 2 | B/POP·C/P1 |
 | `country_electoral_confidence_impact_mult` | 7 | 별도 실행 대상 필요 |
-| `country_enactment_success_chance_law_anarchy_add` | 1 | 별도 실행 대상 필요 |
-| `country_enactment_success_chance_law_autocracy_add` | 1 | 별도 실행 대상 필요 |
-| `country_enactment_success_chance_law_oligarchy_add` | 1 | 별도 실행 대상 필요 |
-| `country_enactment_success_chance_law_technocracy_add` | 1 | 별도 실행 대상 필요 |
 | `country_fervor_target_basque_add` | 1 | B/POP·C/P1 |
 | `country_financial_districts_buy_farms_likelihood` | 3 | 별도 실행 대상 필요 |
 | `country_forbid_electoral_fraud_bool` | 1 | 별도 실행 대상 필요 |
@@ -251,8 +261,6 @@
 | `country_kshatriyas_qualification_growth_other_class_mult` | 1 | B/POP·C/P1 |
 | `country_kshatriyas_qualification_growth_same_class_mult` | 2 | B/POP·C/P1 |
 | `country_laborers_voting_power_add` | 1 | C/P 정치 |
-| `country_legitimacy_govt_size_add` | 17 | C/P 정치 |
-| `country_legitimacy_ideological_incoherence_mult` | 19 | C/P 정치 |
 | `country_leverage_resistance_mult` | 15 | G/H 무역·외교 |
 | `country_limit_officers_qualifications_to_upper_strata` | 1 | B/POP·C/P1 |
 | `country_machinists_voting_power_add` | 1 | C/P 정치 |
@@ -269,9 +277,6 @@
 | `country_polish_cultural_acceptance_add` | 1 | B/POP·C/P1 |
 | `country_prestige_from_navy_power_projection_mult` | 1 | C/E/H 군사 |
 | `country_primary_culture_fervor_from_laws_add` | 5 | B/POP·C/P1 |
-| `country_private_construction_allocation_mult` | 8 | C/D 경제·재정 |
-| `country_production_tech_research_speed_mult` | 1 | C/D 경제·재정 |
-| `country_production_tech_spread_mult` | 1 | C/D 경제·재정 |
 | `country_radicalism_increases_full_acceptance_mult` | 1 | B/POP·C/P1 |
 | `country_ship_construction_efficiency_add` | 1 | C/D 경제·재정 |
 | `country_ship_crew_starting_veterancy_experience_add` | 2 | C/E/H 군사 |
@@ -313,11 +318,6 @@
 | `country_strata_samurai_low_acceptance_max_add` | 1 | B/POP·C/P1 |
 | `country_strata_samurai_low_acceptance_min_add` | 3 | B/POP·C/P1 |
 | `country_strata_samurai_low_qualification_growth_same_class_mult` | 3 | B/POP·C/P1 |
-| `country_support_separatism_resistance_mult` | 14 | C/P 정치 |
-| `country_support_separatism_strength_mult` | 9 | C/P 정치 |
-| `country_suppression_attraction_factor` | 9 | C/P 정치 |
-| `country_tech_research_speed_mult` | 1 | 별도 실행 대상 필요 |
-| `country_tech_spread_mult` | 6 | 별도 실행 대상 필요 |
 | `country_tension_decay_mult` | 1 | 별도 실행 대상 필요 |
 | `country_two_spains_conservative_drift_add` | 1 | 별도 실행 대상 필요 |
 | `country_vaishyas_acceptance_max_add` | 2 | B/POP·C/P1 |
@@ -340,7 +340,6 @@
 | `country_war_support_casualties_mult` | 4 | C/E/H 군사 |
 | `interest_group_ig_devout_pop_attraction_mult` | 3 | C/P 정치 |
 | `interest_group_in_government_attraction_mult` | 1 | C/P 정치 |
-| `political_movement_radicalism_add` | 6 | C/P 정치 |
 | `ship_power_projection_mult` | 2 | C/E/H 군사 |
 | `state_aristocrats_investment_pool_contribution_add` | 1 | C/D 경제·재정 |
 | `state_aristocrats_investment_pool_efficiency_mult` | 7 | C/D 경제·재정 |
@@ -419,3 +418,14 @@
 각 미연결 키는 (a) 이미 존재하는 원장 소비자에 연결하거나 (b) 게임적으로 통합된 명시 규칙을 만들거나 (c) 해당 게임 기능이 없어 `UNSUPPORTED`로 남긴다는 상태를 별도로 기록한다. **미지원 항목을 0으로 조용히 적용하고 '모든 효과 구현'으로 보고하지 않는다.** 기존 C/D/E/G/H 실제 현금·재고·인구·의석·병력 원장은 중복 생성하지 않는다.
 
 원자료: https://github.com/jink47787/Historical_MP_Series_Vic3/tree/master/basegame-ver/common/laws 및 https://github.com/jink47787/Historical_MP_Series_Vic3/tree/master/basegame-ver/common/amendments
+
+## 2026-11-10 후속 연결 (2차)
+
+- P5: 기존 실인구 기반 운동 위험에 치안기관의 실제 운영 능력에 따른 쿠데타 저항력, 분리주의 저항·강도, 정치운동 급진성 보정을 적용. 혁명군·국가·POP를 새로 생성하지 않는다.
+- P1: 권위를 사용하는 실제 운동 지원·억압에 언론법의 attraction factor를 적용한다. 정부의 실제 IG/법률 불일치를 정통성의 이념 불일치로 반영하고, 법률상 정부 규모 가중을 적용한다.
+- P2: 실제 개정 대상 법률과 정확히 일치하는 성공률 보정만 활성 법률/증보에서 조회한다. 다른 선택지에 패널티를 일반화하지 않는다.
+- Phase D/P0: 법률상 연구 속도 및 전파 속도는 유료 기술 연구의 **필요 증빙량**을 변경하며 검증된 작업량과 실제 지출은 그대로 유지한다. 전파에는 실제 기술이전 수업·자금만 사용한다. 기존 프로젝트의 요구량은 시행법 변경 시 다시 계산하되 POP·돈·재료를 재생성하지 않는다.
+- P0/Phase D: 민간 건설 배분율은 완료된 건설을 생성하지 않고 일일 **유효 발주 상한**만 조정한다. 현금, 자재, 직원, 실제 시공 실적, 시설 완공은 계속 기존 원장에 귀속한다.
+- 2차 추가 키 **17종**. 이전 연결 키 포함 총 **80종**, 미연결 **270종**. 이는 내용적 완성률이 아니라 정적 modifier 키별 코드 소비자 존재 여부다.
+
+**연결 범위 한계:** 원작에서는 별도의 이념/정치운동/건설·연구 엔진에서 계산하는 효과를 VIC2.5의 단순화된 P1/P5/P0/D 규칙에 맞춰 사용한다. 엄밀한 1.15 수치 동등성을 주장하지 않는다. 본 회차 컴파일 및 실제 시나리오 재생은 실행하지 않았다.

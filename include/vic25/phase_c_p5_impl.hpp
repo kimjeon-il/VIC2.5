@@ -29,10 +29,42 @@ inline P5RiskView IntegratedWorld::p5_risk(const std::string& movement_id)const 
         risk.pressure_ppm=0;
         return risk;
     }
+    // State-level institutional modifiers count only if an actual,
+    // staffed institution can administer them in the movement's region.
+    // Otherwise only country-level law effects participate.
+    const auto effective_law=[&](std::string_view key)->double {
+        if(!movement.region.empty()&&sovereignty_.contains(movement.region)&&
+           sovereignty_.at(movement.region)==movement.country)
+            return p2_region_modifier_value(movement.region,key);
+        return p2_catalog_modifier_value(movement.country,key);
+    };
+    const auto movement_radicalism=effective_law(
+        "political_movement_radicalism_add");
+    risk.radical_ppm=static_cast<std::int32_t>(std::clamp(
+        static_cast<double>(risk.radical_ppm)+
+        movement_radicalism*1'000'000.0,0.0,1'000'000.0));
     std::int64_t pressure=static_cast<std::int64_t>(
         risk.support_ppm)/3+
         static_cast<std::int64_t>(risk.activism_ppm)/3+
         static_cast<std::int64_t>(risk.radical_ppm)/3;
+    // Compact P5 game balance: resistance changes political pressure,
+    // never the real number of supporters, weapons, or assigned troops.
+    if(movement.goal==P3MovementGoal::replace_government) {
+        const double resistance=std::clamp(effective_law(
+            "country_coup_resistance_add"),-0.5,4.0);
+        pressure=static_cast<std::int64_t>(std::clamp(
+            static_cast<double>(pressure)/(1.0+resistance),
+            0.0,1'000'000.0));
+    } else if(movement.goal==P3MovementGoal::secession||
+              movement.goal==P3MovementGoal::autonomy) {
+        const double strength=std::max(0.0,1.0+
+            effective_law("country_support_separatism_strength_mult"));
+        const double resistance=std::max(0.1,1.0+
+            effective_law("country_support_separatism_resistance_mult"));
+        pressure=static_cast<std::int64_t>(std::clamp(
+            static_cast<double>(pressure)*strength/resistance,
+            0.0,1'000'000.0));
+    }
     if(risk.institutional_exit)pressure=std::max<std::int64_t>(0,pressure-50'000);
     if(p1_constitutions_.contains(movement.country)&&
        p1_legitimacy(movement.country).score<40)

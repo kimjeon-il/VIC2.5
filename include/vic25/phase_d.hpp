@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <stdexcept>
@@ -390,6 +391,59 @@ struct DomainState {
         }
     }
 };
+
+// Research-rate law effects reduce the *required funded evidence*; they do
+// not mint fictitious scientists, goods, cash or completed research work.
+// Speed is evaluated at review time, so repealing a reform also matters.
+inline Quantity effective_research_evidence(
+        const ResearchProject& p,const DomainState& d,
+        const phasec::IntegratedWorld& c) {
+    if(p.required_evidence<=0)return p.required_evidence;
+    const auto& country=c.sovereignty(p.region);
+    if(!c.has_government(country))return p.required_evidence;
+    double speed=c.p2_catalog_modifier_value(
+        country,"country_tech_research_speed_mult");
+    const bool production=std::any_of(d.recipes.begin(),d.recipes.end(),
+        [&](const auto& entry){return entry.second.tech_id==p.tech_id;});
+    if(production)
+        speed+=c.p2_catalog_modifier_value(
+            country,"country_production_tech_research_speed_mult");
+    const double multiplier=std::clamp(1.0+speed,0.25,4.0);
+    return static_cast<Quantity>(std::clamp(
+        std::ceil(static_cast<double>(p.required_evidence)/multiplier),
+        1.0,static_cast<double>(
+            std::numeric_limits<Quantity>::max()/4)));
+}
+
+inline Quantity effective_contact_instruction(
+        const KnowledgeContact& contact,const DomainState& d,
+        const phasec::IntegratedWorld& c) {
+    std::string country;
+    if(c.has_government(contact.target))country=contact.target;
+    else {
+        for(const auto& [id,site]:c.facilities()) {
+            (void)id;
+            if(site.owner!=contact.target)continue;
+            const auto sovereign=c.sovereignty(site.region);
+            if(country.empty())country=sovereign;
+            else if(country!=sovereign)return contact.required_instruction;
+        }
+    }
+    if(country.empty()||!c.has_government(country))
+        return contact.required_instruction;
+    double speed=c.p2_catalog_modifier_value(
+        country,"country_tech_spread_mult");
+    const bool production=std::any_of(d.recipes.begin(),d.recipes.end(),
+        [&](const auto& entry){return entry.second.tech_id==contact.tech;});
+    if(production)
+        speed+=c.p2_catalog_modifier_value(
+            country,"country_production_tech_spread_mult");
+    const double multiplier=std::clamp(1.0+speed,0.25,4.0);
+    return static_cast<Quantity>(std::clamp(
+        std::ceil(static_cast<double>(contact.required_instruction)/multiplier),
+        1.0,static_cast<double>(
+            std::numeric_limits<Quantity>::max()/4)));
+}
 
 class Stage {
     phasec::IntegratedWorld& c_;
@@ -879,9 +933,9 @@ public:
     void review_research(const std::string& project) {
         must(9);
         auto& p=d_.researches.at(project);
-        require(!p.reviewed && p.required_evidence>0 &&
-                p.verified_work>=p.required_evidence &&
-                p.paid_work>=p.required_evidence,
+        const auto needed=effective_research_evidence(p,d_,c_);
+        require(!p.reviewed && needed>0 &&
+                p.verified_work>=needed && p.paid_work>=needed,
                 "research lacks paid validated evidence");
         if(d_.technologies.contains(p.tech_id)){
             for(const auto& prereq:d_.technologies.at(p.tech_id).prerequisites)
@@ -946,8 +1000,9 @@ public:
         must(9);
         auto& contact=d_.contacts.at(id);
         require(!contact.reviewed&&contact.verified_instruction>=
-                contact.required_instruction&&
-                contact.paid_instruction>=contact.required_instruction,
+                effective_contact_instruction(contact,d_,c_)&&
+                contact.paid_instruction>=effective_contact_instruction(
+                    contact,d_,c_),
                 "knowledge transfer lacks real instruction or legitimate payment");
         contact.reviewed=true;
         d_.promotions[d_.opening_month+1].push_back({
