@@ -45,29 +45,50 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         const auto desired=bill.action==P2BillAction::enact_or_replace_base?
             bill.proposed_base.base_choice:std::string{};
         std::int64_t support=0,opposition=0,movement_activism=0;
+        const auto canonical_group=politics::bare_group(law_domain);
+        const auto canonical_choice=politics::bare_law(desired);
+        const bool catalogue_law=!desired.empty()&&
+            politics::catalogue().has(canonical_group,canonical_choice);
+        const auto current=catalogue_law?
+            p2_selected_law(bill.country,canonical_group):
+            std::optional<std::string>{};
         for(const auto& [key,group]:p3_groups_) {
-            if(key.first!=bill.country||group.issue_domain!=law_domain)continue;
+            if(key.first!=bill.country)continue;
+            if(!catalogue_law&&group.issue_domain!=law_domain)continue;
             const auto view=p3_group_view(key.first,key.second);
             const auto clout=static_cast<std::int64_t>(view.clout_ppm);
-            // Distinguish committed, dissatisfied and indifferent groups
-            // using the existing political approval and POP radicalism.
             const auto intensity=std::clamp<std::int64_t>(
                 500'000+(50-view.approval)*10'000+
                 view.radical_ppm/4,250'000,1'000'000);
             const auto& coalition=p1_coalitions_.at(bill.country);
             const bool governing=std::find(coalition.ruling_groups.begin(),
-              coalition.ruling_groups.end(),key.second)!=coalition.ruling_groups.end();
-            if(!desired.empty()&&p1_group_legal_preference(group)==desired) {
-                if(governing)support+=clout*intensity/1'000'000;
-            } else if(!p1_group_legal_preference(group).empty()&&
-                      p1_group_legal_preference(group)!=desired)
-                opposition+=clout*intensity/1'000'000;
+                coalition.ruling_groups.end(),key.second)!=
+                coalition.ruling_groups.end();
+            bool favors=false,opposes=false;
+            if(catalogue_law) {
+                const auto proposal=p3_law_stance(bill.country,
+                    key.second,canonical_group,canonical_choice);
+                const auto prior=current?
+                    p3_law_stance(bill.country,key.second,
+                                  canonical_group,*current):
+                    std::optional<int>{};
+                const auto change=proposal.value_or(0)-prior.value_or(0);
+                favors=change>0;opposes=change<0;
+            } else {
+                favors=!desired.empty()&&
+                    p1_group_legal_preference(group)==desired;
+                opposes=!p1_group_legal_preference(group).empty()&&
+                    p1_group_legal_preference(group)!=desired;
+            }
+            if(favors&&governing)support+=clout*intensity/1'000'000;
+            if(opposes)opposition+=clout*intensity/1'000'000;
         }
         for(const auto& [mid,m]:p3_movements_) {
             if(!m.active||m.country!=bill.country||
-               m.issue_domain!=law_domain)continue;
+               politics::bare_group(m.issue_domain)!=canonical_group)continue;
             const auto view=p3_movement_view(mid);
-            if((!desired.empty()&&m.desired_choice==desired)||
+            if((!desired.empty()&&
+                politics::bare_law(m.desired_choice)==canonical_choice)||
                (desired.empty()&&m.goal==P3MovementGoal::legal_reform)) {
                 support+=view.support_ppm;
                 movement_activism=std::max<std::int64_t>(
