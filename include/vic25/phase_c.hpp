@@ -3299,6 +3299,11 @@ public:
                       (g.chamber_seats>0&&g.quorum>0&&g.quorum<=g.chamber_seats)),
                    "invalid legal P1 or legacy government institution");
         }
+        for(const auto& [country,day]:p1_lost_confidence_)
+            ensure(day>=0&&p1_constitutions_.contains(country)&&
+                   p1_coalitions_.contains(country)&&
+                   p1_coalitions_.at(country).caretaker,
+                   "P1 censured government must remain caretaker");
         ensure(p1_constitutions_.size()==p1_coalitions_.size(),
                "P1 constitution/coalition mismatch");
         for(const auto& [country,order]:p1_constitutions_) {

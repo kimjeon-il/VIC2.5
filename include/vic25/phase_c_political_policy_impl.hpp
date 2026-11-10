@@ -264,5 +264,8 @@ inline void IntegratedWorld::p1_advance_political_policies(std::int64_t today) {
                 event_id,crisis.country,id,
                 P1PoliticalEventKind::crisis_warning,today,false});
     }
+    // One national event for material real wage-right disputes, not
+    // a fabricated docket of trials or judicial budgets.
+    p1_observe_legal_disputes(today);
 }
 } // namespace vic25::phasec
