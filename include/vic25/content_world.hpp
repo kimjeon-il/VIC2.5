@@ -65,10 +65,35 @@ class World {
             try {return c.p5_risk(id).pressure_ppm;}
             catch(const std::out_of_range&){return std::nullopt;}
         }
+        if(key=="p1.legitimacy"&&c.has_government(scope.id))
+            return c.p1_legitimacy(scope.id).score;
+        if(key.rfind("p2.law:",0)==0) {
+            const auto name=key.substr(7);
+            const auto mid=name.find(':');
+            if(mid==std::string::npos)return std::nullopt;
+            const auto selected=c.p2_selected_law(scope.id,name.substr(0,mid));
+            if(!selected)return std::nullopt;
+            return *selected==name.substr(mid+1)?Number{1}:Number{0};
+        }
+        if(key.rfind("p3.movement_active:",0)==0) {
+            const auto id=key.substr(std::string("p3.movement_active:").size());
+            const auto it=c.p3_movements().find(id);
+            if(it==c.p3_movements().end()||it->second.country!=scope.id)
+                return std::nullopt;
+            return it->second.active?Number{1}:Number{0};
+        }
+        if(key.rfind("p3.movement_support:",0)==0) {
+            const auto id=key.substr(std::string("p3.movement_support:").size());
+            const auto it=c.p3_movements().find(id);
+            if(it==c.p3_movements().end()||it->second.country!=scope.id)
+                return std::nullopt;
+            return c.p3_movement_view(id).support_ppm;
+        }
         return std::nullopt; // Unsupported is not silently treated as zero.
     }
     static void native_write(const Scope& scope,const External& effect,
-                 const std::string& provenance,phasegh::Stage& gh) {
+                 const std::string& provenance,Day today,
+                 phasegh::Stage& gh) {
         auto& geo=gh.geography();
         require(gh.phase()==9,"CONTENT_NATIVE_EFFECT_WRONG_STAGE");
         require(!provenance.empty(),"CONTENT_MISSING_CAUSAL_PROVENANCE");
@@ -155,6 +180,114 @@ class World {
                 }
                 return;
             }
+            case ExternalKind::political_bill: {
+                require(effect.target_country.empty()||
+                        effect.target_country==scope.id,
+                        "CONTENT_BILL_FOREIGN_AUTHORITY");
+                const auto& government=core.government(scope.id);
+                const auto proposer=effect.actor.empty()?
+                    government.prime_minister:effect.actor;
+                core.p2_propose_catalogue_reform(scope.id,effect.law_group,
+                    effect.law_choice,proposer,provenance,
+                    "CONTENT:bill:"+provenance,today);
+                return;
+            }
+            case ExternalKind::political_cabinet: {
+                require(effect.target_country.empty()||
+                        effect.target_country==scope.id,
+                        "CONTENT_CABINET_FOREIGN_AUTHORITY");
+                const auto& incumbent=core.government(scope.id);
+                // A scripted office change must refer to an actual incumbent
+                // or a living anchored political figure, not create people.
+                require(effect.prime==incumbent.prime_minister||
+                        (core.p1_characters().contains(effect.prime)&&
+                         core.p1_character_available(effect.prime)),
+                        "CONTENT_CABINET_NEW_PM_NOT_AN_ACTUAL_PERSON");
+                core.schedule_p1_cabinet_daily(scope.id,incumbent.head_of_state,
+                    effect.prime,
+                    phasec::P1Coalition{effect.groups,effect.parties,false},
+                    today+1,provenance);
+                return;
+            }
+            case ExternalKind::political_movement: {
+                require(effect.target_country.empty()||
+                        effect.target_country==scope.id,
+                        "CONTENT_MOVEMENT_FOREIGN_AUTHORITY");
+                phasec::P3Movement m;
+                m.id=effect.subject_id;m.country=scope.id;
+                m.issue_domain=effect.law_group;
+                m.desired_choice=effect.law_choice;
+                m.groups=effect.groups;
+                m.region=effect.region;
+                if(effect.action=="replace_government")
+                    m.goal=phasec::P3MovementGoal::replace_government;
+                else if(effect.action=="autonomy")
+                    m.goal=phasec::P3MovementGoal::autonomy;
+                else if(effect.action=="secession")
+                    m.goal=phasec::P3MovementGoal::secession;
+                else
+                    require(effect.action.empty()||effect.action=="reform",
+                            "CONTENT_MOVEMENT_INVALID_POLITICAL_GOAL");
+                bool real_backing=false;
+                for(const auto& group:effect.groups) {
+                    if(core.p3_groups().contains({scope.id,group})) {
+                        const auto v=core.p3_group_view(scope.id,group);
+                        if(v.members>0) {
+                            real_backing=true;
+                            m.activism_ppm=std::max(m.activism_ppm,
+                                v.engagement_ppm);
+                            m.radical_ppm=std::max(m.radical_ppm,
+                                v.radical_ppm);
+                        }
+                    }
+                }
+                require(real_backing,
+                        "CONTENT_MOVEMENT_REQUIRES_REAL_POP_GROUP");
+                core.p3_seed_movement(std::move(m));
+                return;
+            }
+            case ExternalKind::political_mandate: {
+                require(effect.target_country.empty()||
+                        effect.target_country==scope.id,
+                        "CONTENT_MANDATE_FOREIGN_AUTHORITY");
+                phasec::P1PoliticalMandate directive;
+                directive.id="CONTENT:mandate:"+provenance;
+                directive.country=scope.id;
+                directive.target=effect.subject_id;
+                directive.authority_cost=200;
+                directive.kind=effect.action=="bolster"?
+                    phasec::P1PoliticalMandateKind::bolster_movement:
+                    phasec::P1PoliticalMandateKind::suppress_movement;
+                core.p1_activate_mandate(std::move(directive),today);
+                return;
+            }
+            case ExternalKind::political_settlement: {
+                phasec::P5Settlement agreement;
+                agreement.id="CONTENT:settlement:"+provenance;
+                agreement.crisis_id=effect.subject_id;
+                agreement.legal_basis=provenance;
+                agreement.successor_head=effect.head;
+                agreement.new_sovereign=effect.target_country;
+                agreement.region=effect.region;
+                agreement.day=today;
+                if(effect.action=="legal_concession")
+                    agreement.kind=phasec::P5SettlementKind::legal_concession;
+                else if(effect.action=="autonomy_granted")
+                    agreement.kind=phasec::P5SettlementKind::autonomy_granted;
+                else if(effect.action=="crisis_recedes")
+                    agreement.kind=phasec::P5SettlementKind::crisis_recedes;
+                else if(effect.action=="cabinet_overthrow")
+                    agreement.kind=phasec::P5SettlementKind::cabinet_overthrow;
+                else
+                    agreement.kind=phasec::P5SettlementKind::independence_recognized;
+                // Actual law, military control and territorial transfer are
+                // checked inside the original P5 settlement transaction.
+                require(core.p5_crises().contains(effect.subject_id)&&
+                        core.p5_crises().at(effect.subject_id).country==scope.id,
+                        "CONTENT_SETTLEMENT_MISSING_SOVEREIGN_CRISIS");
+                core.p5_settle(std::move(agreement));
+                return;
+            }
             case ExternalKind::none:
                 throw std::invalid_argument("CONTENT_UNSUPPORTED_NATIVE_EFFECT");
         }
@@ -239,10 +372,10 @@ public:
                                        const std::string& metric){
                 return native_read(scope,metric,gh);
             };
-            const ApplyExternal apply=[&gh](const Scope& scope,
+            const ApplyExternal apply=[&gh,today](const Scope& scope,
                                           const External& effect,
                                           const std::string& provenance){
-                native_write(scope,effect,provenance,gh);
+                native_write(scope,effect,provenance,today,gh);
             };
             step(*rules,staged,today,seed,read,apply);
         });
