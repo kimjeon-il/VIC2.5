@@ -21,7 +21,8 @@ struct P1AuthorityBudget {
     std::int32_t supply{},reserved{},available{};
 };
 enum class P1PoliticalEventKind : std::uint8_t {
-    enactment_debate, political_petition, crisis_warning, political_scandal
+    enactment_debate, political_petition, crisis_warning, political_scandal,
+    actual_legal_dispute
 };
 struct P1PoliticalEvent {
     std::string id,country,source;

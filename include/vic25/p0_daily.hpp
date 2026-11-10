@@ -1045,8 +1045,8 @@ public:
         // Earned wages are accrued by the preceding Stage5 employer
         // commands. Creditors are now paid before optional public transfers,
         // dividends or other discretionary local business expenditures.
-        plan[5].push_back([](phasegh::Stage& gh) {
-            gh.phase_c().phase_time_settle_wage_arrears();
+        plan[5].push_back([today=world_.day_index()](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_settle_wage_arrears(today);
             gh.phase_c().phase_time_settle_bankrupt_reparations();
         });
         if(date.day==1 && decisions.autonomous_tax_step_ppm>0)

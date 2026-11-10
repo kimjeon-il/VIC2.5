@@ -100,6 +100,14 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
                "P2 national law cannot impersonate regional sovereignty");
     }
     p2_validate_clauses(law.country,law.clauses);
+    if(law.domain=="judicial_system")
+        ensure(law.scope.empty()||law.scope=="national",
+               "P2 judicial system must be a national law");
+    if(law.domain=="judicial_system")
+        ensure(law.base_choice=="executive_subordinate"||
+               law.base_choice=="limited_independence"||
+               law.base_choice=="independent",
+               "P2 judicial system has exactly three legal choices");
     for(const auto& clause:law.clauses)
         if(clause.kind==P2ClauseKind::constitutional_veto_rule||
            clause.kind==P2ClauseKind::constitutional_override_ppm||

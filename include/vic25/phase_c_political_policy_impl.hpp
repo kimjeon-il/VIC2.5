@@ -172,8 +172,9 @@ inline void IntegratedWorld::p1_resolve_political_event(
         } else ensure(decision==P1PoliticalEventDecision::acknowledge,
                       "P1 warning requires lawful movement response");
     } else {
+        // A legal-dispute event never creates a court verdict or money.
         ensure(decision==P1PoliticalEventDecision::acknowledge,
-               "P1 event lacks lawful executable political decision");
+               "P1 event lacks an executable monetary or legal order");
     }
     event.resolved=true;
     events_.push_back("p1-resolved-lawful-political-event:"+event_id);

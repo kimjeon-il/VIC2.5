@@ -6,6 +6,7 @@
 // separate future modules (see docs/phase-c/integration/).
 #include "vic25/phase_b.hpp"
 #include "vic25/phase_c_p1.hpp"
+#include "vic25/phase_c_judiciary.hpp"
 #include "vic25/phase_c_p4.hpp"
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
@@ -1631,6 +1632,9 @@ public:
     void seed_p1_coalition(const std::string&,P1Coalition);
     void p1_vote_no_confidence(const std::string&,
                                const std::vector<std::string>&,std::int64_t);
+    [[nodiscard]] P1JudiciaryView p1_judiciary_view(
+        const std::string&)const;
+    void p1_observe_legal_disputes(std::int64_t);
     [[nodiscard]] P1LegitimacyView p1_legitimacy(const std::string&)const;
     void seed_p1_institution(const std::string&,const std::string&,
                              P1InstitutionKind,std::uint8_t);
@@ -2250,13 +2254,26 @@ public:
             claim_id,employer,worker,treasury,country,gross,gross,today});
         events_.push_back("earned-daily-wages-owed");
     }
-    void phase_time_settle_wage_arrears() {
+    void phase_time_settle_wage_arrears(std::int64_t today=-1) {
         require_stage({5});
+        std::map<std::string,std::int32_t> country_enforcement;
         for(auto it=wage_arrears_.begin();it!=wage_arrears_.end();) {
             auto& claim=it->second;
             const Money free=std::max<Money>(0,
                 phase_d_cash_available(claim.employer));
-            const Money paid=std::min(free,claim.outstanding);
+            Money enforceable=free;
+            // Fresh earned wages follow ordinary voluntary payroll. Only
+            // genuinely overdue creditor recovery is legally constrained.
+            if(today>=0&&today-claim.issued_day>=30&&
+               !claim.country.empty()&&p1_constitutions_.contains(claim.country)) {
+                const auto [entry,created]=country_enforcement.try_emplace(
+                     claim.country);
+                if(created)
+                    entry->second=p1_judiciary_view(claim.country)
+                                      .enforceable_contract_ppm;
+                enforceable=p4_scaled(free,entry->second,1'000'000);
+            }
+            const Money paid=std::min(enforceable,claim.outstanding);
             if(paid<=0){++it;continue;}
             const int tax=claim.country.empty()?income_tax_ppm_:
                 (governments_.contains(claim.country)?
@@ -4134,6 +4151,7 @@ private:
 } // namespace vic25::phasec
 
 #include "vic25/phase_c_p1_impl.hpp"
+#include "vic25/phase_c_judiciary_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
 #include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p4_campaign_impl.hpp"
