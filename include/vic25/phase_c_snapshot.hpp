@@ -458,6 +458,10 @@ struct SnapshotCodec {
             ar(std::string("VIC25_PHASEC_ESTATE_CLOSURES_1"));
             ar(w.completed_liquidations_);
         }
+        if(!w.p1_lost_confidence_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_CONFIDENCE_1"));
+            ar(w.p1_lost_confidence_);
+        }
         if(!w.p1_constitutions_.empty()) {
             ar(std::string("VIC25_PHASEC_P1_GOVERNANCE_1"));
             ar(w.p1_constitutions_);
@@ -590,7 +594,7 @@ struct SnapshotCodec {
              seen_enactment=false,seen_campaigns=false,
              seen_characters=false,seen_political_dynamics=false,
              seen_political_ai=false,seen_political_policies=false,
-             seen_separation=false;
+             seen_separation=false,seen_confidence=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -656,6 +660,12 @@ struct SnapshotCodec {
                 ar(w.completed_liquidations_);
                 if(w.completed_liquidations_.size()>1'000'000)
                     throw std::runtime_error("oversized closed estate records");
+            } else if(extension=="VIC25_PHASEC_P1_CONFIDENCE_1"&&
+                       !seen_confidence) {
+                seen_confidence=true;
+                ar(w.p1_lost_confidence_);
+                if(w.p1_lost_confidence_.size()>100'000)
+                    throw std::runtime_error("oversized no-confidence record");
             } else if(extension=="VIC25_PHASEC_P1_GOVERNANCE_1"&&!seen_p1) {
                 seen_p1=true;
                 ar(w.p1_constitutions_);
