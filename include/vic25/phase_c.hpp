@@ -2689,6 +2689,31 @@ public:
         ensure(permitted,"P2 military service law does not permit conscription");
         ensure(service == phaseb::Service::civilian || service == phaseb::Service::reserve,
                "not mobilizable");
+        if(jurisdiction!=sovereignty_.end()&&
+           p2_catalog_group_active(jurisdiction->second,"army_model")) {
+            const auto& profession=people_.economic(s.key.economic).profession;
+            const auto only_peasants=p2_catalog_modifier_value(
+                jurisdiction->second,"country_can_only_conscript_peasants_bool");
+            if(only_peasants>0)
+                ensure(profession=="peasants"||profession=="peasant",
+                       "P2 army model conscripts only peasants");
+            const double rate=std::clamp(p2_region_modifier_value(
+                demo.region,"state_conscription_rate_add"),0.0,1.0);
+            People resident_population=0,already_active=0;
+            for(const auto& [id,row]:people_.slices()) {
+                (void)id;
+                const auto& d=people_.demographic(row.key.demographic);
+                if(d.region!=demo.region)continue;
+                resident_population=phaseb::add_checked(
+                    resident_population,row.count);
+                if(d.service==phaseb::Service::active)
+                    already_active=phaseb::add_checked(already_active,row.count);
+            }
+            const People ceiling=static_cast<People>(
+                static_cast<double>(resident_population)*rate);
+            ensure(n<=std::max<People>(0,ceiling-already_active),
+                   "P2 army model regional conscription quota exceeded");
+        }
         ensure(n <= s.count - assigned(source), "overallocated recruit");
         const People hired = people_.employed(source);
         const People to_release = std::min(hired, n);

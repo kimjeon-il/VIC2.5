@@ -84,6 +84,36 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         const std::string& country,const std::string& group)const {
     const auto& profile=p3_groups_.at({country,group});
     P3GroupView view{country,group};
+    const auto ig_name=[&]()->std::string {
+        switch(profile.type) {
+          case P3GroupType::landowners:return "ig_landowners";
+          case P3GroupType::industrialists:return "ig_industrialists";
+          case P3GroupType::armed_forces:return "ig_armed_forces";
+          case P3GroupType::devout:return "ig_devout";
+          case P3GroupType::intelligentsia:return "ig_intelligentsia";
+          case P3GroupType::petite_bourgeoisie:return "ig_petty_bourgeoisie";
+          case P3GroupType::rural_folk:return "ig_rural_folk";
+          case P3GroupType::trade_unions:return "ig_trade_unions";
+          default:break;
+        }
+        return group.rfind("ig_",0)==0?group:std::string{};
+    }();
+    const std::string ig_strength=ig_name.empty()?std::string{}:
+        "interest_group_"+ig_name+"_pol_str_mult";
+    double sponsor_power=0.0,sponsor_approval=0.0;
+    for(const auto& [bill_id,agreements]:p2_negotiated_) {
+        (void)bill_id;
+        for(const auto& agreement:agreements) {
+            if(agreement.group!=group||
+               !p2_active_amendments_.contains(agreement.amendment.id))
+                continue;
+            sponsor_power+=p2_catalog_raw_modifier(
+                agreement.amendment.id,"interest_group_pol_str_mult",0,true);
+            sponsor_approval+=p2_catalog_raw_modifier(
+                agreement.amendment.id,
+                "interest_group_in_government_approval_add",0,true);
+        }
+    }
     People country_group_members=0;
     People affiliated_weight=0,group_weight=0;
     for(const auto& [key,n]:membership_) {
@@ -94,10 +124,42 @@ inline P3GroupView IntegratedWorld::p3_group_view(
             people_.slice(key.first).key.demographic);
         const auto nation=sovereignty_.find(dem.region);
         if(nation==sovereignty_.end()||nation->second!=country)continue;
-        // Organizational efficiency is applied to REAL affiliated people,
-        // not minted into a separate political-point or membership ledger.
-        const People weighted=phaseb::add_checked(n,
+        // Existing POP membership is the only political strength base.
+        // Apply law-based IG and profession power multipliers to those
+        // actual members, not to fabricated national clout points.
+        const auto& economic=people_.economic(
+            people_.slice(key.first).key.economic);
+        std::string profession=economic.profession;
+        if(!profession.empty()&&profession.back()!='s')
+            profession.push_back('s');
+        const auto profession_key="country_"+profession+"_pol_str_mult";
+        const auto ig_key=[&]()->std::string {
+            const auto& other=organization->second;
+            switch(other.type) {
+              case P3GroupType::landowners:return "interest_group_ig_landowners_pol_str_mult";
+              case P3GroupType::industrialists:return "interest_group_ig_industrialists_pol_str_mult";
+              case P3GroupType::armed_forces:return "interest_group_ig_armed_forces_pol_str_mult";
+              case P3GroupType::devout:return "interest_group_ig_devout_pol_str_mult";
+              case P3GroupType::intelligentsia:return "interest_group_ig_intelligentsia_pol_str_mult";
+              case P3GroupType::petite_bourgeoisie:return "interest_group_ig_petty_bourgeoisie_pol_str_mult";
+              case P3GroupType::rural_folk:return "interest_group_ig_rural_folk_pol_str_mult";
+              case P3GroupType::trade_unions:return "interest_group_ig_trade_unions_pol_str_mult";
+              default:return {};
+            }
+        }();
+        const auto interest_mod=ig_key.empty()?0.0:
+            p2_region_modifier_value(dem.region,ig_key);
+        const auto profession_mod=
+            p2_region_modifier_value(dem.region,profession_key);
+        const auto sponsor_mod=key.second==group?sponsor_power:0.0;
+        const auto strength=std::clamp(
+            1.0+interest_mod+profession_mod+sponsor_mod,0.05,4.0);
+        const auto organized=phaseb::add_checked(n,
              p4_scaled(n,organization->second.organization_ppm,1'000'000));
+        const People weighted=static_cast<People>(
+             std::min<double>(static_cast<double>(
+                 std::numeric_limits<People>::max()/8),
+                 static_cast<double>(organized)*strength));
         affiliated_weight=phaseb::add_checked(affiliated_weight,weighted);
         if(key.second==group) {
             country_group_members=phaseb::add_checked(country_group_members,n);
@@ -165,7 +227,9 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         std::clamp<std::int64_t>(sum_radical,0,1'000'000));
     view.engagement_ppm=static_cast<std::int32_t>(
         std::clamp<std::int64_t>(sum_engagement,0,1'000'000));
-    view.approval=std::clamp(approval-view.radical_ppm/20'000,0,100);
+    view.approval=std::clamp(
+        approval-view.radical_ppm/20'000+
+        static_cast<int>(sponsor_approval),0,100);
     return view;
 }
 
@@ -323,13 +387,24 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
             unemployment)/400+scarcity/250;
         const std::int64_t relief=(employed>0?900:250)+
                                     (scarcity==0?200:0);
+        const auto radical_factor=std::clamp(
+            1.0+p2_region_modifier_value(
+                dem.region,"state_radicals_from_political_movements_mult"),
+            0.0,5.0);
+        const auto effective_pressure=static_cast<std::int64_t>(
+            pressure*radical_factor);
         attitude.radical_ppm=static_cast<std::int32_t>(
             std::clamp<std::int64_t>(
                 static_cast<std::int64_t>(attitude.radical_ppm)+
-                pressure-relief,0,1'000'000));
-        const auto loyalty_delta=pressure>0?
-            -static_cast<std::int64_t>(pressure/2):
-            static_cast<std::int64_t>(employed>0?500:100);
+                effective_pressure-relief,0,1'000'000));
+        const auto loyalty_factor=std::clamp(
+            1.0+p2_region_modifier_value(
+                dem.region,"state_loyalists_from_political_movements_mult"),
+            0.0,5.0);
+        const auto loyalty_delta=effective_pressure>0?
+            -static_cast<std::int64_t>(effective_pressure/2):
+            static_cast<std::int64_t>(
+                (employed>0?500:100)*loyalty_factor);
         attitude.loyal_ppm=static_cast<std::int32_t>(
             std::clamp<std::int64_t>(
                 static_cast<std::int64_t>(attitude.loyal_ppm)+

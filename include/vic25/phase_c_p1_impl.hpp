@@ -147,9 +147,32 @@ inline P1LegitimacyView IntegratedWorld::p1_legitimacy(
     }
     // Pending P3 ideology is not guessed; unknown support components carry
     // a visible neutral prior, not a separate generated political-power stock.
-    result.score=(50*result.group_support+
-                  30*result.electoral_support+
-                  20*result.legal_compatibility)/100;
+    // Legitimacy modifiers contribute only to an observed government and
+    // its actual IG/electoral support. The baseline remains VIC2.5's compact
+    // legitimacy formula; law effects do not invent seats or party votes.
+    const auto legal=[&](std::string_view key)->double {
+        return p2_catalog_modifier_value(country,key);
+    };
+    const double clout_adjust=legal(
+        "country_legitimacy_govt_total_clout_add");
+    const double vote_adjust=legal(
+        "country_legitimacy_govt_total_votes_add");
+    if(result.observed_groups)
+        result.group_support=std::clamp(
+            static_cast<int>(result.group_support+
+                clout_adjust*result.group_support/200.0),0,100);
+    if(result.observed_election)
+        result.electoral_support=std::clamp(
+            static_cast<int>(result.electoral_support+
+                vote_adjust*result.electoral_support/200.0),0,100);
+    const int institutional=(50*result.group_support+
+                             30*result.electoral_support+
+                             20*result.legal_compatibility)/100;
+    const double head_legal=legal("country_legitimacy_headofstate_add");
+    const double base_legal=legal("country_legitimacy_base_add");
+    result.score=std::clamp(
+        static_cast<int>(institutional+base_legal+
+                         head_legal*0.25),0,100);
     return result;
 }
 

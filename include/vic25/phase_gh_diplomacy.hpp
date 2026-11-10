@@ -138,6 +138,14 @@ inline Quantity Stage::lawful_trade_quantity(
             const std::string& buyer_country,
             const std::string& good,Quantity requested) {
     require(requested>=0,"G_ERR_NEGATIVE_QUANTITY");
+    // National economic-system trade prohibitions supersede ordinary
+    // tariff orders. Domestic transactions remain lawful.
+    if(seller_country!=buyer_country &&
+       (phase_c().p2_catalog_modifier_value(
+            seller_country,"country_disallow_trade_bool")>0||
+        phase_c().p2_catalog_modifier_value(
+            buyer_country,"country_disallow_trade_bool")>0))
+        return 0;
     Quantity allowed=requested;
     for(const auto& [treaty_id,t]:diplomacy_.treaties) {
         if(!t.active)continue;
