@@ -555,6 +555,7 @@ inline void IntegratedWorld::p5_settle(P5Settlement settlement) {
     }
     crisis.stage=P5CrisisStage::settled;
     crisis.settled_day=settlement.day;
+    p5_revolution_preparations_.erase(crisis.id);
     p3_movements_.at(crisis.movement).active=false;
     p5_settlements_.push_back(std::move(settlement));
     events_.push_back("p5-verified-political-settlement:"+crisis.id);

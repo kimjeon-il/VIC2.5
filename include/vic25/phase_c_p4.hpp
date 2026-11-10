@@ -13,6 +13,24 @@ enum class P4TermMode : std::uint8_t { restart_after_poll, fixed_cycle };
 enum class P4Competition : std::uint8_t {
     unobserved, legally_single_party, dominant_party, two_party, multi_party
 };
+enum class P4PartyType : std::uint8_t {
+    conservative, liberal, radical, social_democratic, communist, fascist,
+    agrarian, religious, military, nationalist, free_trade, traditionalist
+};
+struct P4PartyIdentity {
+    std::string party;
+    P4PartyType type{P4PartyType::conservative};
+    std::int64_t founded_day{-1},disbanded_day{-1};
+};
+struct P4OfficialAffiliation {
+    std::string country,group,party;
+    std::int64_t since_day{-1};
+};
+struct P4Campaign {
+    std::string contest_id,party_id;
+    std::int64_t start_day{-1},last_review_day{-1};
+    std::int32_t momentum_ppm{}; // relative ballot weight, not additional votes
+};
 struct P4Party {
     std::string id,country,head_candidate;
     // Organization is a relative election-time support weight, not a cash
