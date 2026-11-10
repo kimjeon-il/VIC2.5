@@ -89,6 +89,15 @@ inline bool IntegratedWorld::p2_has_negotiable_bills()const {
         for(const auto& [demand_id,demand]:p2_group_demands_) {
             if(bill.country!=demand.country||
                bill.proposed_base.domain!=demand.law_domain)continue;
+            // In canonical groups only predefined generic sponsor
+            // concessions participate in autonomous daily negotiation.
+            if(const auto* chosen=p2_catalog_law(bill.proposed_base.base_choice);
+               chosen&&chosen->group==bill.proposed_base.domain) {
+                const auto* amendment=p2_catalog_amendment(demand.amendment.id);
+                if(!amendment||!amendment->generic_sponsor||
+                   !p2_catalog_amendment_applies(*amendment,chosen->id))
+                    continue;
+            }
             bool already=false;
             if(const auto it=p2_negotiated_.find(id);
                it!=p2_negotiated_.end())

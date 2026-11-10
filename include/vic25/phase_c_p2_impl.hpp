@@ -278,12 +278,12 @@ inline std::optional<std::int64_t> IntegratedWorld::p2_rule(
                     found=clause.value;
         }
         if(!found)continue;
-        const int rank=static_cast<int>(base.tier);
+        // Simplified P0 priority: constitution > ordinary active policy.
+        // No universal statute/delegation/municipal hierarchy interpreter.
+        // Nonconstitutional laws are already scoped and mutually exclusive.
+        const int rank=base.tier==P2NormTier::constitution?0:1;
         if(rank==priority) {
-            // Fixed law slots need no generic equal-rank conflict engine.
-            // Constitutional powers cannot silently disagree.
-            ensure(kind<P2ClauseKind::constitutional_veto_rule||
-                   value==found,
+            ensure(rank!=0||value==found,
                    "P2 contradictory constitutional authority");
             continue;
         }
