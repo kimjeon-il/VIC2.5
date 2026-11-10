@@ -59,8 +59,7 @@ inline void IntegratedWorld::p1_observe_legal_disputes(std::int64_t today) {
            today-claim.issued_day<60||claim.country.empty()||
            !p1_constitutions_.contains(claim.country))continue;
         const auto court=p1_judiciary_view(claim.country);
-        if(court.defined_by_law&&
-           court.kind!=P1JudiciaryKind::independent)
+        if(court.defined_by_law)
             countries.insert(claim.country);
     }
     for(const auto& country:countries) {

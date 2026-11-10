@@ -39,7 +39,8 @@ struct Fixture {
         const auto d=pop.demographic_profile({
             "R",24000-360,phaseb::Sex::male,"c","r","citizen","free",
             pop.default_health(),phaseb::Service::civilian});
-        pop.seed_population(d,e,hh,100,1);
+        const auto worker_slice=pop.seed_population(d,e,hh,100,1);
+        pop.hire(worker_slice,1,"EMP","labor",100,{});
         if(!law_choice.empty()) {
             P2BaseLaw law;
             law.id="JUDICIAL_ACT";law.country="A";
