@@ -528,6 +528,60 @@ public:
                payer != holder && amount > 0 && shares(asset, holder) > 0 &&
                !dividends_.contains(asset + ":" + holder),
                "invalid dividend declaration");
+        // The holder must own real securities. Lawful dividend shares can
+        // increase only as a *cash-backed obligation* from the actual firm,
+        // not as generated shareholder money or shadow state transfers.
+        std::string origin;
+        bool multinational=false;
+        for(const auto& [id,facility]:facilities_) {
+            (void)id;
+            if(facility.owner!=payer)continue;
+            const auto jurisdiction=sovereignty_.find(facility.region);
+            if(jurisdiction==sovereignty_.end())continue;
+            if(origin.empty())origin=jurisdiction->second;
+            else if(origin!=jurisdiction->second)multinational=true;
+        }
+        if(!multinational&&!origin.empty()) {
+            double bonus=0;
+            if(has_country_treasury(origin)&&
+               holder==country_treasury(origin)) {
+                bonus=p2_catalog_modifier_value(
+                    origin,"country_government_dividends_efficiency_add")+
+                      p2_catalog_modifier_value(
+                    origin,"building_company_government_dividends_add");
+            } else if(holder.rfind("HH:",0)==0) {
+                bool employed_owner=false;
+                for(const auto& [slice,job]:people_.jobs())
+                    if(job.count>0&&job.employer==payer&&
+                       people_.has_slice(slice)&&
+                       holder=="HH:"+std::to_string(
+                           people_.slice(slice).key.household)) {
+                        employed_owner=true;break;
+                    }
+                if(employed_owner)
+                    bonus=p2_catalog_modifier_value(
+                        origin,"building_company_worker_dividends_add");
+            }
+            if(bonus>0) {
+                Money owed=0;
+                for(const auto& [id,d]:dividends_) {
+                    (void)id;
+                    if(d.payer==payer)
+                        owed=phaseb::add_checked(owed,d.amount);
+                }
+                const Money available=std::max<Money>(
+                    0,phase_d_cash_available(payer)-owed);
+                const long double premium=std::ceil(
+                    static_cast<long double>(amount)*
+                    (1.0L+std::min(3.0,bonus)));
+                const Money proposed=static_cast<Money>(
+                    std::min<long double>(premium,
+                        static_cast<long double>(
+                            std::numeric_limits<Money>::max()/4)));
+                if(available>=amount)
+                    amount=std::min(available,proposed);
+            }
+        }
         dividends_[asset + ":" + holder] = {asset, payer, holder, amount, month() + 1};
         events_.push_back("dividend-declared");
     }

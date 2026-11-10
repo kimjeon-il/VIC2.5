@@ -770,7 +770,8 @@ public:
         for(const auto& [id,project]:industry.constructions) {
             if(game_c.firm_bankrupt(project.client) ||
                project.ready||project.commissioned||
-               project.accepted_work>=project.work_required||
+               project.accepted_work>=industry.effective_construction_work(
+                   project,game_c)||
                std::any_of(decisions.investments.begin(),decisions.investments.end(),
                     [&](const Investment& p){return p.construction_project==id;}))
                 continue;
@@ -1182,7 +1183,8 @@ public:
                         std::numeric_limits<Quantity>::max()/4),
                         std::floor(static_cast<double>(ceiling)*allocation)));
                 const Quantity n=std::min({lawful_work,
-                     p.work_required-p.accepted_work,materials,
+                     domain.effective_construction_work(p,c)-
+                       p.accepted_work,materials,
                      static_cast<Quantity>(staff/p.workers_per_work),affordable});
                 if(n<=0)return;
                 gh.phase_d().plan_work(investment.construction_project,n);

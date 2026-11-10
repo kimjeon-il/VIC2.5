@@ -14,6 +14,13 @@ int main() {
     assert(phased::law_verified_yield(9,1,0.1)==2);
     assert(phased::law_verified_yield(0,10,0.1)==11);
     assert(phased::law_verified_yield(5,3,0.0)==3);
+    assert(p2_catalog_raw_modifier(
+        "law_laissez_faire","country_forbid_monopoly_bool")==1);
+    assert(p2_catalog_raw_modifier(
+        "law_command_economy","building_company_government_dividends_add")==0.75);
+    assert(p2_catalog_raw_modifier(
+        "law_cooperative_ownership","building_company_worker_dividends_add")==0.75);
+
 
     IntegratedWorld c{24000};
     c.seed_region("R","A");

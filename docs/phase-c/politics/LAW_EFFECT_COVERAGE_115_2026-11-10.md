@@ -12,8 +12,8 @@
 
 - 법률 **148개**, 법률군 **26개**, 증보 **71개**
 - 정적 modifier 행 **1117개**, 고유 effect key **350종**
-- 실행 경로 매핑된 key **98종** (부분 구현/미검증), 소비자가 아직 없는 key **252종**
-- 매핑된 source 행 **468개**, 미연결 source 행 **649개**
+- 실행 경로 매핑된 key **102종** (부분 구현/미검증), 소비자가 아직 없는 key **248종**
+- 매핑된 source 행 **475개**, 미연결 source 행 **642개**
 
 ## 법률군별 정적 modifier 매핑
 
@@ -27,7 +27,7 @@
 | `citizenship` | 7 | 92 | 18 | 74 |
 | `colonization` | 5 | 14 | 0 | 14 |
 | `distribution_of_power` | 14 | 108 | 81 | 27 |
-| `economic_system` | 8 | 95 | 48 | 47 |
+| `economic_system` | 8 | 95 | 54 | 41 |
 | `edo_social_system` | 3 | 53 | 0 | 53 |
 | `education_system` | 5 | 14 | 8 | 6 |
 | `free_speech` | 4 | 31 | 16 | 15 |
@@ -50,6 +50,9 @@
 
 | 원본 modifier key | 해당 원본 정의 행 | 연결 소유 계산 | 비고 |
 |---|---:|---|---|
+| `building_company_government_dividends_add` | 1 | C/D 경제·재정 | 법정 비용·지불가능한 배당 또는 실재 공사 기성고만 영향 · 미검증 |
+| `building_company_worker_dividends_add` | 1 | C/D 경제·재정 | 법정 비용·지불가능한 배당 또는 실재 공사 기성고만 영향 · 미검증 |
+| `building_group_bg_agriculture_construction_efficiency_add` | 1 | C/D 경제·재정 | 법정 비용·지불가능한 배당 또는 실재 공사 기성고만 영향 · 미검증 |
 | `building_group_bg_agriculture_throughput_add` | 3 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `building_group_bg_extraction_throughput_add` | 1 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `building_group_bg_plantations_throughput_add` | 2 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
@@ -80,7 +83,9 @@
 | `country_enactment_success_chance_law_technocracy_add` | 1 | P2 입법 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_engineers_pol_str_mult` | 1 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_farmers_pol_str_mult` | 2 | 별도 실행 대상 필요 | 정적 소비자 연결 |
+| `country_forbid_monopoly_bool` | 1 | Phase D 실재 설비 기반 공장 확장 | 시설별 기존 생산역량으로만 점유율 추정 · 미검증 |
 | `country_force_privatization_bool` | 1 | 별도 실행 대상 필요 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
+| `country_government_dividends_efficiency_add` | 4 | C/D 경제·재정 | 법정 비용·지불가능한 배당 또는 실재 공사 기성고만 영향 · 미검증 |
 | `country_institution_cost_institution_health_system_mult` | 2 | B/POP·C/P1 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `country_law_enactment_speed_mult` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_law_enactment_success_add` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
@@ -148,16 +153,12 @@
 | `state_tax_collection_mult` | 1 | C/D 경제·재정 | 행정인력에 기반한 원천징수 실효율(단순화) |
 | `state_trade_capacity_mult` | 2 | G/H 무역·외교 | VIC2.5 단순화 계산·조건부 |
 
-| `country_forbid_monopoly_bool` | 1 | Phase D 실재 설비 기반 공장 확장 | 시설별 기존 생산역량으로만 점유율 추정 · 미검증 |
 ## 아직 연결되지 않은 modifier 키 — 실제 계산 연결 필요
 
 | 원본 modifier key | 해당 정의 행 | 연결해야 할 영역 |
 |---|---:|---|
 | `building_art_academy_throughput_add` | 1 | C/D 경제·재정 |
-| `building_company_government_dividends_add` | 1 | C/D 경제·재정 |
-| `building_company_worker_dividends_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_agriculture_allowed_collectivization_add` | 4 | C/D 경제·재정 |
-| `building_group_bg_agriculture_construction_efficiency_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_agriculture_standard_of_living_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_agriculture_tax_mult` | 1 | C/D 경제·재정 |
 | `building_group_bg_arts_allowed_collectivization_add` | 5 | C/D 경제·재정 |
@@ -248,7 +249,6 @@
 | `country_forbid_electoral_fraud_bool` | 1 | 별도 실행 대상 필요 |
 | `country_foreign_collectivization_bool` | 1 | 별도 실행 대상 필요 |
 | `country_free_charters_add` | 8 | 별도 실행 대상 필요 |
-| `country_government_dividends_efficiency_add` | 4 | C/D 경제·재정 |
 | `country_government_dividends_reinvestment_add` | 6 | C/D 경제·재정 |
 | `country_government_wages_mult` | 2 | C/D 경제·재정 |
 | `country_influence_mult` | 4 | G/H 무역·외교 |
@@ -446,6 +446,12 @@
 
 **별도 완료해야 할 항목:** 대다수 건물별 집산화·회사 배당·국영기업 재투자·중립/외국 투자권·시장 접근성·민간기업 구조조정, 건설 효율의 *원작식* 전환, 모든 전문직 투자자 분포가 관측되지 않는 국가, 지역별 부동산/인구 과세의 정밀한 월별 회계, 교육·치안·복지기관의 실제 법정 예산과 모든 원작 조건부 세제 트리거. 신규 등록된 P0/D/C/P2 집중 검사도 **컴파일 및 CTest를 아직 실행하지 않았다.**
 
-**이번 누적 정적 연결:** 98/350 고유 키, 468/1117 정적 modifier 행. 분모는 원본 효과 키 행수이지 결과 정확도, 실제 사용량, 동등성 또는 전 법률 구현 완료율이 아니다.
+**이번 누적 정적 연결:** 102/350 고유 키, 475/1117 정적 modifier 행. 분모는 원본 효과 키 행수이지 결과 정확도, 실제 사용량, 동등성 또는 전 법률 구현 완료율이 아니다.
 
 경제 후속 수정: `country_forbid_monopoly_bool`은 기존에 완공·가동 가능한 실제 제조 시설들의 지역별 설비용량을 비교하여, 해당 기업의 명확한 절대다수(50% 초과) 설비 지배 시 같은 품목 자동 증설을 거부한다. 미완공·잠재 시설을 경쟁사로 허위 계산하지 않는다. 공식 빅토리아 3 시장점유율 공식과 동일하다고 가정하지 않는다. 인두세 국가 임금기준은 일간 가계당 반복 계산하지 않고 국가당 1회만 계산한다.
+
+### 추가 보강: 농업 건설·기업 배당
+
+- `building_group_bg_agriculture_construction_efficiency_add`: 실재 농업 업종의 일반 공사에만 적용. 명시적인 WorkPackage가 있는 다단계 공사는 기존 계약을 보존한다. 기존 건설 요구량을 수정해 저장하지 않고, 승인·지급·자본화된 기성고를 토대로 공사 완료를 판정한다. 임의의 미지급 작업은 완공으로 간주하지 않는다.
+- `building_company_worker_dividends_add`, `building_company_government_dividends_add`, `country_government_dividends_efficiency_add`: 이미 존재하는 회사 유가증권의 유효한 주주(실제 고용된 가계 또는 해당 국가 국고)가 선언받는 배당 의무에만 적용한다. 회사가 보유한 **지불 가능한 실제 현금** 범위 안에서만 보정한다. 선언되지 않은 배당·이익·기업 현금을 새로 생성하지 않는다.
+- `country_forbid_monopoly_bool`: 기존 제조시설의 실측 설비용량을 이용한 지역별 독점 제한 근사이며 원작의 실제 시장점유율 공식과 동일하다고 주장하지 않는다.

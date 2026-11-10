@@ -281,6 +281,46 @@ struct DomainState {
             append(opening_month,"daily-resource-regeneration",id);
         }
     }
+    // Construction efficiency changes the paid work needed to commission
+    // an agricultural facility; the site's original capacity remains the
+    // same and every completed work unit still consumes real materials and
+    // receives real payment. Packaged works retain explicit stage contracts.
+    [[nodiscard]] Quantity effective_construction_work(
+            const ConstructionProject& p,
+            const phasec::IntegratedWorld& c)const {
+        if(p.work_required<=0)return p.work_required;
+        // Most countries do not activate this specific amendment. Short
+        // circuit before scanning work packages and global industry classes.
+        const auto law=std::max(0.0,c.p2_region_modifier_value(
+            p.region,
+            "building_group_bg_agriculture_construction_efficiency_add"));
+        if(law<=0)return p.work_required;
+        for(const auto& [id,work]:work_packages) {
+            (void)id;
+            if(work.project==p.id)return p.work_required;
+        }
+        bool agriculture=false;
+        for(const auto& [id,r]:recipes) {
+            (void)id;
+            if(r.site!=p.target_site)continue;
+            std::string kind=r.industry_class;
+            std::set<std::string> visited;
+            for(int depth=0;depth<12&&!kind.empty()&&
+                    visited.insert(kind).second;++depth) {
+                if(kind=="agriculture"||kind=="farming"||
+                   kind=="farm") {agriculture=true;break;}
+                auto parent=industry_classes.find(kind);
+                if(parent==industry_classes.end())break;
+                kind=parent->second.parent;
+            }
+            if(agriculture)break;
+        }
+        if(!agriculture)return p.work_required;
+        return static_cast<Quantity>(std::clamp(
+            std::ceil(static_cast<long double>(p.work_required)/
+                      (1.0L+static_cast<long double>(law))),
+            1.0L,static_cast<long double>(p.work_required)));
+    }
     void finalize(const phasec::IntegratedWorld& c) {
         for(auto& [id,p]:constructions) {
             require(p.work_required>0 && p.accepted_work>=0 &&
@@ -311,7 +351,8 @@ struct DomainState {
                         "work-package sum disagrees with project");
             require(p.capitalized_value==product(p.capitalized_work,p.cash_price_per_work),
                     "WIP record does not match certified work");
-            if(!p.commissioned && !p.ready && p.accepted_work==p.work_required &&
+            if(!p.commissioned && !p.ready &&
+               p.accepted_work>=effective_construction_work(p,c) &&
                p.capitalized_work==p.accepted_work &&
                (!p.permit_required||p.permit_valid) &&
                (!p.inspection_required||p.inspected)) {
