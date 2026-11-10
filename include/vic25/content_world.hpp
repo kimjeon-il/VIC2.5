@@ -413,8 +413,7 @@ public:
             if(events.size()<journal_cursor)return;
             for(std::size_t i=journal_cursor;i<events.size();++i) {
                 const auto& event=events[i];
-                auto relay=[&](const std::string& prefix,
-                               const std::string& action,
+                auto relay=[&](const std::string& action,
                                const std::string& country) {
                     if(country.empty())return;
                     content::notify(*rules,staged,action,
@@ -429,31 +428,25 @@ public:
                 if(auto id=with_id("p2-law-effective:")) {
                     const auto bill=c.p2_bills().find(*id);
                     if(bill!=c.p2_bills().end())
-                        relay("p2-law-effective:",
-                              "politics.law_effective",bill->second.country);
+                        relay(                              "politics.law_effective",bill->second.country);
                 } else if(auto id=with_id("p5-political-crisis-warning:")) {
                     const auto row=c.p5_crises().find(*id);
                     if(row!=c.p5_crises().end())
-                        relay("p5-political-crisis-warning:",
-                              "politics.crisis_warning",row->second.country);
+                        relay(                              "politics.crisis_warning",row->second.country);
                 } else if(auto id=with_id("p5-verified-political-settlement:")) {
                     const auto row=c.p5_crises().find(*id);
                     if(row!=c.p5_crises().end())
-                        relay("p5-verified-political-settlement:",
-                              "politics.crisis_settled",row->second.country);
+                        relay(                              "politics.crisis_settled",row->second.country);
                 } else if(auto id=with_id("p4-contest-counted:")) {
                     const auto contest=c.p4_contests().find(*id);
                     if(contest!=c.p4_contests().end())
-                        relay("p4-contest-counted:",
-                              "politics.election_held",contest->second.country);
+                        relay(                              "politics.election_held",contest->second.country);
                 } else if(auto id=with_id("p3-persistent-movement-created:")) {
                     const auto row=c.p3_movements().find(*id);
                     if(row!=c.p3_movements().end())
-                        relay("p3-persistent-movement-created:",
-                              "politics.movement_created",row->second.country);
+                        relay(                              "politics.movement_created",row->second.country);
                 } else if(auto id=with_id("p1-daily-government-effective:")) {
-                    relay("p1-daily-government-effective:",
-                          "politics.government_changed",*id);
+                    relay(                          "politics.government_changed",*id);
                 }
             }
         });
