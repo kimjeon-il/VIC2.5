@@ -24,7 +24,8 @@ enum class P1FormationRule : std::uint8_t {
     head_appointment, parliamentary_confidence, council_confidence
 };
 enum class P1InstitutionKind : std::uint8_t {
-    administration, policing, education, healthcare, welfare, elections
+    administration, policing, education, healthcare, welfare, elections,
+    home_affairs, colonial_affairs, labor_inspection
 };
 
 enum class P1VetoRule : std::uint8_t { none, suspensive, absolute };

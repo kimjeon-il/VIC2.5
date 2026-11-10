@@ -325,8 +325,17 @@ private:
                    state_law_modifier(d.region,
                      "state_peasants_internal_migration_disallowed_bool")>0)
                     continue;
+                if(state_law_modifier&&state_law_modifier(
+                    dest_it->second,"country_migration_restrictiveness_add")>=100)
+                    continue; // Closed Borders blocks real in-migration.
+                const double pull=state_law_modifier?state_law_modifier(
+                    dest_it->second,"state_migration_pull_mult"):0.0;
+                const People rate=static_cast<People>(std::clamp(
+                    static_cast<double>(rules_.migration_ppm)*
+                        (1.0+std::clamp(pull,-1.0,4.0)),
+                    0.0,static_cast<double>(PPM)));
                 const People moving=w.allocate_rate(id,"migration",
-                    available,rules_.migration_ppm);
+                    available,rate);
                 if(!moving)continue;
                 const auto& source=w.slice(id);
                 const auto& econ=w.economic(source.key.economic);

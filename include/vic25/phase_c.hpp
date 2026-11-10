@@ -2416,8 +2416,30 @@ public:
             people_.slice(slice).key.demographic);
         const auto country=sovereignty_.find(dem.region);
         if(country!=sovereignty_.end()) {
-            const auto legal=p2_rule(country->second,country->second,
+            auto legal=p2_rule(country->second,country->second,
                  P2ClauseKind::minimum_monthly_contract_wage).value_or(0);
+            // Worker-protection institutions require real staffed service.
+            // Their minimum-wage percentage uses the observed monthly
+            // regional average, never a fictitious government wage index.
+            const auto protection=std::clamp(p2_region_modifier_value(
+                dem.region,"building_minimum_wage_mult"),0.0,2.0);
+            if(protection>0) {
+                Money gross_paid=0;
+                People workers=0;
+                for(const auto& [id,job]:people_.jobs()) {
+                    if(job.count<=0||job.wage_per_month<=0||
+                       !people_.has_slice(id))continue;
+                    const auto& d=people_.demographic(
+                        people_.slice(id).key.demographic);
+                    if(d.region!=dem.region)continue;
+                    gross_paid=phaseb::add_checked(gross_paid,
+                        phaseb::mul_checked(job.count,job.wage_per_month));
+                    workers=phaseb::add_checked(workers,job.count);
+                }
+                if(workers>0)
+                    legal=std::max<Money>(legal,static_cast<Money>(
+                        (static_cast<double>(gross_paid)/workers)*protection));
+            }
             ensure(wage>=legal,
                    "P2 minimum wage law forbids underpaid new labor contracts");
         }
@@ -3340,7 +3362,7 @@ public:
                    p1_constitutions_.contains(entry.country)&&
                    public_institutions_.contains(id)&&entry.level<=5&&
                    static_cast<unsigned>(entry.kind)<=
-                      static_cast<unsigned>(P1InstitutionKind::elections)&&
+                      static_cast<unsigned>(P1InstitutionKind::labor_inspection)&&
                    sovereignty_.contains(public_institutions_.at(id).region)&&
                    sovereignty_.at(public_institutions_.at(id).region)==entry.country,
                    "P1 invalid or foreign public institution");

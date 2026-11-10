@@ -183,7 +183,7 @@ inline void IntegratedWorld::seed_p1_institution(
            p1_constitutions_.contains(country)&&
            public_institutions_.contains(institution_id)&&level<=5&&
            static_cast<unsigned>(kind)<=
-               static_cast<unsigned>(P1InstitutionKind::elections)&&
+               static_cast<unsigned>(P1InstitutionKind::labor_inspection)&&
            !p1_institutions_.contains(institution_id),
            "P1 institution must reference an actual service");
     const auto& service=public_institutions_.at(institution_id);

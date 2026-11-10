@@ -50,10 +50,14 @@ inline double IntegratedWorld::p2_region_modifier_value(
         P1InstitutionKind kind=P1InstitutionKind::administration;
         if(group=="health_system")kind=P1InstitutionKind::healthcare;
         else if(group=="education_system")kind=P1InstitutionKind::education;
-        else if(group=="policing"||group=="internal_security")
-            kind=P1InstitutionKind::policing;
+        else if(group=="policing")kind=P1InstitutionKind::policing;
+        else if(group=="internal_security")
+            kind=P1InstitutionKind::home_affairs;
         else if(group=="welfare")kind=P1InstitutionKind::welfare;
-        else if(group=="colonization")kind=P1InstitutionKind::administration;
+        else if(group=="colonization")
+            kind=P1InstitutionKind::colonial_affairs;
+        else if(group=="labor_rights")
+            kind=P1InstitutionKind::labor_inspection;
         else return 0;
         int level=0;
         for(const auto& [id,inst]:p1_institutions_) {
