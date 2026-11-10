@@ -1866,6 +1866,15 @@ public:
     [[nodiscard]] bool p2_candidate_eligible(
         const std::string&,const std::string&)const;
     void p2_submit_bill(P2Bill,std::int64_t);
+    // Build a new 1.15 catalogue choice from source law definitions, not
+    // by relabelling another choice's economic/legal clauses.
+    [[nodiscard]] std::optional<P2BaseLaw> p2_catalogue_reform_template(
+        const std::string&,const std::string&,const std::string&,
+        const std::string&,const std::string&)const;
+    void p2_propose_catalogue_reform(
+        const std::string&,const std::string&,const std::string&,
+        const std::string&,const std::string&,const std::string&,
+        std::int64_t);
     void p2_review_due(std::int64_t);
     [[nodiscard]] bool p2_has_review_due(std::int64_t)const;
     [[nodiscard]] bool p2_enactment_ready(const std::string&)const;
@@ -4643,6 +4652,7 @@ private:
 #include "vic25/phase_c_p2_constitution_impl.hpp"
 #include "vic25/phase_c_politics_identity_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
+#include "vic25/phase_c_p2_reform_impl.hpp"
 #include "vic25/phase_c_p3_autonomous_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"
 #include "vic25/phase_c_p5_revolution_impl.hpp"
