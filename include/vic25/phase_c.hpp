@@ -6,6 +6,7 @@
 // separate future modules (see docs/phase-c/integration/).
 #include "vic25/phase_b.hpp"
 #include "vic25/phase_c_p1.hpp"
+#include "vic25/phase_c_judiciary.hpp"
 #include "vic25/phase_c_p1_capacities.hpp"
 #include "vic25/phase_c_economic_statistics.hpp"
 #include "vic25/phase_c_p4.hpp"
@@ -4626,6 +4627,7 @@ private:
 } // namespace vic25::phasec
 
 #include "vic25/phase_c_p1_impl.hpp"
+#include "vic25/phase_c_judiciary_impl.hpp"
 #include "vic25/phase_c_p1_capacities_impl.hpp"
 #include "vic25/phase_c_p1_power_projection_impl.hpp"
 #include "vic25/phase_c_p1_goods_prestige_impl.hpp"
@@ -4636,6 +4638,9 @@ private:
 #include "vic25/phase_c_p4_campaign_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
+#include "vic25/phase_c_p2_enactment_impl.hpp"
+#include "vic25/phase_c_p2_separation_impl.hpp"
+#include "vic25/phase_c_p2_constitution_impl.hpp"
 #include "vic25/phase_c_politics_identity_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
 #include "vic25/phase_c_p3_autonomous_impl.hpp"

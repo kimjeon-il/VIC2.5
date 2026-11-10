@@ -249,8 +249,13 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
             -1'000'000,0);
         lawful=p4_scaled(lawful,1'000'000+penalty,1'000'000);
     }
+    // Apply regional reach to the target's legal/trait-constrained output.
+    const auto decree=p1_region_decree_bonus_ppm(
+        link.country,service.region,P1DecreeKind::public_service_reach);
+    const auto improved=std::min(staffed_and_funded,
+        phaseb::add_checked(lawful,p4_scaled(lawful,decree,1'000'000)));
     return {link.country,institution_id,link.kind,level,
-            staff,slots,staffed,lawful,funded};
+            staff,slots,staffed,improved,funded};
 }
 
 inline void IntegratedWorld::p1_vote_no_confidence(

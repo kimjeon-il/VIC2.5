@@ -256,6 +256,7 @@ inline void IntegratedWorld::p2_seed_base(P2BaseLaw law) {
     p2_laws_.emplace(id,std::move(law));
     p2_active_base_.emplace(slot,id);
     p2_sync_constitution(p2_laws_.at(id));
+    p2_apply_constitutional_choice(p2_laws_.at(id));
     if(politics::bare_group(p2_laws_.at(id).domain)=="slavery"&&
        politics::bare_law(p2_laws_.at(id).base_choice)=="slavery_banned")
         p2_emancipation_due_.insert(p2_laws_.at(id).country);
@@ -872,8 +873,10 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             p2_active_base_.erase(
                 std::make_tuple(base.country,base.domain,base.scope));
         }
-        if(bill.action==P2BillAction::enact_or_replace_base)
+        if(bill.action==P2BillAction::enact_or_replace_base) {
             p2_sync_constitution(p2_laws_.at(law_id));
+            p2_apply_constitutional_choice(p2_laws_.at(law_id));
+        }
         p2_sync_country_rules(bill.country,bill.transitions,today);
         const auto lowest=p2_rule(bill.country,bill.country,
                                  P2ClauseKind::income_tax_min_ppm).value_or(0);

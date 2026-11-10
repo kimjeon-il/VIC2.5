@@ -1235,6 +1235,16 @@ public:
                         phaseb::mul_checked(work_budget%1'000'000,rate)/
                         1'000'000);
                 }
+                // Source-branch edict modifies the existing national/legal
+                // ceiling. Real staff, materials and cash still bound work.
+                const auto decree=c.p1_region_decree_bonus_ppm(
+                    country,p.region,phasec::P1DecreeKind::construction_drive);
+                if(decree>0)
+                    work_budget=phaseb::add_checked(work_budget,
+                        phaseb::add_checked(
+                            phaseb::mul_checked(work_budget/1'000'000,decree),
+                            phaseb::mul_checked(work_budget%1'000'000,decree)/
+                                1'000'000));
                 Quantity n=std::min({work_budget,
                      p.work_required-p.accepted_work,materials,
                      static_cast<Quantity>(staff/p.workers_per_work),affordable});
