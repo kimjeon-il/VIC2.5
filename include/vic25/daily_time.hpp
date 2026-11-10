@@ -353,6 +353,12 @@ public:
            !engine_.base().core().core().has_due_p1_government(day_)&&
            !engine_.base().core().core().p4_has_due_amendment(day_)&&
            !engine_.base().core().core().p2_has_due(day_)&&
+           !engine_.base().core().core().p2_has_review_due(day_)&&
+           !engine_.base().core().core().p2_has_assent_work()&&
+           !engine_.base().core().core().p4_has_campaign_due(day_)&&
+           !engine_.base().core().core().p1_has_character_work()&&
+           !engine_.base().core().core().p1_has_ai_review(day_)&&
+           !engine_.base().core().core().p1_has_policy_work()&&
            !engine_.base().core().core().p2_has_negotiable_bills()&&
            !engine_.base().core().core().p3_needs_daily_tick()&&
            !engine_.base().core().core().p5_needs_daily_tick()&&
@@ -486,18 +492,31 @@ public:
                 gh.phase_c().phase_time_apply_p5_guerrilla_access(today);
                 gh.enforce_p2_tariff_ceiling();
             });
-        // P0 domain decisions run on the real calendar day, in the same
-        // C/D/E/G/H transaction as scheduled commands and POP dynamics.
-        for(std::size_t n=0;n<native_day_plan.size();++n)
-            for(const auto& action:native_day_plan[n])
-                real_actions[n].push_back(action);
-        // Opt-in political reaction consumes the real economic results and
-        // membership changes completed earlier in this same native day.
-        // It is not a second population or political-money simulation.
+        // Stage 9 is ordered deliberately: first observe today's actual POP
+        // conditions, then execute P0/player political commands and elections,
+        // then settle bargains and political crises. The same staged C/D/E/G/H
+        // transaction owns every mutation; no second political clock exists.
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p3_needs_daily_tick())
                 gh.phase_c().p3_daily_react(today);
         });
+        // A political role points to an actual living PersonAnchor. Retire
+        // invalid persons and transfer IG leadership before election review.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p1_has_character_work())
+                gh.phase_c().p1_advance_characters(today);
+        });
+        // Registered national IGs and real contest dates determine party
+        // formation and campaign momentum before today's ballots are counted.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p4_has_campaign_due(today))
+                gh.phase_c().p4_daily_party_campaigns(today);
+        });
+        // P0 domain decisions run on the real calendar day and may consume
+        // the freshly computed POP political response.
+        for(std::size_t n=0;n<native_day_plan.size();++n)
+            for(const auto& action:native_day_plan[n])
+                real_actions[n].push_back(action);
         // Native election fallback. P0 plans its contested election earlier
         // in Stage9 (after P3 political reactions); the due index is then
         // cleared, so the fallback does not count the same ballot twice.
@@ -517,11 +536,37 @@ public:
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             gh.phase_c().p2_auto_negotiate_pending(today);
         });
+        // Only due enactment checkpoints are checked, after P0 negotiation.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p2_has_review_due(today))
+                gh.phase_c().p2_review_due(today);
+        });
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p2_has_assent_work())
+                gh.phase_c().p2_assent_due(today);
+        });
+        // AI selects only lawful P1/P2 commands after real election results
+        // and the current enactment checkpoint have been resolved.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p1_has_ai_review(today))
+                gh.phase_c().p1_autonomous_politics(today);
+        });
         // Ongoing movements generate warnings and observable responses;
         // actual armed actions still require verified army and equipment.
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p5_needs_daily_tick())
                 gh.phase_c().p5_daily_advance(today);
+        });
+        // Evaluate authority mandates and real-source political events
+        // after P5 warning changes so crisis notifications are not missed.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            gh.phase_c().p1_advance_political_policies(today);
+        });
+        // Revolution readiness uses only actual unit manpower, arms and IG
+        // support. A full clock without rebel assets cannot spawn an army.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p5_needs_daily_tick())
+                gh.phase_c().p5_auto_prepare_revolutions(today);
         });
         // Only journal due dates run guerrilla review. No daily all-world
         // militia battles or copied guerrilla population and supply ledgers.

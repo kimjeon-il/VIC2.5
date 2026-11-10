@@ -15,6 +15,9 @@
 #include "vic25/phase_c_politics_identity.hpp"
 #include "vic25/phase_c_politics_acceptance_rules.hpp"
 #include "vic25/phase_c_p5.hpp"
+#include "vic25/phase_c_characters.hpp"
+#include "vic25/phase_c_political_ai.hpp"
+#include "vic25/phase_c_political_policy.hpp"
 #include "vic25/phase_c_p5_guerrilla.hpp"
 #include "vic25/ledgers.hpp"
 #include "vic25/shared_reservations.hpp"
@@ -1498,6 +1501,32 @@ public:
     // Names and evidence are scenario data, not fixed social-class bonuses.
     void p3_seed_group(P3Group);
     void p3_seed_movement(P3Movement);
+    void p1_register_political_character(PoliticalCharacter);
+    void p1_mark_player_country(const std::string&,bool);
+    [[nodiscard]] P1AuthorityBudget p1_authority_budget(const std::string&)const;
+    void p1_activate_mandate(P1Mandate,std::int64_t);
+    [[nodiscard]] std::int32_t p1_region_decree_bonus_ppm(
+        const std::string&,const std::string&,P1DecreeKind)const;
+    void p1_deactivate_mandate(const std::string&);
+    void p1_register_lobby(P1Lobby,std::int64_t);
+    void p1_resolve_political_event(
+        const std::string&,P1PoliticalEventDecision,std::int64_t);
+    [[nodiscard]] bool p1_has_policy_work()const;
+    void p1_advance_political_policies(std::int64_t);
+    [[nodiscard]] const std::map<std::string,P1PoliticalEvent>&
+         p1_political_events()const{return p1_political_events_;}
+    [[nodiscard]] bool p1_has_ai_review(std::int64_t)const;
+    void p1_autonomous_politics(std::int64_t);
+    [[nodiscard]] const std::map<std::string,PoliticalAgenda>&
+         p1_political_agendas()const{return p1_political_agendas_;}
+    void p1_set_political_exile(const std::string&,bool);
+    void p1_set_favorite(const std::string&,const std::string&);
+    [[nodiscard]] std::string p1_group_legal_preference(const P3Group&)const;
+    [[nodiscard]] bool p1_character_available(const std::string&)const;
+    [[nodiscard]] bool p1_has_character_work()const;
+    void p1_advance_characters(std::int64_t);
+    [[nodiscard]] const std::map<std::string,PoliticalCharacter>&
+           p1_characters()const{return p1_characters_;}
     void p3_set_stance(Id,const std::string&,P3Stance);
     // Data-driven ideological profiles may be changed on the lawful
     // political stage. The named leader must be an existing PersonAnchor;
@@ -1537,6 +1566,7 @@ public:
     [[nodiscard]] P3MovementView p3_movement_view(const std::string&)const;
     [[nodiscard]] bool p3_needs_daily_tick()const;
     void p3_daily_react(std::int64_t);
+    void p3_autonomous_movements(std::int64_t);
     void p3_reconcile_population();
     // P5's political actions and civil-conflict evidence must bind real POP
     // participation, institutional capacity, and already-deployed C armies.
@@ -1552,6 +1582,7 @@ public:
     }
     [[nodiscard]] bool p5_needs_daily_tick()const;
     void p5_daily_advance(std::int64_t);
+    void p5_auto_prepare_revolutions(std::int64_t);
     [[nodiscard]] bool p5_has_due_daily_strike(std::int64_t)const;
     void phase_time_apply_p5_strikes(std::int64_t);
     void p5_perform_action(P5CollectiveAction);
@@ -1673,6 +1704,11 @@ public:
     [[nodiscard]] const P1Coalition& p1_coalition(const std::string&)const;
     [[nodiscard]] P1AuthorityView p1_authority(const std::string&)const;
     void seed_p1_coalition(const std::string&,P1Coalition);
+    void p1_vote_no_confidence(const std::string&,
+                               const std::vector<std::string>&,std::int64_t);
+    [[nodiscard]] P1JudiciaryView p1_judiciary_view(
+        const std::string&)const;
+    void p1_observe_legal_disputes(std::int64_t);
     [[nodiscard]] P1LegitimacyView p1_legitimacy(const std::string&)const;
     // National capacities derive from enacted laws, actual organizations and
     // ongoing policy commitments; they are never spendable financial stocks.
@@ -1731,6 +1767,14 @@ public:
     // P4's real electoral calendar: each elected institution/region has
     // its own contest, legal term, outcome and due date.
     void p4_register_party(P4Party);
+    void p4_set_official_affiliation(const std::string&,const std::string&,
+                                      const std::string&,std::int64_t);
+    void p4_daily_party_campaigns(std::int64_t);
+    [[nodiscard]] bool p4_has_campaign_due(std::int64_t)const;
+    [[nodiscard]] const std::map<std::pair<std::string,std::string>,
+          P4OfficialAffiliation>& p4_official_affiliations()const {
+        return p4_official_affiliations_;
+    }
     void p4_set_group_affinity(const std::string&,const std::string&,int);
     void p4_seed_contest(P4Contest);
     // Named nominees must bind to actual P1 PersonAnchor/POP, not phantom
@@ -1821,7 +1865,24 @@ public:
     [[nodiscard]] bool p2_candidate_eligible(
         const std::string&,const std::string&)const;
     void p2_submit_bill(P2Bill,std::int64_t);
+    void p2_review_due(std::int64_t);
+    [[nodiscard]] bool p2_has_review_due(std::int64_t)const;
+    [[nodiscard]] bool p2_enactment_ready(const std::string&)const;
+    [[nodiscard]] const std::map<std::string,P2Enactment>& p2_enactments()const {
+        return p2_enactments_;
+    }
     void p2_approve_bill(const std::string&,const std::vector<std::string>&);
+    [[nodiscard]] P1LegislativePowers p1_legislative_powers(const std::string&)const;
+    void p1_set_legislative_powers(const std::string&,P1LegislativePowers);
+    void p2_open_assent(const std::string&);
+    void p2_apply_constitutional_choice(const P2BaseLaw&);
+    void p2_sign_bill(const std::string&,const std::string&,std::int64_t);
+    void p2_veto_bill(const std::string&,const std::string&,std::int64_t);
+    void p2_override_veto(const std::string&,const std::vector<std::string>&,
+                          const std::vector<std::string>&,std::int64_t);
+    void p2_cancel_bill(const std::string&,std::int64_t);
+    void p2_assent_due(std::int64_t);
+    [[nodiscard]] bool p2_has_assent_work()const;
     void p2_promulgate_bill(const std::string&,const std::string&,std::int64_t);
     [[nodiscard]] bool p2_has_due(std::int64_t)const;
     void phase_time_apply_p2(std::int64_t);
@@ -2356,13 +2417,26 @@ public:
             claim_id,employer,worker,treasury,country,gross,gross,today});
         events_.push_back("earned-daily-wages-owed");
     }
-    void phase_time_settle_wage_arrears() {
+    void phase_time_settle_wage_arrears(std::int64_t today=-1) {
         require_stage({5});
+        std::map<std::string,std::int32_t> country_enforcement;
         for(auto it=wage_arrears_.begin();it!=wage_arrears_.end();) {
             auto& claim=it->second;
             const Money free=std::max<Money>(0,
                 phase_d_cash_available(claim.employer));
-            const Money paid=std::min(free,claim.outstanding);
+            Money enforceable=free;
+            // Fresh earned wages follow ordinary voluntary payroll. Only
+            // genuinely overdue creditor recovery is legally constrained.
+            if(today>=0&&today-claim.issued_day>=30&&
+               !claim.country.empty()&&p1_constitutions_.contains(claim.country)) {
+                const auto [entry,created]=country_enforcement.try_emplace(
+                     claim.country);
+                if(created)
+                    entry->second=p1_judiciary_view(claim.country)
+                                      .enforceable_contract_ppm;
+                enforceable=p4_scaled(free,entry->second,1'000'000);
+            }
+            const Money paid=std::min(enforceable,claim.outstanding);
             if(paid<=0){++it;continue;}
             const int tax=claim.country.empty()?income_tax_ppm_:
                 (governments_.contains(claim.country)?
@@ -3574,6 +3648,11 @@ public:
                       (g.chamber_seats>0&&g.quorum>0&&g.quorum<=g.chamber_seats)),
                    "invalid legal P1 or legacy government institution");
         }
+        for(const auto& [country,day]:p1_lost_confidence_)
+            ensure(day>=0&&p1_constitutions_.contains(country)&&
+                   p1_coalitions_.contains(country)&&
+                   p1_coalitions_.at(country).caretaker,
+                   "P1 censured government must remain caretaker");
         ensure(p1_constitutions_.size()==p1_coalitions_.size(),
                "P1 constitution/coalition mismatch");
         for(const auto& [country,order]:p1_constitutions_) {
@@ -3689,6 +3768,26 @@ public:
                 p1_check_coalition(change.coalition);
             }
         }
+        // All optional politics state remains a set of references to the
+        // original P1/P2/P3/P4/P5 ledgers, never a second headcount.
+        for(const auto& [id,character]:p1_characters_)
+            ensure(id==character.person_id&&person_anchors_.contains(id)&&
+                   governments_.contains(character.country)&&
+                   character.roles>0&&character.roles<=31&&
+                   character.popularity_ppm>=-1'000'000&&
+                   character.popularity_ppm<=1'000'000,
+                   "P1 political character is not POP backed");
+        for(const auto& [id,mandate]:p1_mandates_)
+            ensure(id==mandate.id&&p1_constitutions_.contains(mandate.country)&&
+                   mandate.authority_cost>=0&&mandate.authority_cost<=1000,
+                   "P1 invalid persistent authority mandate");
+        for(const auto& [id,agenda]:p1_political_agendas_)
+            ensure(id==agenda.country&&governments_.contains(id)&&
+                   agenda.next_review_day>=-1,
+                   "P1 AI agenda missing constitutional country");
+        ensure(p1_political_events_.size()<=1'000'000&&
+               p1_lobbies_.size()<=100'000,
+               "P1 excessive event or lobbying registry");
         ensure(p4_parties_.size()<=100'000&&p4_contests_.size()<=100'000&&
                p4_history_.size()<=1'000'000&&
                p4_nonparliament_results_.size()<=p4_contests_.size(),
@@ -3702,6 +3801,18 @@ public:
                    interest_groups_.contains(key.second)&&
                    affinity>=1&&affinity<=1'000'000,
                    "P4 affiliation without real party or interest group");
+        for(const auto& [key,membership]:p4_official_affiliations_)
+            ensure(key==std::make_pair(membership.country,membership.group)&&
+                   p3_groups_.contains(key)&&
+                   p4_parties_.contains(membership.party)&&
+                   p4_parties_.at(membership.party).country==membership.country,
+                   "P4 official IG membership has no real national party");
+        for(const auto& [key,campaign]:p4_campaigns_)
+            ensure(key==std::make_pair(campaign.contest_id,campaign.party_id)&&
+                   p4_contests_.contains(key.first)&&
+                   p4_parties_.contains(key.second)&&
+                   campaign.momentum_ppm>=0&&campaign.momentum_ppm<=500'000,
+                   "P4 campaign lacks a genuine election or registered party");
         for(const auto& [id,contest]:p4_contests_) {
             ensure(id==contest.id&&p1_constitutions_.contains(contest.country)&&
                    !contest.law_id.empty()&&contest.term_months>=1&&
@@ -3771,7 +3882,13 @@ public:
                    "P2 amendment active without saved legal record");
         for(const auto& [id,bill]:p2_bills_) {
             ensure(id==bill.id&&governments_.contains(bill.country)&&
-                   bill.introduced_day>=0&&bill.effective_day>bill.introduced_day&&
+                   bill.introduced_day>=0&&
+                    ((bill.status==P2BillStatus::submitted||
+                      bill.status==P2BillStatus::approved||
+                      bill.status==P2BillStatus::rejected)?
+                       (bill.effective_day==-1||
+                        bill.effective_day>bill.introduced_day):
+                       bill.effective_day>bill.introduced_day)&&
                    static_cast<unsigned>(bill.action)<=
                      static_cast<unsigned>(P2BillAction::repeal_base)&&
                    static_cast<unsigned>(bill.status)<=
@@ -3789,6 +3906,19 @@ public:
                        p2_bills_.at(id).status==P2BillStatus::promulgated&&
                        p2_bills_.at(id).effective_day==day,
                        "P2 stale legal event index");
+        for(const auto& [id,entry]:p2_enactments_) {
+            ensure(id==entry.bill_id&&p2_bills_.contains(id)&&
+                   entry.country==p2_bills_.at(id).country&&
+                   entry.phase>=1&&entry.phase<=4&&
+                   entry.setbacks>=0&&entry.setbacks<=3&&
+                   entry.checks>=0,
+                   "P2 invalid staged enactment");
+            if(!entry.ready&&
+               p2_bills_.at(id).status==P2BillStatus::submitted)
+                ensure(p2_review_due_.contains(entry.next_review_day)&&
+                       p2_review_due_.at(entry.next_review_day).contains(id),
+                       "P2 missing scheduled enactment checkpoint");
+        }
         for(const auto& [id,contest]:p4_contests_) {
             if(!p2_laws_.empty()) {
                 const auto legal=p2_term(id);
@@ -4086,6 +4216,13 @@ private:
     std::map<Id, Quantity> household_output_;
     std::map<std::pair<Id,std::string>, Quantity> household_consumed_;
     std::map<std::string, Id> person_anchors_;
+    std::map<std::string,PoliticalCharacter> p1_characters_;
+    std::map<std::string,std::string> p1_favorites_;
+    std::set<std::string> p1_player_countries_;
+    std::map<std::string,PoliticalAgenda> p1_political_agendas_;
+    std::map<std::string,P1Mandate> p1_mandates_;
+    std::map<std::string,P1PoliticalEvent> p1_political_events_;
+    std::map<std::string,P1Lobby> p1_lobbies_;
     std::map<Id, People> anchor_counts_;
     std::set<std::pair<std::string,std::string>> ballot_ids_;
     std::map<std::string,std::map<std::string,People>> ballot_votes_;
@@ -4108,8 +4245,11 @@ private:
     std::map<std::pair<std::string,std::string>,std::string>
         p3_leader_ideologies_;
     std::map<std::string,P3Movement> p3_movements_;
+    std::map<std::string,P3MovementType> p3_movement_types_;
+    std::map<std::string,std::int32_t> p3_movement_calm_days_;
     std::int64_t p3_last_reaction_day_{-1};
     std::map<std::string,P5Crisis> p5_crises_;
+    std::map<std::string,P5RevolutionPreparation> p5_revolution_preparations_;
     // Political capital is a reference into the existing C sovereignty map.
     std::map<std::string,std::string> p5_capitals_;
     std::vector<P5CollectiveAction> p5_actions_;
@@ -4140,6 +4280,8 @@ private:
     // P1 stores constitutional choices and coalition identity only.
     std::map<std::string,P1Constitution> p1_constitutions_;
     std::map<std::string,P1Coalition> p1_coalitions_;
+    // One procedural marker per unseated cabinet; not a new legislature.
+    std::map<std::string,std::int64_t> p1_lost_confidence_;
     std::map<std::string,P1Institution> p1_institutions_;
     // Derived Bureaucracy inputs, not a separately spendable resource.
     std::vector<P1ValueAddedEvent> p1_value_added_;
@@ -4165,6 +4307,10 @@ private:
     // P4 party relationships are many-to-many; political headcount stays in
     // P3 memberships and the national chamber still uses country_elections_.
     std::map<std::string,P4Party> p4_parties_;
+    std::map<std::string,P4PartyIdentity> p4_party_identities_;
+    std::map<std::pair<std::string,std::string>,P4OfficialAffiliation>
+        p4_official_affiliations_;
+    std::map<std::pair<std::string,std::string>,P4Campaign> p4_campaigns_;
     std::map<std::pair<std::string,std::string>,int> p4_affinities_;
     std::map<std::string,P4Contest> p4_contests_;
     std::map<std::pair<std::string,std::string>,
@@ -4181,6 +4327,11 @@ private:
     std::map<std::string,P2Amendment> p2_amendments_;
     std::set<std::string> p2_active_amendments_;
     std::map<std::string,P2Bill> p2_bills_;
+    std::map<std::string,P2Enactment> p2_enactments_;
+    std::map<std::string,P2Assent> p2_assents_;
+    std::map<std::string,P1LegislativePowers> p1_legislative_powers_;
+    std::map<std::string,std::int64_t> p2_retry_after_;
+    std::map<std::int64_t,std::set<std::string>> p2_review_due_; // derived
     std::map<std::string,std::string> p2_upper_chambers_;
     std::map<std::string,P2ChamberDecision> p2_chamber_decisions_;
     std::map<std::string,P2GroupDemand> p2_group_demands_;
@@ -4231,6 +4382,7 @@ private:
         const std::string&,const std::vector<P2ElectionTransition>&,
         std::int64_t);
     void p2_rebuild_due_index();
+    void p2_rebuild_review_due_index();
     static int compare_nonnegative_ratios(std::uint64_t a, std::uint64_t b,
                                           std::uint64_t c, std::uint64_t d) {
         ensure(b != 0 && d != 0, "zero election divisor");
@@ -4481,9 +4633,15 @@ private:
 #include "vic25/phase_c_economic_statistics_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
 #include "vic25/phase_c_p4_personal_impl.hpp"
+#include "vic25/phase_c_p4_campaign_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_politics_identity_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
+#include "vic25/phase_c_p3_autonomous_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"
+#include "vic25/phase_c_p5_revolution_impl.hpp"
+#include "vic25/phase_c_characters_impl.hpp"
+#include "vic25/phase_c_political_ai_impl.hpp"
+#include "vic25/phase_c_political_policy_impl.hpp"
 #include "vic25/phase_c_p5_guerrilla_impl.hpp"
