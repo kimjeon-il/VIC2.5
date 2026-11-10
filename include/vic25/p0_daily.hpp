@@ -2087,11 +2087,21 @@ public:
                 // not a second company registry. Unlocated estates retain
                 // legacy debt repayment, avoiding guessed jurisdiction.
                 std::map<std::string,std::string> estate_country;
+                std::set<std::string> multi_jurisdiction_estates;
                 for(const auto& [id,site]:c.facilities()) {
                     (void)id;
-                    if(!c.has_government(c.sovereignty(site.region)))continue;
-                    estate_country.try_emplace(site.owner,c.sovereignty(site.region));
+                    const auto& sovereign=c.sovereignty(site.region);
+                    if(!c.has_government(sovereign)) {
+                        multi_jurisdiction_estates.insert(site.owner);
+                        continue;
+                    }
+                    const auto [it,new_owner]=
+                        estate_country.try_emplace(site.owner,sovereign);
+                    if(!new_owner&&it->second!=sovereign)
+                        multi_jurisdiction_estates.insert(site.owner);
                 }
+                for(const auto& owner:multi_jurisdiction_estates)
+                    estate_country.erase(owner);
                 for(const auto& [firm,day]:c.bankrupt_firms()) {
                     (void)day;
                     if(c.outstanding_worker_wages(firm)>0)continue;
