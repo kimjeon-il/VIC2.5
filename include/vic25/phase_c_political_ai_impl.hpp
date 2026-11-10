@@ -81,8 +81,8 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
             for(const auto& [id,m]:p1_mandates_) {
                 (void)id;
                 if(m.country==country&&m.target==crisis.movement&&
-                   m.active&&(m.kind==P1MandateKind::bolster_movement||
-                             m.kind==P1MandateKind::suppress_movement))
+                   m.active&&(m.kind==P1PoliticalMandateKind::bolster_movement||
+                             m.kind==P1PoliticalMandateKind::suppress_movement))
                     ordered=true;
             }
             if(ordered||p1_authority_budget(country).available<200)continue;
@@ -93,12 +93,12 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 if(std::find(ruling.begin(),ruling.end(),group)!=ruling.end())
                     governing_support=true;
             }
-            P1Mandate mandate;
+            P1PoliticalMandate mandate;
             mandate.id="P1:AI:crisis:"+crisis_id;
             mandate.country=country;mandate.target=crisis.movement;
             mandate.kind=governing_support?
-                P1MandateKind::bolster_movement:
-                P1MandateKind::suppress_movement;
+                P1PoliticalMandateKind::bolster_movement:
+                P1PoliticalMandateKind::suppress_movement;
             if(!p1_mandates_.contains(mandate.id)) {
                 p1_activate_mandate(std::move(mandate),today);
                 events_.push_back("p1-ai-lawful-political-movement-response:"+crisis_id);

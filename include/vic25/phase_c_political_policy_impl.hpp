@@ -4,39 +4,12 @@
 namespace vic25::phasec {
 inline P1AuthorityBudget IntegratedWorld::p1_authority_budget(
         const std::string& country)const {
-    const auto& c=p1_constitution(country);
-    int supply=200;
-    switch(c.governance) {
-      case P1GovernancePrinciple::chiefdom:supply+=100;break;
-      case P1GovernancePrinciple::monarchy:
-      case P1GovernancePrinciple::theocracy:supply+=200;break;
-      case P1GovernancePrinciple::presidential_republic:supply+=100;break;
-      case P1GovernancePrinciple::parliamentary_republic:supply+=50;break;
-      default:break;
-    }
-    switch(c.power) {
-      case P1PowerDistribution::autocracy:supply+=500;break;
-      case P1PowerDistribution::oligarchy:supply+=200;break;
-      case P1PowerDistribution::landed_vote:supply+=200;break;
-      case P1PowerDistribution::wealth_vote:supply+=100;break;
-      case P1PowerDistribution::single_party:supply+=250;break;
-      case P1PowerDistribution::technocracy:supply+=100;break;
-      default:break;
-    }
-    if(const auto it=p1_favorites_.find(country);
-       it!=p1_favorites_.end()&&
-       p1_characters_.contains(it->second)&&
-       p1_characters_.at(it->second).active&&
-       p1_character_available(it->second))
-        supply+=50;
-    int reserved=0;
-    for(const auto& [id,m]:p1_mandates_)
-        if(m.country==country&&m.active) {
-            ensure(m.authority_cost>=0&&
-                   reserved<=1'000'000-m.authority_cost,
-                   "invalid active authority reservation");
-            reserved+=m.authority_cost;
-        }
+    // The existing P1 Capacity ledger remains the only Authority source.
+    const auto flow=p1_authority_capacity(country);
+    const auto supply=static_cast<std::int32_t>(
+        std::clamp<std::int64_t>(flow.generated,0,2'000'000'000));
+    const auto reserved=static_cast<std::int32_t>(
+        std::clamp<std::int64_t>(flow.committed,0,2'000'000'000));
     return {country,supply,reserved,supply-reserved};
 }
 inline std::int32_t IntegratedWorld::p1_region_decree_bonus_ppm(
@@ -45,7 +18,7 @@ inline std::int32_t IntegratedWorld::p1_region_decree_bonus_ppm(
     // Real edicts modify only paid/staffed services or material-backed work.
     for(const auto& [id,mandate]:p1_mandates_) {
         (void)id;
-        if(mandate.active&&mandate.kind==P1MandateKind::regional_decree&&
+        if(mandate.active&&mandate.kind==P1PoliticalMandateKind::regional_decree&&
            mandate.country==country&&mandate.target==region&&
            mandate.decree==type)
             return 200'000;
@@ -53,7 +26,7 @@ inline std::int32_t IntegratedWorld::p1_region_decree_bonus_ppm(
     return 0;
 }
 inline void IntegratedWorld::p1_activate_mandate(
-        P1Mandate mandate,std::int64_t today) {
+        P1PoliticalMandate mandate,std::int64_t today) {
     require_stage({9});
     ensure(!mandate.id.empty()&&!mandate.country.empty()&&
            !mandate.target.empty()&&mandate.active&&
@@ -62,14 +35,14 @@ inline void IntegratedWorld::p1_activate_mandate(
            today>=0&&
            mandate.authority_cost>=0&&mandate.authority_cost<=1000,
            "P1 invalid national authority mandate");
-    if(mandate.kind==P1MandateKind::bolster_movement||
-       mandate.kind==P1MandateKind::suppress_movement) {
+    if(mandate.kind==P1PoliticalMandateKind::bolster_movement||
+       mandate.kind==P1PoliticalMandateKind::suppress_movement) {
         ensure(mandate.authority_cost==200&&
                p3_movements_.contains(mandate.target)&&
                p3_movements_.at(mandate.target).country==mandate.country&&
                p3_movements_.at(mandate.target).active,
                "P1 political movement order needs 200 authority and real movement");
-    } else if(mandate.kind==P1MandateKind::regional_decree) {
+    } else if(mandate.kind==P1PoliticalMandateKind::regional_decree) {
         ensure(sovereignty_.contains(mandate.target)&&
                sovereignty_.at(mandate.target)==mandate.country&&
                mandate.authority_cost==100&&
@@ -79,7 +52,7 @@ inline void IntegratedWorld::p1_activate_mandate(
         for(const auto& [other_id,existing]:p1_mandates_) {
             (void)other_id;
             ensure(!existing.active||
-                   existing.kind!=P1MandateKind::regional_decree||
+                   existing.kind!=P1PoliticalMandateKind::regional_decree||
                    existing.country!=mandate.country||
                    existing.target!=mandate.target||
                    existing.decree!=mandate.decree,
@@ -160,13 +133,13 @@ inline void IntegratedWorld::p1_resolve_political_event(
             ensure(m.active&&
                    crisis.stage!=P5CrisisStage::settled,
                    "P1 may not issue a movement mandate for resolved crisis");
-            P1Mandate mandate;
+            P1PoliticalMandate mandate;
             mandate.id="P1:event:mandate:"+event_id;
             mandate.country=event.country;
             mandate.target=crisis.movement;
             mandate.kind=decision==P1PoliticalEventDecision::bolster?
-                P1MandateKind::bolster_movement:
-                P1MandateKind::suppress_movement;
+                P1PoliticalMandateKind::bolster_movement:
+                P1PoliticalMandateKind::suppress_movement;
             mandate.authority_cost=200;
             p1_activate_mandate(std::move(mandate),today);
         } else ensure(decision==P1PoliticalEventDecision::acknowledge,
@@ -188,7 +161,7 @@ inline void IntegratedWorld::p1_advance_political_policies(std::int64_t today) {
     require_stage({9});
     for(auto& [id,m]:p1_mandates_) {
         if(!m.active)continue;
-        if(m.kind==P1MandateKind::regional_decree) {
+        if(m.kind==P1PoliticalMandateKind::regional_decree) {
             if(!sovereignty_.contains(m.target)||
                sovereignty_.at(m.target)!=m.country) {
                 m.active=false;
@@ -216,7 +189,7 @@ inline void IntegratedWorld::p1_advance_political_policies(std::int64_t today) {
             auto& attitude=p3_attitudes_[key.first];
             attitude.slice=key.first;
             auto& stance=attitude.issues[movement.issue_domain];
-            const auto direction=m.kind==P1MandateKind::bolster_movement?
+            const auto direction=m.kind==P1PoliticalMandateKind::bolster_movement?
                 2'000:-2'000;
             stance.preference_ppm=std::clamp(
                 stance.preference_ppm+direction,-1'000'000,1'000'000);

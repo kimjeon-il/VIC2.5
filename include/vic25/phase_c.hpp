@@ -1504,7 +1504,7 @@ public:
     void p1_register_political_character(PoliticalCharacter);
     void p1_mark_player_country(const std::string&,bool);
     [[nodiscard]] P1AuthorityBudget p1_authority_budget(const std::string&)const;
-    void p1_activate_mandate(P1Mandate,std::int64_t);
+    void p1_activate_mandate(P1PoliticalMandate,std::int64_t);
     [[nodiscard]] std::int32_t p1_region_decree_bonus_ppm(
         const std::string&,const std::string&,P1DecreeKind)const;
     void p1_deactivate_mandate(const std::string&);
@@ -4220,7 +4220,7 @@ private:
     std::map<std::string,std::string> p1_favorites_;
     std::set<std::string> p1_player_countries_;
     std::map<std::string,PoliticalAgenda> p1_political_agendas_;
-    std::map<std::string,P1Mandate> p1_mandates_;
+    std::map<std::string,P1PoliticalMandate> p1_mandates_;
     std::map<std::string,P1PoliticalEvent> p1_political_events_;
     std::map<std::string,P1Lobby> p1_lobbies_;
     std::map<Id, People> anchor_counts_;

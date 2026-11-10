@@ -167,7 +167,7 @@ enum class PoliticalOrderKind : std::uint8_t {
 struct PoliticalOrder {
     daily::Date date{};
     PoliticalOrderKind kind{PoliticalOrderKind::activate_mandate};
-    phasec::P1Mandate mandate;
+    phasec::P1PoliticalMandate mandate;
     std::string mandate_id,event_id;
     phasec::P1PoliticalEventDecision choice{
         phasec::P1PoliticalEventDecision::acknowledge};
