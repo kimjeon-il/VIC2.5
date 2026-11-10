@@ -26,6 +26,12 @@ enum class P1InstitutionKind : std::uint8_t {
     administration, policing, education, healthcare, welfare, elections
 };
 
+enum class P1VetoRule : std::uint8_t { none, suspensive, absolute };
+struct P1LegislativePowers {
+    P1VetoRule veto{P1VetoRule::none};
+    std::int32_t override_ppm{666'667},assent_days{10};
+    bool party_initiative{true};
+};
 struct P1Constitution {
     P1GovernancePrinciple governance{P1GovernancePrinciple::monarchy};
     P1PowerDistribution power{P1PowerDistribution::autocracy};

@@ -7,9 +7,17 @@ namespace vic25::phasec {
 inline bool IntegratedWorld::p2_valid_clause(const P2Clause& c) {
     if(c.id.empty()||c.target.empty()||
        static_cast<unsigned>(c.kind)>
-           static_cast<unsigned>(P2ClauseKind::peaceful_strike_allowed))
+           static_cast<unsigned>(P2ClauseKind::constitutional_party_initiative))
         return false;
     switch(c.kind) {
+      case P2ClauseKind::constitutional_veto_rule:
+        return c.value>=0&&c.value<=2;
+      case P2ClauseKind::constitutional_override_ppm:
+        return c.value>=500'000&&c.value<=1'000'000;
+      case P2ClauseKind::constitutional_assent_days:
+        return c.value>=1&&c.value<=365;
+      case P2ClauseKind::constitutional_party_initiative:
+        return c.value==0||c.value==1;
       case P2ClauseKind::term_months:
         return c.value>=1&&c.value<=240;
       case P2ClauseKind::max_consecutive_terms:
@@ -56,7 +64,11 @@ inline void IntegratedWorld::p2_validate_clauses(
            c.kind==P2ClauseKind::maximum_import_tariff_ppm||
            c.kind==P2ClauseKind::female_suffrage_allowed||
            c.kind==P2ClauseKind::political_association_allowed||
-           c.kind==P2ClauseKind::peaceful_strike_allowed) {
+           c.kind==P2ClauseKind::peaceful_strike_allowed||
+           c.kind==P2ClauseKind::constitutional_veto_rule||
+           c.kind==P2ClauseKind::constitutional_override_ppm||
+           c.kind==P2ClauseKind::constitutional_assent_days||
+           c.kind==P2ClauseKind::constitutional_party_initiative) {
             ensure(c.target==country,
                    "P2 sovereign economic, civil or military rule needs its country");
         } else if(c.kind==P2ClauseKind::public_institution_level) {
@@ -115,6 +127,21 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
         }
     }
     p2_validate_clauses(law.country,law.clauses);
+    if(law.domain=="judicial_system")
+        ensure(law.scope.empty()||law.scope=="national",
+               "P2 judicial system must be a national law");
+    if(law.domain=="judicial_system")
+        ensure(law.base_choice=="executive_subordinate"||
+               law.base_choice=="limited_independence"||
+               law.base_choice=="independent",
+               "P2 judicial system has exactly three legal choices");
+    for(const auto& clause:law.clauses)
+        if(clause.kind==P2ClauseKind::constitutional_veto_rule||
+           clause.kind==P2ClauseKind::constitutional_override_ppm||
+           clause.kind==P2ClauseKind::constitutional_assent_days||
+           clause.kind==P2ClauseKind::constitutional_party_initiative)
+            ensure(law.tier==P2NormTier::constitution,
+                   "P2 separation of powers requires constitutional rank");
     if(law.tier==P2NormTier::local_ordinance) {
         for(const auto& clause:law.clauses) {
             ensure(clause.target!=law.country,
@@ -139,6 +166,14 @@ inline void IntegratedWorld::p2_check_amendment(const P2Amendment& amendment)con
            !amendment.clauses.empty(),
            "P2 amendment must belong to existing base law");
     p2_validate_clauses(it->second.country,amendment.clauses);
+    // Constitutional authority changes must be applied by a complete
+    // replacement law, never silently by a disconnected amendment.
+    for(const auto& clause:amendment.clauses)
+        ensure(clause.kind!=P2ClauseKind::constitutional_veto_rule&&
+               clause.kind!=P2ClauseKind::constitutional_override_ppm&&
+               clause.kind!=P2ClauseKind::constitutional_assent_days&&
+               clause.kind!=P2ClauseKind::constitutional_party_initiative,
+               "P2 legislative authority requires a constitutional replacement");
     // Mirrored P4 mandate fields need a base value to restore on repeal.
     for(const auto& clause:amendment.clauses) {
         if(clause.kind!=P2ClauseKind::term_months&&
@@ -552,11 +587,20 @@ inline void IntegratedWorld::p2_sync_country_rules(
 inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
     require_stage({9});
     ensure(today>=0&&!bill.id.empty()&&!bill.country.empty()&&
-           bill.proposer==governments_.at(bill.country).prime_minister&&
+           (bill.proposer==governments_.at(bill.country).prime_minister||
+            (p1_legislative_powers(bill.country).party_initiative&&
+             p1_constitution(bill.country).legislature!=P1LegislatureKind::none&&
+             p4_parties_.contains(bill.proposer)&&
+             p4_parties_.at(bill.proposer).country==bill.country&&
+             p4_parties_.at(bill.proposer).active&&
+             country_elections_.contains(bill.country)&&
+             country_elections_.at(bill.country).seats.contains(bill.proposer)&&
+             country_elections_.at(bill.country).seats.at(bill.proposer)>0))&&
            !bill.legal_basis.empty()&&
            bill.introduced_day==-1&&bill.promulgated_day==-1&&
            bill.status==P2BillStatus::submitted&&
-           bill.effective_day>today&&!p2_bills_.contains(bill.id),
+           (bill.effective_day==-1||bill.effective_day>today)&&
+           !p2_bills_.contains(bill.id),
            "P2 unauthorized, retroactive or duplicate bill");
     ensure(static_cast<unsigned>(bill.action)<=
                static_cast<unsigned>(P2BillAction::repeal_base),
@@ -583,7 +627,8 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
                "P2 replacement law must belong to one real sovereign");
         for(const auto& [id,previous]:p2_bills_) {
             (void)id;
-            ensure(previous.status==P2BillStatus::effective||
+            ensure((previous.status==P2BillStatus::effective||
+                     previous.status==P2BillStatus::rejected)||
                    previous.action!=P2BillAction::enact_or_replace_base||
                    std::make_tuple(previous.proposed_base.country,
                                    previous.proposed_base.domain,
@@ -618,7 +663,25 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
     const auto id=bill.id;
     if(bill.action==P2BillAction::enact_or_replace_base)
         p2_negotiation_watch_.insert(id);
+    const auto key=bill.country+":"+
+        std::to_string(static_cast<int>(bill.action))+":"+
+        (bill.action==P2BillAction::enact_or_replace_base?
+           bill.proposed_base.domain+":"+bill.proposed_base.scope+":"+
+           bill.proposed_base.base_choice:
+         bill.action==P2BillAction::attach_amendment?
+           bill.proposed_amendment.id:bill.target_id);
+    ensure(!p2_retry_after_.contains(key)||p2_retry_after_.at(key)<=today,
+           "P2 reform is under the two-year cooldown");
+    const auto domain=bill.action==P2BillAction::enact_or_replace_base?
+        bill.proposed_base.domain:std::string{};
+    const int review_days=domain=="governance_principles"?200:
+       (domain=="distribution_of_power"||domain=="economic_system"||
+        domain=="slavery")?150:100;
+    const auto country=bill.country;
     p2_bills_.emplace(id,std::move(bill));
+    p2_enactments_.emplace(id,P2Enactment{
+        id,country,key,1,0,0,0,today+review_days,-1,false});
+    p2_review_due_[today+review_days].insert(id);
     events_.push_back("p2-bill-introduced");
 }
 
@@ -628,7 +691,13 @@ inline void IntegratedWorld::p2_approve_bill(
     require_stage({9});
     auto& bill=p2_bills_.at(bill_id);
     ensure(bill.status==P2BillStatus::submitted&&
-           bill.proposer==governments_.at(bill.country).prime_minister,
+           p2_enactment_ready(bill_id)&&
+           (bill.proposer==governments_.at(bill.country).prime_minister||
+            (p4_parties_.contains(bill.proposer)&&
+             p4_parties_.at(bill.proposer).country==bill.country&&
+             country_elections_.contains(bill.country)&&
+             country_elections_.at(bill.country).seats.contains(bill.proposer)&&
+             country_elections_.at(bill.country).seats.at(bill.proposer)>0)),
            "P2 rejected unauthorized legislative sponsor");
     const auto order=p1_authority(bill.country);
     const auto tier=(bill.action==P2BillAction::enact_or_replace_base)?
@@ -665,6 +734,7 @@ inline void IntegratedWorld::p2_approve_bill(
     } else {
         p2_negotiation_watch_.erase(bill.id);
         bill.status=P2BillStatus::approved;
+        p2_open_assent(bill.id);
         events_.push_back("p2-law-approved:"+bill.id);
     }
 }
@@ -675,9 +745,16 @@ inline void IntegratedWorld::p2_promulgate_bill(
     require_stage({9});
     auto& bill=p2_bills_.at(bill_id);
     ensure(bill.status==P2BillStatus::approved&&
-           today>=bill.introduced_day&&bill.effective_day>today&&
+           today>=bill.introduced_day&&
            governments_.at(bill.country).head_of_state==incumbent_head,
            "P2 invalid approval, promulgator or effective date");
+    if(p1_legislative_powers(bill.country).veto!=P1VetoRule::none) {
+        const auto it=p2_assents_.find(bill_id);
+        ensure(it==p2_assents_.end()||
+               it->second.signed_by_head||it->second.overridden,
+               "P2 presidential assent or parliamentary override required");
+    }
+    if(bill.effective_day<=today)bill.effective_day=today+1;
     bill.promulgated_day=today;
     bill.status=P2BillStatus::promulgated;
     p2_due_[bill.effective_day].insert(bill_id);
