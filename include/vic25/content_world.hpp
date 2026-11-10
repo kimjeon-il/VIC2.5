@@ -65,8 +65,10 @@ class World {
             try {return c.p5_risk(id).pressure_ppm;}
             catch(const std::out_of_range&){return std::nullopt;}
         }
-        if(key=="p1.legitimacy"&&c.has_government(scope.id))
-            return c.p1_legitimacy(scope.id).score;
+        if(key=="p1.legitimacy"&&c.has_government(scope.id)) {
+            try{return c.p1_legitimacy(scope.id).score;}
+            catch(const std::out_of_range&){return std::nullopt;}
+        }
         if(key.rfind("p2.law:",0)==0) {
             const auto name=key.substr(7);
             const auto mid=name.find(':');
@@ -356,6 +358,25 @@ public:
             if(p==geo.provinces.end())return std::nullopt;
             return c.sovereignty(p->second.region)==scope.id?1:0;
         }
+        if(metric=="p1.legitimacy"&&c.has_government(scope.id)) {
+            try{return c.p1_legitimacy(scope.id).score;}
+            catch(const std::out_of_range&){return std::nullopt;}
+        }
+        if(metric.rfind("p2.law:",0)==0) {
+            const auto law=metric.substr(7);
+            const auto split=law.find(':');
+            if(split==std::string::npos)return std::nullopt;
+            const auto selected=c.p2_selected_law(scope.id,law.substr(0,split));
+            if(!selected)return std::nullopt;
+            return *selected==law.substr(split+1)?1:0;
+        }
+        if(metric.rfind("p3.movement_support:",0)==0) {
+            const auto id=metric.substr(std::string("p3.movement_support:").size());
+            if(!c.p3_movements().contains(id)||
+               c.p3_movements().at(id).country!=scope.id)
+                return std::nullopt;
+            return c.p3_movement_view(id).support_ppm;
+        }
         return std::nullopt;
     }
     // The content state is staged in a copy. Only after C/D/E/G/H's
@@ -367,6 +388,8 @@ public:
         const Day today=native_.day_index();
         const auto seed=native_.world_seed();
         auto rules=rules_;
+        const auto journal_cursor=
+            native_.engine().base().core().core().journal().size();
         plan[9].push_back([&staged,today,seed,rules](phasegh::Stage& gh){
             const ReadDomain read=[&gh](const Scope& scope,
                                        const std::string& metric){
@@ -378,6 +401,61 @@ public:
                 native_write(scope,effect,provenance,today,gh);
             };
             step(*rules,staged,today,seed,read,apply);
+        });
+        // C's native event journal is the authoritative source for
+        // next-day on_action notifications. Stage11 runs after all the
+        // political AI and real Stage10 military work, but inside the
+        // same C/D/E/G/H atomic transaction as the content staging copy.
+        plan[11].push_back([&staged,today,rules,journal_cursor]
+                           (phasegh::Stage& gh) {
+            const auto& c=gh.phase_c();
+            const auto& events=c.journal();
+            if(events.size()<journal_cursor)return;
+            for(std::size_t i=journal_cursor;i<events.size();++i) {
+                const auto& event=events[i];
+                auto relay=[&](const std::string& prefix,
+                               const std::string& action,
+                               const std::string& country) {
+                    if(country.empty())return;
+                    content::notify(*rules,staged,action,
+                                    {"country",country},today+1);
+                };
+                const auto with_id=[&](const std::string& prefix)->
+                      std::optional<std::string> {
+                    if(event.rfind(prefix,0)==0)
+                        return event.substr(prefix.size());
+                    return std::nullopt;
+                };
+                if(auto id=with_id("p2-law-effective:")) {
+                    const auto bill=c.p2_bills().find(*id);
+                    if(bill!=c.p2_bills().end())
+                        relay("p2-law-effective:",
+                              "politics.law_effective",bill->second.country);
+                } else if(auto id=with_id("p5-political-crisis-warning:")) {
+                    const auto row=c.p5_crises().find(*id);
+                    if(row!=c.p5_crises().end())
+                        relay("p5-political-crisis-warning:",
+                              "politics.crisis_warning",row->second.country);
+                } else if(auto id=with_id("p5-verified-political-settlement:")) {
+                    const auto row=c.p5_crises().find(*id);
+                    if(row!=c.p5_crises().end())
+                        relay("p5-verified-political-settlement:",
+                              "politics.crisis_settled",row->second.country);
+                } else if(auto id=with_id("p4-contest-counted:")) {
+                    const auto contest=c.p4_contests().find(*id);
+                    if(contest!=c.p4_contests().end())
+                        relay("p4-contest-counted:",
+                              "politics.election_held",contest->second.country);
+                } else if(auto id=with_id("p3-persistent-movement-created:")) {
+                    const auto row=c.p3_movements().find(*id);
+                    if(row!=c.p3_movements().end())
+                        relay("p3-persistent-movement-created:",
+                              "politics.movement_created",row->second.country);
+                } else if(auto id=with_id("p1-daily-government-effective:")) {
+                    relay("p1-daily-government-effective:",
+                          "politics.government_changed",*id);
+                }
+            }
         });
         auto report=native_.advance_day(plan);
         state_=std::move(staged);
