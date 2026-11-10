@@ -45,6 +45,31 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
         agenda.last_review_day=today;
         agenda.last_election_day=latest_election;
         const auto order=p1_authority(country);
+        // AI may initiate a single real-bloc confidence vote when its cabinet
+        // has already lost the recorded chamber quorum. No individual MPs
+        // or extra parliamentary point ledger are created.
+        if(order.assembly_confidence_required&&
+           !p1_coalitions_.at(country).caretaker&&
+           country_elections_.contains(country)&&
+           !p4_parliament_dissolved(country)) {
+            const auto& election=country_elections_.at(country);
+            const auto& ruling=p1_coalitions_.at(country).ruling_parties;
+            People loyal_seats=0,opposition_seats=0;
+            std::vector<std::string> opposition;
+            for(const auto& [party,seats]:election.seats) {
+                if(std::find(ruling.begin(),ruling.end(),party)!=ruling.end())
+                    loyal_seats=phaseb::add_checked(loyal_seats,seats);
+                else if(seats>0) {
+                    opposition.push_back(party);
+                    opposition_seats=phaseb::add_checked(opposition_seats,seats);
+                }
+            }
+            if(loyal_seats<g.quorum&&
+               opposition_seats>election.total_seats/2) {
+                p1_vote_no_confidence(country,opposition,today);
+                events_.push_back("p1-ai-recorded-no-confidence:"+country);
+            }
+        }
         // Respond to a real warning using an affordable P1 mandate, rather
         // than increasing governmental clout or manufacturing loyalists.
         for(const auto& [crisis_id,crisis]:p5_crises_) {
