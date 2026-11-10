@@ -35,12 +35,12 @@ struct Fixture {
         auto& pop=c.seed_population();
         const auto hh=pop.household_profile({"R","mixed","shared",100});
         const auto e=pop.economic_profile(
-            {"R","labor","wage","employee",pop.default_education()});
+            {"R","worker","wage","employee",pop.default_education()});
         const auto d=pop.demographic_profile({
             "R",24000-360,phaseb::Sex::male,"c","r","citizen","free",
             pop.default_health(),phaseb::Service::civilian});
         const auto worker_slice=pop.seed_population(d,e,hh,100,1);
-        pop.hire(worker_slice,1,"EMP","labor",100,{});
+        pop.hire(worker_slice,1,"EMP","worker",100,{});
         if(!law_choice.empty()) {
             P2BaseLaw law;
             law.id="JUDICIAL_ACT";law.country="A";
