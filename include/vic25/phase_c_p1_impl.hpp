@@ -275,6 +275,28 @@ inline void IntegratedWorld::schedule_p1_cabinet_daily(
            "P1 duplicate same-day cabinet transition");
     p1_check_coalition(coalition);
     const auto authority=p1_authority(country);
+    // Historical constitutional amendments can freeze discretionary
+    // government reshuffles. A genuinely new election or caretaker
+    // transition still requires (and may form) a lawful successor cabinet.
+    if(p2_catalog_modifier_value(
+           country,"country_block_government_reform_bool")>0) {
+        const auto& incumbent=p1_coalition(country);
+        const bool reshuffle=
+            incumbent.ruling_groups!=coalition.ruling_groups||
+            incumbent.ruling_parties!=coalition.ruling_parties;
+        bool fresh_election=false;
+        for(const auto& [id,contest]:p4_contests_) {
+            (void)id;
+            if(contest.country==country&&
+               contest.office==P4Office::legislature&&
+               contest.last_poll_day>=0&&
+               contest.last_poll_day<effective_day&&
+               effective_day-contest.last_poll_day<=30)
+                fresh_election=true;
+        }
+        ensure(!reshuffle||incumbent.caretaker||fresh_election,
+               "P1 active amendment blocks discretionary government reform");
+    }
     if(authority.assembly_confidence_required) {
         ensure(!p4_parliament_dissolved(country),
                "P1 cannot form a parliamentary government from dissolved seats");

@@ -312,6 +312,19 @@ inline P3MovementView IntegratedWorld::p3_movement_view(
     view.radical_ppm=std::max(movement.radical_ppm,
         static_cast<std::int32_t>(
             std::clamp<std::int64_t>(observed_radical,0,1'000'000)));
+    // Effective laws modify the *derived* political movement view.
+    // P5 reads the same value; the modifier must not be applied again
+    // in the separate revolution risk calculation.
+    const double radical_law=(!movement.region.empty()&&
+        sovereignty_.contains(movement.region)&&
+        sovereignty_.at(movement.region)==movement.country)?
+        p2_region_modifier_value(movement.region,
+            "political_movement_radicalism_add"):
+        p2_catalog_modifier_value(movement.country,
+            "political_movement_radicalism_add");
+    view.radical_ppm=static_cast<std::int32_t>(std::clamp(
+        static_cast<double>(view.radical_ppm)+radical_law*1'000'000.0,
+        0.0,1'000'000.0));
     view.activism_ppm=std::max(movement.activism_ppm,
         static_cast<std::int32_t>(
             std::clamp<std::int64_t>(observed_engagement,0,1'000'000)));

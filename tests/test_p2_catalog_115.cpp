@@ -31,6 +31,8 @@ int main() {
     assert(p2_catalog_raw_modifier("law_autocracy","country_authority_add")==200);
     assert(p2_catalog_raw_modifier("law_monarchy","country_authority_add")==200);
     assert(p2_catalog_raw_modifier("law_laissez_faire","country_authority_add")==0);
+    assert(p2_catalog_raw_modifier("law_sakoku",
+        "country_disallow_aggressive_plays_bool")==1);
     const auto* general=p2_catalog_amendment(
         "amendment_generic_sponsor_polstr_increase");
     assert(general&&general->generic_sponsor);

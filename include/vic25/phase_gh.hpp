@@ -849,6 +849,9 @@ public:
                 spatial_.spatial().provinces.contains(province),
                 "H_ERR_INVALID_CRISIS");
         leader(phase_c(),claimant,claimant_prime);
+        require(phase_c().p2_catalog_modifier_value(
+                    claimant,"country_disallow_aggressive_plays_bool")<=0,
+                "H_ERR_LAW_PROHIBITS_AGGRESSIVE_DIPLOMATIC_PLAY");
         const auto& claims=spatial_.spatial().claims;
         require(claims.contains(province) &&
                 claims.at(province).contains(claimant) &&

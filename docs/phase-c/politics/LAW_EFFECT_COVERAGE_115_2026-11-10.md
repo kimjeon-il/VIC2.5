@@ -12,8 +12,8 @@
 
 - 법률 **148개**, 법률군 **26개**, 증보 **71개**
 - 정적 modifier 행 **1117개**, 고유 effect key **350종**
-- 실행 경로 매핑된 key **80종** (부분 구현/미검증), 소비자가 아직 없는 key **270종**
-- 매핑된 source 행 **415개**, 미연결 source 행 **702개**
+- 실행 경로 매핑된 key **82종** (부분 구현/미검증), 소비자가 아직 없는 key **268종**
+- 매핑된 source 행 **419개**, 미연결 source 행 **698개**
 
 ## 법률군별 정적 modifier 매핑
 
@@ -43,7 +43,7 @@
 | `rights_of_women` | 5 | 15 | 6 | 9 |
 | `slavery` | 5 | 5 | 3 | 2 |
 | `taxation` | 5 | 2 | 0 | 2 |
-| `trade_policy` | 6 | 44 | 16 | 28 |
+| `trade_policy` | 6 | 44 | 17 | 27 |
 | `welfare` | 5 | 15 | 5 | 10 |
 
 ## 실행 경로가 존재하는 modifier 키 — 원작 동등성은 별도 검증 필요
@@ -131,6 +131,8 @@
 | `state_tax_collection_mult` | 1 | C/D 경제·재정 | 행정인력에 기반한 원천징수 실효율(단순화) |
 | `state_trade_capacity_mult` | 2 | G/H 무역·외교 | VIC2.5 단순화 계산·조건부 |
 
+| `country_block_government_reform_bool` | 3 | P1 정부 구성 | 선택형/조건부 실행 판정 · 미검증 |
+| `country_disallow_aggressive_plays_bool` | 1 | H 외교 위기 발의 | 선택형/조건부 실행 판정 · 미검증 |
 ## 아직 연결되지 않은 modifier 키 — 실제 계산 연결 필요
 
 | 원본 modifier key | 해당 정의 행 | 연결해야 할 영역 |
@@ -203,7 +205,6 @@
 | `country_amenability_add` | 4 | 별도 실행 대상 필요 |
 | `country_aristocrats_voting_power_add` | 3 | C/P 정치 |
 | `country_basque_cultural_acceptance_add` | 1 | B/POP·C/P1 |
-| `country_block_government_reform_bool` | 3 | 별도 실행 대상 필요 |
 | `country_brahmins_acceptance_min_add` | 3 | B/POP·C/P1 |
 | `country_brahmins_qualification_growth_other_class_mult` | 1 | B/POP·C/P1 |
 | `country_brahmins_qualification_growth_same_class_mult` | 2 | B/POP·C/P1 |
@@ -227,7 +228,6 @@
 | `country_disable_nationalization_bool` | 1 | 별도 실행 대상 필요 |
 | `country_disable_nationalization_without_compensation_bool` | 5 | 별도 실행 대상 필요 |
 | `country_disable_non_company_privatization_bool` | 1 | 별도 실행 대상 필요 |
-| `country_disallow_aggressive_plays_bool` | 1 | 별도 실행 대상 필요 |
 | `country_disallow_agitator_invites_bool` | 1 | 별도 실행 대상 필요 |
 | `country_disallow_trade_outside_canton_bool` | 1 | G/H 무역·외교 |
 | `country_disallow_trade_outside_kyushu_bool` | 1 | G/H 무역·외교 |
@@ -429,3 +429,9 @@
 - 2차 추가 키 **17종**. 이전 연결 키 포함 총 **80종**, 미연결 **270종**. 이는 내용적 완성률이 아니라 정적 modifier 키별 코드 소비자 존재 여부다.
 
 **연결 범위 한계:** 원작에서는 별도의 이념/정치운동/건설·연구 엔진에서 계산하는 효과를 VIC2.5의 단순화된 P1/P5/P0/D 규칙에 맞춰 사용한다. 엄밀한 1.15 수치 동등성을 주장하지 않는다. 본 회차 컴파일 및 실제 시나리오 재생은 실행하지 않았다.
+
+## 추가: 헌정·외교법 효과
+
+- `country_block_government_reform_bool`: 실제 발효된 법률 증보가 있을 때 재직 정부의 재량적 연정 재편을 제한한다. 관리정부의 승계나 실제 새 총선 직후의 합법적 정부 구성은 예외로 유지한다.
+- `country_disallow_aggressive_plays_bool`: 실제 대외 위기를 새로 발의할 때 금지한다. 기존 위기의 협상·방어전쟁·진행 중 전쟁을 자동 폐기하지 않는다.
+- 이 두 항목도 전체 빅토리아 3 정치·외교 스크립트를 복원한다는 의미가 아닌 VIC2.5의 구체적 법률 소비자 연결이다.
