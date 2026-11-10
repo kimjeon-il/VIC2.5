@@ -46,7 +46,9 @@ struct Condition {
     }
 };
 enum class ExternalKind : std::uint8_t {
-    none,independence,transfer,claim,colonize
+    none,independence,transfer,claim,colonize,
+    political_bill,political_cabinet,political_movement,
+    political_mandate,political_settlement
 };
 struct External {
     ExternalKind kind{ExternalKind::none};
@@ -54,6 +56,10 @@ struct External {
     std::uint64_t admin_id{};
     std::vector<std::uint64_t> provinces;
     Number seats{},quorum{};
+    // Political references identify existing legal, movement and office
+    // objects. They do not serialize a second POP/army/treasury ledger.
+    std::string law_group,law_choice,subject_id,action,actor,region;
+    std::vector<std::string> parties,groups;
 };
 enum class EffectKind : std::uint8_t {
     set_flag,clear_flag,add_counter,schedule_event,open_journal,
@@ -141,9 +147,45 @@ struct Registry {
             if(e.kind==EffectKind::external) {
                 require(e.external.kind!=ExternalKind::none,
                         "CONTENT_UNSUPPORTED_NATIVE_EFFECT");
-                require(!e.external.provinces.empty()&&
-                        !e.external.target_country.empty(),
-                        "CONTENT_INCOMPLETE_NATIVE_EFFECT");
+                const auto& x=e.external;
+                if(x.kind<=ExternalKind::colonize) {
+                    require(!x.provinces.empty()&&!x.target_country.empty(),
+                            "CONTENT_INCOMPLETE_NATIVE_EFFECT");
+                } else {
+                    require(x.provinces.empty()&&x.admin_id==0&&
+                            x.seats==0&&x.quorum==0,
+                            "CONTENT_POLITICAL_EFFECT_CANNOT_CREATE_TERRITORY");
+                    switch(x.kind) {
+                      case ExternalKind::political_bill:
+                        require(!x.law_group.empty()&&!x.law_choice.empty(),
+                                "CONTENT_POLITICAL_BILL_NEEDS_CATALOGUE_LAW");
+                        break;
+                      case ExternalKind::political_cabinet:
+                        require(!x.prime.empty(),
+                                "CONTENT_POLITICAL_CABINET_NEEDS_SUCCESSOR");
+                        break;
+                      case ExternalKind::political_movement:
+                        require(!x.subject_id.empty()&&!x.law_group.empty()&&
+                                !x.law_choice.empty()&&!x.groups.empty(),
+                                "CONTENT_POLITICAL_MOVEMENT_NEEDS_ACTUAL_GROUP");
+                        break;
+                      case ExternalKind::political_mandate:
+                        require(!x.subject_id.empty()&&
+                                (x.action=="bolster"||x.action=="suppress"),
+                                "CONTENT_POLITICAL_MANDATE_NEEDS_KIND");
+                        break;
+                      case ExternalKind::political_settlement:
+                        require(!x.subject_id.empty()&&
+                                (x.action=="legal_concession"||
+                                 x.action=="autonomy_granted"||
+                                 x.action=="crisis_recedes"||
+                                 x.action=="cabinet_overthrow"||
+                                 x.action=="independence_recognized"),
+                                "CONTENT_POLITICAL_SETTLEMENT_INVALID");
+                        break;
+                      default:break;
+                    }
+                }
             }
         }
     }
@@ -188,7 +230,8 @@ struct Registry {
         require(!f.id.empty()&&!f.target_country.empty()&&
                 f.needed_ppm>=0&&f.needed_ppm<=1'000'000&&
                 !f.required_provinces.empty()&&
-                f.external.kind!=ExternalKind::none,
+                f.external.kind>=ExternalKind::independence&&
+                f.external.kind<=ExternalKind::colonize,
                 "CONTENT_INVALID_FORMATION");
         validate_condition(f.eligibility);
         const auto ids=f.required_provinces;
