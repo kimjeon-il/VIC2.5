@@ -371,6 +371,14 @@ if(BUILD_TESTING)
     add_test(NAME vic25_p2_catalog_115_tests COMMAND vic25_p2_catalog_115_tests)
 endif()
 
+# Actual law yields, paid factory titles and household customs-like taxes.
+if(BUILD_TESTING)
+    add_executable(vic25_p2_economy_law_115_tests tests/test_p2_economy_law_115.cpp)
+    target_link_libraries(vic25_p2_economy_law_115_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p2_economy_law_115_tests
+             COMMAND vic25_p2_economy_law_115_tests)
+endif()
+
 # Funded research threshold must track law-defined speed and real evidence.
 if(BUILD_TESTING)
     add_executable(vic25_p2_research_effects_tests tests/test_p2_research_effects.cpp)

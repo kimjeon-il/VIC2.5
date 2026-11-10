@@ -619,6 +619,11 @@ inline Quantity available_production(const phased::Stage& d,
         const auto& iq=c.market(f.region,input.good);
         cost_per_batch=phaseb::add_checked(cost_per_batch,times(input.per_unit,iq.price));
     }
+    // The output of a legally more productive site is backed by the same
+    // checked input/labor batch. Use average viable revenue for the private
+    // firm's actual investment decision; the D production ledger records
+    // each incremental unit with deterministic cumulative rounding.
+    const auto yield=phased::law_industry_throughput(state,c,r);
     const Money revenue=times(primary.per_unit,quote.price);
     // Count explicitly scripted OR real contractual payroll, never both.
     const Money per_worker=policy.wage_per_worker_per_day>0?
@@ -627,7 +632,9 @@ inline Quantity available_production(const phased::Stage& d,
     if(per_worker>0)
         cost_per_batch=phaseb::add_checked(cost_per_batch,
                  times(r.workers_per_batch,per_worker));
-    if(revenue<=cost_per_batch)return 0;
+    if(static_cast<long double>(revenue)*
+           (1.0L+static_cast<long double>(yield))<=
+           static_cast<long double>(cost_per_batch))return 0;
     const Quantity stock_shortfall=policy.target_inventory-c.stock(f.owner,f.region,primary.good);
     Quantity batches=stock_shortfall/primary.per_unit+
         (stock_shortfall%primary.per_unit!=0?1:0);
@@ -806,9 +813,23 @@ public:
                             svc.operator_id,svc.region,svc.good);
                         const Quantity units=std::min(throughput,on_hand);
                         if(units>0)
-                            real_need=phaseb::add_checked(real_need,
-                                times(units,game_c.market(
-                                    svc.region,svc.good).price));
+                            {
+                                const Money base=times(units,game_c.market(
+                                    svc.region,svc.good).price);
+                                const double cost_factor=std::clamp(
+                                    1.0+game_c.p2_catalog_modifier_value(
+                                      country,
+                                      "country_institution_cost_institution_health_system_mult"),
+                                    0.1,4.0);
+                                const Money obligation=static_cast<Money>(
+                                    std::min<long double>(
+                                      static_cast<long double>(
+                                        std::numeric_limits<Money>::max()/4),
+                                      std::ceil(static_cast<long double>(base)*
+                                                cost_factor)));
+                                real_need=phaseb::add_checked(
+                                    real_need,obligation);
+                            }
                     }
                 for(const auto& public_program:decisions.public_budget)
                     if(public_program.country==country)
@@ -1153,7 +1174,8 @@ public:
                 const auto nation=c.sovereignty(p.region);
                 const double allocation=std::clamp(
                     1.0+c.p2_catalog_modifier_value(nation,
-                        "country_private_construction_allocation_mult"),
+                        "country_private_construction_allocation_mult")+
+                        c.p2_real_investment_pool_efficiency(p.client),
                     0.0,4.0);
                 const Quantity lawful_work=static_cast<Quantity>(
                     std::min(static_cast<double>(
@@ -1202,7 +1224,8 @@ public:
                     const Money gross=times(*workers,firm.wage_per_worker_per_day);
                     gh.phase_c().wages_under_law(f.owner,firm.employee_wallet,
                                                   firm.treasury_wallet,gross,
-                                                  gh.phase_c().sovereignty(f.region));
+                                                  gh.phase_c().sovereignty(f.region),
+                                                  *workers);
                 });
         }
         // A site operator chooses a real output quantity from target stock,
@@ -1222,7 +1245,13 @@ public:
                     policy.wage_per_unit:
                     times(actual_daily_worker_wage(c,src.owner,date.day,dim),
                           src.workers_per_unit);
-                if(quote.price<=wage_per_unit ||
+                const double extraction_law=std::clamp(
+                    1.0+c.p2_catalog_modifier_value(
+                        c.sovereignty(src.region),
+                        "building_group_bg_extraction_throughput_add"),
+                    0.05,4.0);
+                if(static_cast<long double>(quote.price)*extraction_law<=
+                   static_cast<long double>(wage_per_unit) ||
                    c.stock(src.owner,src.region,src.good)>=policy.target_inventory)
                     return;
                 if(src.monthly_capacity<src.produced_this_month||
@@ -1261,7 +1290,8 @@ public:
                     gh.phase_c().wages_under_law(src.owner,policy.employee_wallet,
                                   policy.treasury_wallet,
                                   times(*completed,policy.wage_per_unit),
-                                  gh.phase_c().sovereignty(src.region));
+                                  gh.phase_c().sovereignty(src.region),
+                                  times(*completed,src.workers_per_unit));
                 });
         }
         // Funded, self-scheduling research is an actual D work order:
@@ -1353,7 +1383,8 @@ public:
                     gh.phase_c().wages_under_law(site.owner,
                           maintenance.employee_wallet,
                           maintenance.treasury_wallet,gross,
-                          gh.phase_c().sovereignty(site.region));
+                          gh.phase_c().sovereignty(site.region),
+                          times(*completed,maintenance.workers_per_unit));
                 });
         }
         for(const auto& credit:decisions.debt_service)
@@ -2140,9 +2171,21 @@ public:
                     const auto cash_left=c.phase_d_cash_available(treasury)-
                         budget.reserve_cash;
                     if(daily_left<=0||cash_left<=0)break;
-                    const auto intended=phaseb::mul_checked(
-                        std::min<Quantity>(available_slots,
-                            c.stock(svc.operator_id,svc.region,svc.good)),unit);
+                    const auto medical_units=std::min<Quantity>(
+                        available_slots,
+                        c.stock(svc.operator_id,svc.region,svc.good));
+                    const Money base=phaseb::mul_checked(medical_units,unit);
+                    const double cost_factor=std::clamp(
+                        1.0+c.p2_catalog_modifier_value(
+                            budget.country,
+                            "country_institution_cost_institution_health_system_mult"),
+                        0.1,4.0);
+                    const Money intended=static_cast<Money>(
+                        std::min<long double>(
+                            static_cast<long double>(
+                                std::numeric_limits<Money>::max()/4),
+                            std::ceil(static_cast<long double>(base)*
+                                      cost_factor)));
                     const Money paid=std::min({intended,daily_left,cash_left});
                     if(paid<=0)continue;
                     c.spend_country_budget(budget.country,svc.operator_id,paid);
@@ -2184,6 +2227,92 @@ public:
                             (*budget_spent_today)[program.country],amount);
                 }
             });
+        // The three non-payroll tax models have their own *real* bases.
+        // The tax rate remains the politically adopted C treasury rate;
+        // the law changes WHAT is taxable, never mints taxable income.
+        plan[5].push_back([date,dim](phasegh::Stage& gh) {
+            auto& c=gh.phase_c();
+            const auto& industry=gh.phase_d().state();
+            std::map<std::pair<std::string,std::string>,People> adults;
+            for(const auto& [id,slice]:c.people().slices()) {
+                if(slice.count<=0||c.people().age_months_slice(id)<16*12)
+                    continue;
+                const auto& dem=c.people().demographic(
+                    slice.key.demographic);
+                if(dem.service!=phaseb::Service::civilian&&
+                   dem.service!=phaseb::Service::reserve)continue;
+                const auto& country=c.sovereignty(dem.region);
+                if(c.p2_taxation_choice(country)!=
+                   "law_per_capita_based_taxation")continue;
+                const auto holder="HH:"+std::to_string(slice.key.household);
+                if(!c.has_actor(holder)||!c.has_country_treasury(country))
+                    continue;
+                adults[{country,holder}]=phaseb::add_checked(
+                    adults[{country,holder}],slice.count);
+            }
+            for(const auto& [key,n]:adults) {
+                const auto& [country,household]=key;
+                const auto benchmark=c.p2_observed_monthly_worker_wage(country);
+                if(benchmark<=0)continue;
+                const auto tax=c.income_tax_ppm(country);
+                const Money per_adult=
+                    (benchmark/1'000'000)*tax+
+                    (benchmark%1'000'000)*tax/1'000'000;
+                const Money monthly=times(per_adult,n);
+                const Money due=daily_budget::increment(monthly,date.day,dim);
+                const auto& treasury=c.country_treasury(country);
+                if(due<=0||treasury==household)continue;
+                const Money paid=std::min(due,
+                    c.phase_d_cash_available(household));
+                if(paid>0)c.pay(household,treasury,paid);
+            }
+            std::set<std::string> taxed_facilities;
+            for(const auto& [id,p]:industry.constructions) {
+                (void)id;
+                if(!p.commissioned||p.capitalized_value<=0||
+                   !taxed_facilities.insert(p.target_site).second)
+                    continue;
+                const auto& country=c.sovereignty(p.region);
+                if(c.p2_taxation_choice(country)!=
+                   "law_land_based_taxation"||
+                   !c.has_country_treasury(country))continue;
+                bool farm=false;
+                for(const auto& [rid,r]:industry.recipes) {
+                    (void)rid;
+                    if(r.site!=p.target_site)continue;
+                    std::string kind=r.industry_class;
+                    std::set<std::string> seen;
+                    for(int depth=0;depth<12&&!kind.empty()&&
+                            seen.insert(kind).second;++depth) {
+                        if(kind=="agriculture"||kind=="plantations"||
+                           kind=="ranching"||kind=="farming"||
+                           kind=="farm") {farm=true;break;}
+                        auto it=industry.industry_classes.find(kind);
+                        if(it==industry.industry_classes.end())break;
+                        kind=it->second.parent;
+                    }
+                    if(farm)break;
+                }
+                if(!farm)continue;
+                const auto& site=c.facility(p.target_site);
+                const auto& treasury=c.country_treasury(country);
+                if(site.owner==treasury||!c.has_actor(site.owner))continue;
+                const int rate=c.income_tax_ppm(country);
+                const Money annual=(p.capitalized_value/1'000'000)*rate+
+                    (p.capitalized_value%1'000'000)*rate/1'000'000;
+                const auto monthly_cumulative=[&](int elapsed)->Money {
+                    return phaseb::add_checked(
+                        phaseb::mul_checked(annual/12,elapsed),
+                        phaseb::mul_checked(annual%12,elapsed)/12);
+                };
+                const Money month=monthly_cumulative(date.month)-
+                                  monthly_cumulative(date.month-1);
+                const Money due=daily_budget::increment(month,date.day,dim);
+                const Money paid=std::min(due,
+                    c.phase_d_cash_available(site.owner));
+                if(paid>0)c.pay(site.owner,treasury,paid);
+            }
+        });
         // Only observed profitable-demand-shortfall industrial examples may
         // open a new project. The D construction ledger will still require
         // actual investor cash, materials, employees, payments and WIP before
@@ -2201,6 +2330,29 @@ public:
                             id,recipe_id,expansion_key,reserve);
                         break;
                     }
+                }
+            });
+        // A state-directed economy buys existing capital from actual
+        // owners; it never confiscates an untracked factory or prints purchase
+        // money. At most one fully funded, lawful nationalization per country
+        // on the first day of a month avoids repeated daily acquisition.
+        if(date.day==1)
+            plan[7].push_back([](phasegh::Stage& gh) {
+                const auto& d=gh.phase_d().state();
+                auto& c=gh.phase_c();
+                std::set<std::string> acquired;
+                for(const auto& [id,project]:d.constructions) {
+                    (void)id;
+                    if(!project.commissioned||project.capitalized_value<=0)
+                        continue;
+                    const auto& country=c.sovereignty(project.region);
+                    if(acquired.contains(country)||!c.has_country_treasury(country)||
+                       c.p2_catalog_modifier_value(
+                         country,"country_disable_investment_pool_bool")<=0)
+                        continue;
+                    if(gh.phase_d().nationalize_commissioned_factory(
+                           project.target_site))
+                        acquired.insert(country);
                 }
             });
         // Actual creditor entries remain in C's balance sheet until paid.

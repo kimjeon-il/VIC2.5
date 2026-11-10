@@ -12,6 +12,8 @@
 #include <cmath>
 #include <functional>
 #include <map>
+#include <limits>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -395,6 +397,50 @@ struct DomainState {
 // Research-rate law effects reduce the *required funded evidence*; they do
 // not mint fictitious scientists, goods, cash or completed research work.
 // Speed is evaluated at review time, so repealing a reform also matters.
+// A throughput law changes the yields from *verified paid-material and labor
+// batches*, not the plant capacity, not the market quote, and not a phantom
+// free source. Cumulative rounding makes ten one-unit batches with a +10% law
+// yield exactly eleven units, even across separate daily production orders.
+inline Quantity law_verified_yield(Quantity before,Quantity produced,
+                                  double throughput) {
+    require(before>=0&&produced>=0,"negative industry yield units");
+    const auto cumulative=phaseb::add_checked(before,produced);
+    const long double multiplier=std::clamp(
+        1.0L+static_cast<long double>(throughput),0.05L,4.0L);
+    const auto adjusted=[&](Quantity n)->Quantity {
+        const long double total=std::floor(static_cast<long double>(n)*
+                                            multiplier);
+        require(total>=0&&total<=static_cast<long double>(
+                   std::numeric_limits<Quantity>::max()/4),
+                "law throughput overflows physical goods");
+        return static_cast<Quantity>(total);
+    };
+    return adjusted(cumulative)-adjusted(before);
+}
+// Industry-class parents are explicit Phase D taxonomy: do not assign a
+// plantation/farm law to an unknown mine from the name of its output good.
+inline double law_industry_throughput(const DomainState& state,
+        const phasec::IntegratedWorld& c,const IndustryRecipe& recipe) {
+    const auto& facility=c.facility(recipe.site);
+    const auto& country=c.sovereignty(facility.region);
+    std::string current=recipe.industry_class;
+    std::set<std::string> visited;
+    double bonus=0;
+    for(int depth=0;depth<12&&!current.empty()&&
+            visited.insert(current).second;++depth) {
+        const auto alias=current=="manufacture"?"manufacturing":
+                         current=="mining"?"extraction":current;
+        if(alias=="manufacturing"||alias=="agriculture"||
+           alias=="plantations"||alias=="extraction"||
+           alias=="ranching"||alias=="logging")
+            bonus+=c.p2_catalog_modifier_value(country,
+                "building_group_bg_"+alias+"_throughput_add");
+        const auto parent=state.industry_classes.find(current);
+        if(parent==state.industry_classes.end())break;
+        current=parent->second.parent;
+    }
+    return std::clamp(bonus,-0.95,3.0);
+}
 inline Quantity effective_research_evidence(
         const ResearchProject& p,const DomainState& d,
         const phasec::IntegratedWorld& c) {
@@ -493,6 +539,11 @@ public:
            c_.firm_bankrupt(old->second.contractor))return false;
         const auto& model=old->second;
         const auto& recipe=ri->second;
+        // Under a command economy there is no autonomous private
+        // investment pool. Explicitly voted government construction,
+        // still financed from the real treasury, remains lawful.
+        if(c_.p2_catalog_modifier_value(c_.sovereignty(model.region),
+                "country_disable_investment_pool_bool")>0)return false;
         if(model.work_required<=0||model.cash_price_per_work<=0||
            recipe.outputs.empty()||model.material_per_work<=0||
            model.workers_per_work<=0)return false;
@@ -558,7 +609,14 @@ public:
         must(7);
         if(price<=0||!c_.has_actor(buyer)||!d_.constructions.size())return false;
         const auto& facility=c_.facility(site);
-        if(!c_.firm_bankrupt(facility.owner)||
+        const auto& sovereign=c_.sovereignty(facility.region);
+        const bool liquidating=c_.firm_bankrupt(facility.owner);
+        const bool forced_private=
+            c_.has_country_treasury(sovereign)&&
+            facility.owner==c_.country_treasury(sovereign)&&
+            c_.p2_catalog_modifier_value(sovereign,
+                  "country_force_privatization_bool")>0;
+        if((!liquidating&&!forced_private)||
            buyer==facility.owner||c_.firm_bankrupt(buyer))return false;
         std::string project_id;
         for(const auto& [id,project]:d_.constructions) {
@@ -577,9 +635,13 @@ public:
             if(research.lab_site==site&&!research.reviewed)return false;
         }
         if(c_.phase_d_cash_available(buyer)<price)return false;
-        c_.sell_bankrupt_facility(site,buyer,price);
+        c_.phase_d_transfer_factory_paid(
+            site,buyer,price,
+            d_.constructions.at(project_id).capitalized_value);
         d_.constructions.at(project_id).client=buyer;
-        d_.append(c_.month(),"cash-real-factory-liquidation",site);
+        d_.append(c_.month(),forced_private?
+            "lawful-funded-factory-privatization":
+            "cash-real-factory-liquidation",site);
         return true;
     }
 
@@ -729,9 +791,19 @@ public:
                 "extraction has no effective owned extraction site");
         occupy_labor(source.owner,product(units,source.workers_per_unit));
         occupy_site(source.site,product(units,source.site_service_per_unit));
-        c_.phase_d_emit_extraction(source.owner,source.region,source.good,units,id);
+        // Extraction output is boosted from a verified deposit/harvest flow.
+        // The depleted biomass and extraction service remain the *base* units.
+        // Production is accounted in the original C goods ledger only once.
+        const double throughput=c_.p2_catalog_modifier_value(
+            c_.sovereignty(source.region),
+            "building_group_bg_extraction_throughput_add");
+        const auto yielded=law_verified_yield(
+            source.produced_this_month,units,throughput);
+        require(yielded>0,"law extraction yield is zero");
+        c_.phase_d_emit_extraction(source.owner,source.region,source.good,
+                                   yielded,id);
         source.produced_this_month=phaseb::add_checked(source.produced_this_month,units);
-        source.cumulative_output=phaseb::add_checked(source.cumulative_output,units);
+        source.cumulative_output=phaseb::add_checked(source.cumulative_output,yielded);
         if(source.renewable)source.standing_biomass-=units;
         d_.append(d_.opening_month,"resource-extracted",id);
     }
@@ -800,11 +872,27 @@ public:
                     "production ingredient not delivered");
         occupy_labor(f.owner,workers);
         occupy_site(r.site,capacity);
+        const double throughput=law_industry_throughput(d_,c_,r);
+        Quantity previous=0;
+        for(const auto& run:d_.actual_production_runs)
+            if(run.month==d_.opening_month&&run.recipe==recipe)
+                previous=phaseb::add_checked(previous,run.batches);
         std::vector<std::pair<std::string,Quantity>> inputs,outputs;
-        for(const auto& x:r.inputs)inputs.emplace_back(x.good,product(batches,x.per_unit));
-        for(const auto& x:r.outputs)outputs.emplace_back(x.good,product(batches,x.per_unit));
-        for(const auto& x:r.byproducts)
-            outputs.emplace_back(x.good,product(batches,x.per_unit));
+        for(const auto& x:r.inputs)
+            inputs.emplace_back(x.good,product(batches,x.per_unit));
+        for(const auto& x:r.outputs) {
+            const auto before=product(previous,x.per_unit);
+            const auto now=product(batches,x.per_unit);
+            const auto quantity=law_verified_yield(before,now,throughput);
+            if(quantity>0)outputs.emplace_back(x.good,quantity);
+        }
+        for(const auto& x:r.byproducts) {
+            const auto quantity=law_verified_yield(
+                product(previous,x.per_unit),product(batches,x.per_unit),
+                throughput);
+            if(quantity>0)outputs.emplace_back(x.good,quantity);
+        }
+        require(!outputs.empty(),"industry throughput requires positive goods");
         c_.phase_d_transform(f.owner,f.region,inputs,outputs,workers);
         d_.cumulative_nonmarket_waste[recipe]=phaseb::add_checked(
             d_.cumulative_nonmarket_waste[recipe],
@@ -856,6 +944,54 @@ public:
         manufacture(recipe,batches);
     }
 
+    // One actual market-priced asset purchase by the national treasury.
+    // The physical facility, commissioned construction title and C security
+    // ownership move together; stock, workers and money remain in C.
+    bool nationalize_commissioned_factory(const std::string& site) {
+        must(7);
+        const auto& asset=c_.facility(site);
+        const auto& country=c_.sovereignty(asset.region);
+        if(!c_.has_country_treasury(country)||
+           c_.p2_catalog_modifier_value(
+               country,"country_disable_nationalization_bool")>0)return false;
+        const auto& treasury=c_.country_treasury(country);
+        if(asset.owner==treasury||c_.firm_bankrupt(asset.owner))return false;
+        std::string project_id;
+        for(const auto& [id,p]:d_.constructions)
+            if(p.target_site==site) {
+                if(!p.commissioned||!project_id.empty())return false;
+                project_id=id;
+            }
+        if(project_id.empty())return false;
+        for(const auto& [id,resource]:d_.resource_sites) {
+            (void)id;
+            if(resource.site==site)return false;
+        }
+        for(const auto& [id,research]:d_.researches) {
+            (void)id;
+            if(research.lab_site==site&&!research.reviewed)return false;
+        }
+        const auto& p=d_.constructions.at(project_id);
+        if(p.capitalized_value<=0)return false;
+        const auto factor=std::clamp(1.0+
+            c_.p2_catalog_modifier_value(
+                country,"building_nationalization_cost_mult"),
+            0.1,4.0);
+        const auto required=std::ceil(
+            static_cast<long double>(p.capitalized_value)*factor);
+        if(required>static_cast<long double>(
+             std::numeric_limits<Money>::max()/4))return false;
+        const auto price=static_cast<Money>(required);
+        if(price<=0||c_.phase_d_cash_available(treasury)<price)return false;
+        // 1.15 laws that forbid uncompensated takings are trivially
+        // respected: this transfer always pays the old legal owner.
+        c_.phase_d_transfer_factory_paid(
+            site,treasury,price,p.capitalized_value);
+        d_.constructions.at(project_id).client=treasury;
+        d_.append(c_.month(),"lawfully-compensated-factory-nationalization",
+                  site);
+        return true;
+    }
     void plan_research(const std::string& project,Quantity units) {
         must(1);
         auto& p=d_.researches.at(project);

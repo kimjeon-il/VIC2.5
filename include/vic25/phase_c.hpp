@@ -827,6 +827,103 @@ public:
         f.owner=buyer;
         events_.push_back("bankrupt-real-factory-cash-sale");
     }
+    // Paid transfer of one existing factory. Unlike a new construction this
+    // only changes the current real facility/title owner. The D ledger must
+    // update the corresponding commissioned project's client in the SAME
+    // staged transaction. No fictional cash, employment or stock changes.
+    void phase_d_transfer_factory_paid(const std::string& site,
+            const std::string& buyer,Money price,Money project_book_value) {
+        require_stage({7});
+        auto& f=facilities_.at(site);
+        const auto old=f.owner;
+        ensure(actors_.contains(buyer)&&old!=buyer&&
+               !firm_bankrupt(buyer)&&price>0&&project_book_value>=0&&
+               phase_d_cash_available(buyer)>=price,
+               "unfunded physical factory title transfer");
+        const auto title="FACILITY:"+site;
+        if(tracked_assets_.contains(title)) {
+            ensure(ownership_.units(title,old)==1,
+                   "factory and canonical legal title disagree");
+            // A securities-backed title must carry its same accounting
+            // ownership. Non-security facility titles have no share accounts.
+            if(security_accounts_.contains({old,title})) {
+                ensure_security_account(buyer,title);
+                money_.post({unique("factory-title-security-transfer"),
+                   "transfer real facility security title",{
+                   {security_account(buyer,title),1,0},
+                   {security_account(old,title),0,1}}});
+            }
+        }
+        // A completed factory's book value is existing paid WIP, never
+        // the bid itself. Transfer it only where C actually holds that asset.
+        const auto old_asset=account(old,"fixed_asset");
+        if(project_book_value>0&&money_.has_account(old_asset)&&
+           money_.balance(old_asset)>=project_book_value) {
+            const auto new_asset=account(buyer,"fixed_asset");
+            if(!money_.has_account(new_asset))
+                money_.add_account(new_asset,buyer,AccountType::asset);
+            money_.post({unique("factory-book-value-transfer"),
+                "carry existing paid fixed capital to new operator",{
+                {new_asset,project_book_value,0},
+                {old_asset,0,project_book_value}}});
+        }
+        pay(buyer,old,price);
+        if(tracked_assets_.contains(title))
+            ownership_.transfer(title,old,buyer,1);
+        f.owner=buyer;
+        events_.push_back("funded-existing-factory-ownership-transfer");
+    }
+    // Company investment efficiency is derived strictly from existing
+    // shareholder titles and their actual Phase B household occupation
+    // slices. Unknown corporate/foreign investors have no guessed profession
+    // bonus and no fabricated investment cash.
+    [[nodiscard]] double p2_real_investment_pool_efficiency(
+            const std::string& company)const {
+        const auto asset="company:"+company;
+        if(!tracked_assets_.contains(asset))return 0.0;
+        const auto holdings=ownership_.holders(asset);
+        long double eligible_shares=0, weighted_shares=0;
+        std::map<Id,People> members;
+        for(const auto& [id,pop]:people_.slices())
+            if(pop.count>0)
+                members[pop.key.household]=phaseb::add_checked(
+                    members[pop.key.household],pop.count);
+        for(const auto& [holder,shares]:holdings) {
+            if(shares<=0)continue;
+            eligible_shares+=static_cast<long double>(shares);
+        }
+        if(eligible_shares<=0)return 0.0;
+        for(const auto& [id,pop]:people_.slices()) {
+            if(pop.count<=0)continue;
+            const auto holding=holdings.find(
+                "HH:"+std::to_string(pop.key.household));
+            if(holding==holdings.end()||holding->second<=0)continue;
+            const auto& occupation=people_.economic(
+                pop.key.economic).profession;
+            std::string profession=occupation;
+            if(profession=="capitalist")profession="capitalists";
+            else if(profession=="farmer")profession="farmers";
+            else if(profession=="aristocrat")profession="aristocrats";
+            else if(profession=="shopkeeper")profession="shopkeepers";
+            else if(profession=="bureaucrat")profession="bureaucrats";
+            else if(profession=="clergyman")profession="clergymen";
+            if(profession!="capitalists"&&profession!="farmers"&&
+               profession!="aristocrats"&&profession!="shopkeepers"&&
+               profession!="bureaucrats"&&profession!="clergymen")continue;
+            const auto& demo=people_.demographic(pop.key.demographic);
+            const auto total=members.at(pop.key.household);
+            if(total<=0)continue;
+            const auto mod=p2_region_modifier_value(demo.region,
+                "state_"+profession+"_investment_pool_efficiency_mult");
+            weighted_shares+=static_cast<long double>(holding->second)*
+                static_cast<long double>(pop.count)/
+                static_cast<long double>(total)*
+                static_cast<long double>(mod);
+        }
+        return std::clamp(
+            static_cast<double>(weighted_shares/eligible_shares),
+            -0.95,3.0);
+    }
     // Phase D additive bridge: material/production share C's real inventory
     // and Phase B's real employment, not an independent Phase D stock.
     [[nodiscard]] People phase_d_workforce(const std::string& owner) const {
@@ -1252,7 +1349,8 @@ public:
         ensure(requested>=0 && markets_.contains({region,good}) &&
                actors_.contains(buyer),"invalid household market request");
         auto& quote=markets_.at({region,good});
-        const Quantity solvent=std::min(requested,cash(buyer)/quote.price);
+        const Quantity solvent=p2_solvent_consumer_units(
+            buyer,region,quote.price,requested);
         Quantity total_offered=0;
         std::vector<std::pair<std::string,Quantity>> sellers;
         for(const auto& seller:seller_ids) {
@@ -1279,6 +1377,9 @@ public:
             remaining-=quantity;
         }
         const Quantity fulfilled=accessible-remaining;
+        if(fulfilled>0)
+            p2_settle_actual_consumption_tax(
+                buyer,region,quote.price,fulfilled);
         quote.delivered=phaseb::add_checked(quote.delivered,fulfilled);
         quote.unmet=phaseb::add_checked(quote.unmet,solvent-fulfilled);
         events_.push_back("daily-household-market-clearing");
@@ -1300,7 +1401,8 @@ public:
                actors_.contains(buyer) && actors_.contains(seller) && buyer!=seller,
                "invalid market order");
         auto& m=markets_.at({region,good});
-        const Quantity solvent=std::min(requested,cash(buyer)/m.price);
+        const Quantity solvent=p2_solvent_consumer_units(
+            buyer,region,m.price,requested);
         const Quantity available=stock(seller,region,good);
         const Quantity accessible=p4_scaled(
             solvent,1'000'000-p5_guerrilla_disruption_ppm(region),1'000'000);
@@ -1313,7 +1415,11 @@ public:
             phaseb::add_checked(m.delivered-fulfilled,available));
         m.delivered=phaseb::add_checked(m.delivered,fulfilled);
         m.unmet=phaseb::add_checked(m.unmet,solvent-fulfilled);
-        if(fulfilled>0) trade(seller,buyer,region,good,fulfilled,m.price);
+        if(fulfilled>0) {
+            trade(seller,buyer,region,good,fulfilled,m.price);
+            p2_settle_actual_consumption_tax(
+                buyer,region,m.price,fulfilled);
+        }
         events_.push_back("solvent-demand-market-clearance");
         return fulfilled;
     }
@@ -2527,9 +2633,85 @@ public:
         scheduled_income_tax_[month() + 1] = ppm;
         events_.push_back("income-tax-law-scheduled");
     }
+    // Use the actual active 1.15 taxation choice. Legacy scenarios without
+    // a taxation law continue using the previous flat national wage tax.
+    [[nodiscard]] std::string p2_taxation_choice(
+            const std::string& country)const {
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(law.country==country&&law.domain=="taxation"&&
+               p2_catalog_law(law.base_choice))
+                return p2_catalog_canonical_choice(law.base_choice);
+        }
+        return {};
+    }
+    // The benchmark is observed actual monthly employment contracts,
+    // not a hardcoded monetary wage or an invented subsistence income.
+    [[nodiscard]] Money p2_observed_monthly_worker_wage(
+            const std::string& country)const {
+        Money aggregate=0;People employees=0;
+        for(const auto& [slice,job]:people_.jobs()) {
+            if(job.count<=0||job.wage_per_month<=0||
+               !people_.has_slice(slice))continue;
+            const auto& demographic=people_.demographic(
+                people_.slice(slice).key.demographic);
+            const auto owner=sovereignty_.find(demographic.region);
+            if(owner==sovereignty_.end()||owner->second!=country)continue;
+            aggregate=phaseb::add_checked(aggregate,
+                phaseb::mul_checked(job.count,job.wage_per_month));
+            employees=phaseb::add_checked(employees,job.count);
+        }
+        return employees>0?aggregate/employees:0;
+    }
+    [[nodiscard]] Money p2_actual_consumption_tax(
+            const std::string& region,Money price,Quantity quantity)const {
+        ensure(price>0&&quantity>=0,"invalid consumption tax base");
+        const auto sovereign=sovereignty_.find(region);
+        if(sovereign==sovereignty_.end()||
+           !has_country_treasury(sovereign->second)||
+           p2_taxation_choice(sovereign->second)!=
+             "law_consumption_based_taxation")return 0;
+        const auto rate=income_tax_ppm(sovereign->second);
+        const Money base=positive_product(price,quantity);
+        return phaseb::add_checked(
+            phaseb::mul_checked(base/1'000'000,rate),
+            phaseb::mul_checked(base%1'000'000,rate)/1'000'000);
+    }
+    [[nodiscard]] Quantity p2_solvent_consumer_units(
+            const std::string& buyer,const std::string& region,
+            Money price,Quantity requested)const {
+        ensure(price>0&&requested>=0,"invalid consumer demand price");
+        Quantity low=0;
+        Quantity high=std::min(requested,cash(buyer)/price);
+        if(high<=0)return 0;
+        if(p2_actual_consumption_tax(region,price,high)==0)return high;
+        // Price, goods and remitted tax must all be funded by the buyer.
+        while(low<high) {
+            const Quantity mid=low+(high-low+1)/2;
+            const Money total=positive_product(price,mid);
+            const Money tax=p2_actual_consumption_tax(region,price,mid);
+            if(total<=cash(buyer)&&tax<=cash(buyer)-total)low=mid;
+            else high=mid-1;
+        }
+        return low;
+    }
+    void p2_settle_actual_consumption_tax(const std::string& buyer,
+            const std::string& region,Money price,Quantity delivered) {
+        require_stage({7});
+        const auto due=p2_actual_consumption_tax(region,price,delivered);
+        if(due<=0)return;
+        const auto& country=sovereignty_.at(region);
+        if(!has_country_treasury(country))return;
+        const auto& treasury=country_treasury(country);
+        ensure(buyer!=treasury,"treasury is not a taxable household");
+        pay(buyer,treasury,due);
+        events_.push_back("p2-funded-household-consumption-tax:"+country);
+    }
     void wages_under_law(const std::string& payer,const std::string& worker,
                          const std::string& treasury,Money gross,
-                         const std::string& country="") {
+                         const std::string& country="",
+                         People paid_workers=0) {
         require_stage({5});
         ensure(gross>0,"invalid gross wage");
         std::string authority=country;
@@ -2548,7 +2730,28 @@ public:
             else if(governments_.size()>1)
                 ensure(treasury==authority,"national treasury binding required");
         }
-        const Money assessed=positive_product(gross,rate)/1'000'000;
+        const auto tax_choice=authority.empty()?std::string{}:
+            p2_taxation_choice(authority);
+        // Land/per-head/consumption taxes have their own *real* tax bases,
+        // handled by the day coordinator or purchased goods. Charging
+        // wages here as well would duplicate the national tax.
+        const bool wage_tax=tax_choice.empty()||
+            tax_choice=="law_proportional_taxation"||
+            tax_choice=="law_graduated_taxation";
+        Money assessed=wage_tax?
+            positive_product(gross,rate)/1'000'000:0;
+        if(tax_choice=="law_graduated_taxation"&&paid_workers>0) {
+            const Money average=p2_observed_monthly_worker_wage(authority);
+            if(average>0) {
+                const double relative=static_cast<double>(gross)*
+                    30.0/static_cast<double>(paid_workers)/
+                    static_cast<double>(average);
+                const double bracket=std::clamp(0.6+0.4*relative,0.5,1.8);
+                assessed=static_cast<Money>(std::min(
+                    static_cast<double>(gross),
+                    static_cast<double>(assessed)*bracket));
+            }
+        }
         Money withholding=assessed;
         if(!authority.empty()) {
             // P1 owns real administrative staffing. Where a country has
@@ -2576,7 +2779,7 @@ public:
             // Uncollected assessment is not a treasury deposit. This
             // simplified game rule does not invent enforceable tax arrears.
         }
-        wages(payer,worker,treasury,gross,withholding);
+        wages(payer,worker,treasury,gross,std::min(gross,withholding));
     }
     void enact_voting_age(int new_age) {
         require_stage({9});
