@@ -500,12 +500,25 @@ class Stage {
         }
         return ceiling;
     }
+    [[nodiscard]] double p2_catalog_import_tariff_factor(
+        const std::string& country) {
+        return std::clamp(
+            1.0+phase_c().p2_catalog_modifier_value(
+                country,"state_tariff_import_add"),0.0,4.0);
+    }
     [[nodiscard]] std::int64_t duty_rate(const std::string& seller,
                                           const std::string& buyer,
                                           const std::string& good) {
         if (seller == buyer || exempt(seller, buyer, good)) return 0;
-        auto it = diplomacy_.tariffs.find({buyer, good});
-        return it == diplomacy_.tariffs.end() ? 0 : it->second.ppm;
+        const auto it=diplomacy_.tariffs.find({buyer,good});
+        if(it==diplomacy_.tariffs.end())return 0;
+        // The effective import duty comes from the H policy and the
+        // importer's enacted trade law. It is paid only when a real G
+        // shipment clears customs; no nominal tax revenue is minted.
+        const auto legal=p2_catalog_import_tariff_factor(buyer);
+        return static_cast<std::int64_t>(std::clamp(
+            static_cast<double>(it->second.ppm)*legal,
+            0.0,static_cast<double>(effective_tariff_ceiling(buyer))));
     }
 public:
     Stage(phasee::SpatialStage& spatial, TradeState& trade,

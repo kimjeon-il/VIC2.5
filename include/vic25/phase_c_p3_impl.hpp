@@ -227,9 +227,12 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         std::clamp<std::int64_t>(sum_radical,0,1'000'000));
     view.engagement_ppm=static_cast<std::int32_t>(
         std::clamp<std::int64_t>(sum_engagement,0,1'000'000));
+    const auto group_approval=ig_name.empty()?0.0:
+        p2_catalog_modifier_value(country,
+            "interest_group_"+ig_name+"_approval_add");
     view.approval=std::clamp(
         approval-view.radical_ppm/20'000+
-        static_cast<int>(sponsor_approval),0,100);
+        static_cast<int>(sponsor_approval+group_approval),0,100);
     return view;
 }
 

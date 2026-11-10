@@ -147,6 +147,20 @@ inline Quantity Stage::lawful_trade_quantity(
             buyer_country,"country_disallow_trade_bool")>0))
         return 0;
     Quantity allowed=requested;
+    if(seller_country!=buyer_country) {
+        const auto& core=phase_c();
+        // Negative law trade-capacity multipliers restrict actual booked
+        // quantity without creating market demand or additional shipping.
+        const auto export_cap=std::max(0.0,1.0+
+            core.p2_catalog_modifier_value(
+                seller_country,"state_trade_capacity_mult"));
+        const auto import_cap=std::max(0.0,1.0+
+            core.p2_catalog_modifier_value(
+                buyer_country,"state_trade_capacity_mult"));
+        const auto legal_cap=std::min({1.0,export_cap,import_cap});
+        allowed=static_cast<Quantity>(
+            static_cast<double>(allowed)*legal_cap);
+    }
     for(const auto& [treaty_id,t]:diplomacy_.treaties) {
         if(!t.active)continue;
         for(const auto& c:t.clauses) {
