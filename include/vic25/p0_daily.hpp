@@ -1553,7 +1553,13 @@ public:
                     case LegislativeAction::withdraw:
                         c.p2_cancel_bill(order.bill_id,today);break;
                     case LegislativeAction::introduce:
-                        c.p2_submit_bill(order.bill,today);
+                        c.p2_submit_bill(order.bill,today,
+                            [&](const std::string& country,
+                                const std::string& technology) {
+                                return gh.phase_d().state().level(
+                                    country,technology)==
+                                    phased::KnowledgeLevel::usable;
+                            });
                         break;
                     case LegislativeAction::approve:
                         c.p2_approve_bill(order.bill_id,

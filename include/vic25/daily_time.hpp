@@ -545,7 +545,13 @@ public:
         // and the current enactment checkpoint have been resolved.
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p1_has_ai_review(today))
-                gh.phase_c().p1_autonomous_politics(today);
+                gh.phase_c().p1_autonomous_politics(today,
+                    [&](const std::string& country,
+                        const std::string& technology) {
+                        return gh.phase_d().state().level(
+                            country,technology)==
+                            phased::KnowledgeLevel::usable;
+                    });
         });
         // Ongoing movements generate warnings and observable responses;
         // actual armed actions still require verified army and equipment.

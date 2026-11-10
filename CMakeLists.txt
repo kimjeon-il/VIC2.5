@@ -364,6 +364,13 @@ if(BUILD_TESTING)
     add_test(NAME vic25_p4_governance_tests COMMAND vic25_p4_governance_tests)
 endif()
 
+# Immutable 1.15 law/amendment snapshot: 26 groups, 148 laws and 71 amendments.
+if(BUILD_TESTING)
+    add_executable(vic25_p2_catalog_115_tests tests/test_p2_catalog_115.cpp)
+    target_link_libraries(vic25_p2_catalog_115_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p2_catalog_115_tests COMMAND vic25_p2_catalog_115_tests)
+endif()
+
 # P2 legislative rules, statutory amendments and legal elected-office terms.
 # Focused test executable is available; no CI/tests are run by this change.
 if(BUILD_TESTING)

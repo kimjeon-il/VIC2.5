@@ -4,6 +4,40 @@
 // No independent demographic, financial, seat or institution state.
 namespace vic25::phasec {
 
+// 1.15 static law effects are read from the catalog, not re-created as custom clauses.
+inline bool IntegratedWorld::p2_catalog_group_active(
+        const std::string& country,std::string_view group)const {
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country==country&&law.domain==group&&
+           p2_catalog_law(law.base_choice)!=nullptr)return true;
+    }
+    return false;
+}
+inline double IntegratedWorld::p2_catalog_modifier_value(
+        const std::string& country,std::string_view key,
+        int institution_level)const {
+    double result=0;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country!=country)continue;
+        const auto* defined=p2_catalog_law(law.base_choice);
+        if(!defined||defined->group!=law.domain)continue;
+        result+=p2_catalog_raw_modifier(defined->id,key,institution_level);
+    }
+    for(const auto& id:p2_active_amendments_) {
+        const auto& amendment=p2_amendments_.at(id);
+        const auto& law=p2_laws_.at(amendment.law_id);
+        if(law.country!=country)continue;
+        const auto* defined=p2_catalog_law(law.base_choice);
+        if(defined&&defined->group==law.domain&&
+           p2_catalog_amendment(amendment.id))
+            result+=p2_catalog_raw_modifier(amendment.id,key,institution_level);
+    }
+    return result;
+}
 inline bool IntegratedWorld::p2_valid_clause(const P2Clause& c) {
     if(c.id.empty()||c.target.empty()||
        static_cast<unsigned>(c.kind)>
@@ -100,6 +134,16 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
                "P2 national law cannot impersonate regional sovereignty");
     }
     p2_validate_clauses(law.country,law.clauses);
+    if(p2_catalog_group(law.domain)) {
+        const auto* defined=p2_catalog_law(law.base_choice);
+        ensure(defined&&defined->group==law.domain&&
+               (law.scope.empty()||law.scope=="national"),
+               "P2 canonical law requires a defined choice in its national group");
+        for(const auto& clause:law.clauses)
+            ensure(law.tier==P2NormTier::constitution&&
+                   clause.kind>=P2ClauseKind::constitutional_veto_rule,
+                   "P2 catalog choice cannot carry invented ordinary provisions");
+    }
     for(const auto& clause:law.clauses)
         if(clause.kind==P2ClauseKind::constitutional_veto_rule||
            clause.kind==P2ClauseKind::constitutional_override_ppm||
@@ -127,9 +171,16 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
 inline void IntegratedWorld::p2_check_amendment(const P2Amendment& amendment)const {
     const auto it=p2_laws_.find(amendment.law_id);
     ensure(!amendment.id.empty()&&!amendment.law_id.empty()&&
-           !amendment.legal_basis.empty()&&it!=p2_laws_.end()&&
-           !amendment.clauses.empty(),
+           !amendment.legal_basis.empty()&&it!=p2_laws_.end(),
            "P2 amendment must belong to existing base law");
+    if(const auto* selected=p2_catalog_law(it->second.base_choice);
+       selected&&selected->group==it->second.domain) {
+        const auto* defined=p2_catalog_amendment(amendment.id);
+        ensure(defined&&p2_catalog_amendment_applies(*defined,selected->id)&&
+               amendment.clauses.empty(),
+               "P2 predefined 1.15 amendment required; arbitrary clauses forbidden");
+    } else ensure(!amendment.clauses.empty(),
+                  "P2 legacy term/office amendment requires actual clauses");
     p2_validate_clauses(it->second.country,amendment.clauses);
     // Constitutional authority changes must be applied by a complete
     // replacement law, never silently by a disconnected amendment.
@@ -224,11 +275,42 @@ inline std::optional<std::int64_t> IntegratedWorld::p2_rule(
         }
         if(!found)continue;
         const int rank=static_cast<int>(base.tier);
-        ensure(rank!=priority,
-               "P2 ambiguous equal-rank active legal provisions");
+        if(rank==priority) {
+            // Fixed law slots need no generic equal-rank conflict engine.
+            // Constitutional powers cannot silently disagree.
+            ensure(kind<P2ClauseKind::constitutional_veto_rule||
+                   value==found,
+                   "P2 contradictory constitutional authority");
+            continue;
+        }
         if(rank<priority) {
             priority=rank;
             value=found;
+        }
+    }
+    if(!value&&target==country) {
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(law.country!=country)continue;
+            const auto* defined=p2_catalog_law(law.base_choice);
+            if(!defined||defined->group!=law.domain)continue;
+            const auto choice=defined->id;
+            if(kind==P2ClauseKind::female_suffrage_allowed&&
+               law.domain=="rights_of_women")
+                return choice=="law_womens_suffrage"?1:0;
+            if(kind==P2ClauseKind::public_healthcare_right&&
+               law.domain=="health_system")
+                return choice=="law_public_health_insurance"?1:0;
+            if(kind==P2ClauseKind::political_association_allowed&&
+               law.domain=="labour_associations")
+                return (choice=="law_right_to_associate"||
+                        choice=="law_corporatized_unions"||
+                        choice=="law_factory_councils")?1:0;
+            if(kind==P2ClauseKind::peaceful_strike_allowed&&
+               law.domain=="labour_associations")
+                return (choice=="law_right_to_associate"||
+                        choice=="law_factory_councils")?1:0;
         }
     }
     return value;
@@ -377,7 +459,10 @@ inline void IntegratedWorld::p2_sync_country_rules(
            "P2 incumbent transition must be grounded in active term law");
 }
 
-inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
+inline void IntegratedWorld::p2_submit_bill(
+        P2Bill bill,std::int64_t today,
+        const std::function<bool(const std::string&,const std::string&)>&
+            has_technology) {
     require_stage({9});
     ensure(today>=0&&!bill.id.empty()&&!bill.country.empty()&&
            (bill.proposer==governments_.at(bill.country).prime_minister||
@@ -415,6 +500,40 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
     }
     if(bill.action==P2BillAction::enact_or_replace_base) {
         p2_validate_base(bill.proposed_base);
+        if(const auto* chosen=p2_catalog_law(bill.proposed_base.base_choice);
+           chosen&&chosen->group==bill.proposed_base.domain) {
+            // Phase D is the sole source of researched technologies; no
+            // second P2 technology registry or unearned unlocks.
+            if(!chosen->unlocking_technologies.empty()) {
+                bool unlocked=false;
+                auto remaining=chosen->unlocking_technologies;
+                while(!remaining.empty()) {
+                    const auto sep=remaining.find(';');
+                    const auto tech=remaining.substr(0,sep);
+                    if(has_technology&&has_technology(bill.country,
+                            std::string(tech)))unlocked=true;
+                    if(sep==std::string_view::npos)break;
+                    remaining.remove_prefix(sep+1);
+                }
+                ensure(unlocked,
+                       "P2 1.15 law requires verified Phase D technology");
+            }
+            bool has_required=chosen->requires_law_or.empty();
+            for(const auto& [slot,other_id]:p2_active_base_) {
+                (void)slot;
+                const auto& other=p2_laws_.at(other_id);
+                if(other.country!=bill.country||
+                   other.domain==chosen->group)continue;
+                const auto* old=p2_catalog_law(other.base_choice);
+                if(!old||old->group!=other.domain)continue;
+                if(p2_catalog_list_contains(chosen->requires_law_or,old->id))
+                    has_required=true;
+                ensure(!p2_catalog_list_contains(chosen->disallowing_laws,old->id)&&
+                       !p2_catalog_list_contains(old->disallowing_laws,chosen->id),
+                       "P2 canonical law conflicts with another active law group");
+            }
+            ensure(has_required,"P2 canonical law requires an active prerequisite law");
+        }
         ensure(bill.proposed_base.country==bill.country&&
                !p2_laws_.contains(bill.proposed_base.id),
                "P2 replacement law must belong to one real sovereign");

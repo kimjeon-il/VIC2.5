@@ -6,6 +6,9 @@ inline P1AuthorityBudget IntegratedWorld::p1_authority_budget(
         const std::string& country)const {
     const auto& c=p1_constitution(country);
     int supply=200;
+    // The original 1.15 law is authoritative when present; P1 defaults
+    // only cover imported worlds without an initialized law-group catalog.
+    if(!p2_catalog_group_active(country,"governance_principles"))
     switch(c.governance) {
       case P1GovernancePrinciple::chiefdom:supply+=100;break;
       case P1GovernancePrinciple::monarchy:
@@ -14,6 +17,7 @@ inline P1AuthorityBudget IntegratedWorld::p1_authority_budget(
       case P1GovernancePrinciple::parliamentary_republic:supply+=50;break;
       default:break;
     }
+    if(!p2_catalog_group_active(country,"distribution_of_power"))
     switch(c.power) {
       case P1PowerDistribution::autocracy:supply+=500;break;
       case P1PowerDistribution::oligarchy:supply+=200;break;
@@ -23,6 +27,11 @@ inline P1AuthorityBudget IntegratedWorld::p1_authority_budget(
       case P1PowerDistribution::technocracy:supply+=100;break;
       default:break;
     }
+    supply+=static_cast<int>(p2_catalog_modifier_value(
+        country,"country_authority_add"));
+    const auto law_authority_mult=p2_catalog_modifier_value(
+        country,"country_authority_mult");
+    supply=std::max(0,static_cast<int>(supply*(1.0+law_authority_mult)));
     if(const auto it=p1_favorites_.find(country);
        it!=p1_favorites_.end()&&
        p1_characters_.contains(it->second)&&
@@ -37,6 +46,8 @@ inline P1AuthorityBudget IntegratedWorld::p1_authority_budget(
                    "invalid active authority reservation");
             reserved+=m.authority_cost;
         }
+    reserved+=std::max(0,static_cast<int>(p2_catalog_modifier_value(
+        country,"country_authority_cost_add")));
     return {country,supply,reserved,supply-reserved};
 }
 inline std::int32_t IntegratedWorld::p1_region_decree_bonus_ppm(

@@ -73,7 +73,10 @@ inline void IntegratedWorld::p2_register_group_demand(P2GroupDemand demand) {
            !demand.law_domain.empty()&&
            !demand.amendment.id.empty()&&
            !demand.amendment.legal_basis.empty()&&
-           !demand.amendment.clauses.empty()&&
+           (p2_catalog_group(demand.law_domain)?
+             (p2_catalog_amendment(demand.amendment.id)!=nullptr&&
+              demand.amendment.clauses.empty()):
+             !demand.amendment.clauses.empty())&&
            demand.min_population_support_ppm>=0&&
            demand.min_population_support_ppm<=1'000'000,
            "P2 invalid documented interest-group negotiation demand");
@@ -103,7 +106,7 @@ inline void IntegratedWorld::p2_auto_negotiate_pending(
         std::int64_t today) {
     require_stage({9});
     ensure(today>=0,"P2 negotiation requires real calendar day");
-    if(p2_group_demands_.empty())return;
+    if(!p2_has_negotiable_bills())return;
     // Existing P3 membership is a support indicator, not a new voter or
     // political-power ledger. A group cannot negotiate without real persons.
     std::map<std::string,People> population;
@@ -138,6 +141,16 @@ inline void IntegratedWorld::p2_auto_negotiate_pending(
             for(const auto& proposal:negotiations)
                 if(proposal.demand_id==id)accepted=true;
             if(accepted)continue;
+            // Game laws can negotiate only named 1.15 sponsor concessions.
+            // Other 1.15 amendments require their original scripted event /
+            // country trigger; do not fabricate them from POP support alone.
+            if(const auto* chosen=p2_catalog_law(bill.proposed_base.base_choice);
+               chosen&&chosen->group==bill.proposed_base.domain) {
+                const auto* defined=p2_catalog_amendment(demand.amendment.id);
+                if(!defined||!defined->generic_sponsor||
+                   !p2_catalog_amendment_applies(*defined,chosen->id))
+                    continue;
+            }
             const auto profile=p3_groups_.find(
                 {bill.country,demand.interest_group});
             if(profile==p3_groups_.end())continue;

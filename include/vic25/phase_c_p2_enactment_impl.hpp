@@ -98,8 +98,13 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         assess(governments_.at(bill.country).head_of_state,20'000);
         if(const auto fav=p1_favorites_.find(bill.country);
            fav!=p1_favorites_.end())assess(fav->second,25'000);
+        // Source-defined law and amendment enactment modifiers apply once.
+        const auto enacted_bonus=static_cast<std::int64_t>(
+            p2_catalog_modifier_value(
+                bill.country,"country_law_enactment_success_add")*1'000'000.0);
         std::int64_t success=std::clamp<std::int64_t>(
-            support+e.success_bonus_ppm+personal_modifier,0,900'000);
+            support+e.success_bonus_ppm+personal_modifier+enacted_bonus,
+            0,900'000);
         std::int64_t stall=std::clamp<std::int64_t>(
             opposition+e.setbacks*25'000,0,900'000);
         if(success+stall>1'000'000){
@@ -160,8 +165,12 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
             std::clamp(budget.available*1000/budget.supply,0,1000):0;
         const int legitimacy_multiplier=legit>=90?750:
                                         legit<50?1500:1000;
-        const auto period=days*legitimacy_multiplier/1000*
-                          (1000-unused/4)/1000;
+        const auto speed=std::clamp(
+            p2_catalog_modifier_value(
+                bill.country,"country_law_enactment_speed_mult"),-0.90,4.0);
+        const auto period=static_cast<int>(
+            (days*legitimacy_multiplier/1000.0)*
+            (1000-unused/4)/1000.0/(1.0+speed));
         e.next_review_day=today+std::clamp(period,30,300);
         p2_review_due_[e.next_review_day].insert(id);
     }

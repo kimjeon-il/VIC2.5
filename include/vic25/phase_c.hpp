@@ -8,6 +8,7 @@
 #include "vic25/phase_c_p1.hpp"
 #include "vic25/phase_c_p4.hpp"
 #include "vic25/phase_c_p2.hpp"
+#include "vic25/phase_c_p2_catalog_115.hpp"
 #include "vic25/phase_c_p3.hpp"
 #include "vic25/phase_c_p5.hpp"
 #include "vic25/phase_c_characters.hpp"
@@ -1466,7 +1467,9 @@ public:
     [[nodiscard]] const std::map<std::string,P1PoliticalEvent>&
          p1_political_events()const{return p1_political_events_;}
     [[nodiscard]] bool p1_has_ai_review(std::int64_t)const;
-    void p1_autonomous_politics(std::int64_t);
+    void p1_autonomous_politics(
+        std::int64_t,
+        const std::function<bool(const std::string&,const std::string&)>& = {});
     [[nodiscard]] const std::map<std::string,PoliticalAgenda>&
          p1_political_agendas()const{return p1_political_agendas_;}
     void p1_set_political_exile(const std::string&,bool);
@@ -1710,11 +1713,18 @@ public:
     [[nodiscard]] bool p2_amendment_active(const std::string&)const;
     [[nodiscard]] std::optional<std::int64_t> p2_rule(
         const std::string&,const std::string&,P2ClauseKind)const;
+    // Data-driven, non-mutating effects of active 1.15 law choices.
+    [[nodiscard]] double p2_catalog_modifier_value(
+        const std::string&,std::string_view,int institution_level=0)const;
+    [[nodiscard]] bool p2_catalog_group_active(
+        const std::string&,std::string_view)const;
     [[nodiscard]] int p2_voting_age(const std::string&)const;
     [[nodiscard]] P2TermView p2_term(const std::string&)const;
     [[nodiscard]] bool p2_candidate_eligible(
         const std::string&,const std::string&)const;
-    void p2_submit_bill(P2Bill,std::int64_t);
+    void p2_submit_bill(
+        P2Bill,std::int64_t,
+        const std::function<bool(const std::string&,const std::string&)>& = {});
     void p2_review_due(std::int64_t);
     [[nodiscard]] bool p2_has_review_due(std::int64_t)const;
     [[nodiscard]] bool p2_enactment_ready(const std::string&)const;

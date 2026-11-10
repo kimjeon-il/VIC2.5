@@ -26,7 +26,10 @@ inline bool IntegratedWorld::p1_has_ai_review(std::int64_t today)const {
     }
     return false;
 }
-inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
+inline void IntegratedWorld::p1_autonomous_politics(
+        std::int64_t today,
+        const std::function<bool(const std::string&,const std::string&)>&
+            has_technology) {
     require_stage({9});
     for(const auto& [country,g]:governments_) {
         if(p1_player_countries_.contains(country)||
@@ -304,12 +307,29 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                        known.scope==current.scope&&known.tier==current.tier) {
                         template_law=&known;break;
                     }
-                if(!template_law)break;
-                bill.proposed_base=*template_law;
-                bill.proposed_base.id=bill.id+":norm";
-                bill.proposed_base.legal_basis=bill.legal_basis;
-                for(auto& clause:bill.proposed_base.clauses)
-                    clause.id=bill.proposed_base.id+":"+clause.id;
+                // Prefer the fixed 1.15 catalog over cloning an old law's
+                // unrelated economic/legal clauses. Legacy office statutes
+                // retain their existing documented template behavior.
+                const auto* defined=p2_catalog_law(m.desired_choice);
+                if(defined&&defined->group==current.domain) {
+                    bill.proposed_base.id=bill.id+":norm";
+                    bill.proposed_base.country=country;
+                    bill.proposed_base.domain=current.domain;
+                    bill.proposed_base.scope=current.scope;
+                    bill.proposed_base.base_choice=std::string(defined->id);
+                    bill.proposed_base.legal_basis=bill.legal_basis;
+                    bill.proposed_base.tier=
+                        (current.domain=="governance_principles"||
+                         current.domain=="distribution_of_power")?
+                        P2NormTier::constitution:current.tier;
+                } else {
+                    if(!template_law)break;
+                    bill.proposed_base=*template_law;
+                    bill.proposed_base.id=bill.id+":norm";
+                    bill.proposed_base.legal_basis=bill.legal_basis;
+                    for(auto& clause:bill.proposed_base.clauses)
+                        clause.id=bill.proposed_base.id+":"+clause.id;
+                }
                 const auto key=bill.country+":"+
                     std::to_string(static_cast<int>(bill.action))+":"+
                     bill.proposed_base.domain+":"+
@@ -318,7 +338,7 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 if(!p2_retry_after_.contains(key)||
                    p2_retry_after_.at(key)<=today) {
                     const auto bill_id=bill.id;
-                    p2_submit_bill(std::move(bill),today);
+                    p2_submit_bill(std::move(bill),today,has_technology);
                     agenda.last_bill_id=bill_id;
                     agenda.last_reform_choice=m.desired_choice;
                     events_.push_back("p1-ai-proposed-political-law:"+bill_id);
