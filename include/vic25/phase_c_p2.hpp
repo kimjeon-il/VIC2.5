@@ -12,6 +12,14 @@ namespace vic25::phasec {
 enum class P2NormTier : std::uint8_t {
     constitution, statute, delegated_regulation, local_ordinance
 };
+// One deterministic chamber threshold for player, AI and upper/lower votes.
+// Legal assent is not a second random enactment-success roll.
+[[nodiscard]] constexpr std::int64_t p2_chamber_quorum(
+        std::int64_t seats,std::int64_t ordinary_quorum,
+        P2NormTier tier) {
+    return tier==P2NormTier::constitution?
+        seats-seats/3:ordinary_quorum;
+}
 enum class P2ClauseKind : std::uint8_t {
     term_months, max_consecutive_terms, max_lifetime_terms,
     term_cycle_mode, dissolution_authorized, dissolution_max_delay_days,

@@ -139,6 +139,10 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
         ensure(defined&&defined->group==law.domain&&
                (law.scope.empty()||law.scope=="national"),
                "P2 canonical law requires a defined choice in its national group");
+        if(law.domain=="governance_principles"||
+           law.domain=="distribution_of_power")
+            ensure(law.tier==P2NormTier::constitution,
+                   "P2 constitutional law group requires constitutional rank");
         for(const auto& clause:law.clauses)
             ensure(law.tier==P2NormTier::constitution&&
                    clause.kind>=P2ClauseKind::constitutional_veto_rule,
@@ -623,9 +627,9 @@ inline void IntegratedWorld::p2_approve_bill(
                "P2 dissolved parliament cannot enact constitutional laws");
         const auto& legislature=legislature_for(bill.country);
         const People votes=coalition_seats(voting_parties,legislature);
-        const People quorum=(tier==P2NormTier::constitution)?
-            legislature.total_seats-legislature.total_seats/3:
-            governments_.at(bill.country).quorum;
+        const People quorum=p2_chamber_quorum(
+            legislature.total_seats,
+            governments_.at(bill.country).quorum,tier);
         ensure(votes>=quorum&&quorum>0,
                "P2 bill lacks constitutionally required parliamentary approval");
     } else {

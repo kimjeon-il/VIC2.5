@@ -1,4 +1,7 @@
 #include "vic25/phase_c_p2_catalog_115.hpp"
+#include "vic25/phase_c_p1.hpp"
+#include "vic25/phase_c_p4.hpp"
+#include "vic25/phase_c_p2.hpp"
 #include <cassert>
 #include <set>
 #include <string_view>
@@ -41,4 +44,19 @@ int main() {
     assert(historic&&p2_catalog_amendment_applies(*historic,"law_autocracy"));
     assert(!p2_catalog_amendment_applies(*historic,"law_universal_suffrage"));
     assert(historic->repeal_requires_legitimacy);
+    // Append-only constitutional values must admit all nine governance
+    // and fourteen distribution-of-power catalog choices.
+    P1Constitution constitutional;
+    constitutional.legal_basis="catalog-1.15-test";
+    constitutional.governance=P1GovernancePrinciple::social_monarchy;
+    constitutional.power=P1PowerDistribution::census_voting;
+    constitutional.legislature=P1LegislatureKind::bicameral;
+    assert(valid_p1_constitution(constitutional));
+    constitutional.governance=P1GovernancePrinciple::council_republic;
+    constitutional.power=P1PowerDistribution::anarchy;
+    assert(valid_p1_constitution(constitutional));
+    constitutional.governance=P1GovernancePrinciple::monarchy;
+    assert(!valid_p1_constitution(constitutional));
+    assert(p2_chamber_quorum(101,51,P2NormTier::statute)==51);
+    assert(p2_chamber_quorum(101,51,P2NormTier::constitution)==68);
 }

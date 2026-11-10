@@ -52,10 +52,8 @@ inline void IntegratedWorld::p2_approve_upper_bill(
                "P2 senate approval references missing or duplicate party bloc");
         votes=phaseb::add_checked(votes,senate.seats.at(party));
     }
-    const People quorum=(tier==P2NormTier::constitution)?
-        senate.seats.empty()?0:
-        contest.seats-contest.seats/3:
-        contest.seats/2+1;
+    const People quorum=p2_chamber_quorum(
+        contest.seats,contest.seats/2+1,tier);
     ensure(quorum>0&&votes>=quorum,
            "P2 insufficient actual upper-house votes for this statute");
     approval.upper_poll_day=senate.day;

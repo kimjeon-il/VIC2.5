@@ -72,6 +72,8 @@ inline P1AuthorityView IntegratedWorld::p1_authority(
     return {formation,constitution.legislature!=P1LegislatureKind::none,
             confidence,!confidence,
             !confidence&&(constitution.power==P1PowerDistribution::autocracy||
+                         constitution.power==P1PowerDistribution::bakufu||
+                         constitution.power==P1PowerDistribution::neo_absolutism||
                          constitution.legislature==P1LegislatureKind::none)};
 }
 
@@ -244,6 +246,7 @@ inline void IntegratedWorld::schedule_p1_head_succession_daily(
     require_stage({9});
     const auto& order=p1_constitution(country);
     ensure((order.governance==P1GovernancePrinciple::monarchy||
+            order.governance==P1GovernancePrinciple::social_monarchy||
             order.governance==P1GovernancePrinciple::chiefdom||
             order.governance==P1GovernancePrinciple::theocracy)&&
            governments_.at(country).head_of_state==incumbent&&

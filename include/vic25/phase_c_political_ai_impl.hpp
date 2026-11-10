@@ -215,8 +215,8 @@ inline void IntegratedWorld::p1_autonomous_politics(
                           bill.action==P2BillAction::repeal_base?
                           bill.target_id:
                           p2_amendments_.at(bill.target_id).law_id).tier;
-                    const People quorum=tier==P2NormTier::constitution?
-                        chamber.total_seats-chamber.total_seats/3:g.quorum;
+                    const People quorum=p2_chamber_quorum(
+                        chamber.total_seats,g.quorum,tier);
                     if(feasible&&coalition_seats(votes,chamber)<quorum)
                         feasible=false;
                 }
@@ -246,10 +246,9 @@ inline void IntegratedWorld::p1_autonomous_politics(
                                 bill.action==P2BillAction::repeal_base?
                                 bill.target_id:
                                 p2_amendments_.at(bill.target_id).law_id).tier;
-                        const People required=tier==P2NormTier::constitution?
-                            p4_contests_.at(id).seats-
-                                p4_contests_.at(id).seats/3:
-                            p4_contests_.at(id).seats/2+1;
+                        const People required=p2_chamber_quorum(
+                            p4_contests_.at(id).seats,
+                            p4_contests_.at(id).seats/2+1,tier);
                         if(voted<required)feasible=false;
                     }
                 }

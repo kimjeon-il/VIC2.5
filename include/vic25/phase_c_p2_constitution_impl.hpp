@@ -8,6 +8,10 @@ inline void IntegratedWorld::p2_apply_constitutional_choice(
     if(law.tier!=P2NormTier::constitution)return;
     auto current=p1_constitution(law.country);
     bool changed=false;
+    // The catalog owns full law IDs; P1 retains its compact native
+    // constitutional identities. Legacy unprefixed scenarios still load.
+    const auto choice=law.base_choice.substr(
+        law.base_choice.rfind("law_",0)==0?4:0);
     if(law.domain=="governance_principles") {
         const std::map<std::string,P1GovernancePrinciple> choices{
             {"chiefdom",P1GovernancePrinciple::chiefdom},
@@ -15,8 +19,12 @@ inline void IntegratedWorld::p2_apply_constitutional_choice(
             {"theocracy",P1GovernancePrinciple::theocracy},
             {"presidential_republic",P1GovernancePrinciple::presidential_republic},
             {"parliamentary_republic",P1GovernancePrinciple::parliamentary_republic},
-            {"council_republic",P1GovernancePrinciple::council_republic}};
-        const auto it=choices.find(law.base_choice);
+            {"council_republic",P1GovernancePrinciple::council_republic},
+            {"colonial_administration",
+                P1GovernancePrinciple::colonial_administration},
+            {"corporate_state",P1GovernancePrinciple::corporate_state},
+            {"social_monarchy",P1GovernancePrinciple::social_monarchy}};
+        const auto it=choices.find(choice);
         ensure(it!=choices.end(),"P2 unknown constitutional governance choice");
         current.governance=it->second;changed=true;
     } else if(law.domain=="distribution_of_power") {
@@ -27,8 +35,19 @@ inline void IntegratedWorld::p2_apply_constitutional_choice(
             {"wealth_vote",P1PowerDistribution::wealth_vote},
             {"universal_vote",P1PowerDistribution::universal_vote},
             {"single_party",P1PowerDistribution::single_party},
-            {"technocracy",P1PowerDistribution::technocracy}};
-        const auto it=choices.find(law.base_choice);
+            {"technocracy",P1PowerDistribution::technocracy},
+            {"bakufu",P1PowerDistribution::bakufu},
+            {"neo_absolutism",P1PowerDistribution::neo_absolutism},
+            {"organic_regulation",P1PowerDistribution::organic_regulation},
+            {"elder_council",P1PowerDistribution::elder_council},
+            {"census_voting",P1PowerDistribution::census_voting},
+            {"anarchy",P1PowerDistribution::anarchy},
+            {"labour_suffrage",P1PowerDistribution::labour_suffrage},
+            {"landed_voting",P1PowerDistribution::landed_vote},
+            {"wealth_voting",P1PowerDistribution::wealth_vote},
+            {"universal_suffrage",P1PowerDistribution::universal_vote},
+            {"single_party_state",P1PowerDistribution::single_party}};
+        const auto it=choices.find(choice);
         ensure(it!=choices.end(),"P2 unknown constitutional power choice");
         current.power=it->second;changed=true;
     }
