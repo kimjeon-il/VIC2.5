@@ -2548,7 +2548,34 @@ public:
             else if(governments_.size()>1)
                 ensure(treasury==authority,"national treasury binding required");
         }
-        const auto withholding=positive_product(gross,rate)/1'000'000;
+        const Money assessed=positive_product(gross,rate)/1'000'000;
+        Money withholding=assessed;
+        if(!authority.empty()) {
+            // P1 owns real administrative staffing. Where a country has
+            // explicit tax-administration institutions, collection depends on
+            // their usable throughput; otherwise legacy administration keeps
+            // its established full-collection behavior.
+            People legal=0,usable=0;
+            for(const auto& [id,inst]:p1_institutions_) {
+                if(inst.country!=authority||
+                   inst.kind!=P1InstitutionKind::administration)continue;
+                const auto capacity=p1_institution_capacity(id);
+                legal=phaseb::add_checked(legal,capacity.legal_slots);
+                usable=phaseb::add_checked(usable,capacity.usable_slots);
+            }
+            double collection=legal>0?
+                std::clamp(static_cast<double>(usable)/legal,0.0,1.0):1.0;
+            collection=std::clamp(
+                collection*(1.0+p2_catalog_modifier_value(
+                    authority,"state_tax_capacity_mult"))*
+                    (1.0+p2_catalog_modifier_value(
+                    authority,"state_tax_collection_mult")),0.0,1.0);
+            const Money ppm=static_cast<Money>(collection*1'000'000.0);
+            withholding=(assessed/1'000'000)*ppm+
+                (assessed%1'000'000)*ppm/1'000'000;
+            // Uncollected assessment is not a treasury deposit. This
+            // simplified game rule does not invent enforceable tax arrears.
+        }
         wages(payer,worker,treasury,gross,withholding);
     }
     void enact_voting_age(int new_age) {

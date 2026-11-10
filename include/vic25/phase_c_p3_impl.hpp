@@ -84,6 +84,18 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         const std::string& country,const std::string& group)const {
     const auto& profile=p3_groups_.at({country,group});
     P3GroupView view{country,group};
+    // Clout is calculated repeatedly during law reviews; avoid recomputing
+    // each region's legal effect for every member slice of the same IG.
+    std::map<std::pair<std::string,std::string>,double> regional_effect_cache;
+    const auto effect=[&](const std::string& region,
+                          const std::string& key)->double {
+        const auto slot=std::make_pair(region,key);
+        const auto it=regional_effect_cache.find(slot);
+        if(it!=regional_effect_cache.end())return it->second;
+        const auto value=p2_region_modifier_value(region,key);
+        regional_effect_cache.emplace(slot,value);
+        return value;
+    };
     const auto ig_name=[&]()->std::string {
         switch(profile.type) {
           case P3GroupType::landowners:return "ig_landowners";
@@ -148,9 +160,9 @@ inline P3GroupView IntegratedWorld::p3_group_view(
             }
         }();
         const auto interest_mod=ig_key.empty()?0.0:
-            p2_region_modifier_value(dem.region,ig_key);
+            effect(dem.region,ig_key);
         const auto profession_mod=
-            p2_region_modifier_value(dem.region,profession_key);
+            effect(dem.region,profession_key);
         const auto sponsor_mod=key.second==group?sponsor_power:0.0;
         const auto strength=std::clamp(
             1.0+interest_mod+profession_mod+sponsor_mod,0.05,4.0);
@@ -330,6 +342,16 @@ inline bool IntegratedWorld::p3_needs_daily_tick()const {
 
 inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
     require_stage({9});
+    std::map<std::pair<std::string,std::string>,double> regional_effect_cache;
+    const auto effect=[&](const std::string& region,
+                          std::string_view key)->double {
+        const auto slot=std::make_pair(region,std::string(key));
+        const auto it=regional_effect_cache.find(slot);
+        if(it!=regional_effect_cache.end())return it->second;
+        const auto value=p2_region_modifier_value(region,key);
+        regional_effect_cache.emplace(slot,value);
+        return value;
+    };
     ensure(today>=0&&today>p3_last_reaction_day_,
            "P3 political attitudes updated twice or out of calendar order");
     if(!p3_needs_daily_tick())return;
@@ -391,7 +413,7 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
         const std::int64_t relief=(employed>0?900:250)+
                                     (scarcity==0?200:0);
         const auto radical_factor=std::clamp(
-            1.0+p2_region_modifier_value(
+            1.0+effect(
                 dem.region,"state_radicals_from_political_movements_mult"),
             0.0,5.0);
         const auto effective_pressure=static_cast<std::int64_t>(
@@ -401,7 +423,7 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
                 static_cast<std::int64_t>(attitude.radical_ppm)+
                 effective_pressure-relief,0,1'000'000));
         const auto loyalty_factor=std::clamp(
-            1.0+p2_region_modifier_value(
+            1.0+effect(
                 dem.region,"state_loyalists_from_political_movements_mult"),
             0.0,5.0);
         const auto loyalty_delta=effective_pressure>0?
