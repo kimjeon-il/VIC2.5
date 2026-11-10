@@ -4,10 +4,12 @@
 namespace vic25::phasec {
 inline P1JudiciaryView IntegratedWorld::p1_judiciary_view(
         const std::string& country)const {
-    ensure(p1_constitutions_.contains(country),
-           "P1 judiciary needs an existing constitutional country");
+    ensure(governments_.contains(country),
+           "P1 judiciary needs an actual government");
     P1JudiciaryView result;
     result.country=country;
+    // Pre-constitutional legacy fixtures retain the original economy.
+    if(!p1_constitutions_.contains(country))return result;
     for(const auto& [slot,id]:p2_active_base_) {
         (void)slot;
         const auto& law=p2_laws_.at(id);

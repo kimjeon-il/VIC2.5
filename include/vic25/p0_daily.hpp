@@ -2083,11 +2083,30 @@ public:
         if(decisions.retire_bank_debt_after_wages)
             plan[8].push_back([](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
+                // Country attribution uses existing physical establishments,
+                // not a second company registry. Unlocated estates retain
+                // legacy debt repayment, avoiding guessed jurisdiction.
+                std::map<std::string,std::string> estate_country;
+                for(const auto& [id,site]:c.facilities()) {
+                    (void)id;
+                    if(!c.has_government(c.sovereignty(site.region)))continue;
+                    estate_country.try_emplace(site.owner,c.sovereignty(site.region));
+                }
                 for(const auto& [firm,day]:c.bankrupt_firms()) {
                     (void)day;
                     if(c.outstanding_worker_wages(firm)>0)continue;
                     Money affordable=std::min(c.outstanding_loan(firm),
                         std::max<Money>(0,c.phase_d_cash_available(firm)));
+                    if(affordable<=0)continue;
+                    if(const auto region=estate_country.find(firm);
+                       region!=estate_country.end()) {
+                        const auto ppm=c.p1_judiciary_view(region->second)
+                                         .enforceable_contract_ppm;
+                        affordable=phaseb::add_checked(
+                            phaseb::mul_checked(affordable/1'000'000,ppm),
+                            phaseb::mul_checked(affordable%1'000'000,ppm)/
+                                1'000'000);
+                    }
                     if(affordable<=0)continue;
                     for(const auto& [id,line]:gh.commerce().credit) {
                         if(affordable<=0)break;
