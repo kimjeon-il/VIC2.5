@@ -291,17 +291,30 @@ inline Condition condition(const Value& v,int depth=0) {
 inline External external(const Value& v) {
     const auto& o=v.object();
     keys(o,{"kind","target_country","admin_name","head","prime","admin_id",
-            "provinces","seats","quorum"});
+            "provinces","seats","quorum","law_group","law_choice",
+            "subject_id","action","actor","region","parties","groups"});
     External result;
     const auto kind=must(o,"kind").string();
     if(kind=="independence")result.kind=ExternalKind::independence;
     else if(kind=="transfer")result.kind=ExternalKind::transfer;
     else if(kind=="claim")result.kind=ExternalKind::claim;
     else if(kind=="colonize")result.kind=ExternalKind::colonize;
+    else if(kind=="political_bill")result.kind=ExternalKind::political_bill;
+    else if(kind=="political_cabinet")result.kind=ExternalKind::political_cabinet;
+    else if(kind=="political_movement")result.kind=ExternalKind::political_movement;
+    else if(kind=="political_mandate")result.kind=ExternalKind::political_mandate;
+    else if(kind=="political_settlement")result.kind=ExternalKind::political_settlement;
     else throw std::invalid_argument("CONTENT_UNKNOWN_EXTERNAL_KIND");
     result.target_country=str(o,"target_country");
     result.admin_name=str(o,"admin_name");
     result.head=str(o,"head");result.prime=str(o,"prime");
+    result.law_group=str(o,"law_group");result.law_choice=str(o,"law_choice");
+    result.subject_id=str(o,"subject_id");result.action=str(o,"action");
+    result.actor=str(o,"actor");result.region=str(o,"region");
+    if(const auto* p=maybe(o,"parties"))
+        for(const auto& item:p->array())result.parties.push_back(item.string());
+    if(const auto* p=maybe(o,"groups"))
+        for(const auto& item:p->array())result.groups.push_back(item.string());
     if(const auto* p=maybe(o,"admin_id"))result.admin_id=positive_id(*p);
     result.seats=num(o,"seats");result.quorum=num(o,"quorum");
     if(const auto* p=maybe(o,"provinces"))
