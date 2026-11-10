@@ -2,6 +2,8 @@
 #include "vic25/phase_b_world.hpp"
 #include "vic25/day_budget.hpp"
 #include "vic25/monthly.hpp"
+#include <functional>
+#include <string_view>
 
 namespace vic25::phaseb {
 
@@ -68,7 +70,10 @@ public:
     // calendar's exact number of days using integer cumulative quotas.
     // Sum(day_ppm, 1..days_in_month) == monthly_ppm, without float drift.
     // The caller must stage the entire C/D/E/G/H world atomically.
-    MonthReport advance_day(World& w,int day,int days_in_month)const {
+    MonthReport advance_day(
+        World& w,int day,int days_in_month,
+        const std::function<double(const std::string&,std::string_view)>&
+            state_law_modifier={})const {
         require(days_in_month>=28&&days_in_month<=31&&day>=1&&
                 day<=days_in_month,"invalid autonomous POP calendar day");
         w.set_native_calendar_day(day);
@@ -110,7 +115,7 @@ public:
         const auto prior=w.events().size();
         if(!today.monthly_vacancies.empty())
             (void)w.match_jobs(today.monthly_vacancies,today.labor);
-        engine.do_demography(w,report,true,month_end);
+        engine.do_demography(w,report,true,month_end,state_law_modifier);
         w.release_ineligible(today.labor);
         w.prune_residuals();
         require(w.validate(today.labor),"autonomous daily demographic invariant");
@@ -139,9 +144,11 @@ private:
         if(hp.temporary_injury)rate=std::min(PPM,rate*std::int64_t(2));
         return rate;
     }
-    void do_demography(World& w,MonthReport& report,
-                       bool education_milestones=true,
-                       bool lifecycle_due=true)const{
+    void do_demography(
+        World& w,MonthReport& report,
+        bool education_milestones=true,bool lifecycle_due=true,
+        const std::function<double(const std::string&,std::string_view)>&
+            state_law_modifier={})const{
         const auto original=w.slices();
         for(const auto& [id,initial]:original){
             if(!w.has_slice(id))continue;
@@ -150,12 +157,44 @@ private:
             const auto hp=w.health(d.health);
             const auto ed=w.education(econ.education);
             const auto age=w.age_months_slice(id);
-            const auto deaths=w.allocate_rate(id,"mortality",initial.count,death_rate(w,initial));
+            // Policy changes the existing hazard; it never creates or
+            // removes population independently of the canonical B ledger.
+            const auto mod=[&](std::string_view key)->double {
+                return state_law_modifier?
+                    state_law_modifier(d.region,key):0.0;
+            };
+            const auto scaled=[&](People base,double multiplier)->People {
+                return static_cast<People>(std::clamp(
+                    static_cast<double>(base)*(1.0+multiplier),
+                    0.0,static_cast<double>(PPM)));
+            };
+            const auto flat=[&](People base,double addition)->People {
+                return static_cast<People>(std::clamp(
+                    static_cast<double>(base)+addition*PPM,
+                    0.0,static_cast<double>(PPM)));
+            };
+            double mortality=mod("state_mortality_mult");
+            if(econ.profession=="farmer"||econ.profession=="farmers")
+                mortality+=mod("state_farmers_mortality_mult");
+            else if(econ.profession=="laborer"||econ.profession=="laborers")
+                mortality+=mod("state_laborers_mortality_mult");
+            else if(econ.profession=="machinist"||econ.profession=="machinists")
+                mortality+=mod("state_machinists_mortality_mult");
+            else if(econ.profession=="peasant"||econ.profession=="peasants")
+                mortality+=mod("state_peasants_mortality_mult");
+            const auto deaths=w.allocate_rate(
+                id,"mortality",initial.count,
+                scaled(death_rate(w,initial),mortality));
             if(deaths){w.death(id,deaths,job_allocation(w,id,deaths));report.deaths=add_checked(report.deaths,deaths);}
             if(d.sex==Sex::female && age>=18*12 && age<45*12){
                 // Birth cohort must join a NONWORKER economic profile, never mother's profession.
                 const auto remaining_mothers=w.has_slice(id)?w.slice(id).count:0;
-                const auto births=w.allocate_rate(id,"fertility",remaining_mothers,rules_.fertility_ppm);
+                double fertility=mod("state_birth_rate_mult");
+                if(econ.profession=="peasant"||econ.profession=="peasants"||
+                   econ.profession=="laborer"||econ.profession=="laborers")
+                    fertility+=mod("state_lower_strata_birth_rate_mult");
+                const auto births=w.allocate_rate(id,"fertility",
+                    remaining_mothers,scaled(rules_.fertility_ppm,fertility));
                 if(births){
                     Economic child=econ;child.profession="not_assigned";child.livelihood="inactive";
                     child.labor_class="ineligible";child.education=w.default_education();
@@ -211,7 +250,9 @@ private:
             if(education_milestones && age >= 0 && age%12==0){
                 Education next=ed;People rate=0;
                 if(ed.school==School::none && age>=8*12 && age<65*12){
-                    rate=age<18*12?rules_.primary_access_ppm:rules_.adult_literacy_access_ppm;
+                    rate=age<18*12?rules_.primary_access_ppm:
+                         flat(rules_.adult_literacy_access_ppm,
+                              mod("state_literacy_growth_add"));
                     next.school=School::primary;next.literacy=std::max<std::uint8_t>(next.literacy,60);
                 }else if(ed.school==School::primary && age>=13*12 && age<30*12){
                     rate=rules_.secondary_access_ppm;next.school=School::secondary;next.literacy=std::max<std::uint8_t>(next.literacy,90);
@@ -219,6 +260,10 @@ private:
                     rate=rules_.tertiary_access_ppm;next.school=School::tertiary;next.literacy=100;
                 }
                 if(rate){
+                    double access=mod("state_education_access_add");
+                    if(econ.profession=="peasant"||econ.profession=="peasants")
+                        access+=mod("state_peasants_education_access_add");
+                    rate=flat(rate,access);
                     const auto multiplier=rules_.education_access_multiplier_ppm[static_cast<std::size_t>(d.sex)];
                     rate=(rate/PPM)*multiplier + (rate%PPM)*multiplier/PPM;
                     const auto n=w.allocate_rate(id,"school",remaining,rate);
@@ -230,7 +275,11 @@ private:
             remaining=w.slice(id).count;
             if(education_milestones && age >= 18*12 && age%12==0 &&
                w.employed(id)>0 && ed.occupational_skill<100){
-                const auto n=w.allocate_rate(id,"training",w.employed(id),rules_.training_ppm);
+                const auto trained_rate=scaled(rules_.training_ppm,
+                    mod("state_pop_qualifications_mult")+
+                    mod("building_training_rate_mult"));
+                const auto n=w.allocate_rate(id,"training",
+                    w.employed(id),trained_rate);
                 if(n){Education next=ed;next.occupational_skill=static_cast<std::uint8_t>(std::min(100,static_cast<int>(next.occupational_skill)+10));
                     w.change_education(id,n,next,EventKind::training,n);report.trained=add_checked(report.trained,n);}
             }
@@ -270,7 +319,14 @@ private:
                 const auto dest_it=rules_.destination_by_region.find(d.region);
                 if(dest_it==rules_.destination_by_region.end()||dest_it->second==d.region)continue;
                 const People available=std::min(initial.count,w.slice(id).count);
-                const People moving=w.allocate_rate(id,"migration",available,rules_.migration_ppm);
+                const auto& economic=w.economic(initial.key.economic);
+                if((economic.profession=="peasant"||
+                    economic.profession=="peasants")&&state_law_modifier&&
+                   state_law_modifier(d.region,
+                     "state_peasants_internal_migration_disallowed_bool")>0)
+                    continue;
+                const People moving=w.allocate_rate(id,"migration",
+                    available,rules_.migration_ppm);
                 if(!moving)continue;
                 const auto& source=w.slice(id);
                 const auto& econ=w.economic(source.key.economic);

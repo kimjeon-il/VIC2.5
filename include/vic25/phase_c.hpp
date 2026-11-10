@@ -2864,8 +2864,20 @@ public:
         require_stage({10});
         if(!demography_enabled_)return;
         const auto before=people_.events().size();
+        // Cache country/region projections for one daily demographic pass.
+        // The real Phase B birth/death/education ledger remains authoritative.
+        std::map<std::pair<std::string,std::string>,double> regional_modifiers;
+        const auto law_modifier=[&](const std::string& region,
+                                    std::string_view key)->double {
+            const auto name=std::make_pair(region,std::string(key));
+            const auto found=regional_modifiers.find(name);
+            if(found!=regional_modifiers.end())return found->second;
+            const auto effect=p2_region_modifier_value(region,key);
+            regional_modifiers.emplace(name,effect);
+            return effect;
+        };
         (void)phaseb::Engine{demographic_rules_}.advance_day(
-            people_,day,days_in_month);
+            people_,day,days_in_month,law_modifier);
         sync_service_transitions(before);
         events_.push_back("daily-auto-demography");
     }

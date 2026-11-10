@@ -38,6 +38,60 @@ inline double IntegratedWorld::p2_catalog_modifier_value(
     }
     return result;
 }
+inline double IntegratedWorld::p2_region_modifier_value(
+        const std::string& region,std::string_view key)const {
+    const auto sovereign=sovereignty_.find(region);
+    if(sovereign==sovereignty_.end())return 0.0;
+    const auto& country=sovereign->second;
+    double value=p2_catalog_modifier_value(country,key);
+    // Institution modifiers belong to the owning policy group rather than
+    // being applied once per ordinary law or per invented service slot.
+    const auto usable_level=[&](std::string_view group)->int {
+        P1InstitutionKind kind=P1InstitutionKind::administration;
+        if(group=="health_system")kind=P1InstitutionKind::healthcare;
+        else if(group=="education_system")kind=P1InstitutionKind::education;
+        else if(group=="policing"||group=="internal_security")
+            kind=P1InstitutionKind::policing;
+        else if(group=="welfare")kind=P1InstitutionKind::welfare;
+        else if(group=="colonization")kind=P1InstitutionKind::administration;
+        else return 0;
+        int level=0;
+        for(const auto& [id,inst]:p1_institutions_) {
+            if(inst.country!=country||inst.kind!=kind)continue;
+            const auto service=public_institutions_.find(id);
+            if(service==public_institutions_.end()||
+               service->second.region!=region)continue;
+            const auto available=p1_institution_capacity(id);
+            if(available.usable_slots>0&&available.cash_backed)
+                level=std::max(level,static_cast<int>(available.level));
+        }
+        return level;
+    };
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country!=country)continue;
+        const auto* choice=p2_catalog_law(law.base_choice);
+        if(!choice||choice->group!=law.domain)continue;
+        const auto level=usable_level(choice->group);
+        if(level==0)continue;
+        value+=p2_catalog_raw_modifier(choice->id,key,level)-
+               p2_catalog_raw_modifier(choice->id,key);
+    }
+    for(const auto& amendment_id:p2_active_amendments_) {
+        const auto& amendment=p2_amendments_.at(amendment_id);
+        const auto& law=p2_laws_.at(amendment.law_id);
+        if(law.country!=country)continue;
+        const auto* choice=p2_catalog_law(law.base_choice);
+        if(!choice||choice->group!=law.domain||
+           !p2_catalog_amendment(amendment.id))continue;
+        const auto level=usable_level(choice->group);
+        if(level==0)continue;
+        value+=p2_catalog_raw_modifier(amendment.id,key,level)-
+               p2_catalog_raw_modifier(amendment.id,key);
+    }
+    return value;
+}
 inline bool IntegratedWorld::p2_valid_clause(const P2Clause& c) {
     if(c.id.empty()||c.target.empty()||
        static_cast<unsigned>(c.kind)>
