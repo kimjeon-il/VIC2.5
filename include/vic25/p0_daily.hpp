@@ -128,6 +128,11 @@ struct Election {
     People turnout_ppm{900'000};
 };
 // Player/campaign cabinet choice takes effect the following real day.
+struct ParliamentNoConfidence {
+    std::string country;
+    std::vector<std::string> supporting_parties;
+    daily::Date decision_date{};
+};
 struct GovernmentFormation {
     std::string country, incumbent_head, new_prime, legal_basis;
     std::vector<std::string> ruling_groups, ruling_parties;
@@ -145,7 +150,8 @@ struct ElectionTermReform {
     daily::Date decision_date{};
 };
 enum class LegislativeAction :std::uint8_t {
-    introduce, approve, promulgate, approve_upper
+    introduce, approve, promulgate, approve_upper,
+    sign, veto, override_veto, withdraw
 };
 struct LegislativeOrder {
     daily::Date date{};
@@ -153,6 +159,19 @@ struct LegislativeOrder {
     phasec::P2Bill bill; // populated for introduction only
     std::string bill_id,head;
     std::vector<std::string> supporting_parties;
+    std::vector<std::string> upper_supporting_parties;
+};
+enum class PoliticalOrderKind : std::uint8_t {
+    activate_mandate, cancel_mandate, event_decision, register_lobby
+};
+struct PoliticalOrder {
+    daily::Date date{};
+    PoliticalOrderKind kind{PoliticalOrderKind::activate_mandate};
+    phasec::P1PoliticalMandate mandate;
+    std::string mandate_id,event_id;
+    phasec::P1PoliticalEventDecision choice{
+        phasec::P1PoliticalEventDecision::acknowledge};
+    phasec::P1Lobby lobby;
 };
 struct CountryAI {
     std::string country,prime_minister,domestic_region,good,domestic_seller;
@@ -285,9 +304,12 @@ struct Policies {
     std::vector<BondSecondaryAsk> bond_secondary_asks;
     std::vector<BondSecondaryBid> bond_secondary_bids;
     std::vector<GovernmentFormation> government_formations; // append-only
+    std::vector<ParliamentNoConfidence> no_confidence_votes;
     std::vector<ParliamentDissolution> dissolutions;
     std::vector<ElectionTermReform> election_term_reforms;
     std::vector<LegislativeOrder> legislative_orders; // append-only
+    std::set<std::string> player_controlled_countries; // never autonomously governed
+    std::vector<PoliticalOrder> political_orders; // date-scoped lawful P1 commands
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -444,6 +466,13 @@ struct Policies {
                reform.amendment.effective_day<=
                    daily::to_day_index(reform.decision_date))
                 throw std::invalid_argument("P0_INVALID_P4_TERM_REFORM");
+        std::set<std::pair<daily::DayIndex,std::string>> confidence_motions;
+        for(const auto& motion:no_confidence_votes) {
+            if(motion.country.empty()||motion.supporting_parties.empty()||
+               !confidence_motions.insert(
+                   {daily::to_day_index(motion.decision_date),motion.country}).second)
+                throw std::invalid_argument("P0_INVALID_NO_CONFIDENCE_MOTION");
+        }
         std::set<std::tuple<daily::DayIndex,std::string,LegislativeAction>>
             p2_legislative_events;
         for(const auto& order:legislative_orders) {
@@ -452,11 +481,15 @@ struct Policies {
                 order.bill.id:order.bill_id;
             if(bill_id.empty()||
                static_cast<unsigned>(order.action)>
-                   static_cast<unsigned>(LegislativeAction::approve_upper)||
+                   static_cast<unsigned>(LegislativeAction::withdraw)||
                !p2_legislative_events.insert({day,bill_id,order.action}).second||
                (order.action==LegislativeAction::introduce&&
                 (order.bill.proposer.empty()||order.bill.country.empty()))||
-               (order.action==LegislativeAction::promulgate&&order.head.empty()))
+               ((order.action==LegislativeAction::promulgate||
+                 order.action==LegislativeAction::sign||
+                 order.action==LegislativeAction::veto)&&order.head.empty())||
+               (order.action==LegislativeAction::override_veto&&
+                 order.supporting_parties.empty()))
                 throw std::invalid_argument("P0_INVALID_P2_LEGISLATIVE_ORDER");
         }
         for(const auto& e:elections)
@@ -1070,8 +1103,8 @@ public:
         // Earned wages are accrued by the preceding Stage5 employer
         // commands. Creditors are now paid before optional public transfers,
         // dividends or other discretionary local business expenditures.
-        plan[5].push_back([](phasegh::Stage& gh) {
-            gh.phase_c().phase_time_settle_wage_arrears();
+        plan[5].push_back([today=world_.day_index()](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_settle_wage_arrears(today);
             gh.phase_c().phase_time_settle_bankrupt_reparations();
         });
         if(date.day==1 && decisions.autonomous_tax_step_ppm>0)
@@ -1202,6 +1235,16 @@ public:
                         phaseb::mul_checked(work_budget%1'000'000,rate)/
                         1'000'000);
                 }
+                // Source-branch edict modifies the existing national/legal
+                // ceiling. Real staff, materials and cash still bound work.
+                const auto decree=c.p1_region_decree_bonus_ppm(
+                    country,p.region,phasec::P1DecreeKind::construction_drive);
+                if(decree>0)
+                    work_budget=phaseb::add_checked(work_budget,
+                        phaseb::add_checked(
+                            phaseb::mul_checked(work_budget/1'000'000,decree),
+                            phaseb::mul_checked(work_budget%1'000'000,decree)/
+                                1'000'000));
                 Quantity n=std::min({work_budget,
                      p.work_required-p.accepted_work,materials,
                      static_cast<Quantity>(staff/p.workers_per_work),affordable});
@@ -1576,6 +1619,14 @@ public:
                 if(protest>0)c.protest(p.population_slice,p.interest_group,protest);
             });
         }
+        // Human-controlled countries never receive autonomous political
+        // decisions. Their own dated P0 commands remain the authority.
+        if(!decisions.player_controlled_countries.empty())
+            plan[9].push_back([countries=decisions.player_controlled_countries]
+                  (phasegh::Stage& gh) {
+                for(const auto& country:countries)
+                    gh.phase_c().p1_mark_player_country(country,true);
+            });
         // Execute independent national parliamentary, local and elected-head
         // contests only on their scheduled day. Voters and party preference
         // are read from actual Phase B/P3 state in the Stage9 transaction.
@@ -1644,6 +1695,16 @@ public:
                              (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 switch(order.action) {
+                    case LegislativeAction::sign:
+                        c.p2_sign_bill(order.bill_id,order.head,today);break;
+                    case LegislativeAction::veto:
+                        c.p2_veto_bill(order.bill_id,order.head,today);break;
+                    case LegislativeAction::override_veto:
+                        c.p2_override_veto(order.bill_id,
+                           order.supporting_parties,
+                           order.upper_supporting_parties,today);break;
+                    case LegislativeAction::withdraw:
+                        c.p2_cancel_bill(order.bill_id,today);break;
                     case LegislativeAction::introduce:
                         c.p2_submit_bill(order.bill,today);
                         break;
@@ -1680,6 +1741,14 @@ public:
                     reform.supporting_parties,today);
             });
         }
+        for(const auto& motion:decisions.no_confidence_votes) {
+            if(date!=motion.decision_date)continue;
+            plan[9].push_back([motion,today=world_.day_index()]
+                              (phasegh::Stage& gh) {
+                gh.phase_c().p1_vote_no_confidence(
+                    motion.country,motion.supporting_parties,today);
+            });
+        }
         for(const auto& formation:decisions.government_formations) {
             if(date.year!=formation.year||date.month!=formation.month||
                date.day!=formation.day)continue;
@@ -1693,6 +1762,24 @@ public:
                                            formation.caretaker},
                         tomorrow,formation.legal_basis);
                 });
+        }
+        for(const auto& order:decisions.political_orders) {
+            if(date!=order.date)continue;
+            plan[9].push_back([order,today=world_.day_index()]
+                              (phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                switch(order.kind) {
+                  case PoliticalOrderKind::activate_mandate:
+                    c.p1_activate_mandate(order.mandate,today);break;
+                  case PoliticalOrderKind::cancel_mandate:
+                    c.p1_deactivate_mandate(order.mandate_id);break;
+                  case PoliticalOrderKind::event_decision:
+                    c.p1_resolve_political_event(
+                       order.event_id,order.choice,today);break;
+                  case PoliticalOrderKind::register_lobby:
+                    c.p1_register_lobby(order.lobby,today);break;
+                }
+            });
         }
         for(const auto& dues:decisions.organization_dues)
             plan[5].push_back([dues](phasegh::Stage& gh) {
@@ -2136,11 +2223,42 @@ public:
         if(decisions.retire_bank_debt_after_wages)
             plan[8].push_back([](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
+                if(c.bankrupt_firms().empty())return;
+                // Country attribution uses existing physical establishments,
+                // not a second company registry. Unlocated estates retain
+                // legacy debt repayment, avoiding guessed jurisdiction.
+                std::map<std::string,std::string> estate_country;
+                std::set<std::string> multi_jurisdiction_estates;
+                for(const auto& [id,site]:c.facilities()) {
+                    (void)id;
+                    if(!c.bankrupt_firms().contains(site.owner))continue;
+                    const auto& sovereign=c.sovereignty(site.region);
+                    if(!c.has_government(sovereign)) {
+                        multi_jurisdiction_estates.insert(site.owner);
+                        continue;
+                    }
+                    const auto [it,new_owner]=
+                        estate_country.try_emplace(site.owner,sovereign);
+                    if(!new_owner&&it->second!=sovereign)
+                        multi_jurisdiction_estates.insert(site.owner);
+                }
+                for(const auto& owner:multi_jurisdiction_estates)
+                    estate_country.erase(owner);
                 for(const auto& [firm,day]:c.bankrupt_firms()) {
                     (void)day;
                     if(c.outstanding_worker_wages(firm)>0)continue;
                     Money affordable=std::min(c.outstanding_loan(firm),
                         std::max<Money>(0,c.phase_d_cash_available(firm)));
+                    if(affordable<=0)continue;
+                    if(const auto region=estate_country.find(firm);
+                       region!=estate_country.end()) {
+                        const auto ppm=c.p1_judiciary_view(region->second)
+                                         .enforceable_contract_ppm;
+                        affordable=phaseb::add_checked(
+                            phaseb::mul_checked(affordable/1'000'000,ppm),
+                            phaseb::mul_checked(affordable%1'000'000,ppm)/
+                                1'000'000);
+                    }
                     if(affordable<=0)continue;
                     for(const auto& [id,line]:gh.commerce().credit) {
                         if(affordable<=0)break;

@@ -249,10 +249,33 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
             -1'000'000,0);
         lawful=p4_scaled(lawful,1'000'000+penalty,1'000'000);
     }
+    // Apply regional reach to the target's legal/trait-constrained output.
+    const auto decree=p1_region_decree_bonus_ppm(
+        link.country,service.region,P1DecreeKind::public_service_reach);
+    const auto improved=std::min(staffed_and_funded,
+        phaseb::add_checked(lawful,p4_scaled(lawful,decree,1'000'000)));
     return {link.country,institution_id,link.kind,level,
-            staff,slots,staffed,lawful,funded};
+            staff,slots,staffed,improved,funded};
 }
 
+inline void IntegratedWorld::p1_vote_no_confidence(
+        const std::string& country,const std::vector<std::string>& parties,
+        std::int64_t today) {
+    require_stage({9});
+    ensure(today>=0&&p1_constitutions_.contains(country)&&
+           p1_authority(country).assembly_confidence_required&&
+           !p4_parliament_dissolved(country)&&
+           country_elections_.contains(country)&&
+           !p1_coalitions_.at(country).caretaker,
+           "P1 only sitting parliamentary cabinets face no confidence");
+    const auto& election=legislature_for(country);
+    ensure(election.total_seats>0&&
+           coalition_seats(parties,election)>election.total_seats/2,
+           "P1 no-confidence motion lacks real absolute seat majority");
+    p1_lost_confidence_[country]=today;
+    p1_coalitions_.at(country).caretaker=true;
+    events_.push_back("p1-parliament-no-confidence:"+country);
+}
 inline bool IntegratedWorld::has_due_p1_government(std::int64_t day)const {
     return p1_pending_.contains(day);
 }
@@ -320,6 +343,8 @@ inline void IntegratedWorld::phase_time_apply_p1_government(std::int64_t today) 
         if(change.replace_prime) {
             government.prime_minister=change.new_prime;
             p1_coalitions_.at(country)=change.coalition;
+            if(!change.coalition.caretaker)
+                p1_lost_confidence_.erase(country);
         }
         ++government.revision;
         events_.push_back("p1-daily-government-effective:"+country);

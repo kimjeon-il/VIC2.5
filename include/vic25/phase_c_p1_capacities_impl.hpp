@@ -31,6 +31,13 @@ inline P1FlowCapacity IntegratedWorld::p1_authority_capacity(
             committed=phaseb::add_checked(
                 committed,p1power::authority_cost(policy.kind));
     }
+    // Additional political orders reserve existing national Authority, not
+    // an alternative supply or separate generated capacity.
+    for(const auto& [id,policy]:p1_mandates_) {
+        (void)id;
+        if(policy.country==country&&policy.active)
+            committed=phaseb::add_checked(committed,policy.authority_cost);
+    }
     return p1power::flow(generated,committed);
 }
 
