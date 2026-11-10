@@ -2083,6 +2083,7 @@ public:
         if(decisions.retire_bank_debt_after_wages)
             plan[8].push_back([](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
+                if(c.bankrupt_firms().empty())return;
                 // Country attribution uses existing physical establishments,
                 // not a second company registry. Unlocated estates retain
                 // legacy debt repayment, avoiding guessed jurisdiction.
@@ -2090,6 +2091,7 @@ public:
                 std::set<std::string> multi_jurisdiction_estates;
                 for(const auto& [id,site]:c.facilities()) {
                     (void)id;
+                    if(!c.bankrupt_firms().contains(site.owner))continue;
                     const auto& sovereign=c.sovereignty(site.region);
                     if(!c.has_government(sovereign)) {
                         multi_jurisdiction_estates.insert(site.owner);
