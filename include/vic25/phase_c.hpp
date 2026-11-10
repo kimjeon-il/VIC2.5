@@ -1629,6 +1629,8 @@ public:
     [[nodiscard]] const P1Coalition& p1_coalition(const std::string&)const;
     [[nodiscard]] P1AuthorityView p1_authority(const std::string&)const;
     void seed_p1_coalition(const std::string&,P1Coalition);
+    void p1_vote_no_confidence(const std::string&,
+                               const std::vector<std::string>&,std::int64_t);
     [[nodiscard]] P1LegitimacyView p1_legitimacy(const std::string&)const;
     void seed_p1_institution(const std::string&,const std::string&,
                              P1InstitutionKind,std::uint8_t);
@@ -3810,6 +3812,8 @@ private:
     // P1 stores constitutional choices and coalition identity only.
     std::map<std::string,P1Constitution> p1_constitutions_;
     std::map<std::string,P1Coalition> p1_coalitions_;
+    // One procedural marker per unseated cabinet; not a new legislature.
+    std::map<std::string,std::int64_t> p1_lost_confidence_;
     std::map<std::string,P1Institution> p1_institutions_;
     std::map<std::int64_t,std::map<std::string,P1GovernmentChange>> p1_pending_;
     // P4 party relationships are many-to-many; political headcount stays in

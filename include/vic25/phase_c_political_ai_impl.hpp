@@ -116,11 +116,28 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 coalition.ruling_groups.erase(std::unique(
                     coalition.ruling_groups.begin(),
                     coalition.ruling_groups.end()),coalition.ruling_groups.end());
-                // Retain an actual incumbent PM instead of inventing a person.
-                schedule_p1_cabinet_daily(country,g.head_of_state,
-                    g.prime_minister,std::move(coalition),today+1,
-                    "ai-lawful-confidence-coalition");
-                events_.push_back("p1-ai-parliamentary-coalition:"+country);
+                // An ousted cabinet cannot reappoint itself; prefer a
+                // registered and POP-anchored party head as successor.
+                std::string successor;
+                if(!p1_lost_confidence_.contains(country)&&
+                   coalition.ruling_parties==
+                       p1_coalitions_.at(country).ruling_parties)
+                    successor=g.prime_minister;
+                if(successor.empty())
+                    for(const auto& party:coalition.ruling_parties) {
+                        const auto& candidate=p4_parties_.at(party).head_candidate;
+                        if(!candidate.empty()&&candidate!=g.prime_minister&&
+                           person_anchors_.contains(candidate)&&
+                           p1_character_available(candidate)) {
+                            successor=candidate;break;
+                        }
+                    }
+                if(!successor.empty()) {
+                    schedule_p1_cabinet_daily(country,g.head_of_state,
+                        successor,std::move(coalition),today+1,
+                        "ai-lawful-confidence-coalition");
+                    events_.push_back("p1-ai-parliamentary-coalition:"+country);
+                }
             }
         }
         // A passed three-phase process still requires lawful chamber votes.

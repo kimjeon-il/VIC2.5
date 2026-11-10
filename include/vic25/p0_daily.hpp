@@ -125,6 +125,11 @@ struct Election {
     People turnout_ppm{900'000};
 };
 // Player/campaign cabinet choice takes effect the following real day.
+struct ParliamentNoConfidence {
+    std::string country;
+    std::vector<std::string> supporting_parties;
+    daily::Date decision_date{};
+};
 struct GovernmentFormation {
     std::string country, incumbent_head, new_prime, legal_basis;
     std::vector<std::string> ruling_groups, ruling_parties;
@@ -296,6 +301,7 @@ struct Policies {
     std::vector<BondSecondaryAsk> bond_secondary_asks;
     std::vector<BondSecondaryBid> bond_secondary_bids;
     std::vector<GovernmentFormation> government_formations; // append-only
+    std::vector<ParliamentNoConfidence> no_confidence_votes;
     std::vector<ParliamentDissolution> dissolutions;
     std::vector<ElectionTermReform> election_term_reforms;
     std::vector<LegislativeOrder> legislative_orders; // append-only
@@ -457,6 +463,13 @@ struct Policies {
                reform.amendment.effective_day<=
                    daily::to_day_index(reform.decision_date))
                 throw std::invalid_argument("P0_INVALID_P4_TERM_REFORM");
+        std::set<std::pair<daily::DayIndex,std::string>> confidence_motions;
+        for(const auto& motion:no_confidence_votes) {
+            if(motion.country.empty()||motion.supporting_parties.empty()||
+               !confidence_motions.insert(
+                   {daily::to_day_index(motion.decision_date),motion.country}).second)
+                throw std::invalid_argument("P0_INVALID_NO_CONFIDENCE_MOTION");
+        }
         std::set<std::tuple<daily::DayIndex,std::string,LegislativeAction>>
             p2_legislative_events;
         for(const auto& order:legislative_orders) {
@@ -1586,6 +1599,14 @@ public:
                 gh.phase_c().p4_schedule_term_amendment(
                     reform.amendment,reform.proposer,
                     reform.supporting_parties,today);
+            });
+        }
+        for(const auto& motion:decisions.no_confidence_votes) {
+            if(date!=motion.decision_date)continue;
+            plan[9].push_back([motion,today=world_.day_index()]
+                              (phasegh::Stage& gh) {
+                gh.phase_c().p1_vote_no_confidence(
+                    motion.country,motion.supporting_parties,today);
             });
         }
         for(const auto& formation:decisions.government_formations) {
