@@ -304,68 +304,60 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
             events_.push_back("p1-ai-actual-bill-approved:"+bill_id);
         }
         if(pending_enactment) {agenda.next_review_day=today+7;continue;}
-        // Choose an active political demand, not an invented ideological
-        // agenda. Only available legal slots can be proposed for replacement.
-        std::string target;std::int64_t highest=0;
-        for(const auto& [id,m]:p3_movements_) {
-            if(!m.active||m.country!=country||
-               m.goal!=P3MovementGoal::legal_reform)continue;
-            const auto v=p3_movement_view(id);
-            const auto weight=static_cast<std::int64_t>(v.support_ppm)+
-                              v.activism_ppm/2;
-            if(weight>highest) {highest=weight;target=id;}
-        }
-        if(!target.empty()&&p1_legitimacy(country).score>=25) {
-            const auto& m=p3_movements_.at(target);
-            for(const auto& [slot,id]:p2_active_base_) {
-                const auto& current=p2_laws_.at(id);
-                if(current.country!=country||
-                   current.domain!=m.issue_domain||
-                   current.base_choice==m.desired_choice)continue;
-                bool busy=false;
-                for(const auto& [other_id,other]:p2_bills_)
-                    if(other.country==country&&
-                       other.action==P2BillAction::enact_or_replace_base&&
-                       other.proposed_base.domain==m.issue_domain&&
-                       other.status!=P2BillStatus::rejected&&
-                       other.status!=P2BillStatus::effective)
-                        busy=true;
-                if(busy)break;
-                P2Bill bill;
-                bill.id="AI:bill:"+country+":"+std::to_string(today);
-                bill.country=country;
-                bill.proposer=g.prime_minister;
-                bill.legal_basis="ai-response-to:"+target;
-                // Never copy the *old* choice's material effects onto
-                // a different law. Only a validated historical template
-                // can supply the new choice's substantive clauses.
-                const P2BaseLaw* template_law=nullptr;
-                for(const auto& [law_id,known]:p2_laws_)
-                    if(known.country==country&&known.domain==m.issue_domain&&
-                       known.base_choice==m.desired_choice&&
-                       known.scope==current.scope&&known.tier==current.tier) {
-                        template_law=&known;break;
+        // Evaluate existing 1.15 catalogue law alternatives at event/agenda
+        // review time, not every simulation day. Both ideology clout and
+        // movement support come from existing P3/POP registrations.
+        if(p1_legitimacy(country).score>=25) {
+            std::string best_group,best_choice;
+            std::int64_t best_score=0;
+            const auto& catalogue=politics::catalogue();
+            for(const auto& [slot,law_id]:p2_active_base_) {
+                (void)slot;
+                const auto& law=p2_laws_.at(law_id);
+                if(law.country!=country||
+                   !catalogue.has_group(law.domain))continue;
+                const auto group=politics::bare_group(law.domain);
+                const auto options=catalogue.by_group.find(group);
+                if(options==catalogue.by_group.end())continue;
+                for(const auto& choice:options->second) {
+                    const auto candidate_id="AI:bill:"+country+":"+
+                        std::to_string(today);
+                    if(!p2_catalogue_reform_template(
+                         country,group,choice,candidate_id,
+                         "ai-catalogue:"+group+":"+choice))continue;
+                    const auto political=p2_political_support(country,group,choice);
+                    std::int64_t backing=0;
+                    for(const auto& [id,movement]:p3_movements_) {
+                        if(!movement.active||movement.country!=country||
+                           movement.goal!=P3MovementGoal::legal_reform||
+                           politics::bare_group(movement.issue_domain)!=group||
+                           politics::bare_law(movement.desired_choice)!=choice)
+                            continue;
+                        const auto evidence=p3_movement_view(id);
+                        // Only documented POP-backed movements can outweigh
+                        // a hostile legislature; zero supporters add nothing.
+                        if(evidence.supporters>0)
+                            backing=std::max(backing,
+                                2*static_cast<std::int64_t>(evidence.support_ppm)+
+                                evidence.activism_ppm);
                     }
-                if(!template_law)break;
-                bill.proposed_base=*template_law;
-                bill.proposed_base.id=bill.id+":norm";
-                bill.proposed_base.legal_basis=bill.legal_basis;
-                for(auto& clause:bill.proposed_base.clauses)
-                    clause.id=bill.proposed_base.id+":"+clause.id;
-                const auto key=bill.country+":"+
-                    std::to_string(static_cast<int>(bill.action))+":"+
-                    bill.proposed_base.domain+":"+
-                    bill.proposed_base.scope+":"+
-                    bill.proposed_base.base_choice;
-                if(!p2_retry_after_.contains(key)||
-                   p2_retry_after_.at(key)<=today) {
-                    const auto bill_id=bill.id;
-                    p2_submit_bill(std::move(bill),today);
-                    agenda.last_bill_id=bill_id;
-                    agenda.last_reform_choice=m.desired_choice;
-                    events_.push_back("p1-ai-proposed-political-law:"+bill_id);
+                    if(!political.observed&&backing<=0)continue;
+                    const std::int64_t score=
+                        3*static_cast<std::int64_t>(political.governing_support_ppm)+
+                        2*static_cast<std::int64_t>(political.support_ppm)-
+                        3*static_cast<std::int64_t>(political.oppose_ppm)+backing;
+                    if(score<=0||score<=best_score)continue;
+                    best_score=score;best_group=group;best_choice=choice;
                 }
-                break;
+            }
+            if(!best_group.empty()) {
+                const auto bill_id="AI:bill:"+country+":"+std::to_string(today);
+                const auto basis="ai-catalogue:"+best_group+":"+best_choice;
+                p2_propose_catalogue_reform(country,best_group,best_choice,
+                    g.prime_minister,basis,bill_id,today);
+                agenda.last_bill_id=bill_id;
+                agenda.last_reform_choice=best_choice;
+                events_.push_back("p1-ai-catalogue-reform-proposed:"+bill_id);
             }
         }
         agenda.next_review_day=today+30;
