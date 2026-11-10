@@ -12,8 +12,8 @@
 
 - 법률 **148개**, 법률군 **26개**, 증보 **71개**
 - 정적 modifier 행 **1117개**, 고유 effect key **350종**
-- 실행 경로 매핑된 key **97종** (부분 구현/미검증), 소비자가 아직 없는 key **253종**
-- 매핑된 source 행 **467개**, 미연결 source 행 **650개**
+- 실행 경로 매핑된 key **98종** (부분 구현/미검증), 소비자가 아직 없는 key **252종**
+- 매핑된 source 행 **468개**, 미연결 source 행 **649개**
 
 ## 법률군별 정적 modifier 매핑
 
@@ -27,7 +27,7 @@
 | `citizenship` | 7 | 92 | 18 | 74 |
 | `colonization` | 5 | 14 | 0 | 14 |
 | `distribution_of_power` | 14 | 108 | 81 | 27 |
-| `economic_system` | 8 | 95 | 47 | 48 |
+| `economic_system` | 8 | 95 | 48 | 47 |
 | `edo_social_system` | 3 | 53 | 0 | 53 |
 | `education_system` | 5 | 14 | 8 | 6 |
 | `free_speech` | 4 | 31 | 16 | 15 |
@@ -148,6 +148,7 @@
 | `state_tax_collection_mult` | 1 | C/D 경제·재정 | 행정인력에 기반한 원천징수 실효율(단순화) |
 | `state_trade_capacity_mult` | 2 | G/H 무역·외교 | VIC2.5 단순화 계산·조건부 |
 
+| `country_forbid_monopoly_bool` | 1 | Phase D 실재 설비 기반 공장 확장 | 시설별 기존 생산역량으로만 점유율 추정 · 미검증 |
 ## 아직 연결되지 않은 modifier 키 — 실제 계산 연결 필요
 
 | 원본 modifier key | 해당 정의 행 | 연결해야 할 영역 |
@@ -245,7 +246,6 @@
 | `country_fervor_target_basque_add` | 1 | B/POP·C/P1 |
 | `country_financial_districts_buy_farms_likelihood` | 3 | 별도 실행 대상 필요 |
 | `country_forbid_electoral_fraud_bool` | 1 | 별도 실행 대상 필요 |
-| `country_forbid_monopoly_bool` | 1 | 별도 실행 대상 필요 |
 | `country_foreign_collectivization_bool` | 1 | 별도 실행 대상 필요 |
 | `country_free_charters_add` | 8 | 별도 실행 대상 필요 |
 | `country_government_dividends_efficiency_add` | 4 | C/D 경제·재정 |
@@ -446,4 +446,6 @@
 
 **별도 완료해야 할 항목:** 대다수 건물별 집산화·회사 배당·국영기업 재투자·중립/외국 투자권·시장 접근성·민간기업 구조조정, 건설 효율의 *원작식* 전환, 모든 전문직 투자자 분포가 관측되지 않는 국가, 지역별 부동산/인구 과세의 정밀한 월별 회계, 교육·치안·복지기관의 실제 법정 예산과 모든 원작 조건부 세제 트리거. 신규 등록된 P0/D/C/P2 집중 검사도 **컴파일 및 CTest를 아직 실행하지 않았다.**
 
-**이번 누적 정적 연결:** 97/350 고유 키, 467/1117 정적 modifier 행. 분모는 원본 효과 키 행수이지 결과 정확도, 실제 사용량, 동등성 또는 전 법률 구현 완료율이 아니다.
+**이번 누적 정적 연결:** 98/350 고유 키, 468/1117 정적 modifier 행. 분모는 원본 효과 키 행수이지 결과 정확도, 실제 사용량, 동등성 또는 전 법률 구현 완료율이 아니다.
+
+경제 후속 수정: `country_forbid_monopoly_bool`은 기존에 완공·가동 가능한 실제 제조 시설들의 지역별 설비용량을 비교하여, 해당 기업의 명확한 절대다수(50% 초과) 설비 지배 시 같은 품목 자동 증설을 거부한다. 미완공·잠재 시설을 경쟁사로 허위 계산하지 않는다. 공식 빅토리아 3 시장점유율 공식과 동일하다고 가정하지 않는다. 인두세 국가 임금기준은 일간 가계당 반복 계산하지 않고 국가당 1회만 계산한다.

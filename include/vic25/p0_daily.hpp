@@ -2250,9 +2250,19 @@ public:
                 adults[{country,holder}]=phaseb::add_checked(
                     adults[{country,holder}],slice.count);
             }
+            // Country wage benchmarks must be computed once per nation,
+            // never once per POP household (which would be O(POP x jobs)).
+            std::map<std::string,Money> observed_wages;
             for(const auto& [key,n]:adults) {
                 const auto& [country,household]=key;
-                const auto benchmark=c.p2_observed_monthly_worker_wage(country);
+                (void)n;(void)household;
+                if(!observed_wages.contains(country))
+                    observed_wages.emplace(
+                        country,c.p2_observed_monthly_worker_wage(country));
+            }
+            for(const auto& [key,n]:adults) {
+                const auto& [country,household]=key;
+                const auto benchmark=observed_wages.at(country);
                 if(benchmark<=0)continue;
                 const auto tax=c.income_tax_ppm(country);
                 const Money per_adult=

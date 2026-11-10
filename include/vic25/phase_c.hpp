@@ -882,6 +882,14 @@ public:
         const auto asset="company:"+company;
         if(!tracked_assets_.contains(asset))return 0.0;
         const auto holdings=ownership_.holders(asset);
+        // Most businesses have no registered household shareholders.
+        // Avoid all-POP scans for those firms.
+        bool household_shareholder=false;
+        for(const auto& [holder,units]:holdings)
+            if(units>0&&holder.rfind("HH:",0)==0) {
+                household_shareholder=true;break;
+            }
+        if(!household_shareholder)return 0.0;
         long double eligible_shares=0, weighted_shares=0;
         std::map<Id,People> members;
         for(const auto& [id,pop]:people_.slices())

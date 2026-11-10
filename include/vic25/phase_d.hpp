@@ -553,6 +553,29 @@ public:
         // Demand alone is not enough: the observed sales value of a real
         // production recipe must exceed the quoted actual input costs.
         if(quote.unmet<=0)return false;
+        // Anti-monopoly rules count only real operational capacity of actual
+        // firms making this good in this region. No market-share proxy,
+        // fictitious competing enterprise or quota ledger is created.
+        if(c_.p2_catalog_modifier_value(c_.sovereignty(model.region),
+                  "country_forbid_monopoly_bool")>0) {
+            Quantity total=0,owned=0;
+            std::set<std::string> counted;
+            for(const auto& [rid,other]:d_.recipes) {
+                (void)rid;
+                if(other.outputs.empty()||
+                   other.outputs.front().good!=good||
+                   !c_.facilities().contains(other.site)||
+                   !counted.insert(other.site).second)continue;
+                const auto& facility=c_.facility(other.site);
+                if(facility.region!=model.region)continue;
+                const Quantity capacity=std::max<Quantity>(
+                    0,facility.capacity-facility.damaged);
+                total=phaseb::add_checked(total,capacity);
+                if(facility.owner==c_.facility(recipe.site).owner)
+                    owned=phaseb::add_checked(owned,capacity);
+            }
+            if(total>0&&owned>total/2)return false;
+        }
         const auto& output=recipe.outputs.front();
         const Money revenue=product(output.per_unit,quote.price);
         Money inputs=0;
