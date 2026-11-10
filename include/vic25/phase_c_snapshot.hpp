@@ -107,6 +107,22 @@ void fields(Archive& a,T& x) {
         V(own_gdp);V(subject_gdp);V(army_projection);V(navy_projection);
         V(goods_leadership);V(monuments);V(other_prestige);
         V(observed_day);V(complete);
+    } else if constexpr(std::is_same_v<X,P1PoliticalMandate>){
+        V(id);V(country);V(target);V(kind);V(decree);
+        V(authority_cost);V(started_day);V(active);
+    } else if constexpr(std::is_same_v<X,P1PoliticalEvent>){
+        V(id);V(country);V(source);V(kind);V(day);V(resolved);
+    } else if constexpr(std::is_same_v<X,P1Lobby>){
+        V(id);V(source_country);V(target_country);V(interest_group);
+        V(issue_domain);V(desired_choice);V(pressure_ppm);
+        V(satisfaction_ppm);V(created_day);V(last_review_day);V(active);
+    } else if constexpr(std::is_same_v<X,PoliticalAgenda>){
+        V(country);V(last_bill_id);V(last_reform_choice);
+        V(last_review_day);V(next_review_day);V(last_election_day);
+    } else if constexpr(std::is_same_v<X,PoliticalCharacter>){
+        V(person_id);V(country);V(interest_group);V(ideology);V(movement);
+        V(law_preferences);V(popularity_ppm);V(roles);V(active);
+        V(politically_exiled);V(last_review_day);
     } else if constexpr(std::is_same_v<X,P3Stance>){
         V(preference_ppm);V(importance_ppm);
     } else if constexpr(std::is_same_v<X,P3Attitude>){
@@ -601,6 +617,14 @@ struct SnapshotCodec {
             ar(w.p2_national_identities_);
             ar(w.p2_emancipation_due_);
         }
+        if(!w.p3_movement_types_.empty()||
+           !w.p3_movement_calm_days_.empty()||
+           !w.p5_revolution_preparations_.empty()) {
+            ar(std::string("VIC25_PHASEC_P3P5_DYNAMICS_1"));
+            ar(w.p3_movement_types_);
+            ar(w.p3_movement_calm_days_);
+            ar(w.p5_revolution_preparations_);
+        }
         if(!w.p5_crises_.empty()||!w.p5_capitals_.empty()||
            !w.p5_actions_.empty()||
            !w.p5_settlements_.empty()||
@@ -646,8 +670,11 @@ struct SnapshotCodec {
              seen_admin_inputs=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
              seen_p3=false,seen_ideologies=false,seen_identity=false,
-             seen_p5=false,
-             seen_guerrilla=false;
+             seen_p5=false,seen_guerrilla=false,
+             seen_enactment=false,seen_campaigns=false,
+             seen_characters=false,seen_political_dynamics=false,
+             seen_political_ai=false,seen_political_policies=false,
+             seen_separation=false,seen_confidence=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -922,6 +949,16 @@ struct SnapshotCodec {
                    w.p2_emancipation_due_.size()>5'000)
                     throw std::runtime_error(
                         "oversized P2 culture/religion evidence");
+            } else if(extension=="VIC25_PHASEC_P3P5_DYNAMICS_1"&&
+                       !seen_political_dynamics) {
+                seen_political_dynamics=true;
+                ar(w.p3_movement_types_);
+                ar(w.p3_movement_calm_days_);
+                ar(w.p5_revolution_preparations_);
+                if(w.p3_movement_types_.size()>100'000||
+                   w.p3_movement_calm_days_.size()>100'000||
+                   w.p5_revolution_preparations_.size()>100'000)
+                    throw std::runtime_error("oversized political dynamics");
             } else if(extension=="VIC25_PHASEC_P5_UNREST_1"&&!seen_p5) {
                 seen_p5=true;
                 ar(w.p5_crises_);
