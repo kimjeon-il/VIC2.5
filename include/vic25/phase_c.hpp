@@ -1584,6 +1584,8 @@ public:
     [[nodiscard]] bool p5_needs_daily_tick()const;
     void p5_daily_advance(std::int64_t);
     void p5_auto_prepare_revolutions(std::int64_t);
+    void p5_autonomous_civil_battles(std::int64_t);
+    void p5_autonomous_crisis_settlements(std::int64_t);
     [[nodiscard]] bool p5_has_due_daily_strike(std::int64_t)const;
     void phase_time_apply_p5_strikes(std::int64_t);
     void p5_perform_action(P5CollectiveAction);
@@ -3568,7 +3570,7 @@ public:
         for(const auto& outcome:p5_settlements_)
             ensure(p5_crises_.contains(outcome.crisis_id)&&outcome.day>=0&&
                    static_cast<unsigned>(outcome.kind)<=
-                       static_cast<unsigned>(P5SettlementKind::independence_recognized),
+                       static_cast<unsigned>(P5SettlementKind::rebel_disarmed),
                    "P5 settlement without real conflict");
         for(const auto& [slice,n]:p5_active_daily_strikes_)
             ensure(people_.has_slice(slice)&&n>=0&&
@@ -4656,6 +4658,7 @@ private:
 #include "vic25/phase_c_p3_autonomous_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"
 #include "vic25/phase_c_p5_revolution_impl.hpp"
+#include "vic25/phase_c_p5_autonomy_impl.hpp"
 #include "vic25/phase_c_characters_impl.hpp"
 #include "vic25/phase_c_political_ai_impl.hpp"
 #include "vic25/phase_c_political_policy_impl.hpp"

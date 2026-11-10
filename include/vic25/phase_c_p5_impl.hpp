@@ -472,7 +472,7 @@ inline void IntegratedWorld::p5_settle(P5Settlement settlement) {
            settlement.day>=0&&
            p5_crises_.contains(settlement.crisis_id)&&
            static_cast<unsigned>(settlement.kind)<=
-               static_cast<unsigned>(P5SettlementKind::independence_recognized),
+               static_cast<unsigned>(P5SettlementKind::rebel_disarmed),
            "P5 settlement requires identifiable actual political crisis");
     for(const auto& history:p5_settlements_)
         ensure(history.id!=settlement.id,
@@ -516,6 +516,24 @@ inline void IntegratedWorld::p5_settle(P5Settlement settlement) {
         ensure(crisis.stage==P5CrisisStage::deescalated||
                p5_risk(crisis.movement).pressure_ppm<250'000,
                "P5 unsupported assertion that political movement faded");
+    } else if(settlement.kind==P5SettlementKind::rebel_disarmed) {
+        ensure(crisis.stage==P5CrisisStage::armed_conflict,
+               "P5 disarmament requires actual civil conflict");
+        for(const auto& unit:crisis.pledged_units) {
+            const auto deployment=army_deployments_.find(unit);
+            if(deployment==army_deployments_.end()||
+               !units_.contains(unit)||active_strength(unit)<=0)continue;
+            const auto& region=deployment->second.region;
+            ensure(stock(unit,region,"ammunition")<=0||
+                   (stock(unit,region,"rifle")<=0&&
+                    assigned_equipment(unit,region,"rifle")<=0),
+                   "P5 faction still has real living equipped forces");
+        }
+        for(const auto& [region,owner]:military_control_) {
+            (void)region;
+            ensure(owner!="P5:"+crisis.id,
+                   "P5 cannot disarm while occupied territory persists");
+        }
     } else if(settlement.kind==P5SettlementKind::cabinet_overthrow) {
         ensure((crisis.kind==P5CrisisKind::revolution||
                 crisis.kind==P5CrisisKind::coup)&&

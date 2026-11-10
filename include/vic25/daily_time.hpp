@@ -568,6 +568,12 @@ public:
             if(gh.phase_c().p5_needs_daily_tick())
                 gh.phase_c().p5_auto_prepare_revolutions(today);
         });
+        // AI civil settlements must rest on actual law, defeated armies or
+        // previously verified occupation; no new state or soldiers created.
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p5_needs_daily_tick())
+                gh.phase_c().p5_autonomous_crisis_settlements(today);
+        });
         // Only journal due dates run guerrilla review. No daily all-world
         // militia battles or copied guerrilla population and supply ledgers.
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
@@ -578,6 +584,12 @@ public:
         // calendar day even when no P0 AI/controller was explicitly attached.
         real_actions[5].push_back([today=day_](phasegh::Stage& gh) {
             gh.phase_c().phase_time_service_sovereign_bonds(today);
+        });
+        // Only existing deployed units fight at Stage10, with C's actual
+        // POP casualties, physical ammunition and military-control state.
+        real_actions[10].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p5_needs_daily_tick())
+                gh.phase_c().p5_autonomous_civil_battles(today);
         });
         // The autonomous population hazard is calendar-day resolved, even
         // without user actions. The existing monthly rate is NOT replayed

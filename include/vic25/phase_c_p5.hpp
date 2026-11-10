@@ -18,7 +18,7 @@ enum class P5CrisisStage : std::uint8_t {
 };
 enum class P5SettlementKind : std::uint8_t {
     legal_concession, crisis_recedes, cabinet_overthrow, autonomy_granted,
-    independence_recognized
+    independence_recognized, rebel_disarmed
 };
 struct P5RiskView {
     std::string movement,country;
