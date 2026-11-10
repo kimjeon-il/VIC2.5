@@ -587,6 +587,10 @@ public:
         });
         // Only existing deployed units fight at Stage10, with C's actual
         // POP casualties, physical ammunition and military-control state.
+        real_actions[7].push_back([](phasegh::Stage& gh) {
+            if(gh.phase_c().p5_needs_daily_tick())
+                gh.phase_c().p5_autonomous_equip_factions();
+        });
         real_actions[10].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p5_needs_daily_tick())
                 gh.phase_c().p5_autonomous_civil_battles(today);

@@ -2,6 +2,35 @@
 // Autonomous internal conflict over the same authoritative army, population,
 // inventory, law and sovereignty ledgers as manually executed P5 operations.
 namespace vic25::phasec {
+inline void IntegratedWorld::p5_autonomous_equip_factions() {
+    require_stage({7});
+    std::set<std::string> examined;
+    for(const auto& [id,crisis]:p5_crises_) {
+        (void)id;
+        if(crisis.stage!=P5CrisisStage::armed_conflict||
+           p1_player_countries_.contains(crisis.country))continue;
+        std::set<std::string> eligible(crisis.pledged_units.begin(),
+                                       crisis.pledged_units.end());
+        for(const auto& [unit,assignment]:army_deployments_)
+            if(assignment.country==crisis.country&&
+               std::find(crisis.contested_regions.begin(),
+                         crisis.contested_regions.end(),assignment.region)!=
+                         crisis.contested_regions.end())
+                eligible.insert(unit);
+        for(const auto& unit:eligible) {
+            if(!examined.insert(unit).second||
+               !units_.contains(unit)||!army_deployments_.contains(unit)||
+               active_strength(unit)<=0)continue;
+            const auto& region=army_deployments_.at(unit).region;
+            const auto physical=stock(unit,region,"rifle");
+            const auto assigned=assigned_equipment(unit,region,"rifle");
+            const auto desired=std::min<Quantity>(physical,
+                                                  active_strength(unit));
+            if(desired>assigned)
+                assign_equipment(unit,region,"rifle",desired-assigned);
+        }
+    }
+}
 inline void IntegratedWorld::p5_autonomous_civil_battles(std::int64_t today) {
     require_stage({10});
     std::set<std::string> fought_today;

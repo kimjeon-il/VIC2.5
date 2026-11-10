@@ -1584,6 +1584,7 @@ public:
     [[nodiscard]] bool p5_needs_daily_tick()const;
     void p5_daily_advance(std::int64_t);
     void p5_auto_prepare_revolutions(std::int64_t);
+    void p5_autonomous_equip_factions();
     void p5_autonomous_civil_battles(std::int64_t);
     void p5_autonomous_crisis_settlements(std::int64_t);
     [[nodiscard]] bool p5_has_due_daily_strike(std::int64_t)const;
