@@ -308,6 +308,7 @@ struct CrisisAdvice {
     bool lawful_war_entry_supported{};
     Money observed_commercial_exposure{};
     std::string recommendation;
+    std::int64_t effective_trade_pressure_ppm{};
 };
 struct Treaty {
     std::string id, country_a, country_b, good;

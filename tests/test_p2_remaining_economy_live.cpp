@@ -66,6 +66,11 @@ static void compensation_requirement() {
     catch(const std::exception&){rejected=true;}
     assert(rejected&&traditional.facility("MILL").owner=="FIRM");
     assert(traditional.cash("A")==0&&traditional.cash("FIRM")==100);
+    auto free_market=build("law_laissez_faire");
+    rejected=false;
+    try{free_market.advance_daily(forbidden,false);}
+    catch(const std::exception&){rejected=true;}
+    assert(rejected&&free_market.facility("MILL").owner=="FIRM");
     auto command=build("law_command_economy");
     command.advance_daily(forbidden,false);
     assert(command.facility("MILL").owner=="A");

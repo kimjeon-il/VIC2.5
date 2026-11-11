@@ -921,6 +921,15 @@ public:
                !firm_bankrupt(buyer)&&price>=0&&project_book_value>=0&&
                phase_d_cash_available(buyer)>=price,
                "unfunded physical factory title transfer");
+        // A private sale to its own state is still nationalization and
+        // cannot bypass the free-market prohibition through a lower-level
+        // C ownership adapter.
+        const auto& sovereign=sovereignty_.at(f.region);
+        if(has_country_treasury(sovereign)&&
+           buyer==country_treasury(sovereign))
+            ensure(p2_catalog_modifier_value(sovereign,
+                       "country_disable_nationalization_bool")<=0,
+                   "P2 economic-system law disallows state nationalization");
         // The only permitted non-cash transfer is state nationalization
         // under a law that does not require compensation. Other property
         // transfers still require actual money and legal title.

@@ -525,6 +525,7 @@ inline CrisisAdvice World::advise_crisis(const std::string& id,
                          c.status!=CrisisStatus::settled;
     const auto exposure=assess_influence(actor,c.respondent);
     advice.observed_commercial_exposure=exposure.bilateral_imports;
+    advice.effective_trade_pressure_ppm=exposure.effective_leverage_ppm;
     // Existing C-M integration has no authoritative Conflict/EntryToWar
     // registry. This evaluation may not invent military commitments.
     advice.lawful_war_entry_supported=false;
@@ -533,6 +534,12 @@ inline CrisisAdvice World::advise_crisis(const std::string& id,
                                         "verify_underlying_claim");
     if(advice.can_mediate&&exposure.ideological_hostility_impact>=50)
         advice.recommendation="request_neutral_mediator";
+    // Only actual settled imports can support an economic offer. The
+    // enacted leverage-resistance and active overlord laws affect whether
+    // the claimant has enough measured pressure to propose that settlement.
+    if(!advice.can_mediate&&advice.has_underlying_dispute&&
+       exposure.observed&&exposure.effective_leverage_ppm>=400'000)
+        advice.recommendation="propose_commercial_settlement";
     return advice;
 }
 } // namespace vic25::phasegh
