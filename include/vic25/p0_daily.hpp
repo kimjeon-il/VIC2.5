@@ -26,6 +26,29 @@ using Quantity=vic25::Quantity;
 using People=phaseb::People;
 using Id=phaseb::Id;
 
+// Actual administration capacity drives the national population-cost
+// factor only when a staffed, registered P1 institution operates the
+// program. This never grants an unpaid benefit or a free POP service.
+inline double paid_administration_cost_factor(
+        const phasec::IntegratedWorld& c,const std::string& country,
+        const std::string& recipient) {
+    for(const auto& [id,link]:c.p1_institutions()) {
+        if(link.country!=country||
+           link.kind!=phasec::P1InstitutionKind::administration)
+            continue;
+        const auto service=c.public_institutions().find(id);
+        if(service==c.public_institutions().end()||
+           service->second.operator_id!=recipient||
+           c.phase_d_workforce(recipient)<=0)continue;
+        return std::clamp(
+            1.0+c.p2_region_modifier_value(
+                service->second.region,
+                "state_bureaucracy_population_base_cost_factor_mult"),
+            0.1,4.0);
+    }
+    return 1.0;
+}
+
 inline Quantity minimum(Quantity a,Quantity b) { return std::min(a,b); }
 inline Quantity proportional(Quantity n,std::int32_t day,std::int32_t days) {
     if(n<=0||day<=0||days<28||days>31||day>days)return 0;
@@ -248,6 +271,12 @@ struct LiquidationFactoryBid {
     std::string site,buyer;
     Money actual_bid_price{};
 };
+// A worker and legal shareholder must both submit a real, funded share
+// purchase. An enabling collectivization law does not confiscate shares.
+struct CollectiveShareBid {
+    std::string id,site,seller,worker_household;
+    Money units{};
+};
 struct Engagement {
     std::string attacker,defender,region;
     Id attacker_slice{},defender_slice{};
@@ -302,6 +331,7 @@ struct Policies {
     std::vector<LegislativeOrder> legislative_orders; // append-only
     std::set<std::string> player_controlled_countries; // never autonomously governed
     std::vector<PoliticalOrder> political_orders; // date-scoped lawful P1 commands
+    std::vector<CollectiveShareBid> cooperative_share_bids; // append-only
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -340,6 +370,12 @@ struct Policies {
             if(b.site.empty()||b.buyer.empty()||b.actual_bid_price<=0||
                !unique_liquidation_sites.insert(b.site).second)
                 throw std::invalid_argument("P0_INVALID_LIQUIDATION_SITE_BID");
+        std::set<std::string> unique_cooperative_bids;
+        for(const auto& bid:cooperative_share_bids)
+            if(bid.id.empty()||bid.site.empty()||bid.seller.empty()||
+               bid.worker_household.empty()||bid.units<=0||
+               !unique_cooperative_bids.insert(bid.id).second)
+                throw std::invalid_argument("P0_INVALID_COOPERATIVE_SHARE_BID");
         std::set<std::string> unique_national_budgets;
         for(const auto& b:national_budget_envelopes)
             if(b.country.empty()||
@@ -833,9 +869,17 @@ public:
                             }
                     }
                 for(const auto& public_program:decisions.public_budget)
-                    if(public_program.country==country)
-                        real_need=phaseb::add_checked(real_need,
-                            public_program.daily_spending_limit);
+                    if(public_program.country==country) {
+                        const auto multiplier=paid_administration_cost_factor(
+                            game_c,country,public_program.recipient);
+                        const auto cost=static_cast<Money>(
+                            std::min<long double>(
+                                std::numeric_limits<Money>::max()/4,
+                                std::ceil(static_cast<long double>(
+                                    public_program.daily_spending_limit)*
+                                    multiplier)));
+                        real_need=phaseb::add_checked(real_need,cost);
+                    }
                 if(real_need<=0&&fiscal.unpaid_coupons<=0)continue;
                 const Money observed_receipts=std::max<Money>(
                     0,fiscal.realized_revenue);
@@ -2210,7 +2254,14 @@ public:
                 if(treasury==program.recipient)return;
                 const Money free=c.phase_d_cash_available(treasury);
                 if(free<=program.treasury_cash_reserve)return;
-                Money amount=std::min(program.daily_spending_limit,
+                const auto multiplier=paid_administration_cost_factor(
+                    c,program.country,program.recipient);
+                const Money statutory_need=static_cast<Money>(
+                    std::min<long double>(
+                        std::numeric_limits<Money>::max()/4,
+                        std::ceil(static_cast<long double>(
+                            program.daily_spending_limit)*multiplier)));
+                Money amount=std::min(statutory_need,
                                       free-program.treasury_cash_reserve);
                 auto budget=national_envelopes.find(program.country);
                 if(budget!=national_envelopes.end()) {
@@ -2325,6 +2376,34 @@ public:
                 if(paid>0)c.pay(site.owner,treasury,paid);
             }
         });
+        // Real shareholders may subscribe cash to operating companies on
+        // the first day of a month. The aristocrat law changes only actual
+        // household savings transferred into registered company wallets.
+        if(date.day==1)
+            plan[7].push_back([](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::set<std::string> companies;
+                for(const auto& [id,p]:gh.phase_d().state().constructions) {
+                    (void)id;
+                    if(!p.commissioned||
+                       !c.facilities().contains(p.target_site))continue;
+                    const auto& owner=c.facility(p.target_site).owner;
+                    if(!companies.insert(owner).second)continue;
+                    (void)c.p2_invest_from_aristocratic_shareholders(owner);
+                }
+            });
+        // A cooperative buyout requires a legal share seller, a real
+        // employee-household bidder, and actual cash on this calendar day.
+        for(const auto& bid:decisions.cooperative_share_bids)
+            plan[7].push_back([bid](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto command="P2:COOP:"+bid.id;
+                if(c.command_processed(command))return;
+                if(!gh.phase_d().purchase_collective_shares(
+                    bid.site,bid.seller,bid.worker_household,bid.units))
+                    return;
+                c.command_once(command,[](phasec::IntegratedWorld&){});
+            });
         // Only observed profitable-demand-shortfall industrial examples may
         // open a new project. The D construction ledger will still require
         // actual investor cash, materials, employees, payments and WIP before

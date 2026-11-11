@@ -429,8 +429,13 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
             1.0+effect(
                 dem.region,"state_radicals_from_political_movements_mult"),
             0.0,5.0);
+        // Expected living standard is a genuine legal benchmark: it
+        // changes the POP response to observed scarcity and unemployment,
+        // never reduces actual food consumption or fabricates household cash.
+        const auto expected_sol=std::clamp(
+            1.0+effect(dem.region,"state_expected_sol_mult"),0.1,3.0);
         const auto effective_pressure=static_cast<std::int64_t>(
-            pressure*radical_factor);
+            pressure*radical_factor*expected_sol);
         attitude.radical_ppm=static_cast<std::int32_t>(
             std::clamp<std::int64_t>(
                 static_cast<std::int64_t>(attitude.radical_ppm)+

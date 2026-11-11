@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -600,6 +601,30 @@ public:
             {account(holder, "cash"), d.amount, 0},
             {account(holder, "revenue"), 0, d.amount}}});
         dividends_.erase(id);
+        // A government may return received dividends to the existing
+        // enterprise as a cash-funded reinvestment. This is a transfer of
+        // the SAME paid dividend, never an additional state income.
+        for(const auto& [site_id,site]:facilities_) {
+            (void)site_id;
+            if(site.owner!=d.payer)continue;
+            const auto region=sovereignty_.find(site.region);
+            if(region==sovereignty_.end()||
+               !has_country_treasury(region->second)||
+               holder!=country_treasury(region->second))continue;
+            const auto rate=std::clamp(p2_catalog_modifier_value(
+                region->second,
+                "country_government_dividends_reinvestment_add"),0.0,1.0);
+            const Money planned=static_cast<Money>(
+                std::floor(static_cast<long double>(d.amount)*rate));
+            const Money available=std::max<Money>(
+                0,phase_d_cash_available(holder));
+            const Money contribution=std::min(planned,available);
+            if(contribution>0) {
+                pay(holder,d.payer,contribution);
+                events_.push_back("real-government-dividend-reinvested");
+            }
+            break;
+        }
         events_.push_back("dividend-paid");
     }
     void issue_bond(const std::string& bond_id, const std::string& government,
@@ -850,6 +875,8 @@ public:
     }
     [[nodiscard]] const std::map<std::string,PublicInstitution>&
             public_institutions()const{return public_institutions_;}
+    [[nodiscard]] const std::map<std::string,P1Institution>&
+            p1_institutions()const{return p1_institutions_;}
     [[nodiscard]] People public_services_rendered(const std::string& id) const {
         return public_institutions_.at(id).provided;
     }
@@ -885,15 +912,27 @@ public:
     // only changes the current real facility/title owner. The D ledger must
     // update the corresponding commissioned project's client in the SAME
     // staged transaction. No fictional cash, employment or stock changes.
-    void phase_d_transfer_factory_paid(const std::string& site,
+    void phase_d_transfer_factory_legal(const std::string& site,
             const std::string& buyer,Money price,Money project_book_value) {
         require_stage({7});
         auto& f=facilities_.at(site);
         const auto old=f.owner;
         ensure(actors_.contains(buyer)&&old!=buyer&&
-               !firm_bankrupt(buyer)&&price>0&&project_book_value>=0&&
+               !firm_bankrupt(buyer)&&price>=0&&project_book_value>=0&&
                phase_d_cash_available(buyer)>=price,
                "unfunded physical factory title transfer");
+        // The only permitted non-cash transfer is state nationalization
+        // under a law that does not require compensation. Other property
+        // transfers still require actual money and legal title.
+        if(price==0) {
+            const auto& country=sovereignty_.at(f.region);
+            ensure(project_book_value>0&&
+                   has_country_treasury(country)&&
+                   buyer==country_treasury(country)&&
+                   p2_catalog_modifier_value(country,
+                       "country_disable_nationalization_without_compensation_bool")<=0,
+                   "P2 law forbids uncompensated state acquisition");
+        }
         const auto title="FACILITY:"+site;
         if(tracked_assets_.contains(title)) {
             ensure(ownership_.units(title,old)==1,
@@ -921,11 +960,54 @@ public:
                 {new_asset,project_book_value,0},
                 {old_asset,0,project_book_value}}});
         }
-        pay(buyer,old,price);
+        if(price>0)pay(buyer,old,price);
         if(tracked_assets_.contains(title))
             ownership_.transfer(title,old,buyer,1);
+        // Only real employees of this operation face a dated workplace
+        // political shock. Reduced compensation raises grievance; the
+        // command economy's -75% law lowers its magnitude, but never
+        // fabricates radicals or military participants.
+        if(project_book_value>price&&has_government(
+                 sovereignty_.at(f.region))&&
+           has_country_treasury(sovereignty_.at(f.region))&&
+           buyer==country_treasury(sovereignty_.at(f.region))) {
+            const auto nation=sovereignty_.at(f.region);
+            const double severity=std::clamp(
+                1.0+p2_catalog_modifier_value(nation,
+                      "building_nationalization_radicals_mult"),0.0,4.0);
+            const double shortfall=static_cast<double>(
+                project_book_value-price)/static_cast<double>(
+                project_book_value);
+            const auto shock=static_cast<std::int32_t>(
+                40'000.0*severity*shortfall);
+            if(shock>0)
+                for(const auto& [slice,job]:people_.jobs()) {
+                    if(job.count<=0||job.employer!=old||
+                       !people_.has_slice(slice))continue;
+                    const auto& dem=people_.demographic(
+                        people_.slice(slice).key.demographic);
+                    if(dem.region!=f.region)continue;
+                    auto& view=p3_attitudes_[slice];
+                    view.slice=slice;
+                    view.radical_ppm=std::clamp(
+                        view.radical_ppm+shock,0,1'000'000);
+                    view.loyal_ppm=std::min(
+                        view.loyal_ppm,1'000'000-view.radical_ppm);
+                }
+        }
         f.owner=buyer;
-        events_.push_back("funded-existing-factory-ownership-transfer");
+        events_.push_back(price>0?
+            "funded-existing-factory-ownership-transfer":
+            "lawful-uncompensated-government-factory-acquisition");
+    }
+    void phase_d_transfer_factory_paid(const std::string& site,
+            const std::string& buyer,Money price,Money project_book_value) {
+        ensure(price>0,"paid factory sale must transfer actual cash");
+        phase_d_transfer_factory_legal(site,buyer,price,project_book_value);
+    }
+    void phase_d_transfer_factory_uncompensated(const std::string& site,
+            const std::string& government,Money project_book_value) {
+        phase_d_transfer_factory_legal(site,government,0,project_book_value);
     }
     // Company investment efficiency is derived strictly from existing
     // shareholder titles and their actual Phase B household occupation
@@ -985,6 +1067,66 @@ public:
         return std::clamp(
             static_cast<double>(weighted_shares/eligible_shares),
             -0.95,3.0);
+    }
+    [[nodiscard]] bool p2_has_registered_company_equity(
+            const std::string& owner)const {
+        return tracked_assets_.contains("company:"+owner);
+    }
+    // The aristocratic investment-pool law changes actual private capital
+    // subscribed out of household wallets. A contributor must own existing
+    // company shares and contain real eligible aristocratic POP; no stock,
+    // bond or deposit is issued in exchange for a synthetic contribution.
+    Money p2_invest_from_aristocratic_shareholders(
+            const std::string& company) {
+        require_stage({7});
+        if(!actors_.contains(company)||
+           !p2_has_registered_company_equity(company)||
+           firm_bankrupt(company))return 0;
+        const auto holders=ownership_.holders("company:"+company);
+        Money contributed=0;
+        for(const auto& [holder,shares]:holders) {
+            if(shares<=0||holder.rfind("HH:",0)!=0||
+               !actors_.contains(holder))continue;
+            People total=0,aristocrats=0;
+            long double weighted_mod=0;
+            for(const auto& [id,pop]:people_.slices()) {
+                (void)id;
+                if(pop.count<=0||
+                   holder!="HH:"+std::to_string(pop.key.household))continue;
+                total=phaseb::add_checked(total,pop.count);
+                const auto& econ=people_.economic(pop.key.economic);
+                if(econ.profession!="aristocrat"&&
+                   econ.profession!="aristocrats")continue;
+                const auto& dem=people_.demographic(pop.key.demographic);
+                aristocrats=phaseb::add_checked(aristocrats,pop.count);
+                weighted_mod+=static_cast<long double>(pop.count)*
+                    std::max(0.0,p2_region_modifier_value(dem.region,
+                        "state_aristocrats_investment_pool_contribution_add"));
+            }
+            if(total<=0||aristocrats<=0||weighted_mod<=0)continue;
+            const double fraction=std::clamp(
+                static_cast<double>(weighted_mod/total),0.0,0.5);
+            const Money available=std::max<Money>(
+                0,phase_d_cash_available(holder));
+            const Money amount=static_cast<Money>(
+                std::floor(static_cast<long double>(available)*fraction));
+            if(amount<=0)continue;
+            if(phase_d_reservation_mode_)
+                resources_.assert_cash_available(
+                    holder,amount,cash(holder));
+            // Existing shareholder recapitalization, not a fictitious
+            // sale or operating revenue. Securities remain unchanged.
+            money_.post({unique("real-shareholder-capital"),
+                "existing shareholder injects actual bank deposits",{
+                {account(holder,"capital"),amount,0},
+                {account(holder,"cash"),0,amount},
+                {account(company,"cash"),amount,0},
+                {account(company,"capital"),0,amount}}});
+            contributed=phaseb::add_checked(contributed,amount);
+        }
+        if(contributed>0)
+            events_.push_back("real-aristocratic-shareholder-investment");
+        return contributed;
     }
     // Phase D additive bridge: material/production share C's real inventory
     // and Phase B's real employment, not an independent Phase D stock.
@@ -1509,12 +1651,20 @@ public:
         }
         for(auto& [key,m]:markets_) {
             const auto& [region,good]=key;
-            (void)region;
             (void)good; // Need gaps were already counted once at stage 7.
-            // 1% nominal pressure per active day, with deterministic discrete
-            // currency ticks for prices below 100 units.
-            const Money step=m.price>=100?std::max<Money>(1,m.price/100):
+            // Import-price impact changes the amplitude of *observed* market
+            // price updates; without real trade/shortage there is no effect.
+            // Fractional changes are deterministic by calendar day and the
+            // original floor/ceiling still bound the actual quote.
+            const Money base_step=m.price>=100?std::max<Money>(1,m.price/100):
                     (day_index%std::max<Money>(1,100/m.price)==0?1:0);
+            const double impact=std::clamp(
+                1.0+p2_region_modifier_value(
+                    region,"state_market_access_price_impact"),0.05,3.0);
+            const double adjusted=static_cast<double>(base_step)*impact;
+            const Money whole=static_cast<Money>(adjusted);
+            const Money step=whole+((adjusted-whole)*1000.0>
+                static_cast<double>(day_index%1000)?1:0);
             if(m.unmet>0 && step>0)
                 m.price=std::min(m.ceiling,phaseb::add_checked(m.price,step));
             else if(m.unmet==0 && m.solvent_demand>0 &&

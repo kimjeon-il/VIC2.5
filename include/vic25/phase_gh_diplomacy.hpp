@@ -487,6 +487,30 @@ inline InfluenceView World::assess_influence(const std::string& source,
             }
         }
     }
+    // A diplomatic ideological penalty exists between real governments
+    // with demonstrably different enacted economic systems; it does not
+    // require an invented trade flow, state of war or approval points.
+    const auto& core=core_.core().core();
+    if(core.has_government(source)&&core.has_government(target)) {
+        const auto socialist=[&](const std::string& nation) {
+            for(const auto& [id,law]:core.p2_laws()) {
+                (void)id;
+                if(law.country!=nation||law.domain!="economic_system"||
+                   !core.p2_is_active_base(law.id))continue;
+                return law.base_choice=="law_cooperative_ownership"||
+                       law.base_choice=="law_command_economy";
+            }
+            return false;
+        };
+        if(socialist(source)!=socialist(target)) {
+            v.ideological_hostility_impact=static_cast<std::int64_t>(
+                core.p2_catalog_modifier_value(source,
+                 "country_other_country_socialist_economy_hostility_impact_add")+
+                core.p2_catalog_modifier_value(target,
+                 "country_other_country_socialist_economy_hostility_impact_add"));
+            if(v.ideological_hostility_impact>0)v.political_known=true;
+        }
+    }
     return v;
 }
 inline CrisisAdvice World::advise_crisis(const std::string& id,
@@ -499,7 +523,7 @@ inline CrisisAdvice World::advise_crisis(const std::string& id,
                                    q->second.contains(c.claimant);
     advice.can_mediate=actor!=c.claimant&&actor!=c.respondent&&
                          c.status!=CrisisStatus::settled;
-    const auto exposure=trade_influence(actor,c.respondent);
+    const auto exposure=assess_influence(actor,c.respondent);
     advice.observed_commercial_exposure=exposure.bilateral_imports;
     // Existing C-M integration has no authoritative Conflict/EntryToWar
     // registry. This evaluation may not invent military commitments.
@@ -507,6 +531,8 @@ inline CrisisAdvice World::advise_crisis(const std::string& id,
     advice.recommendation=advice.can_mediate?"offer_mediation":
           (advice.has_underlying_dispute?"consider_negotiated_settlement":
                                         "verify_underlying_claim");
+    if(advice.can_mediate&&exposure.ideological_hostility_impact>=50)
+        advice.recommendation="request_neutral_mediator";
     return advice;
 }
 } // namespace vic25::phasegh

@@ -594,6 +594,26 @@ public:
         // Demand alone is not enough: the observed sales value of a real
         // production recipe must exceed the quoted actual input costs.
         if(quote.unmet<=0)return false;
+        // Statutory self-investment likelihood applies only to a real,
+        // profitable firm with demand for its existing output. The FNV-1a
+        // selection is reproducible across platforms and reloads: it is
+        // not a separate mutable random state or fictional investor.
+        const auto country=c_.sovereignty(model.region);
+        if(c_.p2_catalog_group_active(country,"economic_system")) {
+            const auto chance=std::clamp(
+                0.5+c_.p2_catalog_modifier_value(
+                    country,"building_self_investment_chance_add"),
+                0.0,1.0);
+            std::uint64_t hash=14695981039346656037ULL;
+            const std::string stable=model.client+":"+new_id;
+            for(const unsigned char ch:stable) {
+                hash^=ch;
+                hash*=1099511628211ULL;
+            }
+            const auto roll=static_cast<double>(
+                hash%1'000'000ULL)/1'000'000.0;
+            if(roll>=chance)return false;
+        }
         // Anti-monopoly rules count only real operational capacity of actual
         // firms making this good in this region. No market-share proxy,
         // fictitious competing enterprise or quota ledger is created.
@@ -643,12 +663,19 @@ public:
         const auto recipe_id="AUTO:RECIPE:"+new_id;
         if(d_.constructions.contains(id)||d_.recipes.contains(recipe_id))
             return false;
+        const auto charter_bonus=std::clamp(
+            static_cast<int>(c_.p2_catalog_modifier_value(
+                country,"country_free_charters_add")),0,5);
+        int other_open=0;
         for(const auto& [project_id,p]:d_.constructions) {
             (void)project_id;
             if(!p.commissioned&&p.client==model.client&&
                p.region==model.region&&p.target_site!=model.target_site)
-                return false; // one outstanding expansion per region/owner
+                ++other_open;
         }
+        // Legal charters only increase the concurrent number of real,
+        // fully financed construction filings; they do not spawn companies.
+        if(other_open>=1+charter_bonus)return false;
         auto project=model;
         project.id=id;project.target_site=site;
         project.accepted_work=0;project.paid_work=0;
@@ -680,6 +707,12 @@ public:
             facility.owner==c_.country_treasury(sovereign)&&
             c_.p2_catalog_modifier_value(sovereign,
                   "country_force_privatization_bool")>0;
+        // A non-company public asset cannot be quietly privatized when
+        // national economic law explicitly reserves it.
+        if(c_.p2_catalog_modifier_value(sovereign,
+                  "country_disable_non_company_privatization_bool")>0&&
+           !c_.p2_has_registered_company_equity(facility.owner))
+            return false;
         if((!liquidating&&!forced_private)||
            buyer==facility.owner||c_.firm_bankrupt(buyer))return false;
         std::string project_id;
@@ -709,6 +742,97 @@ public:
         return true;
     }
 
+    // A workers' cooperative is an actual share purchase in the existing
+    // C OwnershipLedger. A statute merely permits the transaction: without
+    // a documented seller, employed worker, shares and cash nothing moves.
+    bool purchase_collective_shares(const std::string& site,
+                                    const std::string& seller,
+                                    const std::string& worker_household,
+                                    Money units) {
+        must(7);
+        if(units<=0||seller==worker_household||
+           !c_.has_actor(worker_household)||
+           !c_.has_actor(seller)||!c_.facilities().contains(site))
+            return false;
+        const auto& facility=c_.facility(site);
+        const auto& country=c_.sovereignty(facility.region);
+        if(!c_.has_government(country)||c_.firm_bankrupt(facility.owner))
+            return false;
+        const auto asset="company:"+facility.owner;
+        if(!c_.p2_has_registered_company_equity(facility.owner)||
+           c_.shares(asset,seller)<units||
+           c_.phase_d_cash_available(worker_household)<units)
+            return false;
+        bool real_worker=false;
+        for(const auto& [slice,job]:c_.people().jobs()) {
+            if(job.count<=0||job.employer!=facility.owner||
+               !c_.people().has_slice(slice))continue;
+            const auto& row=c_.people().slice(slice);
+            const auto& dem=c_.people().demographic(row.key.demographic);
+            if(dem.region==facility.region&&
+               worker_household=="HH:"+
+                   std::to_string(row.key.household)) {
+                real_worker=true;break;
+            }
+        }
+        if(!real_worker)return false;
+        bool allowed=false;
+        for(const auto& [id,recipe]:d_.recipes) {
+            (void)id;
+            if(recipe.site!=site)continue;
+            std::string kind=recipe.industry_class;
+            std::set<std::string> visited;
+            for(int depth=0;depth<12&&!kind.empty()&&
+                  visited.insert(kind).second;++depth) {
+                const auto group=kind=="manufacture"?"manufacturing":
+                    kind=="mining"?"extraction":kind;
+                if((group=="manufacturing"||group=="extraction"||
+                    group=="power"||group=="private_infrastructure"||
+                    group=="arts")&&
+                   c_.p2_catalog_modifier_value(country,
+                       "building_group_bg_"+group+
+                       "_allowed_collectivization_add")>0)
+                    allowed=true;
+                const auto ancestor=d_.industry_classes.find(kind);
+                if(ancestor==d_.industry_classes.end())break;
+                kind=ancestor->second.parent;
+            }
+        }
+        if(!allowed)return false;
+        bool foreign_seller=c_.has_government(seller)&&seller!=country;
+        if(!foreign_seller)
+            for(const auto& [id,f]:c_.facilities()) {
+                (void)id;
+                if(f.owner==seller&&
+                   c_.sovereignty(f.region)!=country)
+                    foreign_seller=true;
+            }
+        // Household titles are foreign when their real POP holders reside
+        // under another sovereign government. Never guess an investor's
+        // nationality solely from an arbitrary actor ID.
+        if(!foreign_seller&&seller.rfind("HH:",0)==0)
+            for(const auto& [id,pop]:c_.people().slices()) {
+                (void)id;
+                if(pop.count<=0||
+                   seller!="HH:"+std::to_string(pop.key.household))
+                    continue;
+                const auto& dem=c_.people().demographic(
+                    pop.key.demographic);
+                if(c_.sovereignty(dem.region)!=country) {
+                    foreign_seller=true;break;
+                }
+            }
+        if(foreign_seller&&
+           c_.p2_catalog_modifier_value(
+               country,"country_foreign_collectivization_bool")<=0)
+            return false;
+        // C sell_shares charges the real worker 1 monetary unit per share
+        // and transfers the matching registered security and company title.
+        c_.sell_shares(asset,seller,worker_household,units);
+        d_.append(c_.month(),"funded-worker-cooperative-share-purchase",
+                  site);
+        return true;
+    }
     // Cash reservation is now owned by the SAME Phase C authority used by
     // legacy payments, wages, transactions and Phase D activity planning.
     // Payments must actually settle before capitalisation or validation.
@@ -1037,23 +1161,34 @@ public:
         }
         const auto& p=d_.constructions.at(project_id);
         if(p.capitalized_value<=0)return false;
-        const auto factor=std::clamp(1.0+
+        const auto cost_factor=std::clamp(1.0+
             c_.p2_catalog_modifier_value(
-                country,"building_nationalization_cost_mult"),
+                country,"building_nationalization_cost_mult"),0.1,4.0);
+        const auto owner_return=std::clamp(1.0+
+            c_.p2_catalog_modifier_value(
+                country,"building_nationalization_investment_return_add"),
             0.1,4.0);
         const auto required=std::ceil(
-            static_cast<long double>(p.capitalized_value)*factor);
+            static_cast<long double>(p.capitalized_value)*
+            cost_factor*owner_return);
         if(required>static_cast<long double>(
              std::numeric_limits<Money>::max()/4))return false;
         const auto price=static_cast<Money>(required);
-        if(price<=0||c_.phase_d_cash_available(treasury)<price)return false;
-        // 1.15 laws that forbid uncompensated takings are trivially
-        // respected: this transfer always pays the old legal owner.
-        c_.phase_d_transfer_factory_paid(
-            site,treasury,price,p.capitalized_value);
+        if(price<=0)return false;
+        const bool can_pay=c_.phase_d_cash_available(treasury)>=price;
+        const bool compensation_required=c_.p2_catalog_modifier_value(
+            country,"country_disable_nationalization_without_compensation_bool")>0;
+        if(!can_pay&&compensation_required)return false;
+        if(can_pay)
+            c_.phase_d_transfer_factory_paid(
+                site,treasury,price,p.capitalized_value);
+        else
+            c_.phase_d_transfer_factory_uncompensated(
+                site,treasury,p.capitalized_value);
         d_.constructions.at(project_id).client=treasury;
-        d_.append(c_.month(),"lawfully-compensated-factory-nationalization",
-                  site);
+        d_.append(c_.month(),can_pay?
+            "lawfully-compensated-factory-nationalization":
+            "uncompensated-nationalization-subject-to-current-law",site);
         return true;
     }
     void plan_research(const std::string& project,Quantity units) {

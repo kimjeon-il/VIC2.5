@@ -393,6 +393,11 @@ struct InfluenceView {
     Money bilateral_imports{};       // Only G's actually settled trade evidence.
     Money target_total_imports{};
     std::int64_t trade_dependency_ppm{};
+    // Policy-adjusted leverage is separate from the measured observed ratio;
+    // neither invents a trade fill or an unobserved relationship.
+    std::int64_t effective_leverage_ppm{};
+    std::int64_t ideological_hostility_impact{};
+    bool observed_overlord_link{};
     // Military/political/cultural dimensions remain unsupported, not zero.
     bool military_known{}, political_known{}, cultural_known{};
     Quantity military_goods_delivered{};
@@ -1521,6 +1526,29 @@ public:
             view.observed=true;
             view.trade_dependency_ppm=phaseb::mul_checked(
                 view.bilateral_imports,1'000'000)/view.target_total_imports;
+            const auto& state=core_.core().core();
+            const double resistance=std::clamp(
+                state.p2_catalog_modifier_value(target,
+                    "country_leverage_resistance_mult"),-0.9,4.0);
+            view.effective_leverage_ppm=static_cast<std::int64_t>(
+                std::clamp(
+                    static_cast<double>(view.trade_dependency_ppm)/
+                        (1.0+resistance),0.0,1'000'000.0));
+            for(const auto& [id,link]:diplomacy_.protectorates) {
+                (void)id;
+                if(!link.active||link.principal!=source||
+                   link.dependent!=target)continue;
+                const double dependence=std::clamp(
+                    state.p2_catalog_modifier_value(target,
+                        "country_economic_dependence_on_overlord_add"),
+                    -0.9,3.0);
+                view.effective_leverage_ppm=static_cast<std::int64_t>(
+                    std::clamp(
+                        static_cast<double>(view.effective_leverage_ppm)*
+                        (1.0+dependence),0.0,1'000'000.0));
+                view.observed_overlord_link=true;
+                break;
+            }
         }
         return view;
     }

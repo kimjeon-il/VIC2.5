@@ -371,6 +371,21 @@ if(BUILD_TESTING)
     add_test(NAME vic25_p2_catalog_115_tests COMMAND vic25_p2_catalog_115_tests)
 endif()
 
+# Economic law 1.15: all 41 original source rows and real equity/cash rules.
+if(BUILD_TESTING)
+    add_executable(vic25_p2_economic_41_catalog_tests
+                   tests/test_p2_remaining_economic_modifiers_115.cpp)
+    target_link_libraries(vic25_p2_economic_41_catalog_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p2_economic_41_catalog_tests
+             COMMAND vic25_p2_economic_41_catalog_tests)
+
+    add_executable(vic25_p2_economic_41_live_tests
+                   tests/test_p2_remaining_economy_live.cpp)
+    target_link_libraries(vic25_p2_economic_41_live_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p2_economic_41_live_tests
+             COMMAND vic25_p2_economic_41_live_tests)
+endif()
+
 # Actual law yields, paid factory titles and household customs-like taxes.
 if(BUILD_TESTING)
     add_executable(vic25_p2_economy_law_115_tests tests/test_p2_economy_law_115.cpp)

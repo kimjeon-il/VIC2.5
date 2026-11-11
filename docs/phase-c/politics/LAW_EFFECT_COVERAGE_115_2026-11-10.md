@@ -12,38 +12,38 @@
 
 - 법률 **148개**, 법률군 **26개**, 증보 **71개**
 - 정적 modifier 행 **1117개**, 고유 effect key **350종**
-- 실행 경로 매핑된 key **102종** (부분 구현/미검증), 소비자가 아직 없는 key **248종**
-- 매핑된 source 행 **475개**, 미연결 source 행 **642개**
+- 실행 경로 매핑된 key **122종** (부분 구현/미검증), 소비자가 아직 없는 key **228종**
+- 매핑된 source 행 **556개**, 미연결 source 행 **561개**
 
 ## 법률군별 정적 modifier 매핑
 
 | 법률군 | 법률 선택지 | 원문 직접/제도 수치 효과 행 | 코드 소비자 존재 행(부분) | 미연결 행 |
 |---|---:|---:|---:|---:|
-| `army_model` | 6 | 42 | 17 | 25 |
-| `bureaucracy` | 6 | 13 | 7 | 6 |
-| `caste_hegemony` | 4 | 51 | 2 | 49 |
+| `army_model` | 6 | 42 | 19 | 23 |
+| `bureaucracy` | 6 | 13 | 11 | 2 |
+| `caste_hegemony` | 4 | 51 | 4 | 47 |
 | `childrens_rights` | 3 | 11 | 7 | 4 |
 | `church_and_state` | 7 | 87 | 13 | 74 |
 | `citizenship` | 7 | 92 | 18 | 74 |
 | `colonization` | 5 | 14 | 0 | 14 |
-| `distribution_of_power` | 14 | 108 | 81 | 27 |
-| `economic_system` | 8 | 95 | 54 | 41 |
+| `distribution_of_power` | 14 | 108 | 82 | 26 |
+| `economic_system` | 8 | 95 | 95 | 0 |
 | `edo_social_system` | 3 | 53 | 0 | 53 |
 | `education_system` | 5 | 14 | 8 | 6 |
-| `free_speech` | 4 | 31 | 16 | 15 |
+| `free_speech` | 4 | 31 | 19 | 12 |
 | `governance_principles` | 9 | 35 | 34 | 1 |
 | `health_system` | 4 | 13 | 6 | 7 |
 | `internal_security` | 8 | 48 | 36 | 12 |
 | `labor_rights` | 3 | 1 | 1 | 0 |
-| `labour_associations` | 6 | 37 | 9 | 28 |
+| `labour_associations` | 6 | 37 | 20 | 17 |
 | `land_reform` | 9 | 32 | 13 | 19 |
-| `migration` | 3 | 5 | 2 | 3 |
+| `migration` | 3 | 5 | 4 | 1 |
 | `navy_model` | 4 | 20 | 2 | 18 |
 | `policing` | 4 | 11 | 4 | 7 |
 | `rights_of_women` | 5 | 15 | 6 | 9 |
 | `slavery` | 5 | 5 | 3 | 2 |
-| `taxation` | 5 | 2 | 0 | 2 |
-| `trade_policy` | 6 | 44 | 17 | 27 |
+| `taxation` | 5 | 2 | 1 | 1 |
+| `trade_policy` | 6 | 44 | 22 | 22 |
 | `welfare` | 5 | 15 | 5 | 10 |
 
 ## 실행 경로가 존재하는 modifier 키 — 원작 동등성은 별도 검증 필요
@@ -54,11 +54,19 @@
 | `building_company_worker_dividends_add` | 1 | C/D 경제·재정 | 법정 비용·지불가능한 배당 또는 실재 공사 기성고만 영향 · 미검증 |
 | `building_group_bg_agriculture_construction_efficiency_add` | 1 | C/D 경제·재정 | 법정 비용·지불가능한 배당 또는 실재 공사 기성고만 영향 · 미검증 |
 | `building_group_bg_agriculture_throughput_add` | 3 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
+| `building_group_bg_arts_allowed_collectivization_add` | 5 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
+| `building_group_bg_extraction_allowed_collectivization_add` | 4 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `building_group_bg_extraction_throughput_add` | 1 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
+| `building_group_bg_manufacturing_allowed_collectivization_add` | 4 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `building_group_bg_plantations_throughput_add` | 2 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
+| `building_group_bg_power_allowed_collectivization_add` | 4 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
+| `building_group_bg_private_infrastructure_allowed_collectivization_add` | 5 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `building_group_bg_ranching_throughput_add` | 1 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `building_minimum_wage_mult` | 3 | C/D 경제·재정 | VIC2.5 단순화 계산·조건부 |
 | `building_nationalization_cost_mult` | 4 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
+| `building_nationalization_investment_return_add` | 5 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
+| `building_nationalization_radicals_mult` | 1 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
+| `building_self_investment_chance_add` | 2 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `building_training_rate_mult` | 5 | C/D 경제·재정 | 정적 소비자 연결 |
 | `country_academics_pol_str_mult` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_aristocrats_pol_str_mult` | 10 | 별도 실행 대상 필요 | 정적 소비자 연결 |
@@ -75,8 +83,11 @@
 | `country_coup_resistance_add` | 7 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_disable_investment_pool_bool` | 1 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `country_disable_nationalization_bool` | 1 | 별도 실행 대상 필요 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
+| `country_disable_nationalization_without_compensation_bool` | 5 | 별도 실행 대상 필요 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
+| `country_disable_non_company_privatization_bool` | 1 | 별도 실행 대상 필요 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `country_disallow_aggressive_plays_bool` | 1 | H 외교 위기 발의 | 선택형/조건부 실행 판정 · 미검증 |
 | `country_disallow_trade_bool` | 1 | G/H 무역·외교 | VIC2.5 단순화 계산·조건부 |
+| `country_economic_dependence_on_overlord_add` | 2 | 별도 실행 대상 필요 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `country_enactment_success_chance_law_anarchy_add` | 1 | P2 입법 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_enactment_success_chance_law_autocracy_add` | 1 | P2 입법 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_enactment_success_chance_law_oligarchy_add` | 1 | P2 입법 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
@@ -85,7 +96,10 @@
 | `country_farmers_pol_str_mult` | 2 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_forbid_monopoly_bool` | 1 | Phase D 실재 설비 기반 공장 확장 | 시설별 기존 생산역량으로만 점유율 추정 · 미검증 |
 | `country_force_privatization_bool` | 1 | 별도 실행 대상 필요 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
+| `country_foreign_collectivization_bool` | 1 | 별도 실행 대상 필요 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
+| `country_free_charters_add` | 8 | 별도 실행 대상 필요 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `country_government_dividends_efficiency_add` | 4 | C/D 경제·재정 | 법정 비용·지불가능한 배당 또는 실재 공사 기성고만 영향 · 미검증 |
+| `country_government_dividends_reinvestment_add` | 6 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `country_institution_cost_institution_health_system_mult` | 2 | B/POP·C/P1 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `country_law_enactment_speed_mult` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_law_enactment_success_add` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
@@ -95,10 +109,12 @@
 | `country_legitimacy_govt_total_votes_add` | 11 | C/P 정치 | VIC2.5 단순화 계산·조건부 |
 | `country_legitimacy_headofstate_add` | 13 | C/P 정치 | VIC2.5 단순화 계산·조건부 |
 | `country_legitimacy_ideological_incoherence_mult` | 19 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `country_leverage_resistance_mult` | 15 | G/H 무역·외교 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `country_loan_interest_rate_add` | 5 | C/D 경제·재정 | 정적 소비자 연결 |
 | `country_loan_interest_rate_mult` | 5 | C/D 경제·재정 | 정적 소비자 연결 |
 | `country_migration_restrictiveness_add` | 3 | B/POP·C/P1 | VIC2.5 단순화 계산·조건부 |
 | `country_officers_pol_str_mult` | 21 | 별도 실행 대상 필요 | 정적 소비자 연결 |
+| `country_other_country_socialist_economy_hostility_impact_add` | 2 | 별도 실행 대상 필요 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `country_peasants_pol_str_mult` | 3 | 별도 실행 대상 필요 | 정적 소비자 연결 |
 | `country_private_construction_allocation_mult` | 8 | P0/Phase D 민간 건설 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
 | `country_production_tech_research_speed_mult` | 1 | Phase D 기술·연구 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
@@ -126,13 +142,16 @@
 | `interest_group_in_government_approval_add` | 4 | C/P 정치 | 정적 소비자 연결 |
 | `interest_group_pol_str_mult` | 6 | C/P 정치 | 정적 소비자 연결 |
 | `political_movement_radicalism_add` | 6 | P1/P3/P5 정치 | 신규 소비자 — VIC2.5 단순화 규칙 · 미검증 |
+| `state_aristocrats_investment_pool_contribution_add` | 1 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `state_aristocrats_investment_pool_efficiency_mult` | 7 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `state_birth_rate_mult` | 4 | B/POP·C/P1 | 정적 소비자 연결 |
+| `state_bureaucracy_population_base_cost_factor_mult` | 8 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `state_bureaucrats_investment_pool_efficiency_mult` | 3 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `state_capitalists_investment_pool_efficiency_mult` | 8 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `state_clergymen_investment_pool_efficiency_mult` | 3 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `state_conscription_rate_add` | 8 | C/E/H 군사 | VIC2.5 단순화 계산·조건부 |
 | `state_education_access_add` | 3 | B/POP·C/P1 | 정적 소비자 연결 |
+| `state_expected_sol_mult` | 1 | 별도 실행 대상 필요 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `state_farmers_investment_pool_efficiency_mult` | 5 | C/D 경제·재정 | 1~3단계 신규 소비자 · 조건부/게임식 단순화 · 미검증 |
 | `state_farmers_mortality_mult` | 2 | B/POP·C/P1 | 정적 소비자 연결 |
 | `state_laborers_mortality_mult` | 2 | B/POP·C/P1 | 정적 소비자 연결 |
@@ -140,6 +159,7 @@
 | `state_lower_strata_birth_rate_mult` | 1 | B/POP·C/P1 | 정적 소비자 연결 |
 | `state_loyalists_from_political_movements_mult` | 1 | C/P 정치 | 정적 소비자 연결 |
 | `state_machinists_mortality_mult` | 1 | B/POP·C/P1 | 정적 소비자 연결 |
+| `state_market_access_price_impact` | 1 | C/D 경제·재정 | 경제체제 41개 잔여 정의 소비자 · 조건부/게임식 근사 · 미검증 |
 | `state_migration_pull_mult` | 1 | B/POP·C/P1 | VIC2.5 단순화 계산·조건부 |
 | `state_mortality_mult` | 3 | B/POP·C/P1 | 정적 소비자 연결 |
 | `state_peasants_education_access_add` | 2 | B/POP·C/P1 | 정적 소비자 연결 |
@@ -161,13 +181,10 @@
 | `building_group_bg_agriculture_allowed_collectivization_add` | 4 | C/D 경제·재정 |
 | `building_group_bg_agriculture_standard_of_living_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_agriculture_tax_mult` | 1 | C/D 경제·재정 |
-| `building_group_bg_arts_allowed_collectivization_add` | 5 | C/D 경제·재정 |
-| `building_group_bg_extraction_allowed_collectivization_add` | 4 | C/D 경제·재정 |
 | `building_group_bg_heavy_industry_allowed_collectivization_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_light_industry_allowed_collectivization_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_logging_unincorporated_throughput_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_manor_houses_aristocrats_standard_of_living_add` | 1 | C/D 경제·재정 |
-| `building_group_bg_manufacturing_allowed_collectivization_add` | 4 | C/D 경제·재정 |
 | `building_group_bg_manufacturing_unincorporated_throughput_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_military_industry_allowed_collectivization_add` | 1 | C/E/H 군사 |
 | `building_group_bg_mining_allowed_collectivization_add` | 1 | C/D 경제·재정 |
@@ -175,8 +192,6 @@
 | `building_group_bg_plantations_allowed_collectivization_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_plantations_tax_mult` | 1 | C/D 경제·재정 |
 | `building_group_bg_plantations_unincorporated_throughput_add` | 1 | C/D 경제·재정 |
-| `building_group_bg_power_allowed_collectivization_add` | 4 | C/D 경제·재정 |
-| `building_group_bg_private_infrastructure_allowed_collectivization_add` | 5 | C/D 경제·재정 |
 | `building_group_bg_ranching_allowed_collectivization_add` | 4 | C/D 경제·재정 |
 | `building_group_bg_ranching_standard_of_living_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_ranching_tax_mult` | 1 | C/D 경제·재정 |
@@ -186,10 +201,7 @@
 | `building_group_bg_subsistence_ranching_allowed_collectivization_add` | 1 | C/D 경제·재정 |
 | `building_group_bg_subsistence_ranching_peasants_standard_of_living_add` | 1 | C/D 경제·재정 |
 | `building_minimum_incorporated_subsistence_employment_add` | 2 | C/D 경제·재정 |
-| `building_nationalization_investment_return_add` | 5 | C/D 경제·재정 |
-| `building_nationalization_radicals_mult` | 1 | C/D 경제·재정 |
 | `building_naval_administration_hiring_rate_mult` | 2 | C/D 경제·재정 |
-| `building_self_investment_chance_add` | 2 | C/D 경제·재정 |
 | `building_unincorporated_subsistence_output_mult` | 1 | C/D 경제·재정 |
 | `building_unincorporated_throughput_add` | 1 | C/D 경제·재정 |
 | `building_working_conditions_mult` | 1 | C/D 경제·재정 |
@@ -236,20 +248,14 @@
 | `country_dalit_qualification_growth_mult` | 1 | B/POP·C/P1 |
 | `country_dalit_qualification_growth_other_class_mult` | 1 | B/POP·C/P1 |
 | `country_dalit_qualification_growth_same_class_mult` | 2 | B/POP·C/P1 |
-| `country_disable_nationalization_without_compensation_bool` | 5 | 별도 실행 대상 필요 |
-| `country_disable_non_company_privatization_bool` | 1 | 별도 실행 대상 필요 |
 | `country_disallow_agitator_invites_bool` | 1 | 별도 실행 대상 필요 |
 | `country_disallow_trade_outside_canton_bool` | 1 | G/H 무역·외교 |
 | `country_disallow_trade_outside_kyushu_bool` | 1 | G/H 무역·외교 |
-| `country_economic_dependence_on_overlord_add` | 2 | 별도 실행 대상 필요 |
 | `country_education_fervor_add` | 2 | B/POP·C/P1 |
 | `country_electoral_confidence_impact_mult` | 7 | 별도 실행 대상 필요 |
 | `country_fervor_target_basque_add` | 1 | B/POP·C/P1 |
 | `country_financial_districts_buy_farms_likelihood` | 3 | 별도 실행 대상 필요 |
 | `country_forbid_electoral_fraud_bool` | 1 | 별도 실행 대상 필요 |
-| `country_foreign_collectivization_bool` | 1 | 별도 실행 대상 필요 |
-| `country_free_charters_add` | 8 | 별도 실행 대상 필요 |
-| `country_government_dividends_reinvestment_add` | 6 | C/D 경제·재정 |
 | `country_government_wages_mult` | 2 | C/D 경제·재정 |
 | `country_influence_mult` | 4 | G/H 무역·외교 |
 | `country_institution_cost_institution_home_affairs_mult` | 2 | 별도 실행 대상 필요 |
@@ -267,7 +273,6 @@
 | `country_kshatriyas_qualification_growth_other_class_mult` | 1 | B/POP·C/P1 |
 | `country_kshatriyas_qualification_growth_same_class_mult` | 2 | B/POP·C/P1 |
 | `country_laborers_voting_power_add` | 1 | C/P 정치 |
-| `country_leverage_resistance_mult` | 15 | G/H 무역·외교 |
 | `country_limit_officers_qualifications_to_upper_strata` | 1 | B/POP·C/P1 |
 | `country_machinists_voting_power_add` | 1 | C/P 정치 |
 | `country_max_companies_add` | 1 | 별도 실행 대상 필요 |
@@ -277,7 +282,6 @@
 | `country_navy_goods_cost_mult` | 1 | C/E/H 군사 |
 | `country_non_state_religion_wages_mult` | 3 | C/D 경제·재정 |
 | `country_officers_voting_power_add` | 4 | C/P 정치 |
-| `country_other_country_socialist_economy_hostility_impact_add` | 2 | 별도 실행 대상 필요 |
 | `country_other_country_socialist_government_hostility_impact_add` | 1 | 별도 실행 대상 필요 |
 | `country_peasants_voting_power_add` | 1 | C/P 정치 |
 | `country_polish_cultural_acceptance_add` | 1 | B/POP·C/P1 |
@@ -347,11 +351,9 @@
 | `interest_group_ig_devout_pop_attraction_mult` | 3 | C/P 정치 |
 | `interest_group_in_government_attraction_mult` | 1 | C/P 정치 |
 | `ship_power_projection_mult` | 2 | C/E/H 군사 |
-| `state_aristocrats_investment_pool_contribution_add` | 1 | C/D 경제·재정 |
 | `state_assimilation_mult` | 5 | B/POP·C/P1 |
 | `state_building_barrack_max_level_add` | 6 | C/E/H 군사 |
 | `state_building_conscription_center_max_level_add` | 6 | C/E/H 군사 |
-| `state_bureaucracy_population_base_cost_factor_mult` | 8 | C/D 경제·재정 |
 | `state_colony_growth_creation_factor` | 1 | G/H 무역·외교 |
 | `state_colony_growth_speed_mult` | 2 | G/H 무역·외교 |
 | `state_conscription_rate_mult` | 3 | C/E/H 군사 |
@@ -359,7 +361,6 @@
 | `state_dependent_political_participation_add` | 2 | C/P 정치 |
 | `state_dependent_wage_mult` | 7 | B/POP·C/P1 |
 | `state_education_access_wealth_add` | 1 | B/POP·C/P1 |
-| `state_expected_sol_mult` | 1 | 별도 실행 대상 필요 |
 | `state_export_advantage_mult` | 1 | G/H 무역·외교 |
 | `state_food_security_add` | 2 | B/POP·C/P1 |
 | `state_free_state_pop_support_movement_anti_slavery_mult` | 1 | B/POP·C/P1 |
@@ -370,7 +371,6 @@
 | `state_import_advantage_mult` | 1 | G/H 무역·외교 |
 | `state_lower_strata_expected_sol_add` | 2 | B/POP·C/P1 |
 | `state_lower_strata_standard_of_living_add` | 1 | B/POP·C/P1 |
-| `state_market_access_price_impact` | 1 | C/D 경제·재정 |
 | `state_middle_strata_expected_sol_add` | 1 | B/POP·C/P1 |
 | `state_middle_strata_standard_of_living_add` | 1 | B/POP·C/P1 |
 | `state_migration_pull_unincorporated_mult` | 4 | B/POP·C/P1 |
@@ -455,3 +455,22 @@
 - `building_group_bg_agriculture_construction_efficiency_add`: 실재 농업 업종의 일반 공사에만 적용. 명시적인 WorkPackage가 있는 다단계 공사는 기존 계약을 보존한다. 기존 건설 요구량을 수정해 저장하지 않고, 승인·지급·자본화된 기성고를 토대로 공사 완료를 판정한다. 임의의 미지급 작업은 완공으로 간주하지 않는다.
 - `building_company_worker_dividends_add`, `building_company_government_dividends_add`, `country_government_dividends_efficiency_add`: 이미 존재하는 회사 유가증권의 유효한 주주(실제 고용된 가계 또는 해당 국가 국고)가 선언받는 배당 의무에만 적용한다. 회사가 보유한 **지불 가능한 실제 현금** 범위 안에서만 보정한다. 선언되지 않은 배당·이익·기업 현금을 새로 생성하지 않는다.
 - `country_forbid_monopoly_bool`: 기존 제조시설의 실측 설비용량을 이용한 지역별 독점 제한 근사이며 원작의 실제 시장점유율 공식과 동일하다고 주장하지 않는다.
+
+## 2026-11-11: 경제체제법 잔여 41개 효과 정의 연결
+
+**범위:** 경제체제법 8종에 있던 미연결 정적 modifier **41행 / 20개 고유 키**를 실제 실행 경로에 추가했다. 전체 법률 1,117행과는 별개이며, C++ 컴파일·CTest 및 장기 게임 재현이 완료되었다는 뜻은 아니다.
+
+| 연결된 실제 원장·계산 | 적용한 키 및 게임화 방식 |
+|---|---|
+| 재정·국가 행정 | `state_bureaucracy_population_base_cost_factor_mult`: 등록·고용된 행정기관에 이미 승인된 현금 지출을 보정한다. `country_government_dividends_reinvestment_add`: 정부가 **실제로 받은** 배당금 일부만 기존 기업으로 송금해 재투자한다 |
+| 민간기업 자율 투자 | `building_self_investment_chance_add`: 실제 수요·원가 검사를 통과한 공장에 이식 가능한 결정적 월간 투자심사 확률. `country_free_charters_add`: 회사·투자 허가를 추가로 창조하지 않고 동시에 자금을 조달할 수 있는 실제 민간 건설 신청 수를 확대한다 |
+| 실재 지분·투자금 | `state_aristocrats_investment_pool_contribution_add`: 실제 귀족 POP가 속한 가계의 **기존 회사 지분과 현금**이 있을 때만 기업 계좌로 자본을 납입한다. 추가 주식·예금을 창조하지 않는다 |
+| 국유화 | `building_nationalization_investment_return_add`: 기존 자본화 가치와 비용계수로 국고 보상액을 산정한다. `country_disable_nationalization_without_compensation_bool`: 법률이 금지하면 현금 없는 국유화를 차단한다. 허용 법률에서는 기존 시설·회계상 자산의 무상 이전이 가능하지만 현금은 생성하지 않는다 |
+| 국유화의 POP 반응 | `building_nationalization_radicals_mult`: 기존 근로자들이 겪은 검증된 무보상·저보상 소유권 변경에만 P3 급진성 변화를 적용한다. 명목상 기업이 새 POP를 생성하지 않는다 |
+| 민영화·집산화 | `country_disable_non_company_privatization_bool`: 등록 회사 지분이 없는 자산의 기존 현금 민영화 명령을 제한한다. `building_group_bg_{manufacturing,extraction,power,private_infrastructure,arts}_allowed_collectivization_add`: 해당 실존 산업의 실제 회사 지분을 기존 주주로부터 고용된 노동자 가계가 **현금으로 매수할 때만** 허용한다. `country_foreign_collectivization_bool`: 실제 외국 주주·국가 자산의 집산화 승인 조건이다 |
+| 시장·POP | `state_market_access_price_impact`: 실제 지역별 시장 부족·과잉에 따른 익일 가격 변동 폭에만 적용한다. `state_expected_sol_mult`: 관측된 실업·생필품 결핍에 따른 기존 POP 정치적 반응 기준을 조정한다 |
+| 보호국·외교 | `country_leverage_resistance_mult`: 실제 정산된 무역 의존에 대한 저항 보정. `country_economic_dependence_on_overlord_add`: 활성 보호국과 실제 양국 간 수입증거가 있을 때만 의존도를 보정. `country_other_country_socialist_economy_hostility_impact_add`: 두 나라의 실제 경제체제가 다를 경우 외교적 반감을 계산하고 위기 중재 조언에 연결한다 |
+
+**중요 한계:** `country_free_charters_add` 및 시장·관료비·예상 생활수준·자기투자확률·국유화 급진성·사회주의 외교 반응은 기존 VIC2.5 기능을 재활용한 **게임식 실행 근사**이며 빅토리아 3 1.15 내부 공식을 그대로 재현한 것은 아니다. 집산화는 매매 명령이 있는 경우에만 이루어진다. 국가 공직·주식·POP·국고·실물 재고 원장은 기존 기록을 그대로 사용한다. 새 테스트 파일들은 별도 실행 전까지 미검증이다.
+
+**집계:** 경제체제 법률군 95/95행 정적 소비자 연결. 전체 122/350개 고유 키, 556/1117개 정적 정의 연결, 잔여 228키/561행. 연결은 호출 경로 존재를 뜻하며 모든 시나리오에서 실제 사용되거나 런타임이 검증됐다는 주장은 하지 않는다.
