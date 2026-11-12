@@ -361,36 +361,61 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                               v.activism_ppm/2;
             if(weight>highest) {highest=weight;target=id;}
         }
-        if(!target.empty()&&p1_legitimacy(country).score>=25) {
+        // Without a formal movement, governing interest groups still
+        // advocate real law preferences through their measured clout.
+        std::string reform_domain,reform_choice,provenance;
+        if(!target.empty()) {
             const auto& m=p3_movements_.at(target);
+            reform_domain=m.issue_domain;
+            reform_choice=m.desired_choice;
+            provenance="ai-response-to:"+target;
+        } else {
+            std::int64_t best=0;
+            const auto& ruling=p1_coalitions_.at(country).ruling_groups;
+            for(const auto& [key,group]:p3_groups_) {
+                if(key.first!=country||
+                   std::find(ruling.begin(),ruling.end(),key.second)==ruling.end())
+                    continue;
+                const auto desired=p1_group_legal_preference(group);
+                if(desired.empty()||!politics::catalogue().has(
+                        group.issue_domain,desired))continue;
+                const auto view=p3_group_view(country,key.second);
+                if(view.members<=0||view.clout_ppm<=best)continue;
+                best=view.clout_ppm;
+                reform_domain=group.issue_domain;
+                reform_choice=desired;
+                provenance="ai-governing-ig:"+key.second;
+            }
+        }
+        if(!reform_domain.empty()&&p1_legitimacy(country).score>=25) {
             for(const auto& [slot,id]:p2_active_base_) {
                 const auto& current=p2_laws_.at(id);
                 if(current.country!=country||
-                   current.domain!=m.issue_domain||
-                   current.base_choice==m.desired_choice)continue;
+                   current.domain!=reform_domain||
+                   current.base_choice==reform_choice)continue;
                 bool busy=false;
                 for(const auto& [other_id,other]:p2_bills_)
                     if(other.country==country&&
                        other.action==P2BillAction::enact_or_replace_base&&
-                       other.proposed_base.domain==m.issue_domain&&
+                       other.proposed_base.domain==reform_domain&&
                        other.status!=P2BillStatus::rejected&&
                        other.status!=P2BillStatus::effective)
                         busy=true;
                 if(busy)break;
                 const auto& catalog=politics::catalogue();
-                if(!catalog.has(m.issue_domain,m.desired_choice))break;
+                if(!catalog.has(reform_domain,reform_choice))break;
                 const auto key=country+":"+
                     std::to_string(static_cast<int>(
                         P2BillAction::enact_or_replace_base))+":"+
-                    m.issue_domain+":"+current.scope+":"+m.desired_choice;
+                    reform_domain+":"+current.scope+":"+reform_choice;
                 if(p2_retry_after_.contains(key)&&
                    p2_retry_after_.at(key)>today)break;
                 const auto bill_id="P2:auto:"+country+":"+
-                    m.issue_domain+":"+std::to_string(today);
-                p2_propose_catalogue_reform(country,m.issue_domain,
-                    m.desired_choice,"ai-response-to:"+target,today);
+                    reform_domain+":"+std::to_string(today);
+                p2_propose_catalogue_reform(country,reform_domain,
+                    reform_choice,provenance,today);
                 agenda.last_bill_id=bill_id;
-                agenda.last_reform_choice=m.desired_choice;
+                agenda.last_reform_choice=reform_choice;
                 events_.push_back("p1-ai-proposed-political-law:"+bill_id);
                 break;
             }
