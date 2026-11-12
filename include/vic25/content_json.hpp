@@ -291,16 +291,23 @@ inline Condition condition(const Value& v,int depth=0) {
 inline External external(const Value& v) {
     const auto& o=v.object();
     keys(o,{"kind","target_country","admin_name","head","prime","admin_id",
-            "provinces","seats","quorum"});
+            "provinces","seats","quorum",
+            "law_domain","law_choice","movement_id"});
     External result;
     const auto kind=must(o,"kind").string();
     if(kind=="independence")result.kind=ExternalKind::independence;
     else if(kind=="transfer")result.kind=ExternalKind::transfer;
     else if(kind=="claim")result.kind=ExternalKind::claim;
     else if(kind=="colonize")result.kind=ExternalKind::colonize;
+    else if(kind=="propose_law")result.kind=ExternalKind::propose_law;
+    else if(kind=="bolster_movement")result.kind=ExternalKind::bolster_movement;
+    else if(kind=="suppress_movement")result.kind=ExternalKind::suppress_movement;
     else throw std::invalid_argument("CONTENT_UNKNOWN_EXTERNAL_KIND");
     result.target_country=str(o,"target_country");
     result.admin_name=str(o,"admin_name");
+    result.law_domain=str(o,"law_domain");
+    result.law_choice=str(o,"law_choice");
+    result.movement_id=str(o,"movement_id");
     result.head=str(o,"head");result.prime=str(o,"prime");
     if(const auto* p=maybe(o,"admin_id"))result.admin_id=positive_id(*p);
     result.seats=num(o,"seats");result.quorum=num(o,"quorum");

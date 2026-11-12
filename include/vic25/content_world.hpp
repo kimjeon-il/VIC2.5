@@ -68,15 +68,40 @@ class World {
         return std::nullopt; // Unsupported is not silently treated as zero.
     }
     static void native_write(const Scope& scope,const External& effect,
-                 const std::string& provenance,phasegh::Stage& gh) {
+                 const std::string& provenance,phasegh::Stage& gh,
+                  Day today) {
         auto& geo=gh.geography();
         require(gh.phase()==9,"CONTENT_NATIVE_EFFECT_WRONG_STAGE");
         require(!provenance.empty(),"CONTENT_MISSING_CAUSAL_PROVENANCE");
         const auto& provinces=geo.spatial().provinces;
-        const auto& core=gh.phase_c();
+        auto& core=gh.phase_c();
         require(scope.kind=="country"&&core.has_government(scope.id),
                 "CONTENT_NATIVE_COUNTRY_AUTHORITY_REQUIRED");
         switch(effect.kind) {
+            case ExternalKind::propose_law:
+                require(effect.target_country.empty()||
+                        effect.target_country==scope.id,
+                        "CONTENT_POLITICAL_COUNTRY_MISMATCH");
+                core.p2_propose_catalogue_reform(scope.id,
+                    effect.law_domain,effect.law_choice,
+                    "content:"+provenance,today);
+                return;
+            case ExternalKind::bolster_movement:
+            case ExternalKind::suppress_movement: {
+                require(effect.target_country.empty()||
+                        effect.target_country==scope.id,
+                        "CONTENT_POLITICAL_COUNTRY_MISMATCH");
+                phasec::P1PoliticalMandate mandate;
+                mandate.id="content:mandate:"+provenance;
+                mandate.country=scope.id;
+                mandate.target=effect.movement_id;
+                mandate.kind=effect.kind==ExternalKind::bolster_movement?
+                    phasec::P1PoliticalMandateKind::bolster_movement:
+                    phasec::P1PoliticalMandateKind::suppress_movement;
+                mandate.authority_cost=200;
+                core.p1_activate_mandate(std::move(mandate),today);
+                return;
+            }
             case ExternalKind::independence:
                 require(scope.kind=="country"&&
                         !effect.target_country.empty()&&
@@ -239,10 +264,10 @@ public:
                                        const std::string& metric){
                 return native_read(scope,metric,gh);
             };
-            const ApplyExternal apply=[&gh](const Scope& scope,
+            const ApplyExternal apply=[&gh,today](const Scope& scope,
                                           const External& effect,
                                           const std::string& provenance){
-                native_write(scope,effect,provenance,gh);
+                native_write(scope,effect,provenance,gh,today);
             };
             step(*rules,staged,today,seed,read,apply);
         });

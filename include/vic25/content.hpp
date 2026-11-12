@@ -46,7 +46,7 @@ struct Condition {
     }
 };
 enum class ExternalKind : std::uint8_t {
-    none,independence,transfer,claim,colonize
+    none,independence,transfer,claim,colonize,propose_law,bolster_movement,suppress_movement
 };
 struct External {
     ExternalKind kind{ExternalKind::none};
@@ -54,6 +54,7 @@ struct External {
     std::uint64_t admin_id{};
     std::vector<std::uint64_t> provinces;
     Number seats{},quorum{};
+    std::string law_domain,law_choice,movement_id;
 };
 enum class EffectKind : std::uint8_t {
     set_flag,clear_flag,add_counter,schedule_event,open_journal,
@@ -141,9 +142,21 @@ struct Registry {
             if(e.kind==EffectKind::external) {
                 require(e.external.kind!=ExternalKind::none,
                         "CONTENT_UNSUPPORTED_NATIVE_EFFECT");
-                require(!e.external.provinces.empty()&&
-                        !e.external.target_country.empty(),
-                        "CONTENT_INCOMPLETE_NATIVE_EFFECT");
+                const auto kind=e.external.kind;
+                if(kind==ExternalKind::propose_law)
+                    require(!e.external.law_domain.empty()&&
+                            !e.external.law_choice.empty()&&
+                            e.external.provinces.empty(),
+                            "CONTENT_INCOMPLETE_LAW_PROPOSAL");
+                else if(kind==ExternalKind::bolster_movement||
+                        kind==ExternalKind::suppress_movement)
+                    require(!e.external.movement_id.empty()&&
+                            e.external.provinces.empty(),
+                            "CONTENT_INCOMPLETE_MOVEMENT_ORDER");
+                else
+                    require(!e.external.provinces.empty()&&
+                            !e.external.target_country.empty(),
+                            "CONTENT_INCOMPLETE_NATIVE_EFFECT");
             }
         }
     }
