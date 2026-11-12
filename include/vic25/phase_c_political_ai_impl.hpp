@@ -404,6 +404,22 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 if(busy)break;
                 const auto& catalog=politics::catalogue();
                 if(!catalog.has(reform_domain,reform_choice))break;
+                bool prohibited=false;
+                const auto proposed=politics::bare_law(reform_choice);
+                for(const auto& [other_slot,other_id]:p2_active_base_) {
+                    (void)other_slot;
+                    const auto& other=p2_laws_.at(other_id);
+                    if(other.country!=country||
+                       other.domain==reform_domain)continue;
+                    const auto current_choice=politics::bare_law(
+                        other.base_choice);
+                    if((catalog.disallowed.contains(proposed)&&
+                        catalog.disallowed.at(proposed).contains(current_choice))||
+                       (catalog.disallowed.contains(current_choice)&&
+                        catalog.disallowed.at(current_choice).contains(proposed)))
+                        prohibited=true;
+                }
+                if(prohibited)break;
                 const auto key=country+":"+
                     std::to_string(static_cast<int>(
                         P2BillAction::enact_or_replace_base))+":"+
