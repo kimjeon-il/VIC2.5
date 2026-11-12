@@ -20,7 +20,9 @@ enum class P2ClauseKind : std::uint8_t {
     minimum_monthly_contract_wage, public_institution_level,
     maximum_import_tariff_ppm,
     female_suffrage_allowed, political_association_allowed,
-    peaceful_strike_allowed
+    peaceful_strike_allowed,
+    constitutional_veto_rule, constitutional_override_ppm,
+    constitutional_assent_days, constitutional_party_initiative
 };
 enum class P2BillAction : std::uint8_t {
     enact_or_replace_base, attach_amendment,
@@ -76,6 +78,11 @@ struct P2Enactment {
     std::int64_t next_review_day{-1},last_review_day{-1};
     bool ready{};
 };
+struct P2Assent {
+    std::string bill_id,country;
+    std::int64_t deadline{-1},veto_day{-1};
+    bool signed_by_head{},vetoed{},overridden{};
+};
 struct P2LawEvent {
     std::string bill_id,country,law_id,amendment_id,legal_basis;
     P2BillAction action{P2BillAction::enact_or_replace_base};
@@ -97,6 +104,13 @@ struct P2ChamberDecision {
     std::string bill_id,upper_contest_id;
     std::int64_t lower_poll_day{-1},upper_poll_day{-1};
     bool lower_passed{},upper_passed{};
+};
+// Read-only national political response to a proposed *change* of law.
+struct P2PoliticalSupportView {
+    std::string country,law_group,proposed_law;
+    std::int32_t support_ppm{},oppose_ppm{},neutral_ppm{};
+    std::int32_t governing_support_ppm{};
+    bool observed{};
 };
 struct P2TermView {
     std::string contest_id, legal_basis;

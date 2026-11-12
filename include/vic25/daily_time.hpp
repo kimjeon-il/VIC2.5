@@ -354,6 +354,7 @@ public:
            !engine_.base().core().core().p4_has_due_amendment(day_)&&
            !engine_.base().core().core().p2_has_due(day_)&&
            !engine_.base().core().core().p2_has_review_due(day_)&&
+           !engine_.base().core().core().p2_has_assent_work()&&
            !engine_.base().core().core().p4_has_campaign_due(day_)&&
            !engine_.base().core().core().p1_has_character_work()&&
            !engine_.base().core().core().p1_has_ai_review(day_)&&
@@ -472,6 +473,9 @@ public:
                 });
             }
         }
+        real_actions[7].push_back([](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_consume_administration_inputs();
+        });
         // Exact birth day and age eligibility must be known at Stage0,
         // before any same-day labor, election or explicit birth command.
         real_actions[0].insert(real_actions[0].begin(),
@@ -480,6 +484,7 @@ public:
                 // A lawful change enters on its scheduled calendar day even
                 // if no P0 controller, battle or economic command is active.
                 gh.phase_c().phase_time_apply_p1_government(today);
+                gh.phase_c().phase_time_apply_p1_mandates(today);
                 gh.phase_c().phase_time_apply_p5_settlement(today);
                 gh.phase_c().phase_time_apply_p4_amendments(today);
                 gh.phase_c().phase_time_apply_p2(today);
@@ -536,6 +541,10 @@ public:
             if(gh.phase_c().p2_has_review_due(today))
                 gh.phase_c().p2_review_due(today);
         });
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p2_has_assent_work())
+                gh.phase_c().p2_assent_due(today);
+        });
         // AI selects only lawful P1/P2 commands after real election results
         // and the current enactment checkpoint have been resolved.
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
@@ -558,6 +567,10 @@ public:
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
             if(gh.phase_c().p5_needs_daily_tick())
                 gh.phase_c().p5_auto_prepare_revolutions(today);
+        });
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p5_needs_daily_tick())
+                gh.phase_c().p5_auto_resolve_crises(today);
         });
         // Only journal due dates run guerrilla review. No daily all-world
         // militia battles or copied guerrilla population and supply ledgers.
@@ -591,9 +604,11 @@ public:
         static_assert(std::is_nothrow_move_assignable_v<
                       std::map<std::string,DailyCargo>>);
         static_assert(std::is_nothrow_move_assignable_v<std::vector<Entry>>);
+        const bool leap=(current.year%4==0&&
+            (current.year%100!=0||current.year%400==0));
         engine_.advance_daily(real_actions,day_,first_calendar_day,
                               current.day,days_in_month(current.year,current.month),
-                              close);
+                              close,leap?366:365);
         scheduled_=std::move(next_scheduled);
         journal_=std::move(next_journal);
         cargo_=std::move(next_cargo);

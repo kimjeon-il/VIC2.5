@@ -85,6 +85,9 @@ struct Extractor {
 struct ResearchPolicy {
     std::string project;
     Quantity maximum_daily_work{1};
+    // Evidence-backed discipline: military, production, society, or spread.
+    // An unclassified project cannot receive a fictional specialty bonus.
+    std::string discipline;
 };
 struct Buyer {
     Id population_slice{};
@@ -125,6 +128,11 @@ struct Election {
     People turnout_ppm{900'000};
 };
 // Player/campaign cabinet choice takes effect the following real day.
+struct ParliamentNoConfidence {
+    std::string country;
+    std::vector<std::string> supporting_parties;
+    daily::Date decision_date{};
+};
 struct GovernmentFormation {
     std::string country, incumbent_head, new_prime, legal_basis;
     std::vector<std::string> ruling_groups, ruling_parties;
@@ -142,7 +150,8 @@ struct ElectionTermReform {
     daily::Date decision_date{};
 };
 enum class LegislativeAction :std::uint8_t {
-    introduce, approve, promulgate, approve_upper
+    introduce, approve, promulgate, approve_upper,
+    sign, veto, override_veto, withdraw
 };
 struct LegislativeOrder {
     daily::Date date{};
@@ -150,6 +159,7 @@ struct LegislativeOrder {
     phasec::P2Bill bill; // populated for introduction only
     std::string bill_id,head;
     std::vector<std::string> supporting_parties;
+    std::vector<std::string> upper_supporting_parties;
 };
 enum class PoliticalOrderKind : std::uint8_t {
     activate_mandate, cancel_mandate, event_decision, register_lobby
@@ -157,7 +167,7 @@ enum class PoliticalOrderKind : std::uint8_t {
 struct PoliticalOrder {
     daily::Date date{};
     PoliticalOrderKind kind{PoliticalOrderKind::activate_mandate};
-    phasec::P1Mandate mandate;
+    phasec::P1PoliticalMandate mandate;
     std::string mandate_id,event_id;
     phasec::P1PoliticalEventDecision choice{
         phasec::P1PoliticalEventDecision::acknowledge};
@@ -294,6 +304,7 @@ struct Policies {
     std::vector<BondSecondaryAsk> bond_secondary_asks;
     std::vector<BondSecondaryBid> bond_secondary_bids;
     std::vector<GovernmentFormation> government_formations; // append-only
+    std::vector<ParliamentNoConfidence> no_confidence_votes;
     std::vector<ParliamentDissolution> dissolutions;
     std::vector<ElectionTermReform> election_term_reforms;
     std::vector<LegislativeOrder> legislative_orders; // append-only
@@ -455,6 +466,13 @@ struct Policies {
                reform.amendment.effective_day<=
                    daily::to_day_index(reform.decision_date))
                 throw std::invalid_argument("P0_INVALID_P4_TERM_REFORM");
+        std::set<std::pair<daily::DayIndex,std::string>> confidence_motions;
+        for(const auto& motion:no_confidence_votes) {
+            if(motion.country.empty()||motion.supporting_parties.empty()||
+               !confidence_motions.insert(
+                   {daily::to_day_index(motion.decision_date),motion.country}).second)
+                throw std::invalid_argument("P0_INVALID_NO_CONFIDENCE_MOTION");
+        }
         std::set<std::tuple<daily::DayIndex,std::string,LegislativeAction>>
             p2_legislative_events;
         for(const auto& order:legislative_orders) {
@@ -463,11 +481,15 @@ struct Policies {
                 order.bill.id:order.bill_id;
             if(bill_id.empty()||
                static_cast<unsigned>(order.action)>
-                   static_cast<unsigned>(LegislativeAction::approve_upper)||
+                   static_cast<unsigned>(LegislativeAction::withdraw)||
                !p2_legislative_events.insert({day,bill_id,order.action}).second||
                (order.action==LegislativeAction::introduce&&
                 (order.bill.proposer.empty()||order.bill.country.empty()))||
-               (order.action==LegislativeAction::promulgate&&order.head.empty()))
+               ((order.action==LegislativeAction::promulgate||
+                 order.action==LegislativeAction::sign||
+                 order.action==LegislativeAction::veto)&&order.head.empty())||
+               (order.action==LegislativeAction::override_veto&&
+                 order.supporting_parties.empty()))
                 throw std::invalid_argument("P0_INVALID_P2_LEGISLATIVE_ORDER");
         }
         for(const auto& e:elections)
@@ -588,6 +610,26 @@ inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
             need-=n;
         }
     }
+    if(need<=0||!c.has_government(c.sovereignty(p.region))||
+       c.p3_trait_modifier_ppm(c.sovereignty(p.region),
+                              "state_working_adult_ratio_add")<=0)return;
+    // The positive working-adult-ratio trait draws from existing unemployed
+    // adult nonworkers only if an actual open vacancy remains. The source
+    // headcount is split in Phase B; no fictional labor units are minted.
+    std::vector<Id> inactive;
+    for(const auto& [id,row]:c.people().slices()) {
+        if(c.people().demographic(row.key.demographic).region!=p.region)
+            continue;
+        if(c.people().economic(row.key.economic).livelihood=="inactive")
+            inactive.push_back(id);
+    }
+    for(const auto id:inactive) {
+        if(need<=0)break;
+        const auto [worker,count]=c.p3_activate_working_adults(id,need);
+        if(worker==0||count<=0)continue;
+        c.hire(worker,count,p.employer,p.monthly_wage);
+        need-=count;
+    }
 }
 
 inline Quantity available_production(const phased::Stage& d,
@@ -675,6 +717,41 @@ inline void fight(phasec::IntegratedWorld& c,const Engagement& e) {
     const auto rifle_b=c.assigned_equipment(e.defender,e.region,"rifle");
     auto al=tactical_losses(a,ammo_b,rifle_b,e.defender_terrain_ppm,true);
     auto bl=tactical_losses(b,ammo_a,rifle_a,e.defender_terrain_ppm,false);
+    // Apply IG traits to REAL, already-armed battle casualties. The
+    // original C battle() remains the sole military casualty/population
+    // authority. No troops, ammunition, or phantom engagements are minted.
+    const auto& deployments=c.army_deployments();
+    const auto atk=deployments.find(e.attacker);
+    const auto def=deployments.find(e.defender);
+    if(atk!=deployments.end()&&def!=deployments.end()) {
+        const auto bonus=[&](const std::string& country,
+                             const std::string& key)->std::int64_t {
+            if(!c.has_government(country))return 0;
+            return c.p3_trait_modifier_ppm(country,key)+
+                   c.p2_modifier_ppm(country,key);
+        };
+        const auto adjust=[&](phasec::CombatLoss& loss,People victim,
+                              std::int64_t attacking,std::int64_t defending) {
+            const auto combined=std::clamp<std::int64_t>(
+                1'000'000+attacking-defending,0,2'000'000);
+            const auto original=phaseb::add_checked(
+                loss.killed,loss.acute);
+            const auto whole=phaseb::mul_checked(
+                original/1'000'000,combined);
+            const auto fractional=phaseb::mul_checked(
+                original%1'000'000,combined)/1'000'000;
+            const auto impact=std::min(victim,phaseb::add_checked(
+                whole,fractional));
+            loss.killed=impact/4;
+            loss.acute=impact-loss.killed;
+        };
+        adjust(al,a,
+               bonus(def->second.country,"unit_offense_mult"),
+               bonus(atk->second.country,"unit_defense_mult"));
+        adjust(bl,b,
+               bonus(atk->second.country,"unit_offense_mult"),
+               bonus(def->second.country,"unit_defense_mult"));
+    }
     al.ammunition=ammo_a;
     bl.ammunition=ammo_b;
     // Both loss counts are derived from the same pre-battle committed state.
@@ -1026,8 +1103,8 @@ public:
         // Earned wages are accrued by the preceding Stage5 employer
         // commands. Creditors are now paid before optional public transfers,
         // dividends or other discretionary local business expenditures.
-        plan[5].push_back([](phasegh::Stage& gh) {
-            gh.phase_c().phase_time_settle_wage_arrears();
+        plan[5].push_back([today=world_.day_index()](phasegh::Stage& gh) {
+            gh.phase_c().phase_time_settle_wage_arrears(today);
             gh.phase_c().phase_time_settle_bankrupt_reparations();
         });
         if(date.day==1 && decisions.autonomous_tax_step_ppm>0)
@@ -1130,19 +1207,77 @@ public:
                               p.contractor,p.region,p.material_good)/p.material_per_work;
                 const People staff=c.phase_d_workforce(p.contractor);
                 const Quantity affordable=(free-investment.reserve_cash)/p.cash_price_per_work;
-                const auto bonus=c.p1_region_decree_bonus_ppm(
-                     c.sovereignty(p.region),p.region,
-                     phasec::P1DecreeKind::construction_drive);
-                const Quantity extra=phaseb::add_checked(
-                     phaseb::mul_checked(investment.maximum_daily_work/
-                        1'000'000,bonus),
-                     phaseb::mul_checked(investment.maximum_daily_work%
-                        1'000'000,bonus)/1'000'000);
-                const Quantity ceiling=phaseb::add_checked(
-                     investment.maximum_daily_work,extra);
-                const Quantity n=std::min({ceiling,
+                Quantity work_budget=investment.maximum_daily_work;
+                const auto country=c.sovereignty(p.region);
+                const bool privately_funded=
+                    !c.has_country_treasury(country)||
+                    p.client!=c.country_treasury(country);
+                if(privately_funded) {
+                    const auto effect=phaseb::add_checked(
+                        c.p2_modifier_ppm(
+                            country,"country_private_construction_allocation_mult"),
+                        c.p3_private_investment_bonus_ppm(country,p.client));
+                    const auto rate=std::clamp<std::int64_t>(
+                        1'000'000+effect,0,2'000'000);
+                    work_budget=phaseb::add_checked(
+                        phaseb::mul_checked(work_budget/1'000'000,rate),
+                        phaseb::mul_checked(work_budget%1'000'000,rate)/1'000'000);
+                }
+                // 1.15: excess Bureaucracy increases feasible paid
+                // construction speed, without manufacturing inputs or cash.
+                const auto administration=c.p1_bureaucracy(country);
+                if(administration.capacity.complete&&
+                   administration.construction_bonus_ppm>0) {
+                    const auto rate=static_cast<std::int64_t>(
+                        1'000'000+administration.construction_bonus_ppm);
+                    work_budget=phaseb::add_checked(
+                        phaseb::mul_checked(work_budget/1'000'000,rate),
+                        phaseb::mul_checked(work_budget%1'000'000,rate)/
+                        1'000'000);
+                }
+                // Source-branch edict modifies the existing national/legal
+                // ceiling. Real staff, materials and cash still bound work.
+                const auto decree=c.p1_region_decree_bonus_ppm(
+                    country,p.region,phasec::P1DecreeKind::construction_drive);
+                if(decree>0)
+                    work_budget=phaseb::add_checked(work_budget,
+                        phaseb::add_checked(
+                            phaseb::mul_checked(work_budget/1'000'000,decree),
+                            phaseb::mul_checked(work_budget%1'000'000,decree)/
+                                1'000'000));
+                Quantity n=std::min({work_budget,
                      p.work_required-p.accepted_work,materials,
                      static_cast<Quantity>(staff/p.workers_per_work),affordable});
+                // The actual Trade Unions "work to rule" trait modifies
+                // paid daily construction work, not a synthetic construction
+                // progress bar. Bonuses cannot create additional materials,
+                // workers or funds beyond the observed feasible work.
+                const auto trait=phaseb::add_checked(
+                    c.p3_trait_modifier_ppm(
+                        country,"state_construction_mult"),
+                    c.p1_local_decree_ppm(
+                        country,p.region,"state_construction_mult"));
+                if(trait<0&&n>0) {
+                    const auto legal=std::clamp<std::int64_t>(
+                        1'000'000+trait,0,1'000'000);
+                    n=std::max<Quantity>(legal>0?1:0,
+                        static_cast<Quantity>(
+                            phaseb::mul_checked(n/1'000'000,legal)+
+                            phaseb::mul_checked(n%1'000'000,legal)/1'000'000));
+                }
+                if(trait>0&&n>0) {
+                    const auto rate=std::clamp<std::int64_t>(
+                        1'000'000+trait,1'000'000,2'000'000);
+                    const Quantity boosted=phaseb::add_checked(
+                        phaseb::mul_checked(n/1'000'000,rate),
+                        phaseb::mul_checked(n%1'000'000,rate)/1'000'000);
+                    // Extra work is permitted only with actual staff,
+                    // delivered material, funds and unfinished scope.
+                    n=std::min({boosted,p.work_required-p.accepted_work,
+                        materials,
+                        static_cast<Quantity>(staff/p.workers_per_work),
+                        affordable});
+                }
                 if(n<=0)return;
                 gh.phase_d().plan_work(investment.construction_project,n);
                 *work=n;
@@ -1183,7 +1318,8 @@ public:
                     const Money gross=times(*workers,firm.wage_per_worker_per_day);
                     gh.phase_c().wages_under_law(f.owner,firm.employee_wallet,
                                                   firm.treasury_wallet,gross,
-                                                  gh.phase_c().sovereignty(f.region));
+                                                  gh.phase_c().sovereignty(f.region),
+                                                  r.industry_class);
                 });
         }
         // A site operator chooses a real output quantity from target stock,
@@ -1270,7 +1406,30 @@ public:
                                     p.holder,p.region,p.material_good);
                 const Money funds=c.phase_d_cash_available(p.sponsor);
                 if(funds<=0)return;
-                const Quantity n=std::min({research.maximum_daily_work,
+                Quantity budget=research.maximum_daily_work;
+                const auto country=c.sovereignty(p.region);
+                if(c.has_government(country)&&!research.discipline.empty()) {
+                    std::string key;
+                    if(research.discipline=="military")
+                        key="country_military_tech_research_speed_mult";
+                    else if(research.discipline=="production")
+                        key="country_production_tech_research_speed_mult";
+                    else if(research.discipline=="society")
+                        key="country_society_tech_research_speed_mult";
+                    else if(research.discipline=="spread")
+                        key="country_tech_spread_mult";
+                    if(!key.empty()) {
+                        const auto bonus=phaseb::add_checked(
+                            c.p2_modifier_ppm(country,key),
+                            c.p3_trait_modifier_ppm(country,key));
+                        const auto ppm=std::clamp<std::int64_t>(
+                            1'000'000+bonus,0,2'000'000);
+                        budget=phaseb::add_checked(
+                            phaseb::mul_checked(budget/1'000'000,ppm),
+                            phaseb::mul_checked(budget%1'000'000,ppm)/1'000'000);
+                    }
+                }
+                const Quantity n=std::min({budget,
                     p.required_evidence-p.verified_work,cap-used,
                     material/p.material_per_work,
                     static_cast<Quantity>(labor/p.workers_per_work),
@@ -1485,8 +1644,8 @@ public:
         for(const auto& election:decisions.elections) {
             if(date.year!=election.year||date.month!=election.month||date.day!=election.day)continue;
             plan[9].push_back([election](phasegh::Stage& gh){
-                const auto& registered=gh.phase_c().p4_contests();
-                for(const auto& [id,contest]:registered) {
+                const auto& registered_contests=gh.phase_c().p4_contests();
+                for(const auto& [id,contest]:registered_contests) {
                     (void)id;
                     if(contest.country==election.country&&
                        contest.office==phasec::P4Office::legislature)
@@ -1536,6 +1695,16 @@ public:
                              (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 switch(order.action) {
+                    case LegislativeAction::sign:
+                        c.p2_sign_bill(order.bill_id,order.head,today);break;
+                    case LegislativeAction::veto:
+                        c.p2_veto_bill(order.bill_id,order.head,today);break;
+                    case LegislativeAction::override_veto:
+                        c.p2_override_veto(order.bill_id,
+                           order.supporting_parties,
+                           order.upper_supporting_parties,today);break;
+                    case LegislativeAction::withdraw:
+                        c.p2_cancel_bill(order.bill_id,today);break;
                     case LegislativeAction::introduce:
                         c.p2_submit_bill(order.bill,today);
                         break;
@@ -1570,6 +1739,14 @@ public:
                 gh.phase_c().p4_schedule_term_amendment(
                     reform.amendment,reform.proposer,
                     reform.supporting_parties,today);
+            });
+        }
+        for(const auto& motion:decisions.no_confidence_votes) {
+            if(date!=motion.decision_date)continue;
+            plan[9].push_back([motion,today=world_.day_index()]
+                              (phasegh::Stage& gh) {
+                gh.phase_c().p1_vote_no_confidence(
+                    motion.country,motion.supporting_parties,today);
             });
         }
         for(const auto& formation:decisions.government_formations) {
@@ -2046,11 +2223,42 @@ public:
         if(decisions.retire_bank_debt_after_wages)
             plan[8].push_back([](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
+                if(c.bankrupt_firms().empty())return;
+                // Country attribution uses existing physical establishments,
+                // not a second company registry. Unlocated estates retain
+                // legacy debt repayment, avoiding guessed jurisdiction.
+                std::map<std::string,std::string> estate_country;
+                std::set<std::string> multi_jurisdiction_estates;
+                for(const auto& [id,site]:c.facilities()) {
+                    (void)id;
+                    if(!c.bankrupt_firms().contains(site.owner))continue;
+                    const auto& sovereign=c.sovereignty(site.region);
+                    if(!c.has_government(sovereign)) {
+                        multi_jurisdiction_estates.insert(site.owner);
+                        continue;
+                    }
+                    const auto [it,new_owner]=
+                        estate_country.try_emplace(site.owner,sovereign);
+                    if(!new_owner&&it->second!=sovereign)
+                        multi_jurisdiction_estates.insert(site.owner);
+                }
+                for(const auto& owner:multi_jurisdiction_estates)
+                    estate_country.erase(owner);
                 for(const auto& [firm,day]:c.bankrupt_firms()) {
                     (void)day;
                     if(c.outstanding_worker_wages(firm)>0)continue;
                     Money affordable=std::min(c.outstanding_loan(firm),
                         std::max<Money>(0,c.phase_d_cash_available(firm)));
+                    if(affordable<=0)continue;
+                    if(const auto region=estate_country.find(firm);
+                       region!=estate_country.end()) {
+                        const auto ppm=c.p1_judiciary_view(region->second)
+                                         .enforceable_contract_ppm;
+                        affordable=phaseb::add_checked(
+                            phaseb::mul_checked(affordable/1'000'000,ppm),
+                            phaseb::mul_checked(affordable%1'000'000,ppm)/
+                                1'000'000);
+                    }
                     if(affordable<=0)continue;
                     for(const auto& [id,line]:gh.commerce().credit) {
                         if(affordable<=0)break;

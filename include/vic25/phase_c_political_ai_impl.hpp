@@ -2,6 +2,52 @@
 // National political AI issues ordinary lawful P1/P2 orders. It never
 // creates votes, changes laws directly, or invents legislative templates.
 namespace vic25::phasec {
+inline void IntegratedWorld::p2_propose_catalogue_reform(
+        const std::string& country,const std::string& domain,
+        const std::string& choice,const std::string& provenance,
+        std::int64_t today) {
+    require_stage({9});
+    ensure(!provenance.empty()&&today>=0&&
+           politics::catalogue().has(domain,choice)&&
+           governments_.contains(country),
+           "P2 autonomous reform needs an actual 1.15 law choice");
+    const P2BaseLaw* active=nullptr;
+    for(const auto& [slot,id]:p2_active_base_) {
+        const auto& law=p2_laws_.at(id);
+        if(law.country==country&&law.domain==domain&&
+           (law.scope.empty()||law.scope=="national")) {
+            active=&law;break;
+        }
+    }
+    ensure(active&&active->base_choice!=choice,
+           "P2 autonomous reform needs an existing different national law");
+    P2Bill bill;
+    bill.id="P2:auto:"+country+":"+domain+":"+
+            std::to_string(today);
+    bill.country=country;
+    bill.proposer=governments_.at(country).prime_minister;
+    bill.legal_basis=provenance;
+    const P2BaseLaw* templ=nullptr;
+    for(const auto& [id,law]:p2_laws_)
+        if(law.country==country&&law.domain==domain&&
+           law.base_choice==choice&&law.scope==active->scope&&
+           law.tier==active->tier) {
+            templ=&law;break;
+        }
+    if(templ)bill.proposed_base=*templ;
+    else {
+        // The catalogue is authoritative for a law choice and its native
+        // modifier lookup. Never transplant clauses of the *old* law.
+        bill.proposed_base=*active;
+        bill.proposed_base.base_choice=choice;
+        bill.proposed_base.clauses.clear();
+    }
+    bill.proposed_base.id=bill.id+":law";
+    bill.proposed_base.legal_basis=provenance;
+    for(auto& clause:bill.proposed_base.clauses)
+        clause.id=bill.proposed_base.id+":"+clause.id;
+    p2_submit_bill(std::move(bill),today);
+}
 inline void IntegratedWorld::p1_mark_player_country(
         const std::string& country,bool controlled) {
     ensure((stage_==-1&&commit_id_==0)||stage_==9,
@@ -45,6 +91,31 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
         agenda.last_review_day=today;
         agenda.last_election_day=latest_election;
         const auto order=p1_authority(country);
+        // AI may initiate a single real-bloc confidence vote when its cabinet
+        // has already lost the recorded chamber quorum. No individual MPs
+        // or extra parliamentary point ledger are created.
+        if(order.assembly_confidence_required&&
+           !p1_coalitions_.at(country).caretaker&&
+           country_elections_.contains(country)&&
+           !p4_parliament_dissolved(country)) {
+            const auto& election=country_elections_.at(country);
+            const auto& ruling=p1_coalitions_.at(country).ruling_parties;
+            People loyal_seats=0,opposition_seats=0;
+            std::vector<std::string> opposition;
+            for(const auto& [party,seats]:election.seats) {
+                if(std::find(ruling.begin(),ruling.end(),party)!=ruling.end())
+                    loyal_seats=phaseb::add_checked(loyal_seats,seats);
+                else if(seats>0) {
+                    opposition.push_back(party);
+                    opposition_seats=phaseb::add_checked(opposition_seats,seats);
+                }
+            }
+            if(loyal_seats<g.quorum&&
+               opposition_seats>election.total_seats/2) {
+                p1_vote_no_confidence(country,opposition,today);
+                events_.push_back("p1-ai-recorded-no-confidence:"+country);
+            }
+        }
         // Respond to a real warning using an affordable P1 mandate, rather
         // than increasing governmental clout or manufacturing loyalists.
         for(const auto& [crisis_id,crisis]:p5_crises_) {
@@ -56,8 +127,8 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
             for(const auto& [id,m]:p1_mandates_) {
                 (void)id;
                 if(m.country==country&&m.target==crisis.movement&&
-                   m.active&&(m.kind==P1MandateKind::bolster_movement||
-                             m.kind==P1MandateKind::suppress_movement))
+                   m.active&&(m.kind==P1PoliticalMandateKind::bolster_movement||
+                             m.kind==P1PoliticalMandateKind::suppress_movement))
                     ordered=true;
             }
             if(ordered||p1_authority_budget(country).available<200)continue;
@@ -68,12 +139,12 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 if(std::find(ruling.begin(),ruling.end(),group)!=ruling.end())
                     governing_support=true;
             }
-            P1Mandate mandate;
+            P1PoliticalMandate mandate;
             mandate.id="P1:AI:crisis:"+crisis_id;
             mandate.country=country;mandate.target=crisis.movement;
             mandate.kind=governing_support?
-                P1MandateKind::bolster_movement:
-                P1MandateKind::suppress_movement;
+                P1PoliticalMandateKind::bolster_movement:
+                P1PoliticalMandateKind::suppress_movement;
             if(!p1_mandates_.contains(mandate.id)) {
                 p1_activate_mandate(std::move(mandate),today);
                 events_.push_back("p1-ai-lawful-political-movement-response:"+crisis_id);
@@ -116,11 +187,28 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 coalition.ruling_groups.erase(std::unique(
                     coalition.ruling_groups.begin(),
                     coalition.ruling_groups.end()),coalition.ruling_groups.end());
-                // Retain an actual incumbent PM instead of inventing a person.
-                schedule_p1_cabinet_daily(country,g.head_of_state,
-                    g.prime_minister,std::move(coalition),today+1,
-                    "ai-lawful-confidence-coalition");
-                events_.push_back("p1-ai-parliamentary-coalition:"+country);
+                // An ousted cabinet cannot reappoint itself; prefer a
+                // registered and POP-anchored party head as successor.
+                std::string successor;
+                if(!p1_lost_confidence_.contains(country)&&
+                   coalition.ruling_parties==
+                       p1_coalitions_.at(country).ruling_parties)
+                    successor=g.prime_minister;
+                if(successor.empty())
+                    for(const auto& party:coalition.ruling_parties) {
+                        const auto& candidate=p4_parties_.at(party).head_candidate;
+                        if(!candidate.empty()&&candidate!=g.prime_minister&&
+                           person_anchors_.contains(candidate)&&
+                           p1_character_available(candidate)) {
+                            successor=candidate;break;
+                        }
+                    }
+                if(!successor.empty()) {
+                    schedule_p1_cabinet_daily(country,g.head_of_state,
+                        successor,std::move(coalition),today+1,
+                        "ai-lawful-confidence-coalition");
+                    events_.push_back("p1-ai-parliamentary-coalition:"+country);
+                }
             }
         }
         // A passed three-phase process still requires lawful chamber votes.
@@ -131,6 +219,65 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 bill.status!=P2BillStatus::approved))continue;
             pending_enactment=true;
             if(bill.status==P2BillStatus::approved) {
+                if(p1_legislative_powers(country).veto!=P1VetoRule::none&&
+                   p2_assents_.contains(bill_id)) {
+                    const auto& assent=p2_assents_.at(bill_id);
+                    if(assent.vetoed&&!assent.overridden) {
+                        const auto powers=p1_legislative_powers(country);
+                        if(powers.veto!=P1VetoRule::suspensive||
+                           !country_elections_.contains(country)||
+                           p4_parliament_dissolved(country))continue;
+                        const auto& chamber=country_elections_.at(country);
+                        const auto& ruling=p1_coalitions_.at(country).ruling_parties;
+                        const auto required=[&](People seats)->People {
+                            return static_cast<People>(
+                                (static_cast<std::uint64_t>(seats)*
+                                 powers.override_ppm+999'999)/1'000'000);
+                        };
+                        bool enough=true;
+                        for(const auto& party:ruling)
+                            if(!chamber.seats.contains(party))enough=false;
+                        if(!enough||coalition_seats(ruling,chamber)<
+                           required(chamber.total_seats))continue;
+                        std::vector<std::string> senate_support;
+                        if(p1_constitution(country).legislature==
+                           P1LegislatureKind::bicameral) {
+                            if(!p2_upper_chambers_.contains(country))continue;
+                            const auto senate_id=p2_upper_chambers_.at(country);
+                            if(!p4_nonparliament_results_.contains(senate_id))continue;
+                            const auto& upper=p4_nonparliament_results_.at(senate_id);
+                            People senate_votes=0;
+                            for(const auto& party:ruling)
+                                if(upper.seats.contains(party)) {
+                                    senate_support.push_back(party);
+                                    senate_votes=phaseb::add_checked(
+                                        senate_votes,upper.seats.at(party));
+                                }
+                            if(senate_votes<required(p4_contests_.at(senate_id).seats))
+                                continue;
+                        }
+                        p2_override_veto(bill_id,ruling,senate_support,today);
+                    }
+                    if(!assent.signed_by_head&&!assent.overridden) {
+                        const auto character=p1_characters_.find(g.head_of_state);
+                        const auto domain=bill.action==
+                            P2BillAction::enact_or_replace_base?
+                            bill.proposed_base.domain:std::string{};
+                        const auto desired=bill.action==
+                            P2BillAction::enact_or_replace_base?
+                            bill.proposed_base.base_choice:std::string{};
+                        bool opposes=false;
+                        if(character!=p1_characters_.end()&&
+                           character->second.active) {
+                            const auto preference=character->second.law_preferences.find(domain);
+                            opposes=preference!=character->second.law_preferences.end()&&
+                                    preference->second!=desired;
+                        }
+                        if(opposes)p2_veto_bill(bill_id,g.head_of_state,today);
+                        else p2_sign_bill(bill_id,g.head_of_state,today);
+                        if(opposes)continue;
+                    }
+                }
                 p2_promulgate_bill(bill_id,g.head_of_state,today);
                 events_.push_back("p1-ai-legal-promulgation:"+bill_id);
                 continue;
@@ -197,6 +344,8 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
             if(p1_constitution(country).legislature==
                P1LegislatureKind::bicameral)
                 p2_approve_upper_bill(bill_id,upper_votes);
+            if(p1_legislative_powers(country).veto!=P1VetoRule::none)
+                p2_sign_bill(bill_id,g.head_of_state,today);
             p2_promulgate_bill(bill_id,g.head_of_state,today);
             events_.push_back("p1-ai-actual-bill-approved:"+bill_id);
         }
@@ -212,46 +361,78 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                               v.activism_ppm/2;
             if(weight>highest) {highest=weight;target=id;}
         }
-        if(!target.empty()&&p1_legitimacy(country).score>=25) {
+        // Without a formal movement, governing interest groups still
+        // advocate real law preferences through their measured clout.
+        std::string reform_domain,reform_choice,provenance;
+        if(!target.empty()) {
             const auto& m=p3_movements_.at(target);
+            reform_domain=m.issue_domain;
+            reform_choice=m.desired_choice;
+            provenance="ai-response-to:"+target;
+        } else {
+            std::int64_t best=0;
+            const auto& ruling=p1_coalitions_.at(country).ruling_groups;
+            for(const auto& [key,group]:p3_groups_) {
+                if(key.first!=country||
+                   std::find(ruling.begin(),ruling.end(),key.second)==ruling.end())
+                    continue;
+                const auto desired=p1_group_legal_preference(group);
+                if(desired.empty()||!politics::catalogue().has(
+                        group.issue_domain,desired))continue;
+                const auto view=p3_group_view(country,key.second);
+                if(view.members<=0||view.clout_ppm<=best)continue;
+                best=view.clout_ppm;
+                reform_domain=group.issue_domain;
+                reform_choice=desired;
+                provenance="ai-governing-ig:"+key.second;
+            }
+        }
+        if(!reform_domain.empty()&&p1_legitimacy(country).score>=25) {
             for(const auto& [slot,id]:p2_active_base_) {
                 const auto& current=p2_laws_.at(id);
                 if(current.country!=country||
-                   current.domain!=m.issue_domain||
-                   current.base_choice==m.desired_choice)continue;
+                   current.domain!=reform_domain||
+                   current.base_choice==reform_choice)continue;
                 bool busy=false;
                 for(const auto& [other_id,other]:p2_bills_)
                     if(other.country==country&&
                        other.action==P2BillAction::enact_or_replace_base&&
-                       other.proposed_base.domain==m.issue_domain&&
+                       other.proposed_base.domain==reform_domain&&
                        other.status!=P2BillStatus::rejected&&
                        other.status!=P2BillStatus::effective)
                         busy=true;
                 if(busy)break;
-                P2Bill bill;
-                bill.id="AI:bill:"+country+":"+std::to_string(today);
-                bill.country=country;
-                bill.proposer=g.prime_minister;
-                bill.legal_basis="ai-response-to:"+target;
-                bill.proposed_base=current; // preserve actual clause effects
-                bill.proposed_base.id=bill.id+":norm";
-                bill.proposed_base.base_choice=m.desired_choice;
-                bill.proposed_base.legal_basis=bill.legal_basis;
-                for(auto& clause:bill.proposed_base.clauses)
-                    clause.id=bill.proposed_base.id+":"+clause.id;
-                const auto key=bill.country+":"+
-                    std::to_string(static_cast<int>(bill.action))+":"+
-                    bill.proposed_base.domain+":"+
-                    bill.proposed_base.scope+":"+
-                    bill.proposed_base.base_choice;
-                if(!p2_retry_after_.contains(key)||
-                   p2_retry_after_.at(key)<=today) {
-                    const auto bill_id=bill.id;
-                    p2_submit_bill(std::move(bill),today);
-                    agenda.last_bill_id=bill_id;
-                    agenda.last_reform_choice=m.desired_choice;
-                    events_.push_back("p1-ai-proposed-political-law:"+bill_id);
+                const auto& catalog=politics::catalogue();
+                if(!catalog.has(reform_domain,reform_choice))break;
+                bool prohibited=false;
+                const auto proposed=politics::bare_law(reform_choice);
+                for(const auto& [other_slot,other_id]:p2_active_base_) {
+                    (void)other_slot;
+                    const auto& other=p2_laws_.at(other_id);
+                    if(other.country!=country||
+                       other.domain==reform_domain)continue;
+                    const auto current_choice=politics::bare_law(
+                        other.base_choice);
+                    if((catalog.disallowed.contains(proposed)&&
+                        catalog.disallowed.at(proposed).contains(current_choice))||
+                       (catalog.disallowed.contains(current_choice)&&
+                        catalog.disallowed.at(current_choice).contains(proposed)))
+                        prohibited=true;
                 }
+                if(prohibited)break;
+                const auto key=country+":"+
+                    std::to_string(static_cast<int>(
+                        P2BillAction::enact_or_replace_base))+":"+
+                    reform_domain+":"+current.scope+":"+reform_choice;
+                if(p2_retry_after_.contains(key)&&
+                   p2_retry_after_.at(key)>today)break;
+                const auto bill_id="P2:auto:"+country+":"+
+                    reform_domain+":"+std::to_string(today);
+                p2_propose_catalogue_reform(country,reform_domain,
+                    reform_choice,provenance,today);
+                agenda.last_bill_id=bill_id;
+                agenda.last_reform_choice=reform_choice;
+                events_.push_back("p1-ai-proposed-political-law:"+bill_id);
                 break;
             }
         }

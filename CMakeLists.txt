@@ -381,6 +381,13 @@ if(BUILD_TESTING)
     add_test(NAME vic25_p2_advanced_tests COMMAND vic25_p2_advanced_tests)
 endif()
 
+# P1/P2 compact legislative confidence and law-projected judicial enforcement.
+if(BUILD_TESTING)
+    add_executable(vic25_p1_judiciary_tests tests/test_p1_legislature_judiciary.cpp)
+    target_link_libraries(vic25_p1_judiciary_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p1_judiciary_tests COMMAND vic25_p1_judiciary_tests)
+endif()
+
 # P3 and P5 opt-in daily politics: POP attitudes, institutional interest-group
 # clout, movements, actual one-day strikes, unrest and army-backed civil cases.
 if(BUILD_TESTING)
@@ -396,4 +403,49 @@ if(BUILD_TESTING)
     add_executable(vic25_p5_guerrilla_tests tests/test_p5_guerrilla.cpp)
     target_link_libraries(vic25_p5_guerrilla_tests PRIVATE vic25_core)
     add_test(NAME vic25_p5_guerrilla_tests COMMAND vic25_p5_guerrilla_tests)
+endif()
+
+
+# Victoria 3 1.15-style shared content runtime: events, decisions, scripted
+# journal outcomes, country formation and lossless native daily save/rollback.
+if(BUILD_TESTING)
+    add_executable(vic25_content_tests tests/test_content.cpp)
+    target_link_libraries(vic25_content_tests PRIVATE vic25_core)
+    add_test(NAME vic25_content_tests COMMAND vic25_content_tests)
+    set_tests_properties(vic25_content_tests PROPERTIES TIMEOUT 180)
+endif()
+
+# Bounded JSON content rulesets: no runtime scripting engine or shadow ledgers.
+if(BUILD_TESTING)
+    add_executable(vic25_content_json_tests tests/test_content_json.cpp)
+    target_link_libraries(vic25_content_json_tests PRIVATE vic25_core)
+    target_compile_definitions(vic25_content_json_tests PRIVATE VIC25_SOURCE_ROOT=\"${CMAKE_SOURCE_DIR}\")
+    add_test(NAME vic25_content_json_tests COMMAND vic25_content_json_tests)
+    set_tests_properties(vic25_content_json_tests PROPERTIES TIMEOUT 120)
+endif()
+
+# Actual day-native POP legal hazards and source modifier effects.
+if(BUILD_TESTING)
+    add_executable(vic25_politics_domain_tests tests/test_politics_domain.cpp)
+    target_link_libraries(vic25_politics_domain_tests PRIVATE vic25_core)
+    add_test(NAME vic25_politics_domain_tests COMMAND vic25_politics_domain_tests)
+    set_tests_properties(vic25_politics_domain_tests PROPERTIES TIMEOUT 180)
+endif()
+
+# P2/P3/P1: Victoria 3 wiki-informed legal catalogue, ideology preferences,
+# real organization-backed clout, service access, and coalition legitimacy.
+if(BUILD_TESTING)
+    add_executable(vic25_politics_catalog_tests tests/test_politics_catalog.cpp)
+    target_link_libraries(vic25_politics_catalog_tests PRIVATE vic25_core)
+    add_test(NAME vic25_politics_catalog_tests COMMAND vic25_politics_catalog_tests)
+    set_tests_properties(vic25_politics_catalog_tests PROPERTIES TIMEOUT 180)
+endif()
+
+# Sourced 1.13.11 law/ideology modifiers and source-qualified 1.15-policy
+# migration, citizenship, real emancipation and native snapshot integrity.
+if(BUILD_TESTING)
+    add_executable(vic25_politics_identity_tests tests/test_politics_identity.cpp)
+    target_link_libraries(vic25_politics_identity_tests PRIVATE vic25_core)
+    add_test(NAME vic25_politics_identity_tests COMMAND vic25_politics_identity_tests)
+    set_tests_properties(vic25_politics_identity_tests PROPERTIES TIMEOUT 180)
 endif()

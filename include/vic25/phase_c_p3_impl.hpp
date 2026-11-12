@@ -34,6 +34,110 @@ inline void IntegratedWorld::p3_seed_group(P3Group group) {
     p3_groups_.emplace(key,std::move(group));
 }
 
+inline void IntegratedWorld::p3_set_ideologies(
+        const std::string& country,const std::string& group,
+        std::vector<std::string> ideologies) {
+    ensure((stage_==-1&&commit_id_==0)||stage_==9,
+           "P3 ideologies can change only at opening or politics stage");
+    ensure(p3_groups_.contains({country,group})&&!ideologies.empty()&&
+           ideologies.size()<=8,"P3 missing interest-group ideology authority");
+    std::set<std::string> unique;
+    for(const auto& ideology:ideologies)
+        ensure(politics::catalogue().knows_ideology(ideology)&&
+               unique.insert(ideology).second,
+               "P3 unsupported or duplicate political ideology");
+    p3_ideology_overrides_[{country,group}]=std::move(ideologies);
+    events_.push_back("p3-ideological-group-profile-changed:"+country+":"+group);
+}
+inline void IntegratedWorld::p3_set_leader_ideology(
+        const std::string& country,const std::string& group,
+        const std::string& ideology) {
+    ensure((stage_==-1&&commit_id_==0)||stage_==9,
+           "P3 leader ideology changes require political stage");
+    const auto it=p3_groups_.find({country,group});
+    ensure(it!=p3_groups_.end()&&!it->second.leader_anchor.empty()&&
+           person_anchors_.contains(it->second.leader_anchor)&&
+           politics::catalogue().knows_ideology(ideology),
+           "P3 political leader ideology must bind existing named person");
+    p3_leader_ideologies_[{country,group}]=ideology;
+    events_.push_back("p3-named-leader-ideology-changed:"+country+":"+group);
+}
+inline std::vector<std::string> IntegratedWorld::p3_ideologies(
+        const std::string& country,const std::string& group)const {
+    const auto& profile=p3_groups_.at({country,group});
+    if(auto it=p3_ideology_overrides_.find({country,group});
+       it!=p3_ideology_overrides_.end())return it->second;
+    return politics::default_ideologies(profile.type);
+}
+inline std::optional<int> IntegratedWorld::p3_law_stance(
+        const std::string& country,const std::string& group,
+        const std::string& law_group,const std::string& law)const {
+    if(!politics::catalogue().has(law_group,law))return std::nullopt;
+    int sum=0,weight=0;
+    for(const auto& ideology:p3_ideologies(country,group)) {
+        if(const auto stance=politics::catalogue().stance(
+               ideology,law_group,law)) {
+            sum+=*stance;
+            ++weight;
+        }
+    }
+    if(const auto leader=p3_leader_ideologies_.find({country,group});
+       leader!=p3_leader_ideologies_.end()) {
+        if(const auto stance=politics::catalogue().stance(
+               leader->second,law_group,law)) {
+            sum+=2*(*stance);
+            weight+=2;
+        }
+    }
+    if(!weight)return std::nullopt;
+    return std::clamp(sum/weight,-2,2);
+}
+
+inline P2PoliticalSupportView IntegratedWorld::p2_political_support(
+        const std::string& country,const std::string& law_group,
+        const std::string& proposed_law)const {
+    const auto group=politics::bare_group(law_group);
+    const auto proposed=politics::bare_law(proposed_law);
+    ensure(politics::catalogue().has(group,proposed)&&
+           governments_.contains(country),
+           "P2 legislative support requires known national proposed law");
+    P2PoliticalSupportView view{country,group,proposed};
+    const auto adopted=p2_selected_law(country,group);
+    std::int64_t total=0,support=0,oppose=0,governing=0;
+    const auto coalition=p1_coalitions_.find(country);
+    for(const auto& [key,profile]:p3_groups_) {
+        (void)profile;
+        if(key.first!=country)continue;
+        const auto weight=p3_group_view(country,key.second).clout_ppm;
+        if(weight<=0)continue;
+        total+=weight;
+        if(adopted&&*adopted==proposed)continue;
+        const auto current=adopted?
+            p3_law_stance(country,key.second,group,*adopted):
+            std::optional<int>{};
+        const auto candidate=p3_law_stance(
+            country,key.second,group,proposed);
+        if(!current&&!candidate)continue;
+        const auto delta=candidate.value_or(0)-current.value_or(0);
+        if(delta>0) {
+            support+=weight;
+            if(coalition!=p1_coalitions_.end()&&
+               std::find(coalition->second.ruling_groups.begin(),
+                         coalition->second.ruling_groups.end(),key.second)!=
+                         coalition->second.ruling_groups.end())
+                governing+=weight;
+        } else if(delta<0)oppose+=weight;
+    }
+    if(total>0) {
+        view.observed=true;
+        view.support_ppm=p3_fraction(support,total);
+        view.oppose_ppm=p3_fraction(oppose,total);
+        view.neutral_ppm=1'000'000-view.support_ppm-view.oppose_ppm;
+        view.governing_support_ppm=p3_fraction(governing,total);
+    }
+    return view;
+}
+
 inline void IntegratedWorld::p3_set_stance(
         Id slice,const std::string& issue,P3Stance stance) {
     ensure((stage_==-1&&commit_id_==0)||stage_==9,
@@ -86,6 +190,22 @@ inline P3GroupView IntegratedWorld::p3_group_view(
     P3GroupView view{country,group};
     People country_group_members=0;
     People affiliated_weight=0,group_weight=0;
+    const auto legal_modifiers=p2_active_modifiers(country);
+    const auto profession_strength=[&](const std::string& profession) {
+        const auto it=legal_modifiers.find(
+            "country_"+profession+"_pol_str_mult");
+        return it!=legal_modifiers.end()&&!it->second.boolean?
+            it->second.value_ppm:std::int64_t{0};
+    };
+    const auto scale=[&](People actual,std::int64_t multiplier_ppm){
+        ensure(multiplier_ppm>=0&&multiplier_ppm<=3'000'000,
+               "P3 legal political strength out of range");
+        const People whole=phaseb::mul_checked(
+            actual,multiplier_ppm/1'000'000);
+        const People fractional=p4_scaled(
+            actual,multiplier_ppm%1'000'000,1'000'000);
+        return phaseb::add_checked(whole,fractional);
+    };
     for(const auto& [key,n]:membership_) {
         if(n<=0||!people_.has_slice(key.first))continue;
         const auto organization=p3_groups_.find({country,key.second});
@@ -96,8 +216,21 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         if(nation==sovereignty_.end()||nation->second!=country)continue;
         // Organizational efficiency is applied to REAL affiliated people,
         // not minted into a separate political-point or membership ledger.
-        const People weighted=phaseb::add_checked(n,
+        const People organized=phaseb::add_checked(n,
              p4_scaled(n,organization->second.organization_ppm,1'000'000));
+        const auto legal_strength=p2_political_strength_ppm(
+            country,organization->second.type);
+        People weighted=scale(organized,legal_strength);
+        // Occupation-specific law modifiers and acceptance penalties apply
+        // only to the actual members of this living POP slice.
+        const auto& economic=people_.economic(
+            people_.slice(key.first).key.economic);
+        const auto occupational=std::clamp<std::int64_t>(
+            1'000'000+profession_strength(economic.profession),0,3'000'000);
+        weighted=scale(weighted,occupational);
+        if(const auto acceptance=p2_acceptance_effect(country,key.first))
+            weighted=scale(weighted,std::clamp<std::int64_t>(
+                acceptance->political_strength_ppm,0,3'000'000));
         affiliated_weight=phaseb::add_checked(affiliated_weight,weighted);
         if(key.second==group) {
             country_group_members=phaseb::add_checked(country_group_members,n);
@@ -136,6 +269,23 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         if(!current_choice.empty())
             approval=current_choice==preferred?75:30;
     }
+    // A group's live laws are evaluated through ideology preferences.
+    // The legacy single-issue preference remains a fallback for custom
+    // groups with no stance on any adopted catalogued law.
+    std::int64_t ideological_score=0,ideological_observations=0;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& adopted=p2_laws_.at(id);
+        if(adopted.country!=country)continue;
+        const auto stance=p3_law_stance(country,group,
+                         adopted.domain,adopted.base_choice);
+        if(!stance)continue;
+        ideological_score+=*stance;
+        ++ideological_observations;
+    }
+    if(ideological_observations>0)
+        approval=static_cast<int>(std::clamp<std::int64_t>(
+            50+12*ideological_score/ideological_observations,0,100));
     People members=0;
     std::int64_t sum_radical=0,sum_engagement=0;
     for(const auto& [key,n]:membership_) {
@@ -167,6 +317,111 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         std::clamp<std::int64_t>(sum_engagement,0,1'000'000));
     view.approval=std::clamp(approval-view.radical_ppm/20'000,0,100);
     return view;
+}
+
+inline std::vector<politics::IGEffect>
+IntegratedWorld::p3_active_traits(
+        const std::string& country,const std::string& group)const {
+    const auto& profile=p3_groups_.at({country,group});
+    const auto view=p3_group_view(country,group);
+    return politics::active_ig_effects(profile.type,view.approval,view.members);
+}
+inline std::int64_t IntegratedWorld::p3_trait_modifier_ppm(
+        const std::string& country,const std::string& effect_key)const {
+    ensure(governments_.contains(country),
+           "P3 IG trait requires existing sovereign government");
+    std::int64_t sum=0;
+    for(const auto& [key,profile]:p3_groups_) {
+        (void)profile;
+        if(key.first!=country)continue;
+        for(const auto& trait:p3_active_traits(key.first,key.second))
+            if(trait.modifier==effect_key)
+                sum=phaseb::add_checked(sum,trait.value_ppm);
+    }
+    return sum;
+}
+
+inline std::int64_t IntegratedWorld::p3_private_investment_bonus_ppm(
+        const std::string& country,const std::string& investor)const {
+    ensure(governments_.contains(country),"P3 investment needs real sovereign");
+    const auto cap=p3_trait_modifier_ppm(
+        country,"state_capitalists_investment_pool_efficiency_mult");
+    const auto arist=p3_trait_modifier_ppm(
+        country,"state_aristocrats_investment_pool_efficiency_mult");
+    if(cap==0&&arist==0)return 0;
+    const auto rate=[&](const std::string& holder)->std::int64_t {
+        const auto anchor=person_anchors_.find(holder);
+        if(anchor==person_anchors_.end()||
+           !people_.has_slice(anchor->second))return 0;
+        const auto row=people_.slice(anchor->second);
+        const auto& demographic=people_.demographic(row.key.demographic);
+        const auto sovereign=sovereignty_.find(demographic.region);
+        if(sovereign==sovereignty_.end()||sovereign->second!=country)return 0;
+        const auto& kind=people_.economic(row.key.economic).profession;
+        if(kind=="capitalist"||kind=="capitalists")return cap;
+        if(kind=="aristocrat"||kind=="aristocrats")return arist;
+        return 0;
+    };
+    const auto asset="company:"+investor;
+    if(!tracked_assets_.contains(asset))return rate(investor);
+    const auto holders=ownership_.holders(asset);
+    Money total=0;
+    for(const auto& [holder,units]:holders) {
+        (void)holder;
+        if(units>0)total=phaseb::add_checked(total,units);
+    }
+    if(total<=0)return 0;
+    std::int64_t weighted=0;
+    for(const auto& [holder,units]:holders) {
+        if(units<=0)continue;
+        const auto contribution=rate(holder);
+        if(contribution==0)continue;
+        const auto fraction=p3_fraction(units,total);
+        weighted=phaseb::add_checked(weighted,
+            phaseb::mul_checked(contribution,fraction)/1'000'000);
+    }
+    return weighted;
+}
+
+inline std::pair<Id,People> IntegratedWorld::p3_activate_working_adults(
+        Id source,People wanted) {
+    require_stage({2});
+    if(wanted<=0||!people_.has_slice(source))return {0,0};
+    const auto source_row=people_.slice(source);
+    if(source_row.count<=1||people_.employed(source)>0||
+       assigned(source)>0)return {0,0};
+    const auto& dem=people_.demographic(source_row.key.demographic);
+    const auto juris=sovereignty_.find(dem.region);
+    if(juris==sovereignty_.end()||
+       !governments_.contains(juris->second))return {0,0};
+    const auto& econ=people_.economic(source_row.key.economic);
+    if(econ.livelihood!="inactive"||
+       !people_.eligible_for(source,phaseb::JobRequirements{}))
+        return {0,0};
+    // Never split a cohort whose organization or named actual persons could
+    // become detached. All new workers come from unassigned real persons.
+    for(const auto& [key,members]:membership_)
+        if(key.first==source&&members>0)return {0,0};
+    if(anchor_counts_.contains(source)&&anchor_counts_.at(source)>0)
+        return {0,0};
+    const auto effect=p3_trait_modifier_ppm(
+        juris->second,"state_working_adult_ratio_add");
+    if(effect<=0)return {0,0};
+    const auto fraction=std::clamp<std::int64_t>(
+        effect,0,1'000'000);
+    const People permitted=std::min(
+        wanted,p4_scaled(source_row.count,fraction,1'000'000));
+    if(permitted<=0||permitted>=source_row.count)return {0,0};
+    const Id separated=people_.split_partition(source,permitted,0);
+    auto working=people_.economic(
+        people_.slice(separated).key.economic);
+    working.profession="worker";
+    working.livelihood="wage";
+    working.labor_class="employee";
+    const Id reclassified=people_.reclassify_economic(
+        separated,permitted,working,0);
+    events_.push_back("p3-verified-adult-labor-participation");
+    return {reclassified,permitted};
 }
 
 inline P3MovementView IntegratedWorld::p3_movement_view(
@@ -293,6 +548,22 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
                 candidates.insert(id);
         }
     }
+    // Freeze the IG hostility modifiers BEFORE updating any population
+    // attitudes; an IG's approval can depend on those same attitudes.
+    // This avoids same-day order dependence and never creates a parallel
+    // radical population ledger.
+    std::map<std::string,std::array<std::int64_t,3>> hostility;
+    for(const auto& [country,government]:governments_) {
+        (void)government;
+        if(p3_groups_.empty())break;
+        hostility.emplace(country,std::array<std::int64_t,3>{{
+            p3_trait_modifier_ppm(country,
+                "state_radicalism_increases_violent_hostility_mult"),
+            p3_trait_modifier_ppm(country,
+                "state_radicalism_increases_cultural_erasure_mult"),
+            p3_trait_modifier_ppm(country,
+                "state_radicalism_increases_open_prejudice_mult")}});
+    }
     // Unaffiliated, unshocked POPs keep their aggregate existing profile.
     // One national movement cannot allocate millions of duplicate, mostly
     // neutral per-slice records on every tick. Explicit issue opinions and
@@ -319,8 +590,33 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
              p3_fraction(shortage,row.count):0;
         // Both changes use actually observed economic conditions. Political
         // memory evolves gradually, not a fixed trait of religion/culture.
-        const std::int64_t pressure=static_cast<std::int64_t>(
+        std::int64_t pressure=static_cast<std::int64_t>(
             unemployment)/400+scarcity/250;
+        // An actual source-qualified discriminatory law/POP identity
+        // increases *existing observed* hardship-driven radicalisation.
+        // A missing culture/religion source is Unsupported rather than
+        // automatically assuming hostile or full acceptance.
+        if(pressure>0) {
+            const auto nation=sovereignty_.find(dem.region);
+            if(nation!=sovereignty_.end()) {
+                const auto rules=hostility.find(nation->second);
+                const auto acceptance=p2_acceptance(nation->second,id);
+                if(rules!=hostility.end()&&acceptance) {
+                    const auto level=acceptance->level;
+                    int index=-1;
+                    if(level==P2AcceptanceLevel::violent_hostility)index=0;
+                    else if(level==P2AcceptanceLevel::cultural_erasure)index=1;
+                    else if(level==P2AcceptanceLevel::open_prejudice)index=2;
+                    if(index>=0) {
+                        const auto factor=std::clamp<std::int64_t>(
+                            1'000'000+rules->second.at(
+                                static_cast<std::size_t>(index)),
+                            0,2'000'000);
+                        pressure=phaseb::mul_checked(pressure,factor)/1'000'000;
+                    }
+                }
+            }
+        }
         const std::int64_t relief=(employed>0?900:250)+
                                     (scarcity==0?200:0);
         attitude.radical_ppm=static_cast<std::int32_t>(

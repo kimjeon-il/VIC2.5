@@ -6,9 +6,15 @@
 // separate future modules (see docs/phase-c/integration/).
 #include "vic25/phase_b.hpp"
 #include "vic25/phase_c_p1.hpp"
+#include "vic25/phase_c_judiciary.hpp"
+#include "vic25/phase_c_p1_capacities.hpp"
+#include "vic25/phase_c_economic_statistics.hpp"
 #include "vic25/phase_c_p4.hpp"
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
+#include "vic25/phase_c_politics_catalog.hpp"
+#include "vic25/phase_c_politics_identity.hpp"
+#include "vic25/phase_c_politics_acceptance_rules.hpp"
 #include "vic25/phase_c_p5.hpp"
 #include "vic25/phase_c_characters.hpp"
 #include "vic25/phase_c_political_ai.hpp"
@@ -510,6 +516,30 @@ public:
                actors_.contains(seller) && actors_.contains(buyer) &&
                buyer != seller && shares(asset, seller) >= units &&
                cash(buyer) >= units, "invalid security transfer");
+        // Apply actual enacted command ownership law only when the share
+        // registry is demonstrably bound to a physical firm and one
+        // unambiguous sovereign jurisdiction. Unbound securities remain
+        // governed by the existing ownership ledger, never guessed.
+        if(asset.rfind("company:",0)==0) {
+            const auto firm=asset.substr(8);
+            std::string sovereign;
+            for(const auto& [site_id,site]:facilities_) {
+                (void)site_id;
+                if(site.owner!=firm)continue;
+                const auto juris=sovereignty_.find(site.region);
+                if(juris==sovereignty_.end())continue;
+                ensure(sovereign.empty()||sovereign==juris->second,
+                       "P2 multinational title transfer needs legal allocation");
+                sovereign=juris->second;
+            }
+            if(!sovereign.empty()&&
+               p2_selected_law(sovereign,"economic_system")==
+                   std::optional<std::string>("command_economy")) {
+                ensure(has_country_treasury(sovereign)&&
+                       buyer==country_treasury(sovereign),
+                       "P2 command-economy corporate titles require state buyer");
+            }
+        }
         ensure_security_account(buyer, asset);
         ownership_.transfer(asset, seller, buyer, units);
         money_.post({unique("share-sale"), "share ownership and cash swap", {
@@ -539,11 +569,26 @@ public:
             resources_.assert_cash_available(d.payer,d.amount,cash(d.payer));
         ensure(d.due <= month() && cash(d.payer) >= d.amount,
                "dividend not yet due or unfunded");
-        money_.post({unique("dividend"), "dividend settles shareholder payable", {
-            {account(d.payer, "capital"), d.amount, 0},
-            {account(d.payer, "cash"), 0, d.amount},
-            {account(holder, "cash"), d.amount, 0},
-            {account(holder, "revenue"), 0, d.amount}}});
+        Money paid=d.amount;
+        // The unfunded fraction of a government dividend stays as the
+        // firm's actual retained capital, never a fictional transfer.
+        for(const auto& [country,government]:governments_) {
+            (void)government;
+            if(!has_country_treasury(country)||
+               country_treasury(country)!=holder)continue;
+            const auto admin=p1_bureaucracy(country);
+            if(admin.capacity.complete)
+                paid=phaseb::mul_checked(d.amount,
+                    1'000'000-admin.dividend_waste_ppm)/1'000'000;
+            break;
+        }
+        if(paid>0)
+            money_.post({unique("dividend"),
+                "net shareholder dividend after administrative waste", {
+                {account(d.payer, "capital"), paid, 0},
+                {account(d.payer, "cash"), 0, paid},
+                {account(holder, "cash"), paid, 0},
+                {account(holder, "revenue"), 0, paid}}});
         dividends_.erase(id);
         events_.push_back("dividend-paid");
     }
@@ -866,6 +911,8 @@ public:
             resources_.record_stage4_output({actor,region,good},qty);
             tracked_goods_.insert(good);
         }
+        p1_observe_value_added("phase-d-input-output-production",
+                               region,inputs,outputs);
         events_.push_back("phase-d-input-output-production");
     }
     // A nonrenewable/renewable resource lot is emitted only after Phase D
@@ -882,6 +929,8 @@ public:
         goods_.produce({holder,region,good},qty);
         resources_.record_stage4_output({holder,region,good},qty);
         tracked_goods_.insert(good);
+        p1_observe_value_added("phase-d-extraction:"+deposit_id,
+                               region,{},{{good,qty}});
         events_.push_back("phase-d-verified-extraction:"+deposit_id);
     }
     // Cash-settled pilot path only: a verified cost was already paid via
@@ -1074,6 +1123,8 @@ public:
                (moving_shares==0||(tracked_assets_.contains(asset) &&
                 shares(asset,old_owner)>=moving_shares)),
                "invalid explicit migration and ownership allocation");
+        ensure(p2_migration_permitted(source,destination_region),
+               "P2 migration law, serfdom or citizenship restrictions");
         const Id arrived=people_.migrate(source,count,destination_region,destination_household,0);
         if(moving_cash) {
             if(phase_d_reservation_mode_)
@@ -1454,7 +1505,7 @@ public:
     void p1_register_political_character(PoliticalCharacter);
     void p1_mark_player_country(const std::string&,bool);
     [[nodiscard]] P1AuthorityBudget p1_authority_budget(const std::string&)const;
-    void p1_activate_mandate(P1Mandate,std::int64_t);
+    void p1_activate_mandate(P1PoliticalMandate,std::int64_t);
     [[nodiscard]] std::int32_t p1_region_decree_bonus_ppm(
         const std::string&,const std::string&,P1DecreeKind)const;
     void p1_deactivate_mandate(const std::string&);
@@ -1478,6 +1529,18 @@ public:
     [[nodiscard]] const std::map<std::string,PoliticalCharacter>&
            p1_characters()const{return p1_characters_;}
     void p3_set_stance(Id,const std::string&,P3Stance);
+    // Data-driven ideological profiles may be changed on the lawful
+    // political stage. The named leader must be an existing PersonAnchor;
+    // neither method manufactures new politicians or political headcount.
+    void p3_set_ideologies(const std::string&,const std::string&,
+                          std::vector<std::string>);
+    void p3_set_leader_ideology(const std::string&,const std::string&,
+                               const std::string&);
+    [[nodiscard]] std::vector<std::string> p3_ideologies(
+        const std::string&,const std::string&)const;
+    [[nodiscard]] std::optional<int> p3_law_stance(
+        const std::string&,const std::string&,
+        const std::string&,const std::string&)const;
     [[nodiscard]] const std::map<Id,P3Attitude>& p3_attitudes()const {
         return p3_attitudes_;
     }
@@ -1488,6 +1551,19 @@ public:
     }
     [[nodiscard]] P3GroupView p3_group_view(
         const std::string&,const std::string&)const;
+    [[nodiscard]] std::int64_t p3_trait_modifier_ppm(
+        const std::string& country,const std::string& effect_key)const;
+    // Derived from real registered personal investors or the actual company
+    // share ledger. No virtual investment pool, contributions or currency.
+    [[nodiscard]] std::int64_t p3_private_investment_bonus_ppm(
+        const std::string& country,const std::string& investor)const;
+    // Activates a bounded share of *existing* inactive adult POP only when
+    // real vacancies and a country with the IG participation trait exist.
+    // Returns the real new Phase B slice and its reclassified headcount.
+    [[nodiscard]] std::pair<Id,People> p3_activate_working_adults(
+        Id source,People wanted);
+    [[nodiscard]] std::vector<politics::IGEffect> p3_active_traits(
+        const std::string& country,const std::string& group)const;
     [[nodiscard]] P3MovementView p3_movement_view(const std::string&)const;
     [[nodiscard]] bool p3_needs_daily_tick()const;
     void p3_daily_react(std::int64_t);
@@ -1508,6 +1584,7 @@ public:
     [[nodiscard]] bool p5_needs_daily_tick()const;
     void p5_daily_advance(std::int64_t);
     void p5_auto_prepare_revolutions(std::int64_t);
+    void p5_auto_resolve_crises(std::int64_t);
     [[nodiscard]] bool p5_has_due_daily_strike(std::int64_t)const;
     void phase_time_apply_p5_strikes(std::int64_t);
     void p5_perform_action(P5CollectiveAction);
@@ -1629,7 +1706,54 @@ public:
     [[nodiscard]] const P1Coalition& p1_coalition(const std::string&)const;
     [[nodiscard]] P1AuthorityView p1_authority(const std::string&)const;
     void seed_p1_coalition(const std::string&,P1Coalition);
+    void p1_vote_no_confidence(const std::string&,
+                               const std::vector<std::string>&,std::int64_t);
+    [[nodiscard]] P1JudiciaryView p1_judiciary_view(
+        const std::string&)const;
+    void p1_observe_legal_disputes(std::int64_t);
     [[nodiscard]] P1LegitimacyView p1_legitimacy(const std::string&)const;
+    // National capacities derive from enacted laws, actual organizations and
+    // ongoing policy commitments; they are never spendable financial stocks.
+    [[nodiscard]] P1FlowCapacity p1_authority_capacity(
+        const std::string&)const;
+    [[nodiscard]] P1AuthorityConsequences p1_authority_consequences(
+        const std::string&)const;
+    [[nodiscard]] std::int64_t p1_local_decree_ppm(
+        const std::string&,const std::string&,const std::string&)const;
+    void p1_schedule_mandate(P1Mandate,const std::string&,std::int64_t);
+    void p1_schedule_mandate_termination(
+        const std::string&,const std::string&,const std::string&,
+        std::int64_t);
+    void phase_time_apply_p1_mandates(std::int64_t);
+    [[nodiscard]] const std::map<std::string,P1Mandate>&
+        p1_active_mandates()const{return p1_active_mandates_;}
+    void p1_record_standing(P1StandingEvidence);
+    void p1_register_ship(P1NavalHull);
+    void p1_register_army_rating(P1ArmyRating);
+    void p1_set_navy_inventory_verified(const std::string&,bool);
+    void p1_retire_ship(const std::string&);
+    [[nodiscard]] P1MilitaryPowerView p1_military_power(
+        const std::string&)const;
+    [[nodiscard]] P1GoodsLeadershipView p1_goods_leadership(
+        const std::string&,std::int64_t,std::int64_t)const;
+    [[nodiscard]] P1PrestigeView p1_prestige(const std::string&)const;
+    [[nodiscard]] P1PowerRank p1_power_rank(const std::string&)const;
+    [[nodiscard]] const std::map<std::string,P1StandingEvidence>&
+        p1_standing()const{return p1_standing_;}
+    // E's real territory and C's real POP registry determine incorporated
+    // state costs; offices must be physically backed by C facility and staff.
+    [[nodiscard]] P1GdpView p1_gdp(
+        const std::string&,std::int64_t,std::int64_t)const;
+    void phase_d_record_paid_construction_value(
+        const std::string&,const std::string&,const std::string&,
+        Quantity,Money);
+    void p1_set_incorporation(const std::string&,bool);
+    void p1_register_office(P1OfficeEvidence);
+    void phase_time_consume_administration_inputs();
+    void p1_register_national_building_level(const std::string&,std::uint32_t);
+    void p1_register_commander(P1CommanderEvidence);
+    [[nodiscard]] P1BureaucracyView p1_bureaucracy(
+        const std::string&)const;
     void seed_p1_institution(const std::string&,const std::string&,
                              P1InstitutionKind,std::uint8_t);
     [[nodiscard]] P1InstitutionView p1_institution_capacity(
@@ -1695,6 +1819,8 @@ public:
     // P2: legal authority and effective clauses; P1/P4/C retain their own
     // office, election, tax and demographic state and transaction ownership.
     void p2_seed_base(P2BaseLaw);
+    // Native government form is the P1 authority; enacted law modifies it.
+    void p2_sync_constitution(const P2BaseLaw&);
     void p2_seed_amendment(P2Amendment);
     void p2_register_upper_chamber(const std::string&,const std::string&);
     void p2_approve_upper_bill(const std::string&,
@@ -1710,11 +1836,41 @@ public:
     [[nodiscard]] bool p2_amendment_active(const std::string&)const;
     [[nodiscard]] std::optional<std::int64_t> p2_rule(
         const std::string&,const std::string&,P2ClauseKind)const;
+    [[nodiscard]] std::optional<std::string> p2_selected_law(
+        const std::string&,const std::string&)const;
+    [[nodiscard]] P2PoliticalSupportView p2_political_support(
+        const std::string&,const std::string&,const std::string&)const;
+    [[nodiscard]] std::int32_t p2_political_strength_ppm(
+        const std::string&,P3GroupType)const;
+    // Read-only actual law modifiers. Numeric values are parts-per-million
+    // with 1,000,000 representing 1.0, including legacy raw unit +100.
+    [[nodiscard]] std::int64_t p2_modifier_ppm(
+        const std::string& country,const std::string& effect_key)const;
+    [[nodiscard]] std::map<std::string,politics::LawModifier>
+        p2_active_modifiers(const std::string& country)const;
+    void p2_seed_culture(P2CultureTraits);
+    void p2_seed_religion(P2ReligionTraits);
+    void p2_seed_national_identity(P2NationalIdentity);
+    [[nodiscard]] std::optional<P2AcceptanceView> p2_acceptance(
+        const std::string& country,Id pop_slice)const;
+    [[nodiscard]] std::optional<P2AcceptanceLawEffect>
+        p2_acceptance_effect(const std::string& country,Id pop_slice)const;
+    [[nodiscard]] bool p2_migration_permitted(
+        Id pop_slice,const std::string& destination_region)const;
+    [[nodiscard]] bool p2_citizenship_vote_allowed(
+        const std::string& country,Id pop_slice)const;
+    void phase_time_enforce_abolition();
+    [[nodiscard]] std::int32_t p2_institution_factor_ppm(
+        const std::string&,P1InstitutionKind)const;
     [[nodiscard]] int p2_voting_age(const std::string&)const;
     [[nodiscard]] P2TermView p2_term(const std::string&)const;
     [[nodiscard]] bool p2_candidate_eligible(
         const std::string&,const std::string&)const;
     void p2_submit_bill(P2Bill,std::int64_t);
+    // Existing law template first; 1.15 catalogue choice otherwise.
+    void p2_propose_catalogue_reform(const std::string& country,
+        const std::string& domain,const std::string& choice,
+        const std::string& provenance,std::int64_t today);
     void p2_review_due(std::int64_t);
     [[nodiscard]] bool p2_has_review_due(std::int64_t)const;
     [[nodiscard]] bool p2_enactment_ready(const std::string&)const;
@@ -1722,6 +1878,17 @@ public:
         return p2_enactments_;
     }
     void p2_approve_bill(const std::string&,const std::vector<std::string>&);
+    [[nodiscard]] P1LegislativePowers p1_legislative_powers(const std::string&)const;
+    void p1_set_legislative_powers(const std::string&,P1LegislativePowers);
+    void p2_open_assent(const std::string&);
+    void p2_apply_constitutional_choice(const P2BaseLaw&);
+    void p2_sign_bill(const std::string&,const std::string&,std::int64_t);
+    void p2_veto_bill(const std::string&,const std::string&,std::int64_t);
+    void p2_override_veto(const std::string&,const std::vector<std::string>&,
+                          const std::vector<std::string>&,std::int64_t);
+    void p2_cancel_bill(const std::string&,std::int64_t);
+    void p2_assent_due(std::int64_t);
+    [[nodiscard]] bool p2_has_assent_work()const;
     void p2_promulgate_bill(const std::string&,const std::string&,std::int64_t);
     [[nodiscard]] bool p2_has_due(std::int64_t)const;
     void phase_time_apply_p2(std::int64_t);
@@ -1965,6 +2132,24 @@ public:
         require_stage({8});
         if(bank_interest_annual_ppm_<=0)return;
         constexpr Money denominator=365'000'000;
+        // The Petite Bourgeoisie interest trait (and real country law
+        // modifiers) changes only the interest due on an existing country's
+        // actual financial loan. No rate is assumed for a private company
+        // without explicit country/jurisdiction evidence.
+        std::map<std::string,Money> sovereign_rates;
+        if(!p3_groups_.empty()||!p2_active_base_.empty())
+            for(const auto& [country,gov]:governments_) {
+                (void)gov;
+                if(!has_country_treasury(country))continue;
+                const auto bonus=phaseb::add_checked(
+                    p2_modifier_ppm(country,"country_loan_interest_rate_mult"),
+                    p3_trait_modifier_ppm(country,"country_loan_interest_rate_mult"));
+                const auto ppm=std::clamp<std::int64_t>(
+                    1'000'000+bonus,0,2'000'000);
+                const Money adjusted=phaseb::mul_checked(
+                    bank_interest_annual_ppm_,ppm)/1'000'000;
+                sovereign_rates.emplace(country_treasury(country),adjusted);
+            }
         if(!money_.has_account("BANK:interest_receivable"))
             money_.add_account("BANK:interest_receivable","BANK",
                                AccountType::asset);
@@ -1976,11 +2161,12 @@ public:
             if(principal<=0)continue;
             const Money carry=bank_interest_fraction_[debtor];
             ensure(carry>=0&&carry<denominator,"invalid interest carry");
+            const auto rate=sovereign_rates.contains(debtor)?
+                sovereign_rates.at(debtor):bank_interest_annual_ppm_;
             const Money high=phaseb::mul_checked(
-                principal/denominator,bank_interest_annual_ppm_);
+                principal/denominator,rate);
             const Money low=phaseb::add_checked(
-                phaseb::mul_checked(principal%denominator,
-                                    bank_interest_annual_ppm_),carry);
+                phaseb::mul_checked(principal%denominator,rate),carry);
             const Money interest=phaseb::add_checked(high,low/denominator);
             bank_interest_fraction_[debtor]=low%denominator;
             if(interest<=0)continue;
@@ -2237,13 +2423,26 @@ public:
             claim_id,employer,worker,treasury,country,gross,gross,today});
         events_.push_back("earned-daily-wages-owed");
     }
-    void phase_time_settle_wage_arrears() {
+    void phase_time_settle_wage_arrears(std::int64_t today=-1) {
         require_stage({5});
+        std::map<std::string,std::int32_t> country_enforcement;
         for(auto it=wage_arrears_.begin();it!=wage_arrears_.end();) {
             auto& claim=it->second;
             const Money free=std::max<Money>(0,
                 phase_d_cash_available(claim.employer));
-            const Money paid=std::min(free,claim.outstanding);
+            Money enforceable=free;
+            // Fresh earned wages follow ordinary voluntary payroll. Only
+            // genuinely overdue creditor recovery is legally constrained.
+            if(today>=0&&today-claim.issued_day>=30&&
+               !claim.country.empty()&&p1_constitutions_.contains(claim.country)) {
+                const auto [entry,created]=country_enforcement.try_emplace(
+                     claim.country);
+                if(created)
+                    entry->second=p1_judiciary_view(claim.country)
+                                      .enforceable_contract_ppm;
+                enforceable=p4_scaled(free,entry->second,1'000'000);
+            }
+            const Money paid=std::min(enforceable,claim.outstanding);
             if(paid<=0){++it;continue;}
             const int tax=claim.country.empty()?income_tax_ppm_:
                 (governments_.contains(claim.country)?
@@ -2400,7 +2599,22 @@ public:
             ensure(wage>=legal,
                    "P2 minimum wage law forbids underpaid new labor contracts");
         }
-        people_.hire(slice, count, employer, "worker", wage, phaseb::JobRequirements{});
+        // National citizenship laws change wages for lower-acceptance
+        // workers. This adjusts only an actual new C employment contract;
+        // it never manufactures or silently transfers payroll money.
+        Money contracted=wage;
+        if(country!=sovereignty_.end()) {
+            if(const auto accepted=p2_acceptance_effect(
+                    country->second,slice)) {
+                ensure(accepted->wage_ppm>=0&&
+                       accepted->wage_ppm<=1'500'000,
+                       "P2 invalid discriminated wage multiplier");
+                contracted=phaseb::mul_checked(
+                    wage,accepted->wage_ppm)/1'000'000;
+            }
+        }
+        people_.hire(slice,count,employer,"worker",contracted,
+                     phaseb::JobRequirements{});
         events_.push_back("hire");
     }
     void produce(const std::string& firm, const std::string& region,
@@ -2419,6 +2633,8 @@ public:
         if(phase_d_reservation_mode_)
             resources_.record_stage4_output({firm,region,output},qty);
         tracked_goods_.insert(output);
+        p1_observe_value_added("phase-c-production",region,
+                               {{input,qty}},{{output,qty}});
         events_.push_back("production");
     }
     void trade(const std::string& seller, const std::string& buyer,
@@ -2486,7 +2702,8 @@ public:
     }
     void wages_under_law(const std::string& payer,const std::string& worker,
                          const std::string& treasury,Money gross,
-                         const std::string& country="") {
+                         const std::string& country="",
+                         const std::string& source_industry="") {
         require_stage({5});
         ensure(gross>0,"invalid gross wage");
         std::string authority=country;
@@ -2505,7 +2722,44 @@ public:
             else if(governments_.size()>1)
                 ensure(treasury==authority,"national treasury binding required");
         }
-        const auto withholding=positive_product(gross,rate)/1'000'000;
+        // Sector-specific IG tax traits change a real taxable payroll
+        // withholding, never create government receipts. Industry is
+        // sourced from the actual Phase D recipe rather than product names.
+        int effective_rate=rate;
+        if(!authority.empty()&&governments_.contains(authority)&&
+           !source_industry.empty()) {
+            const auto key=[&]()->std::string {
+                if(source_industry=="bg_manufacturing"||
+                   source_industry=="manufacturing")
+                    return "building_group_bg_manufacturing_tax_mult";
+                if(source_industry=="bg_agriculture"||
+                   source_industry=="agriculture")
+                    return "building_group_bg_agriculture_tax_mult";
+                if(source_industry=="bg_ranching"||
+                   source_industry=="ranching")
+                    return "building_group_bg_ranching_tax_mult";
+                if(source_industry=="bg_plantations"||
+                   source_industry=="plantations")
+                    return "building_group_bg_plantations_tax_mult";
+                return "";
+            }();
+            if(!key.empty()) {
+                const auto adjustment=phaseb::add_checked(
+                    p2_modifier_ppm(authority,key),
+                    p3_trait_modifier_ppm(authority,key));
+                const auto multiplier=std::clamp<std::int64_t>(
+                    1'000'000+adjustment,0,2'000'000);
+                effective_rate=static_cast<int>(std::min<std::int64_t>(
+                    1'000'000,phaseb::mul_checked(rate,multiplier)/1'000'000));
+            }
+        }
+        Money withholding=positive_product(gross,effective_rate)/1'000'000;
+        if(!authority.empty()&&governments_.contains(authority)) {
+            const auto admin=p1_bureaucracy(authority);
+            if(admin.capacity.complete)
+                withholding=phaseb::mul_checked(withholding,
+                    1'000'000-admin.tax_waste_ppm)/1'000'000;
+        }
         wages(payer,worker,treasury,gross,withholding);
     }
     void enact_voting_age(int new_age) {
@@ -2666,6 +2920,24 @@ public:
                 .value_or(conscription_enabled_?1:0)!=0;
         }
         ensure(permitted,"P2 military service law does not permit conscription");
+        if(jurisdiction!=sovereignty_.end()) {
+            const auto& country=jurisdiction->second;
+            if(const auto model=p2_selected_law(country,"army_model")) {
+                const auto& job=people_.economic(s.key.economic);
+                if(*model=="peasant_levies")
+                    ensure(job.profession=="peasant"||
+                           job.livelihood=="subsistence",
+                           "P2 peasant levies require actual peasant POP");
+                if(const auto rate=politics::catalogue().modifier(
+                       *model,"state_conscription_rate_add");
+                   rate&&rate->value_ppm>0&&!rate->boolean) {
+                    const auto ppm=std::clamp<std::int64_t>(
+                        rate->value_ppm,0,1'000'000);
+                    ensure(n<=p4_scaled(s.count,ppm,1'000'000),
+                           "P2 army conscription exceeds actual legal POP quota");
+                }
+            }
+        }
         ensure(service == phaseb::Service::civilian || service == phaseb::Service::reserve,
                "not mobilizable");
         ensure(n <= s.count - assigned(source), "overallocated recruit");
@@ -2719,6 +2991,8 @@ public:
         ensure(sovereignty_.contains(region) && !sovereign.empty(),
                "phase E invalid territory or sovereign");
         require_typed(typed_id(EntityKind::region,region), EntityKind::region);
+        if(sovereignty_.at(region)!=sovereign)
+            p1_incorporation_.erase(region); // sovereignty change requires reintegration
         sovereignty_[region]=sovereign;
         events_.push_back("phase-e-sovereignty-transfer");
     }
@@ -2843,8 +3117,81 @@ public:
         require_stage({10});
         if(!demography_enabled_)return;
         const auto before=people_.events().size();
+        // Preserve the single Phase B POP registry. Country-scoped legal
+        // modifiers and activated interest-group traits are applied as
+        // *rates*, not as extra births, students, jobs or migrants.
+        struct PoliticalRates {
+            std::int64_t birth{},school{},migration{};
+            bool schools_allowed{true};
+        };
+        std::map<std::string,PoliticalRates> rates;
+        if(!p3_groups_.empty()||!p2_active_base_.empty()||
+           !p1_active_mandates_.empty())
+            for(const auto& [country,government]:governments_) {
+                (void)government;
+                const auto effect=[&](const std::string& key) {
+                    return phaseb::add_checked(
+                        p2_modifier_ppm(country,key),
+                        p3_trait_modifier_ppm(country,key));
+                };
+                const auto education=p2_selected_law(
+                    country,"education_system");
+                rates.emplace(country,PoliticalRates{
+                    effect("state_birth_rate_mult"),
+                    effect("state_education_access_add"),
+                    effect("state_migration_pull_mult"),
+                    education!=std::optional<std::string>("no_schools")});
+            }
+        phaseb::Engine::RateAdjustment adjustment;
+        if(!rates.empty())adjustment=[&,day,days_in_month](
+                const phaseb::World& population,Id id,
+                const char* kind,People base)->People {
+            if(!population.has_slice(id))return base;
+            const auto& dem=population.demographic(
+                population.slice(id).key.demographic);
+            const auto juris=sovereignty_.find(dem.region);
+            if(juris==sovereignty_.end())return base;
+            const auto found=rates.find(juris->second);
+            if(found==rates.end())return base;
+            const auto& policy=found->second;
+            const std::string metric(kind);
+            if(metric=="school") {
+                if(!policy.schools_allowed)return 0;
+                const auto absolute=std::clamp<std::int64_t>(
+                    phaseb::add_checked(policy.school,
+                        p1_local_decree_ppm(
+                            juris->second,dem.region,
+                            "state_education_access_add")),
+                    -1'000'000,1'000'000);
+                const auto daily=vic25::daily_budget::increment(
+                    std::abs(absolute),day,days_in_month);
+                return static_cast<People>(
+                    std::clamp<std::int64_t>(
+                        static_cast<std::int64_t>(base)+
+                        (absolute<0?-daily:daily),0,1'000'000));
+            }
+            std::int64_t factor=0;
+            if(metric=="fertility")factor=policy.birth;
+            else if(metric=="migration") {
+                const auto dest=demographic_rules_.destination_by_region.find(
+                    dem.region);
+                if(dest==demographic_rules_.destination_by_region.end()||
+                   !p2_migration_permitted(id,dest->second))return 0;
+                const auto next=sovereignty_.find(dest->second);
+                if(next!=sovereignty_.end())
+                    if(const auto target=rates.find(next->second);
+                       target!=rates.end())
+                        factor=target->second.migration;
+            } else return base;
+            const auto scaled=std::clamp<std::int64_t>(
+                1'000'000+factor,0,2'000'000);
+            const auto adjusted=phaseb::mul_checked(
+                static_cast<std::int64_t>(base),scaled)/1'000'000;
+            return static_cast<People>(
+                std::clamp<std::int64_t>(adjusted,0,1'000'000));
+        };
         (void)phaseb::Engine{demographic_rules_}.advance_day(
-            people_,day,days_in_month);
+            people_,day,days_in_month,std::move(adjustment));
         sync_service_transitions(before);
         events_.push_back("daily-auto-demography");
     }
@@ -2869,6 +3216,7 @@ public:
             for (const auto& command:plan[static_cast<std::size_t>(n)])
                 command(staged);
             if(n==8)staged.phase_time_accrue_and_settle_interest();
+            if(n==10)staged.phase_time_enforce_abolition();
             if(n==10&&final_calendar_day) {
                 // Update month-based age classification after today's real
                 // population events; never rerun month-sized risk rates.
@@ -2920,6 +3268,7 @@ public:
             if (n == 9) stage.collect_market_grievances();
             for (const auto& callback : plan[static_cast<std::size_t>(n)]) callback(stage);
             if (n == 10) {
+                stage.phase_time_enforce_abolition();
                 // Strikes reserve actual working time only for this month's
                 // production; they must not outlive a later death or split.
                 stage.strike_active_.clear();
@@ -2990,6 +3339,25 @@ public:
                        stance.importance_ppm<=1'000'000,
                        "P3 invalid issue-specific POP preference");
         }
+        for(const auto& [id,traits]:p2_cultures_) {
+            ensure(id==traits.culture&&!id.empty(),
+                   "P2 invalid cultural traits");
+        }
+        for(const auto& [id,traits]:p2_religions_) {
+            ensure(id==traits.religion&&!id.empty(),
+                   "P2 invalid religious traits");
+        }
+        for(const auto& [country,nation]:p2_national_identities_) {
+            ensure(governments_.contains(country)&&country==nation.country&&
+                   !nation.primary_cultures.empty(),
+                   "P2 national identity lacks existing sovereign");
+            for(const auto& culture:nation.primary_cultures)
+                ensure(p2_cultures_.contains(culture),
+                       "P2 national identity has unknown primary culture");
+            for(const auto& faith:nation.state_religions)
+                ensure(p2_religions_.contains(faith),
+                       "P2 national identity has unknown state religion");
+        }
         for(const auto& [key,group]:p3_groups_) {
             ensure(key.first==group.country&&key.second==group.id&&
                    governments_.contains(group.country)&&
@@ -3003,6 +3371,23 @@ public:
                    (group.leader_anchor.empty()||
                     person_anchors_.contains(group.leader_anchor)),
                    "P3 illegal interest-group identity/leader");
+        }
+        for(const auto& [key,ids]:p3_ideology_overrides_) {
+            ensure(p3_groups_.contains(key)&&!ids.empty()&&ids.size()<=8,
+                   "P3 ideology profile has no actual interest group");
+            std::set<std::string> unique;
+            for(const auto& id:ids)
+                ensure(politics::catalogue().knows_ideology(id)&&
+                       unique.insert(id).second,
+                       "P3 unknown or repeated ideology");
+        }
+        for(const auto& [key,id]:p3_leader_ideologies_) {
+            const auto group=p3_groups_.find(key);
+            ensure(group!=p3_groups_.end()&&
+                   !group->second.leader_anchor.empty()&&
+                   person_anchors_.contains(group->second.leader_anchor)&&
+                   politics::catalogue().knows_ideology(id),
+                   "P3 leader ideology not backed by real named person");
         }
         for(const auto& [id,movement]:p3_movements_) {
             ensure(id==movement.id&&governments_.contains(movement.country)&&
@@ -3269,6 +3654,11 @@ public:
                       (g.chamber_seats>0&&g.quorum>0&&g.quorum<=g.chamber_seats)),
                    "invalid legal P1 or legacy government institution");
         }
+        for(const auto& [country,day]:p1_lost_confidence_)
+            ensure(day>=0&&p1_constitutions_.contains(country)&&
+                   p1_coalitions_.contains(country)&&
+                   p1_coalitions_.at(country).caretaker,
+                   "P1 censured government must remain caretaker");
         ensure(p1_constitutions_.size()==p1_coalitions_.size(),
                "P1 constitution/coalition mismatch");
         for(const auto& [country,order]:p1_constitutions_) {
@@ -3276,6 +3666,91 @@ public:
                    valid_p1_constitution(order)&&p1_coalitions_.contains(country),
                    "P1 constitution not backed by a legal government");
             p1_check_coalition(p1_coalitions_.at(country));
+        }
+        for(const auto& [id,policy]:p1_active_mandates_) {
+            ensure(id==policy.id&&p1_constitutions_.contains(policy.country)&&
+                   !policy.legal_basis.empty()&&policy.adopted_day>=0&&
+                   policy.effective_day>policy.adopted_day&&
+                   (policy.kind==P1MandateKind::decree_road_maintenance||
+                    policy.kind==P1MandateKind::decree_promote_social_mobility)&&
+                   sovereignty_.contains(policy.target)&&
+                   sovereignty_.at(policy.target)==policy.country,
+                   "P1 unbacked active Authority mandate");
+        }
+        for(const auto& [day,changes]:p1_pending_mandates_) {
+            ensure(day>=0&&!changes.empty(),
+                   "P1 invalid scheduled Authority order");
+            for(const auto& change:changes) {
+                ensure(!change.id.empty()&&
+                       (change.terminate||
+                        (change.mandate.id==change.id&&
+                         change.mandate.effective_day==day&&
+                         p1_constitutions_.contains(change.mandate.country))),
+                       "P1 malformed Authority order");
+            }
+        }
+        for(const auto& [id,hull]:p1_naval_hulls_) {
+            ensure(id==hull.id&&!hull.unit.empty()&&
+                   army_deployments_.contains(hull.unit)&&
+                   units_.contains(hull.unit)&&hull.projection>0&&
+                   hull.max_hp>=hull.current_hp&&
+                   hull.max_hp>0&&hull.required_crew>0,
+                   "P1 registered ship must have an actual C unit and hull");
+        }
+        for(const auto& [unit,rating]:p1_army_ratings_) {
+            ensure(unit==rating.unit&&
+                   army_deployments_.contains(unit)&&
+                   !rating.source.empty()&&
+                   rating.power_per_person_ppm>0,
+                   "P1 national military power unbacked by real unit");
+        }
+        for(const auto& country:p1_verified_navies_)
+            ensure(governments_.contains(country),
+                   "P1 verified fleet must have recognized country");
+        for(const auto& [country,standing]:p1_standing_) {
+            ensure(country==standing.country&&governments_.contains(country)&&
+                   !standing.source.empty()&&standing.observed_day>=0&&
+                   standing.tier<=P1CountryTier::hegemony&&
+                   standing.confirmed_rank<=P1PowerRank::great_power&&
+                   standing.own_gdp>=0&&standing.subject_gdp>=0&&
+                   standing.army_projection>=0&&standing.navy_projection>=0,
+                   "P1 invalid prestige evidence");
+        }
+        ensure(p1_value_added_.size()<=5'000'000,
+               "P1 oversize immutable GDP evidence");
+        for(const auto& event:p1_value_added_)
+            ensure(!event.source.empty()&&!event.country.empty()&&
+                   !event.region.empty()&&event.month>=0&&event.day>=0&&
+                   event.day<=31&&event.gross_output>=0&&
+                   event.intermediate_input>=0,
+                   "P1 illegal GDP production observation");
+        for(const auto& [region,incorporated]:p1_incorporation_) {
+            (void)incorporated;
+            ensure(sovereignty_.contains(region),
+                   "P1 incorporation references missing real region");
+        }
+        for(const auto& [id,office]:p1_offices_) {
+            ensure(id==office.institution&&p1_institutions_.contains(id)&&
+                   p1_institutions_.at(id).kind==P1InstitutionKind::administration&&
+                   public_institutions_.contains(id)&&
+                   facilities_.contains(office.site)&&office.levels>0&&
+                   office.workers_per_level>0&&
+                   facilities_.at(office.site).owner==
+                       public_institutions_.at(id).operator_id&&
+                   facilities_.at(office.site).region==
+                       public_institutions_.at(id).region,
+                   "P1 unbacked public administrative office");
+        }
+        for(const auto& [id,levels]:p1_public_building_levels_)
+            ensure(facilities_.contains(id)&&levels>0&&
+                   levels<=facilities_.at(id).capacity,
+                   "P1 nationalized site has no real building capacity");
+        for(const auto& [id,commander]:p1_commanders_) {
+            ensure(id==commander.id&&
+                   person_anchors_.contains(commander.anchor)&&
+                   army_deployments_.contains(commander.unit)&&
+                   commander.cost>=0&&commander.cost<=1000,
+                   "P1 commander cost lacks real named officer");
         }
         for(const auto& [id,entry]:p1_institutions_) {
             ensure(entry.public_institution_id==id&&
@@ -3751,7 +4226,7 @@ private:
     std::map<std::string,std::string> p1_favorites_;
     std::set<std::string> p1_player_countries_;
     std::map<std::string,PoliticalAgenda> p1_political_agendas_;
-    std::map<std::string,P1Mandate> p1_mandates_;
+    std::map<std::string,P1PoliticalMandate> p1_mandates_;
     std::map<std::string,P1PoliticalEvent> p1_political_events_;
     std::map<std::string,P1Lobby> p1_lobbies_;
     std::map<Id, People> anchor_counts_;
@@ -3762,7 +4237,19 @@ private:
     // P3: POP political attributes are preferences over existing real
     // people, never an independent count or financial account.
     std::map<Id,P3Attitude> p3_attitudes_;
+    // Legal cultural matching uses existing Phase B POP culture/religion
+    // strings; these are source-qualified trait relations, not headcounts.
+    std::map<std::string,P2CultureTraits> p2_cultures_;
+    std::map<std::string,P2ReligionTraits> p2_religions_;
+    std::map<std::string,P2NationalIdentity> p2_national_identities_;
+    std::set<std::string> p2_emancipation_due_; // transient within one staged day
     std::map<std::pair<std::string,std::string>,P3Group> p3_groups_;
+    // Optional legal/leadership ideology selections; separate versioned
+    // snapshot extension preserves the old P3 group record byte layout.
+    std::map<std::pair<std::string,std::string>,std::vector<std::string>>
+        p3_ideology_overrides_;
+    std::map<std::pair<std::string,std::string>,std::string>
+        p3_leader_ideologies_;
     std::map<std::string,P3Movement> p3_movements_;
     std::map<std::string,P3MovementType> p3_movement_types_;
     std::map<std::string,std::int32_t> p3_movement_calm_days_;
@@ -3799,7 +4286,29 @@ private:
     // P1 stores constitutional choices and coalition identity only.
     std::map<std::string,P1Constitution> p1_constitutions_;
     std::map<std::string,P1Coalition> p1_coalitions_;
+    // One procedural marker per unseated cabinet; not a new legislature.
+    std::map<std::string,std::int64_t> p1_lost_confidence_;
     std::map<std::string,P1Institution> p1_institutions_;
+    // Derived Bureaucracy inputs, not a separately spendable resource.
+    std::vector<P1ValueAddedEvent> p1_value_added_;
+    std::map<std::string,bool> p1_incorporation_;
+    std::map<std::string,P1OfficeEvidence> p1_offices_;
+    std::map<std::string,std::pair<std::int64_t,std::int32_t>>
+        p1_office_consumed_; // day-native actual input-consumption evidence
+    std::map<std::string,std::uint32_t> p1_public_building_levels_;
+    std::map<std::string,P1CommanderEvidence> p1_commanders_;
+    // Elected decrees and interest-group measures are policy identities, not
+    // stocks of Authority. Their continuing usage is derived when queried.
+    std::map<std::string,P1Mandate> p1_active_mandates_;
+    std::map<std::int64_t,std::vector<P1MandateChange>> p1_pending_mandates_;
+    // Source-qualified prestige/recognition observations, not an alternative
+    // GDP, manpower, treasury or diplomatic influence ledger.
+    std::map<std::string,P1StandingEvidence> p1_standing_;
+    // Actual commissioned hull identity and sourced ratings; a ship must be
+    // crewed by a real existing C military unit/POP, not synthetic seamen.
+    std::map<std::string,P1NavalHull> p1_naval_hulls_;
+    std::map<std::string,P1ArmyRating> p1_army_ratings_;
+    std::set<std::string> p1_verified_navies_;
     std::map<std::int64_t,std::map<std::string,P1GovernmentChange>> p1_pending_;
     // P4 party relationships are many-to-many; political headcount stays in
     // P3 memberships and the national chamber still uses country_elections_.
@@ -3825,6 +4334,8 @@ private:
     std::set<std::string> p2_active_amendments_;
     std::map<std::string,P2Bill> p2_bills_;
     std::map<std::string,P2Enactment> p2_enactments_;
+    std::map<std::string,P2Assent> p2_assents_;
+    std::map<std::string,P1LegislativePowers> p1_legislative_powers_;
     std::map<std::string,std::int64_t> p2_retry_after_;
     std::map<std::int64_t,std::set<std::string>> p2_review_due_; // derived
     std::map<std::string,std::string> p2_upper_chambers_;
@@ -3895,6 +4406,10 @@ private:
             direction = -direction;
         }
     }
+    void p1_observe_value_added(
+        const std::string&,const std::string&,
+        const std::vector<std::pair<std::string,Quantity>>&,
+        const std::vector<std::pair<std::string,Quantity>>&);
     static std::string security_account(const std::string& who, const std::string& asset) {
         return who + ":security:" + asset;
     }
@@ -4117,12 +4632,21 @@ private:
 } // namespace vic25::phasec
 
 #include "vic25/phase_c_p1_impl.hpp"
+#include "vic25/phase_c_judiciary_impl.hpp"
+#include "vic25/phase_c_p1_capacities_impl.hpp"
+#include "vic25/phase_c_p1_power_projection_impl.hpp"
+#include "vic25/phase_c_p1_goods_prestige_impl.hpp"
+#include "vic25/phase_c_p1_bureaucracy_impl.hpp"
+#include "vic25/phase_c_economic_statistics_impl.hpp"
 #include "vic25/phase_c_p4_impl.hpp"
 #include "vic25/phase_c_p4_personal_impl.hpp"
 #include "vic25/phase_c_p4_campaign_impl.hpp"
 #include "vic25/phase_c_p2_impl.hpp"
 #include "vic25/phase_c_p2_advanced_impl.hpp"
 #include "vic25/phase_c_p2_enactment_impl.hpp"
+#include "vic25/phase_c_p2_separation_impl.hpp"
+#include "vic25/phase_c_p2_constitution_impl.hpp"
+#include "vic25/phase_c_politics_identity_impl.hpp"
 #include "vic25/phase_c_p3_impl.hpp"
 #include "vic25/phase_c_p3_autonomous_impl.hpp"
 #include "vic25/phase_c_p5_impl.hpp"

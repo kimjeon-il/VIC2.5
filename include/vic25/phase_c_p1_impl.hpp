@@ -148,6 +148,36 @@ inline P1LegitimacyView IntegratedWorld::p1_legitimacy(
     result.score=(50*result.group_support+
                   30*result.electoral_support+
                   20*result.legal_compatibility)/100;
+    // Political legitimacy is penalized by observable conflict between
+    // coalition groups' ideological positions on actually adopted laws.
+    // No invented party ideology, POP count, or political-power token.
+    std::int64_t disputes=0,comparisons=0;
+    for(const auto& [slot,law_id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(law_id);
+        if(law.country!=country||
+           !politics::catalogue().has(law.domain,law.base_choice))continue;
+        for(std::size_t i=0;i<coalition.ruling_groups.size();++i) {
+            const auto& left=coalition.ruling_groups[i];
+            if(!p3_groups_.contains({country,left}))continue;
+            const auto a=p3_law_stance(country,left,law.domain,law.base_choice);
+            if(!a)continue;
+            for(std::size_t j=i+1;j<coalition.ruling_groups.size();++j) {
+                const auto& right=coalition.ruling_groups[j];
+                if(!p3_groups_.contains({country,right}))continue;
+                const auto b=p3_law_stance(country,right,law.domain,law.base_choice);
+                if(!b)continue;
+                if((*a>0&&*b<0)||(*a<0&&*b>0))
+                    disputes+=std::abs(*a-*b);
+                ++comparisons;
+            }
+        }
+    }
+    if(comparisons>0)
+        result.ideological_incompatibility=static_cast<int>(
+            std::min<std::int64_t>(20,disputes*5/comparisons));
+    result.score=std::clamp(result.score-
+                           result.ideological_incompatibility,0,100);
     return result;
 }
 
@@ -180,8 +210,23 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
         static_cast<std::uint8_t>(*law_level):link.level;
     const People slots=(service.monthly_slots/5)*level+
                        ((service.monthly_slots%5)*level)/5;
-    const People staffed=std::min(slots,
-        positive_product(staff,service.patients_per_worker));
+    People staff_capacity=positive_product(
+        staff,service.patients_per_worker);
+    if(link.kind==P1InstitutionKind::administration) {
+        // The Petite Bourgeoisie's Happy "Middle Managers" trait raises
+        // administration productivity, not the legal facility level or
+        // fictitious employees. Never exceed real paid site capacity.
+        const auto bonus=std::clamp<std::int64_t>(
+            p3_trait_modifier_ppm(link.country,"country_bureaucracy_mult"),
+            -1'000'000,1'000'000);
+        if(bonus>0)
+            staff_capacity=phaseb::add_checked(staff_capacity,
+                p4_scaled(staff_capacity,bonus,1'000'000));
+        else if(bonus<0)
+            staff_capacity=p4_scaled(staff_capacity,
+                                     1'000'000+bonus,1'000'000);
+    }
+    const People staffed=std::min(slots,staff_capacity);
     const bool funded=cash(service.operator_id)>0||
         (has_country_treasury(link.country)&&
          cash(country_treasury(link.country))>0);
@@ -191,15 +236,46 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
     const People accessible=p4_scaled(
         staffed_and_funded,
         1'000'000-p5_guerrilla_disruption_ppm(service.region),1'000'000);
+    // Existing paid staff/cash remain the upper bound. A country that
+    // legally has no schools, police or health institution cannot deliver
+    // those public services through a scenario's old orphaned facility.
+    People lawful=p4_scaled(
+        accessible,p2_institution_factor_ppm(link.country,link.kind),1'000'000);
+    if(link.kind==P1InstitutionKind::education) {
+        // Unhappy Devout: -10% Education Access. This affects delivered
+        // services only; no population, classrooms or tuition are minted.
+        const auto penalty=std::clamp<std::int64_t>(
+            p3_trait_modifier_ppm(link.country,"state_education_access_add"),
+            -1'000'000,0);
+        lawful=p4_scaled(lawful,1'000'000+penalty,1'000'000);
+    }
+    // Apply regional reach to the target's legal/trait-constrained output.
     const auto decree=p1_region_decree_bonus_ppm(
         link.country,service.region,P1DecreeKind::public_service_reach);
     const auto improved=std::min(staffed_and_funded,
-        phaseb::add_checked(accessible,
-            p4_scaled(accessible,decree,1'000'000)));
+        phaseb::add_checked(lawful,p4_scaled(lawful,decree,1'000'000)));
     return {link.country,institution_id,link.kind,level,
             staff,slots,staffed,improved,funded};
 }
 
+inline void IntegratedWorld::p1_vote_no_confidence(
+        const std::string& country,const std::vector<std::string>& parties,
+        std::int64_t today) {
+    require_stage({9});
+    ensure(today>=0&&p1_constitutions_.contains(country)&&
+           p1_authority(country).assembly_confidence_required&&
+           !p4_parliament_dissolved(country)&&
+           country_elections_.contains(country)&&
+           !p1_coalitions_.at(country).caretaker,
+           "P1 only sitting parliamentary cabinets face no confidence");
+    const auto& election=legislature_for(country);
+    ensure(election.total_seats>0&&
+           coalition_seats(parties,election)>election.total_seats/2,
+           "P1 no-confidence motion lacks real absolute seat majority");
+    p1_lost_confidence_[country]=today;
+    p1_coalitions_.at(country).caretaker=true;
+    events_.push_back("p1-parliament-no-confidence:"+country);
+}
 inline bool IntegratedWorld::has_due_p1_government(std::int64_t day)const {
     return p1_pending_.contains(day);
 }
@@ -267,6 +343,8 @@ inline void IntegratedWorld::phase_time_apply_p1_government(std::int64_t today) 
         if(change.replace_prime) {
             government.prime_minister=change.new_prime;
             p1_coalitions_.at(country)=change.coalition;
+            if(!change.coalition.caretaker)
+                p1_lost_confidence_.erase(country);
         }
         ++government.revision;
         events_.push_back("p1-daily-government-effective:"+country);

@@ -86,4 +86,74 @@ inline void IntegratedWorld::p5_auto_prepare_revolutions(std::int64_t day) {
         }
     }
 }
+// Resolve only cases with *existing* legal or military evidence.
+// Do not fabricate victories, sovereign entities or capital occupation.
+inline void IntegratedWorld::p5_auto_resolve_crises(std::int64_t today) {
+    require_stage({9});
+    for(auto& [id,crisis]:p5_crises_) {
+        if(crisis.stage==P5CrisisStage::settled)continue;
+        const auto& movement=p3_movements_.at(crisis.movement);
+        P5Settlement settlement;
+        settlement.id="P5:auto:peace:"+id+":"+std::to_string(today);
+        settlement.crisis_id=id;
+        settlement.day=today;
+        settlement.legal_basis="ai-verified-existing-evidence";
+        if(crisis.stage==P5CrisisStage::deescalated&&
+           p5_risk(crisis.movement).pressure_ppm<250'000) {
+            settlement.kind=P5SettlementKind::crisis_recedes;
+            p5_settle(std::move(settlement));
+            continue;
+        }
+        bool effective_reform=false;
+        for(const auto& [slot,law_id]:p2_active_base_) {
+            const auto& law=p2_laws_.at(law_id);
+            if(law.country==crisis.country&&
+               law.domain==movement.issue_domain&&
+               law.base_choice==movement.desired_choice) {
+                effective_reform=true;break;
+            }
+        }
+        if(effective_reform&&crisis.stage!=P5CrisisStage::armed_conflict) {
+            settlement.kind=P5SettlementKind::legal_concession;
+            p5_settle(std::move(settlement));
+            continue;
+        }
+        if(crisis.stage!=P5CrisisStage::armed_conflict||
+           (crisis.kind!=P5CrisisKind::revolution&&
+            crisis.kind!=P5CrisisKind::coup)||
+           !p5_capitals_.contains(crisis.country))continue;
+        const auto& capital=p5_capitals_.at(crisis.country);
+        const auto evidence=p5_control_evidence_.find(id);
+        if(evidence==p5_control_evidence_.end()||
+           !evidence->second.contains(capital)||
+           military_control_.at(capital)!="P5:"+id||
+           (crisis.kind!=P5CrisisKind::coup&&
+            crisis.verified_engagements==0))continue;
+        // Only a real living political character may become the new head.
+        std::string successor;
+        for(const auto& [person,character]:p1_characters_)
+            if(character.country==crisis.country&&character.active&&
+               !character.politically_exiled&&
+               p1_character_available(person)&&
+               person!=governments_.at(crisis.country).head_of_state&&
+               (character.roles&static_cast<std::uint8_t>(
+                   PoliticalRole::interest_group_leader))!=0) {
+                successor=person;break;
+            }
+        if(successor.empty()||
+           (p1_pending_.contains(today+1)&&
+            p1_pending_.at(today+1).contains(crisis.country)))continue;
+        bool verified=true;
+        for(const auto& region:evidence->second)
+            if(!sovereignty_.contains(region)||
+               sovereignty_.at(region)!=crisis.country||
+               !military_control_.contains(region)||
+               military_control_.at(region)!="P5:"+id)
+                verified=false;
+        if(!verified)continue;
+        settlement.kind=P5SettlementKind::cabinet_overthrow;
+        settlement.successor_head=successor;
+        p5_settle(std::move(settlement));
+    }
+}
 } // namespace vic25::phasec

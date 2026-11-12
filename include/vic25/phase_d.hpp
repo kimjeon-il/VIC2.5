@@ -438,6 +438,17 @@ public:
            c_.firm_bankrupt(old->second.client)||
            c_.firm_bankrupt(old->second.contractor))return false;
         const auto& model=old->second;
+        // The investor, contractor and state treasury remain real C actors.
+        // Under an enacted command economy, new enterprise projects must be
+        // financed by the actual sovereign treasury. Existing completed
+        // private assets are not expropriated by merely evaluating a proposal.
+        const auto sovereign=c_.sovereignty(model.region);
+        if(const auto economy=c_.p2_selected_law(sovereign,"economic_system");
+           economy&&*economy=="command_economy") {
+            if(!c_.has_country_treasury(sovereign)||
+               model.client!=c_.country_treasury(sovereign))
+                return false;
+        }
         const auto& recipe=ri->second;
         if(model.work_required<=0||model.cash_price_per_work<=0||
            recipe.outputs.empty()||model.material_per_work<=0||
@@ -627,6 +638,12 @@ public:
         c_.phase_d_release_cash(p.client,"construction:"+project,amount);
         c_.pay(p.client,p.contractor,amount);
         p.paid_work=phaseb::add_checked(p.paid_work,units);
+        // Construction GDP is recorded exactly when the original
+        // contractor's actual money receipt has settled. A work invoice
+        // settled later is not GDP again.
+        c_.phase_d_record_paid_construction_value(
+            project,p.region,p.material_good,
+            product(units,p.material_per_work),amount);
         d_.append(c_.month(),"work-paid",project);
     }
     void accrue_work_invoice(const std::string& project,Quantity units) {
@@ -748,9 +765,43 @@ public:
         occupy_site(r.site,capacity);
         std::vector<std::pair<std::string,Quantity>> inputs,outputs;
         for(const auto& x:r.inputs)inputs.emplace_back(x.good,product(batches,x.per_unit));
-        for(const auto& x:r.outputs)outputs.emplace_back(x.good,product(batches,x.per_unit));
+        // A throughput modifier changes actual goods per paid batch, not
+        // the number of completed batches or workers/inputs consumed.
+        // Only explicit industry class IDs may opt in: never guess industry
+        // from a company name, product label or national culture.
+        const auto production_group=[&]() -> std::string {
+            const auto& type=r.industry_class;
+            if(type=="bg_manufacturing"||type=="manufacturing")
+                return "building_group_bg_manufacturing_throughput_add";
+            if(type=="bg_agriculture"||type=="agriculture")
+                return "building_group_bg_agriculture_throughput_add";
+            if(type=="bg_plantations"||type=="plantations")
+                return "building_group_bg_plantations_throughput_add";
+            if(type=="bg_ranching"||type=="ranching")
+                return "building_group_bg_ranching_throughput_add";
+            if(type=="bg_mining"||type=="mining")
+                return "building_group_bg_mining_throughput_add";
+            return "";
+        }();
+        std::int64_t multiplier=1'000'000;
+        if(!production_group.empty()) {
+            const auto country=c_.sovereignty(f.region);
+            if(c_.has_government(country))
+                multiplier=std::clamp<std::int64_t>(
+                    1'000'000+phaseb::add_checked(
+                        c_.p2_modifier_ppm(country,production_group),
+                        c_.p3_trait_modifier_ppm(country,production_group)),
+                    0,2'000'000);
+        }
+        const auto adjusted=[&](Quantity per_unit)->Quantity {
+            const auto normal=product(batches,per_unit);
+            return phaseb::add_checked(
+                phaseb::mul_checked(normal/1'000'000,multiplier),
+                phaseb::mul_checked(normal%1'000'000,multiplier)/1'000'000);
+        };
+        for(const auto& x:r.outputs)outputs.emplace_back(x.good,adjusted(x.per_unit));
         for(const auto& x:r.byproducts)
-            outputs.emplace_back(x.good,product(batches,x.per_unit));
+            outputs.emplace_back(x.good,adjusted(x.per_unit));
         c_.phase_d_transform(f.owner,f.region,inputs,outputs,workers);
         d_.cumulative_nonmarket_waste[recipe]=phaseb::add_checked(
             d_.cumulative_nonmarket_waste[recipe],

@@ -7,9 +7,17 @@ namespace vic25::phasec {
 inline bool IntegratedWorld::p2_valid_clause(const P2Clause& c) {
     if(c.id.empty()||c.target.empty()||
        static_cast<unsigned>(c.kind)>
-           static_cast<unsigned>(P2ClauseKind::peaceful_strike_allowed))
+           static_cast<unsigned>(P2ClauseKind::constitutional_party_initiative))
         return false;
     switch(c.kind) {
+      case P2ClauseKind::constitutional_veto_rule:
+        return c.value>=0&&c.value<=2;
+      case P2ClauseKind::constitutional_override_ppm:
+        return c.value>=500'000&&c.value<=1'000'000;
+      case P2ClauseKind::constitutional_assent_days:
+        return c.value>=1&&c.value<=365;
+      case P2ClauseKind::constitutional_party_initiative:
+        return c.value==0||c.value==1;
       case P2ClauseKind::term_months:
         return c.value>=1&&c.value<=240;
       case P2ClauseKind::max_consecutive_terms:
@@ -56,7 +64,11 @@ inline void IntegratedWorld::p2_validate_clauses(
            c.kind==P2ClauseKind::maximum_import_tariff_ppm||
            c.kind==P2ClauseKind::female_suffrage_allowed||
            c.kind==P2ClauseKind::political_association_allowed||
-           c.kind==P2ClauseKind::peaceful_strike_allowed) {
+           c.kind==P2ClauseKind::peaceful_strike_allowed||
+           c.kind==P2ClauseKind::constitutional_veto_rule||
+           c.kind==P2ClauseKind::constitutional_override_ppm||
+           c.kind==P2ClauseKind::constitutional_assent_days||
+           c.kind==P2ClauseKind::constitutional_party_initiative) {
             ensure(c.target==country,
                    "P2 sovereign economic, civil or military rule needs its country");
         } else if(c.kind==P2ClauseKind::public_institution_level) {
@@ -87,7 +99,49 @@ inline void IntegratedWorld::p2_validate_base(const P2BaseLaw& law)const {
         ensure(law.scope.empty()||law.scope=="national",
                "P2 national law cannot impersonate regional sovereignty");
     }
+    // Existing synthetic/legacy legal domains continue to work. Recognised
+    // Victoria-style categories must use a real catalogue choice and the
+    // central legal scope. Unknown "law_*" entries may not silently bypass
+    // the catalogue's admissible law-group relation.
+    if(politics::catalogue().has_group(law.domain)) {
+        const auto& source=politics::catalogue();
+        ensure(source.has(law.domain,law.base_choice)&&
+               law.tier!=P2NormTier::local_ordinance,
+               "P2 unsupported or mismatched catalogue law");
+        // Mutual exclusion is checked *both* ways. A law enacted in a
+        // country cannot depend on the order in which legal categories were
+        // seeded or which disallowing_laws block declared the conflict.
+        const auto proposed=politics::bare_law(law.base_choice);
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& existing=p2_laws_.at(id);
+            if(existing.country!=law.country||
+               politics::bare_group(existing.domain)==
+               politics::bare_group(law.domain))continue;
+            const auto current=politics::bare_law(existing.base_choice);
+            if(source.disallowed.at(proposed).contains(current)||
+               (source.disallowed.contains(current)&&
+                source.disallowed.at(current).contains(proposed)))
+                throw std::invalid_argument(
+                    "P2_VIC3_115_MUTUALLY_EXCLUSIVE_LAWS");
+        }
+    }
     p2_validate_clauses(law.country,law.clauses);
+    if(law.domain=="judicial_system")
+        ensure(law.scope.empty()||law.scope=="national",
+               "P2 judicial system must be a national law");
+    if(law.domain=="judicial_system")
+        ensure(law.base_choice=="executive_subordinate"||
+               law.base_choice=="limited_independence"||
+               law.base_choice=="independent",
+               "P2 judicial system has exactly three legal choices");
+    for(const auto& clause:law.clauses)
+        if(clause.kind==P2ClauseKind::constitutional_veto_rule||
+           clause.kind==P2ClauseKind::constitutional_override_ppm||
+           clause.kind==P2ClauseKind::constitutional_assent_days||
+           clause.kind==P2ClauseKind::constitutional_party_initiative)
+            ensure(law.tier==P2NormTier::constitution,
+                   "P2 separation of powers requires constitutional rank");
     if(law.tier==P2NormTier::local_ordinance) {
         for(const auto& clause:law.clauses) {
             ensure(clause.target!=law.country,
@@ -112,6 +166,14 @@ inline void IntegratedWorld::p2_check_amendment(const P2Amendment& amendment)con
            !amendment.clauses.empty(),
            "P2 amendment must belong to existing base law");
     p2_validate_clauses(it->second.country,amendment.clauses);
+    // Constitutional authority changes must be applied by a complete
+    // replacement law, never silently by a disconnected amendment.
+    for(const auto& clause:amendment.clauses)
+        ensure(clause.kind!=P2ClauseKind::constitutional_veto_rule&&
+               clause.kind!=P2ClauseKind::constitutional_override_ppm&&
+               clause.kind!=P2ClauseKind::constitutional_assent_days&&
+               clause.kind!=P2ClauseKind::constitutional_party_initiative,
+               "P2 legislative authority requires a constitutional replacement");
     // Mirrored P4 mandate fields need a base value to restore on repeal.
     for(const auto& clause:amendment.clauses) {
         if(clause.kind!=P2ClauseKind::term_months&&
@@ -138,6 +200,52 @@ inline void IntegratedWorld::p2_check_amendment(const P2Amendment& amendment)con
     }
 }
 
+inline void IntegratedWorld::p2_sync_constitution(
+        const P2BaseLaw& law) {
+    const auto group=politics::bare_group(law.domain);
+    const auto id=politics::bare_law(law.base_choice);
+    if(group!="governance_principles"&&
+       group!="distribution_of_power")return;
+    auto proposed=p1_constitutions_.at(law.country);
+    if(group=="governance_principles") {
+        const std::map<std::string,P1GovernancePrinciple> table{
+            {"chiefdom",P1GovernancePrinciple::chiefdom},
+            {"monarchy",P1GovernancePrinciple::monarchy},
+            {"theocracy",P1GovernancePrinciple::theocracy},
+            {"presidential_republic",P1GovernancePrinciple::presidential_republic},
+            {"parliamentary_republic",P1GovernancePrinciple::parliamentary_republic},
+            {"council_republic",P1GovernancePrinciple::council_republic},
+            {"colonial_administration",P1GovernancePrinciple::colonial_administration},
+            {"social_monarchy",P1GovernancePrinciple::social_monarchy},
+            {"corporate_state",P1GovernancePrinciple::corporate_state}
+        };
+        proposed.governance=table.at(id);
+    } else {
+        const std::map<std::string,P1PowerDistribution> table{
+            {"autocracy",P1PowerDistribution::autocracy},
+            {"oligarchy",P1PowerDistribution::oligarchy},
+            {"landed_voting",P1PowerDistribution::landed_vote},
+            {"wealth_voting",P1PowerDistribution::wealth_vote},
+            {"universal_suffrage",P1PowerDistribution::universal_vote},
+            {"single_party_state",P1PowerDistribution::single_party},
+            {"technocracy",P1PowerDistribution::technocracy},
+            {"bakufu",P1PowerDistribution::bakufu},
+            {"neo_absolutism",P1PowerDistribution::neo_absolutism},
+            {"organic_regulation",P1PowerDistribution::organic_regulation},
+            {"elder_council",P1PowerDistribution::elder_council},
+            {"census_voting",P1PowerDistribution::census_vote},
+            {"labor_suffrage",P1PowerDistribution::labor_suffrage},
+            {"anarchy",P1PowerDistribution::anarchy}
+        };
+        proposed.power=table.at(id);
+    }
+    proposed.legal_basis=law.legal_basis;
+    ensure(valid_p1_constitution(proposed),
+           "P2 constitutional law requires an existing lawful legislature");
+    p1_constitutions_[law.country]=std::move(proposed);
+    events_.push_back("p2-constitutional-law-effective:"+id);
+}
+
 inline void IntegratedWorld::p2_seed_base(P2BaseLaw law) {
     ensure(stage_==-1&&commit_id_==0,"P2 law must seed before simulation");
     p2_validate_base(law);
@@ -147,6 +255,14 @@ inline void IntegratedWorld::p2_seed_base(P2BaseLaw law) {
     const auto id=law.id;
     p2_laws_.emplace(id,std::move(law));
     p2_active_base_.emplace(slot,id);
+    p2_sync_constitution(p2_laws_.at(id));
+    p2_apply_constitutional_choice(p2_laws_.at(id));
+    if(politics::bare_group(p2_laws_.at(id).domain)=="slavery"&&
+       politics::bare_law(p2_laws_.at(id).base_choice)=="slavery_banned")
+        p2_emancipation_due_.insert(p2_laws_.at(id).country);
+    if(politics::bare_group(p2_laws_.at(id).domain)=="land_reform"&&
+       politics::bare_law(p2_laws_.at(id).base_choice)!="serfdom")
+        p2_emancipation_due_.insert(p2_laws_.at(id).country);
     p2_sync_country_rules(p2_laws_.at(id).country,{},-1);
 }
 
@@ -204,7 +320,126 @@ inline std::optional<std::int64_t> IntegratedWorld::p2_rule(
             value=found;
         }
     }
+    if(value)return value;
+    // Existing explicitly legislated clauses/amendments take precedence.
+    // Otherwise the effective catalogue law supplies an operational rule.
+    // A restrictive rule across distinct domains is combined rather than
+    // being an ambiguous same-rank statute.
+    if(target==country) {
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(law.country!=country)continue;
+            const auto policy=politics::law_clause(
+                law.domain,law.base_choice,kind);
+            if(policy)value=value?std::min(*value,*policy):policy;
+        }
+    }
     return value;
+}
+
+inline std::optional<std::string> IntegratedWorld::p2_selected_law(
+        const std::string& country,const std::string& group)const {
+    const auto normalized=politics::bare_group(group);
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country==country&&
+           politics::bare_group(law.domain)==normalized&&
+           politics::catalogue().has(normalized,law.base_choice))
+            return politics::bare_law(law.base_choice);
+    }
+    return std::nullopt;
+}
+
+inline std::map<std::string,politics::LawModifier>
+IntegratedWorld::p2_active_modifiers(const std::string& country)const {
+    ensure(governments_.contains(country),"P2 modifiers require actual country");
+    std::map<std::string,politics::LawModifier> combined;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& adopted=p2_laws_.at(id);
+        if(adopted.country!=country)continue;
+        const auto it=politics::catalogue().modifiers.find(
+            politics::bare_law(adopted.base_choice));
+        if(it==politics::catalogue().modifiers.end())continue;
+        for(const auto& [key,effect]:it->second) {
+            auto entry=combined.find(key);
+            if(entry==combined.end()) {
+                combined.emplace(key,effect);
+                continue;
+            }
+            ensure(entry->second.boolean==effect.boolean,
+                   "P2 mixed boolean and numeric law modifier");
+            if(effect.boolean)
+                entry->second.value_ppm=std::max(entry->second.value_ppm,
+                                                 effect.value_ppm);
+            else
+                entry->second.value_ppm=phaseb::add_checked(
+                    entry->second.value_ppm,effect.value_ppm);
+        }
+    }
+    return combined;
+}
+inline std::int64_t IntegratedWorld::p2_modifier_ppm(
+        const std::string& country,const std::string& effect_key)const {
+    const auto effects=p2_active_modifiers(country);
+    if(auto it=effects.find(effect_key);it!=effects.end())
+        return it->second.value_ppm;
+    return 0;
+}
+
+inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
+        const std::string& country,P3GroupType group)const {
+    const auto group_id=[&]() -> const char* {
+        switch(group) {
+            case P3GroupType::landowners:return "ig_landowners";
+            case P3GroupType::industrialists:return "ig_industrialists";
+            case P3GroupType::armed_forces:return "ig_armed_forces";
+            case P3GroupType::devout:return "ig_devout";
+            case P3GroupType::intelligentsia:return "ig_intelligentsia";
+            case P3GroupType::petite_bourgeoisie:return "ig_petty_bourgeoisie";
+            case P3GroupType::rural_folk:return "ig_rural_folk";
+            case P3GroupType::trade_unions:return "ig_trade_unions";
+            case P3GroupType::custom:return "";
+        }
+        return "";
+    }();
+    std::int64_t strength=1'000'000;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country!=country)continue;
+        // Prefer exact source IG multipliers if they exist. The previous
+        // simplified clout bonus remains a fallback for uncoded new laws.
+        const auto metric=std::string("interest_group_")+group_id+
+                          "_pol_str_mult";
+        if(*group_id) {
+            const auto original=politics::catalogue().modifier(
+                law.base_choice,metric);
+            if(original&&!original->boolean) {
+                strength=phaseb::add_checked(strength,original->value_ppm);
+                continue;
+            }
+        }
+        strength=phaseb::add_checked(strength,
+            politics::clout_bonus(law.domain,law.base_choice,group));
+    }
+    return static_cast<std::int32_t>(
+        std::clamp<std::int64_t>(strength,250'000,2'500'000));
+}
+
+inline std::int32_t IntegratedWorld::p2_institution_factor_ppm(
+        const std::string& country,P1InstitutionKind kind)const {
+    std::int32_t factor=1'000'000;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country!=country)continue;
+        factor=std::min(factor,politics::institution_factor(
+            law.domain,law.base_choice,kind));
+    }
+    return factor;
 }
 
 inline int IntegratedWorld::p2_voting_age(const std::string& country)const {
@@ -353,7 +588,15 @@ inline void IntegratedWorld::p2_sync_country_rules(
 inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
     require_stage({9});
     ensure(today>=0&&!bill.id.empty()&&!bill.country.empty()&&
-           bill.proposer==governments_.at(bill.country).prime_minister&&
+           (bill.proposer==governments_.at(bill.country).prime_minister||
+            (p1_legislative_powers(bill.country).party_initiative&&
+             p1_constitution(bill.country).legislature!=P1LegislatureKind::none&&
+             p4_parties_.contains(bill.proposer)&&
+             p4_parties_.at(bill.proposer).country==bill.country&&
+             p4_parties_.at(bill.proposer).active&&
+             country_elections_.contains(bill.country)&&
+             country_elections_.at(bill.country).seats.contains(bill.proposer)&&
+             country_elections_.at(bill.country).seats.at(bill.proposer)>0))&&
            !bill.legal_basis.empty()&&
            bill.introduced_day==-1&&bill.promulgated_day==-1&&
            bill.status==P2BillStatus::submitted&&
@@ -436,10 +679,16 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
        (domain=="distribution_of_power"||domain=="economic_system"||
         domain=="slavery")?150:100;
     const auto country=bill.country;
+    // Old dated fixtures already carry a legislative effective date. Retain
+    // their lawful chamber vote and historical save contract; new undated
+    // bills pass the three-stage political enactment process.
+    const bool process=bill.effective_day==-1;
     p2_bills_.emplace(id,std::move(bill));
-    p2_enactments_.emplace(id,P2Enactment{
-        id,country,key,1,0,0,0,today+review_days,-1,false});
-    p2_review_due_[today+review_days].insert(id);
+    if(process) {
+        p2_enactments_.emplace(id,P2Enactment{
+            id,country,key,1,0,0,0,today+review_days,-1,false});
+        p2_review_due_[today+review_days].insert(id);
+    }
     events_.push_back("p2-bill-introduced");
 }
 
@@ -450,7 +699,12 @@ inline void IntegratedWorld::p2_approve_bill(
     auto& bill=p2_bills_.at(bill_id);
     ensure(bill.status==P2BillStatus::submitted&&
            p2_enactment_ready(bill_id)&&
-           bill.proposer==governments_.at(bill.country).prime_minister,
+           (bill.proposer==governments_.at(bill.country).prime_minister||
+            (p4_parties_.contains(bill.proposer)&&
+             p4_parties_.at(bill.proposer).country==bill.country&&
+             country_elections_.contains(bill.country)&&
+             country_elections_.at(bill.country).seats.contains(bill.proposer)&&
+             country_elections_.at(bill.country).seats.at(bill.proposer)>0)),
            "P2 rejected unauthorized legislative sponsor");
     const auto order=p1_authority(bill.country);
     const auto tier=(bill.action==P2BillAction::enact_or_replace_base)?
@@ -487,6 +741,7 @@ inline void IntegratedWorld::p2_approve_bill(
     } else {
         p2_negotiation_watch_.erase(bill.id);
         bill.status=P2BillStatus::approved;
+        p2_open_assent(bill.id);
         events_.push_back("p2-law-approved:"+bill.id);
     }
 }
@@ -500,6 +755,12 @@ inline void IntegratedWorld::p2_promulgate_bill(
            today>=bill.introduced_day&&
            governments_.at(bill.country).head_of_state==incumbent_head,
            "P2 invalid approval, promulgator or effective date");
+    if(p1_legislative_powers(bill.country).veto!=P1VetoRule::none) {
+        const auto it=p2_assents_.find(bill_id);
+        ensure(it==p2_assents_.end()||
+               it->second.signed_by_head||it->second.overridden,
+               "P2 presidential assent or parliamentary override required");
+    }
     if(bill.effective_day<=today)bill.effective_day=today+1;
     bill.promulgated_day=today;
     bill.status=P2BillStatus::promulgated;
@@ -525,6 +786,9 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
         std::string amendment_id;
         if(bill.action==P2BillAction::enact_or_replace_base) {
             const auto& next=bill.proposed_base;
+            // A conflicting law can become active while a bill is queued.
+            // Check again at the effective day inside the atomic transaction.
+            p2_validate_base(next);
             const auto slot=std::make_tuple(next.country,next.domain,next.scope);
             const auto old=p2_active_base_.find(slot);
             if(old!=p2_active_base_.end()) {
@@ -555,6 +819,14 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             law_id=next.id;
             p2_laws_.emplace(next.id,next);
             p2_active_base_[slot]=next.id;
+            // Actual bonded POPs are emancipated at Stage10 of the
+            // lawful effective day, not on the preceding enactment day.
+            if(politics::bare_group(next.domain)=="slavery"&&
+               politics::bare_law(next.base_choice)=="slavery_banned")
+                p2_emancipation_due_.insert(next.country);
+            if(politics::bare_group(next.domain)=="land_reform"&&
+               politics::bare_law(next.base_choice)!="serfdom")
+                p2_emancipation_due_.insert(next.country);
             if(const auto negotiated=p2_negotiated_.find(id);
                negotiated!=p2_negotiated_.end()) {
                 for(const auto& accepted:negotiated->second) {
@@ -590,6 +862,8 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
                    "P2 base law has already been replaced");
             law_id=bill.target_id;
             const auto& base=p2_laws_.at(law_id);
+            ensure(!politics::catalogue().has_group(base.domain),
+                   "P2 cannot repeal a 1.15 law group without replacement");
             for(const auto& clause:base.clauses)
                 if(clause.kind==P2ClauseKind::term_months||
                    clause.kind==P2ClauseKind::term_cycle_mode||
@@ -604,6 +878,10 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             }
             p2_active_base_.erase(
                 std::make_tuple(base.country,base.domain,base.scope));
+        }
+        if(bill.action==P2BillAction::enact_or_replace_base) {
+            p2_sync_constitution(p2_laws_.at(law_id));
+            p2_apply_constitutional_choice(p2_laws_.at(law_id));
         }
         p2_sync_country_rules(bill.country,bill.transitions,today);
         const auto lowest=p2_rule(bill.country,bill.country,

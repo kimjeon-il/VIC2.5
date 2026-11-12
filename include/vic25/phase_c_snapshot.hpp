@@ -83,9 +83,33 @@ void fields(Archive& a,T& x) {
         V(legal_basis);V(replace_head);V(replace_prime);
     } else if constexpr(std::is_same_v<X,P1Institution>){
         V(country);V(public_institution_id);V(kind);V(level);
+    } else if constexpr(std::is_same_v<X,P1NavalHull>){
+        V(id);V(unit);V(type);V(source);V(projection);V(max_hp);
+        V(current_hp);V(required_crew);V(commissioned);
+    } else if constexpr(std::is_same_v<X,P1ArmyRating>){
+        V(unit);V(source);V(power_per_person_ppm);
+    } else if constexpr(std::is_same_v<X,P1ValueAddedEvent>){
+        V(source);V(country);V(region);V(month);V(day);
+        V(gross_output);V(intermediate_input);V(fully_priced);
+        V(produced_goods);
+    } else if constexpr(std::is_same_v<X,P1OfficeEvidence>){
+        V(institution);V(site);V(method);V(levels);V(workers_per_level);
+    } else if constexpr(std::is_same_v<X,P1CommanderEvidence>){
+        V(id);V(unit);V(anchor);V(cost);
     } else if constexpr(std::is_same_v<X,P1Mandate>){
-        V(id);V(country);V(target);V(kind);V(decree);V(authority_cost);
-        V(started_day);V(active);
+        V(id);V(country);V(target);V(legal_basis);V(kind);
+        V(adopted_day);V(effective_day);
+    } else if constexpr(std::is_same_v<X,P1MandateChange>){
+        V(id);V(mandate);V(terminate);
+    } else if constexpr(std::is_same_v<X,P1StandingEvidence>){
+        V(country);V(source);V(tier);V(recognized);V(confirmed_rank);
+        V(observed_head);V(head_popularity);V(head_popularity_observed);
+        V(own_gdp);V(subject_gdp);V(army_projection);V(navy_projection);
+        V(goods_leadership);V(monuments);V(other_prestige);
+        V(observed_day);V(complete);
+    } else if constexpr(std::is_same_v<X,P1PoliticalMandate>){
+        V(id);V(country);V(target);V(kind);V(decree);
+        V(authority_cost);V(started_day);V(active);
     } else if constexpr(std::is_same_v<X,P1PoliticalEvent>){
         V(id);V(country);V(source);V(kind);V(day);V(resolved);
     } else if constexpr(std::is_same_v<X,P1Lobby>){
@@ -104,6 +128,13 @@ void fields(Archive& a,T& x) {
     } else if constexpr(std::is_same_v<X,P3Attitude>){
         V(slice);V(radical_ppm);V(loyal_ppm);V(engagement_ppm);
         V(observed_day);V(issues);
+    } else if constexpr(std::is_same_v<X,P2CultureTraits>) {
+        V(culture);V(heritages);V(heritage_groups);
+        V(languages);V(language_groups);V(traditions);V(homelands);
+    } else if constexpr(std::is_same_v<X,P2ReligionTraits>) {
+        V(religion);V(traits);V(trait_groups);
+    } else if constexpr(std::is_same_v<X,P2NationalIdentity>) {
+        V(country);V(primary_cultures);V(state_religions);
     } else if constexpr(std::is_same_v<X,P3Group>){
         V(country);V(id);V(leader_anchor);V(issue_domain);
         V(preferred_choice);V(type);V(organization_ppm);
@@ -177,6 +208,11 @@ void fields(Archive& a,T& x) {
         V(id);V(country);V(proposer);V(legal_basis);V(action);V(status);
         V(proposed_base);V(proposed_amendment);V(target_id);V(transitions);
         V(introduced_day);V(promulgated_day);V(effective_day);
+    } else if constexpr(std::is_same_v<X,P1LegislativePowers>){
+        V(veto);V(override_ppm);V(assent_days);V(party_initiative);
+    } else if constexpr(std::is_same_v<X,P2Assent>){
+        V(bill_id);V(country);V(deadline);V(veto_day);
+        V(signed_by_head);V(vetoed);V(overridden);
     } else if constexpr(std::is_same_v<X,P2Enactment>){
         V(bill_id);V(country);V(law_key);V(phase);
         V(success_bonus_ppm);V(setbacks);V(checks);
@@ -453,12 +489,46 @@ struct SnapshotCodec {
             ar(std::string("VIC25_PHASEC_ESTATE_CLOSURES_1"));
             ar(w.completed_liquidations_);
         }
+        if(!w.p1_lost_confidence_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_CONFIDENCE_1"));
+            ar(w.p1_lost_confidence_);
+        }
         if(!w.p1_constitutions_.empty()) {
             ar(std::string("VIC25_PHASEC_P1_GOVERNANCE_1"));
             ar(w.p1_constitutions_);
             ar(w.p1_coalitions_);
             ar(w.p1_institutions_);
             ar(w.p1_pending_);
+        }
+        if(!w.p1_active_mandates_.empty()||
+           !w.p1_pending_mandates_.empty()||!w.p1_standing_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_STRATEGIC_CAPACITIES_1"));
+            ar(w.p1_active_mandates_);
+            ar(w.p1_pending_mandates_);
+            ar(w.p1_standing_);
+        }
+        if(!w.p1_naval_hulls_.empty()||!w.p1_army_ratings_.empty()||
+           !w.p1_verified_navies_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_MILITARY_STANDING_1"));
+            ar(w.p1_naval_hulls_);
+            ar(w.p1_army_ratings_);
+            ar(w.p1_verified_navies_);
+        }
+        if(!w.p1_office_consumed_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_ADMIN_INPUTS_1"));
+            ar(w.p1_office_consumed_);
+        }
+        if(!w.p1_value_added_.empty()) {
+            ar(std::string("VIC25_PHASEC_VALUE_ADDED_2"));
+            ar(w.p1_value_added_);
+        }
+        if(!w.p1_incorporation_.empty()||!w.p1_offices_.empty()||
+           !w.p1_public_building_levels_.empty()||!w.p1_commanders_.empty()) {
+            ar(std::string("VIC25_PHASEC_P1_BUREAUCRACY_1"));
+            ar(w.p1_incorporation_);
+            ar(w.p1_offices_);
+            ar(w.p1_public_building_levels_);
+            ar(w.p1_commanders_);
         }
         if(!w.p4_parties_.empty()||!w.p4_contests_.empty()) {
             ar(std::string("VIC25_PHASEC_P4_ELECTIONS_1"));
@@ -516,6 +586,10 @@ struct SnapshotCodec {
             ar(w.p2_group_demands_);
             ar(w.p2_negotiated_);
         }
+        if(!w.p2_assents_.empty()||!w.p1_legislative_powers_.empty()) {
+            ar(std::string("VIC25_PHASEC_SEPARATION_POWERS_1"));
+            ar(w.p1_legislative_powers_);ar(w.p2_assents_);
+        }
         if(!w.p2_enactments_.empty()||!w.p2_retry_after_.empty()) {
             ar(std::string("VIC25_PHASEC_P2_ENACTMENT_1"));
             ar(w.p2_enactments_);ar(w.p2_retry_after_);
@@ -527,6 +601,21 @@ struct SnapshotCodec {
             ar(w.p3_groups_);
             ar(w.p3_movements_);
             ar(w.p3_last_reaction_day_);
+        }
+        if(!w.p3_ideology_overrides_.empty()||
+           !w.p3_leader_ideologies_.empty()) {
+            ar(std::string("VIC25_PHASEC_P3_IDEOLOGIES_1"));
+            ar(w.p3_ideology_overrides_);
+            ar(w.p3_leader_ideologies_);
+        }
+        if(!w.p2_cultures_.empty()||!w.p2_religions_.empty()||
+           !w.p2_national_identities_.empty()||
+           !w.p2_emancipation_due_.empty()) {
+            ar(std::string("VIC25_PHASEC_P2_NATIONAL_IDENTITIES_1"));
+            ar(w.p2_cultures_);
+            ar(w.p2_religions_);
+            ar(w.p2_national_identities_);
+            ar(w.p2_emancipation_due_);
         }
         if(!w.p3_movement_types_.empty()||
            !w.p3_movement_calm_days_.empty()||
@@ -576,11 +665,16 @@ struct SnapshotCodec {
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
+             seen_p1_capacities=false,seen_p1_bureaucracy=false,
+             seen_value_added=false,seen_military_standing=false,
+             seen_admin_inputs=false,
              seen_p4=false,seen_p2=false,seen_people=false,seen_procedures=false,
-             seen_p3=false,seen_p5=false,seen_guerrilla=false,
+             seen_p3=false,seen_ideologies=false,seen_identity=false,
+             seen_p5=false,seen_guerrilla=false,
              seen_enactment=false,seen_campaigns=false,
              seen_characters=false,seen_political_dynamics=false,
-             seen_political_ai=false,seen_political_policies=false;
+             seen_political_ai=false,seen_political_policies=false,
+             seen_separation=false,seen_confidence=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -646,6 +740,12 @@ struct SnapshotCodec {
                 ar(w.completed_liquidations_);
                 if(w.completed_liquidations_.size()>1'000'000)
                     throw std::runtime_error("oversized closed estate records");
+            } else if(extension=="VIC25_PHASEC_P1_CONFIDENCE_1"&&
+                       !seen_confidence) {
+                seen_confidence=true;
+                ar(w.p1_lost_confidence_);
+                if(w.p1_lost_confidence_.size()>100'000)
+                    throw std::runtime_error("oversized no-confidence record");
             } else if(extension=="VIC25_PHASEC_P1_GOVERNANCE_1"&&!seen_p1) {
                 seen_p1=true;
                 ar(w.p1_constitutions_);
@@ -658,6 +758,64 @@ struct SnapshotCodec {
                    w.p1_institutions_.size()>1'000'000||
                    w.p1_pending_.size()>1'000'000)
                     throw std::runtime_error("invalid P1 constitutional extension");
+            } else if(extension=="VIC25_PHASEC_P1_STRATEGIC_CAPACITIES_1"&&
+                      !seen_p1_capacities) {
+                seen_p1_capacities=true;
+                ar(w.p1_active_mandates_);
+                ar(w.p1_pending_mandates_);
+                ar(w.p1_standing_);
+                if(w.p1_active_mandates_.size()>500'000||
+                   w.p1_pending_mandates_.size()>500'000||
+                   w.p1_standing_.size()>100'000)
+                    throw std::runtime_error("oversized P1 capacity commitments");
+            } else if(extension=="VIC25_PHASEC_P1_MILITARY_STANDING_1"&&
+                      !seen_military_standing) {
+                seen_military_standing=true;
+                ar(w.p1_naval_hulls_);
+                ar(w.p1_army_ratings_);
+                ar(w.p1_verified_navies_);
+                if(w.p1_naval_hulls_.size()>500'000||
+                   w.p1_army_ratings_.size()>500'000||
+                   w.p1_verified_navies_.size()>100'000)
+                    throw std::runtime_error("oversized real military standing");
+            } else if(extension=="VIC25_PHASEC_P1_ADMIN_INPUTS_1"&&
+                      !seen_admin_inputs) {
+                seen_admin_inputs=true;
+                ar(w.p1_office_consumed_);
+                if(w.p1_office_consumed_.size()>500'000)
+                    throw std::runtime_error("oversized daily office input journal");
+            } else if(extension=="VIC25_PHASEC_VALUE_ADDED_1"&&
+                      !seen_value_added) {
+                seen_value_added=true;
+                std::uint64_t n{};ar(n);
+                if(n>5'000'000)
+                    throw std::runtime_error("oversized legacy GDP history");
+                w.p1_value_added_.reserve(static_cast<std::size_t>(n));
+                for(std::uint64_t i=0;i<n;++i) {
+                    P1ValueAddedEvent event;
+                    ar(event.source);ar(event.country);ar(event.region);
+                    ar(event.month);ar(event.day);ar(event.gross_output);
+                    ar(event.intermediate_input);ar(event.fully_priced);
+                    w.p1_value_added_.push_back(std::move(event));
+                }
+            } else if(extension=="VIC25_PHASEC_VALUE_ADDED_2"&&
+                      !seen_value_added) {
+                seen_value_added=true;
+                ar(w.p1_value_added_);
+                if(w.p1_value_added_.size()>5'000'000)
+                    throw std::runtime_error("oversized GDP observation history");
+            } else if(extension=="VIC25_PHASEC_P1_BUREAUCRACY_1"&&
+                      !seen_p1_bureaucracy) {
+                seen_p1_bureaucracy=true;
+                ar(w.p1_incorporation_);
+                ar(w.p1_offices_);
+                ar(w.p1_public_building_levels_);
+                ar(w.p1_commanders_);
+                if(w.p1_incorporation_.size()>1'000'000||
+                   w.p1_offices_.size()>500'000||
+                   w.p1_public_building_levels_.size()>500'000||
+                   w.p1_commanders_.size()>500'000)
+                    throw std::runtime_error("oversized P1 bureaucracy extension");
             } else if(extension=="VIC25_PHASEC_P4_ELECTIONS_1"&&!seen_p4) {
                 seen_p4=true;
                 ar(w.p4_parties_);
@@ -745,6 +903,13 @@ struct SnapshotCodec {
                    w.p2_group_demands_.size()>1'000'000||
                    w.p2_negotiated_.size()>1'000'000)
                     throw std::runtime_error("oversized P2 parliamentary record");
+            } else if(extension=="VIC25_PHASEC_SEPARATION_POWERS_1"&&
+                       !seen_separation) {
+                seen_separation=true;
+                ar(w.p1_legislative_powers_);ar(w.p2_assents_);
+                if(w.p1_legislative_powers_.size()>100'000||
+                   w.p2_assents_.size()>1'000'000)
+                    throw std::runtime_error("oversized legislative assent");
             } else if(extension=="VIC25_PHASEC_P2_ENACTMENT_1"&&
                        !seen_enactment) {
                 seen_enactment=true;
@@ -763,6 +928,27 @@ struct SnapshotCodec {
                    w.p3_groups_.size()>500'000||
                    w.p3_movements_.size()>100'000)
                     throw std::runtime_error("oversized POP political state");
+            } else if(extension=="VIC25_PHASEC_P3_IDEOLOGIES_1"&&
+                      !seen_ideologies) {
+                seen_ideologies=true;
+                ar(w.p3_ideology_overrides_);
+                ar(w.p3_leader_ideologies_);
+                if(w.p3_ideology_overrides_.size()>500'000||
+                   w.p3_leader_ideologies_.size()>500'000)
+                    throw std::runtime_error("oversized P3 ideological profile");
+            } else if(extension=="VIC25_PHASEC_P2_NATIONAL_IDENTITIES_1"&&
+                      !seen_identity) {
+                seen_identity=true;
+                ar(w.p2_cultures_);
+                ar(w.p2_religions_);
+                ar(w.p2_national_identities_);
+                ar(w.p2_emancipation_due_);
+                if(w.p2_cultures_.size()>50'000||
+                   w.p2_religions_.size()>50'000||
+                   w.p2_national_identities_.size()>5'000||
+                   w.p2_emancipation_due_.size()>5'000)
+                    throw std::runtime_error(
+                        "oversized P2 culture/religion evidence");
             } else if(extension=="VIC25_PHASEC_P3P5_DYNAMICS_1"&&
                        !seen_political_dynamics) {
                 seen_political_dynamics=true;

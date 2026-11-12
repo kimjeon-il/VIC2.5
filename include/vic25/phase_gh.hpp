@@ -156,7 +156,9 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         std::int32_t day_of_month=0,std::int32_t days_in_month=0,
         const std::map<std::string,Quantity>* provisional_edges=nullptr,
         bool verified_day_edges_only=false,
-        const std::map<std::string,std::int32_t>* override_days=nullptr) {
+        const std::map<std::string,std::int32_t>* override_days=nullptr,
+        const std::function<Quantity(const TransportEdge&)>*
+            effective_capacity=nullptr) {
     if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
     if(trade.transport_edges.empty())return std::nullopt;
     using Item=std::tuple<Money,Month,Id>;
@@ -194,10 +196,12 @@ inline std::optional<PathQuote> quote_daily_freight_path(
                 provisional_edges->contains(edge_id))?
                 provisional_edges->at(edge_id):0;
             const Quantity used=phaseb::add_checked(committed,pending);
+            const Quantity lawful=effective_capacity?
+                (*effective_capacity)(edge):edge.monthly_capacity;
             const Quantity ceiling=day_of_month>0?
-                daily_budget::cumulative(edge.monthly_capacity,
+                daily_budget::cumulative(lawful,
                                          day_of_month,days_in_month):
-                edge.monthly_capacity;
+                lawful;
             // Actual native cargo occupies only its departing segment
             // today. Future segments are capacity-checked when the lot
             // physically reaches their hub, not months prematurely.
@@ -233,8 +237,10 @@ inline std::optional<PathQuote> quote_daily_freight_path(
             provisional_edges->contains(edge.id))?
             provisional_edges->at(edge.id):0;
         const Quantity used=phaseb::add_checked(committed,pending);
+        const Quantity lawful=effective_capacity?
+            (*effective_capacity)(edge):edge.monthly_capacity;
         const Quantity ceiling=day_of_month>0?
-            daily_budget::cumulative(edge.monthly_capacity,day_of_month,days_in_month):edge.monthly_capacity;
+            daily_budget::cumulative(lawful,day_of_month,days_in_month):lawful;
         if(day_of_month<=0||edge.from==from) {
             require(used<ceiling,"G_ERR_LOGISTICS_CAPACITY");
             result.capacity=std::min(result.capacity,ceiling-used);
@@ -370,12 +376,32 @@ struct WarState {
     std::int64_t started_day{},last_combat_day{-1},ended_day{-1};
     bool active{true},armistice{};
 };
+enum class InfamyTier:std::uint8_t {
+    reputable,infamous,notorious,pariah
+};
+struct InfamyRecord {
+    std::int64_t value_ppm{},carry{},last_day{-1};
+};
+struct InfamyEvent {
+    std::string id,country,source;
+    std::int64_t amount_ppm{},day{};
+};
+struct InfamyView {
+    std::string country;
+    std::int64_t value_ppm{},last_day{-1};
+    InfamyTier tier{InfamyTier::reputable};
+    std::int32_t conquest_radicals_ppm{},separatism_resistance_ppm{};
+};
 struct DiplomacyState {
     std::map<std::pair<std::string,std::string>,Tariff> tariffs;
     std::vector<PendingTariff> scheduled_tariffs;
     std::map<std::string,Treaty> treaties;
     std::map<std::string,DailyTreaty> daily_treaties;
     std::map<std::string,WarState> wars; // legal war state only, never duplicate army ledger
+    // H's only persistent Infamy register and immutable real-event audit.
+    std::map<std::string,InfamyRecord> infamy;
+    std::vector<InfamyEvent> infamy_events;
+    std::set<std::string> infamy_ids; // derived on checkpoint restore
     std::map<std::string,Organization> organizations;
     std::map<std::string,Protectorate> protectorates;
     std::map<std::string,Crisis> crises;
@@ -388,6 +414,16 @@ struct DiplomacyState {
     std::uint64_t revision{};
 };
 
+struct DiplomaticCapacityView {
+    std::string country;
+    phasec::P1PowerRank rank{phasec::P1PowerRank::unobserved};
+    phasec::P1FlowCapacity influence;
+    std::int64_t rank_bonus{},legal_bonus{},ongoing_pacts{};
+    std::int64_t prestige_before{},prestige_after{};
+    std::size_t unpriced_commitments{};
+    std::int32_t infamy_decay_bonus_ppm{},prestige_loss_ppm{};
+    bool rank_observed{},prestige_observed{},prestige_complete{};
+};
 struct InfluenceView {
     bool observed{};                 // false means unknown, NOT zero influence.
     Money bilateral_imports{};       // Only G's actually settled trade evidence.
@@ -434,6 +470,12 @@ class Stage {
                 c.government(country).prime_minister == person,
                 "H_ERR_UNAUTHORIZED_GOVERNMENT");
     }
+    // Real verified edges retain their base capacity; the source country's
+    // enacted infrastructure/IG efficiency adjusts only the derived daily
+    // operational ceiling. No new roads, railways or routes are manufactured.
+    [[nodiscard]] Quantity effective_edge_capacity(const TransportEdge&)const;
+    [[nodiscard]] Money military_procurement_price(
+        const std::string&,const std::string&,const std::string&,Money)const;
     [[nodiscard]] std::optional<PathQuote> quote_path(
         Id from, Id to, Month month) const;
     void plan_contracts();
@@ -506,6 +548,11 @@ public:
     [[nodiscard]] phasec::IntegratedWorld& phase_c() { return spatial_.phase_c(); }
     [[nodiscard]] const DiplomacyState& diplomacy() const { return diplomacy_; }
     [[nodiscard]] const TradeState& commerce() const { return trade_; }
+    void record_infamy(const std::string&,const std::string&,
+                       const std::string&,std::int64_t);
+    void phase_time_infamy_decay(
+        std::int64_t,int,
+        const std::map<std::string,std::int32_t>&);
 
     // New daily H treaties use the same authenticated government identities
     // and one H-owned diplomacy registry. Terms are active from exact days,
@@ -561,7 +608,7 @@ public:
         const auto key=std::make_pair(phase_c().month(),edge_id);
         const Quantity used=trade_.edge_usage[key];
         require(quantity<=daily_budget::remaining(
-                    edge.monthly_capacity,used,day,days),
+                    effective_edge_capacity(edge),used,day,days),
                 "F_ERR_DUPLICATE_FREIGHT_CAPACITY");
         const std::string purpose="F:"+cargo_id;
         phase_c().phase_d_reserve_material(
@@ -597,7 +644,7 @@ public:
         const auto key=std::make_pair(phase_c().month(),edge_id);
         const auto used=trade_.edge_usage[key];
         const auto capacity=daily_budget::cumulative(
-            edge.monthly_capacity,day_of_month,days_in_month);
+            effective_edge_capacity(edge),day_of_month,days_in_month);
         const auto booked=trade_.day_cargo_reservations.find(cargo_id);
         const bool reserved=booked!=trade_.day_cargo_reservations.end();
         require(used<=capacity&&
@@ -944,10 +991,14 @@ public:
             if(!ready(trade_.transport_edges.at(edge_id))) {
                 if(!geo.regions.contains(cargo.hub_region)||
                    !geo.regions.contains(cargo.destination))continue;
+                const std::function<Quantity(const TransportEdge&)> cap=
+                    [this](const TransportEdge& e) {
+                        return effective_edge_capacity(e);
+                    };
                 const auto alternate=quote_daily_freight_path(
                     trade_,geo.regions.at(cargo.hub_region),
                     geo.regions.at(cargo.destination),c.month(),
-                    day_of_month_,days_in_month_,nullptr,true);
+                    day_of_month_,days_in_month_,nullptr,true,nullptr,&cap);
                 if(!alternate||alternate->edges.empty()||
                    alternate->capacity<cargo.quantity)continue;
                 cargo.path_edges.resize(cargo.hop_index+1);
@@ -961,7 +1012,8 @@ public:
             const auto key=std::make_pair(c.month(),edge_id);
             const Quantity used=trade_.edge_usage[key];
             const Quantity free=daily_budget::remaining(
-                edge.monthly_capacity,used,day_of_month_,days_in_month_);
+                effective_edge_capacity(edge),used,
+                day_of_month_,days_in_month_);
             if(free<cargo.quantity)continue;
             const Money price=phaseb::mul_checked(
                 cargo.quantity,edge.freight_per_unit);
@@ -1099,6 +1151,11 @@ public:
         const auto id="WAR:"+crisis_id;
         diplomacy_.wars.emplace(id,WarState{
             id,crisis_id,claimant,crisis.respondent,day_index_,-1,-1,true,false});
+        // Real armed escalation of an existing territorial claim incurs
+        // the 1.15 state-goal baseline of one point. Full GDP/population
+        // weights require the source-complete state/world GDP and remain
+        // separate from this backed one-time war event.
+        record_infamy("H:WAR-GOAL:"+crisis_id,claimant,id,1'000'000);
         crisis.status=CrisisStatus::escalated;
         ++diplomacy_.revision;
         return true;
@@ -1287,6 +1344,15 @@ private:
                     war.ended_day>=-1&&
                     (war.ended_day<0||!war.active),
                     "H_ERR_WAR_RECORD_INVARIANT");
+        require(h.infamy_events.size()<=1'000'000&&
+                h.infamy.size()<=100'000&&
+                h.infamy_ids.size()==h.infamy_events.size(),
+                "H Infamy history or identity mismatch");
+        for(const auto& [country,record]:h.infamy)
+            require(!country.empty()&&record.value_ppm>=0&&
+                    record.value_ppm<=1'000'000'000&&record.carry>=0&&
+                    record.carry<=366&&record.last_day>=-1,
+                    "H Infamy record outside sourced game scale");
         for(const auto& [id,cargo]:g.daily_shipments) {
             require(id==cargo.id&&!id.empty()&&!cargo.buyer.empty()&&
                     !cargo.destination.empty()&&!cargo.good.empty()&&
@@ -1320,9 +1386,19 @@ public:
                                          bool first_calendar_day=false,
                                          std::int32_t day_of_month=0,
                                          std::int32_t days_in_month=0,
-                                         bool final_calendar_day=false) {
+                                         bool final_calendar_day=false,
+                                         int days_in_year=365) {
         TradeState new_trade=trade_;
         DiplomacyState new_diplomacy=diplomacy_;
+        // Last committed treaty/rank state sets the day's diplomatic
+        // mitigation; this avoids circular prestige/rank/Influence updates.
+        std::map<std::string,std::int32_t> infamy_bonuses;
+        for(const auto& [country,record]:diplomacy_.infamy) {
+            (void)record;
+            const auto cap=diplomatic_capacity(country);
+            if(cap.influence.complete)
+                infamy_bonuses[country]=cap.infamy_decay_bonus_ppm;
+        }
         phasee::World::Plan bridge;
         for(int n=0;n<12;++n)
             bridge[static_cast<std::size_t>(n)].push_back(
@@ -1330,6 +1406,9 @@ public:
                     Stage stage{spatial,new_trade,new_diplomacy,n,
                                 day_of_month,days_in_month,day};
                     if(n==0){
+                        if(day_of_month>0)
+                            stage.phase_time_infamy_decay(day,days_in_year,
+                                                          infamy_bonuses);
                         if(first_calendar_day)stage.advance_legal_state();
                         if(day_of_month>0) {
                             stage.settle_due_daily_trade_cargo();
@@ -1475,6 +1554,12 @@ public:
     [[nodiscard]] const CreditFacility& trade_credit(const std::string& id)const{
         return trade_.credit.at(id);
     }
+    // National diplomatic capacity is a derived concurrent commitment flow.
+    // Bilateral trade dependency (assess_influence) remains an independent
+    // factual diplomatic-exposure view, never spendable influence points.
+    [[nodiscard]] DiplomaticCapacityView diplomatic_capacity(
+        const std::string& country)const;
+    [[nodiscard]] InfamyView infamy_view(const std::string&)const;
     [[nodiscard]] InfluenceView assess_influence(const std::string& source,
                                                   const std::string& target) const;
     [[nodiscard]] CrisisAdvice advise_crisis(const std::string& id,
@@ -1671,7 +1756,11 @@ inline void Stage::plan_autonomous_trade() {
         const auto& source_quote=core.market(origin,route.good);
         const auto& target_quote=core.market(dest,route.good);
         const auto ppm=duty_rate(from,to,route.good);
-        const Money price=source_quote.price;
+        // A government buyer really pays the source-qualified higher
+        // military-goods bid. A private firm, other commodity, or fixed-price
+        // treaty contract is never silently charged this state expense.
+        const Money price=military_procurement_price(
+            to,route.buyer,route.good,source_quote.price);
         require(price>0&&ppm>=0&&ppm<=1'000'000,
                 "G_ERR_INVALID_MARKET_QUOTE");
         const auto path=quote_path(route.origin,route.destination,core.month());
@@ -1833,3 +1922,5 @@ inline void Stage::execute_autonomous_trade() {
 } // namespace vic25::phasegh
 #include "vic25/phase_gh_extensions.hpp"
 #include "vic25/phase_gh_diplomacy.hpp"
+#include "vic25/phase_gh_political_power.hpp"
+#include "vic25/phase_gh_infamy_impl.hpp"

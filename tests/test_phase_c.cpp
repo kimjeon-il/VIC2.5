@@ -391,7 +391,7 @@ int main() {
             w.propose_tax_law("A","Intruder",{"A"},300'000);
         });
         verify(rejected([&]{f.w.advance(illegal);}),"unauthorized law passed");
-        verify(f.w.month()==24000 && f.w.income_tax_ppm()==100'000,
+        verify(f.w.month()==24000 && f.w.income_tax_ppm("A")==100'000,
                "illegal bill changed month or tax");
         IntegratedWorld::Plan valid;
         valid[9].push_back([](auto& w){
@@ -399,9 +399,9 @@ int main() {
             w.propose_tax_law("A","Premier",{"A"},300'000);
         });
         f.w.advance(valid);
-        verify(f.w.income_tax_ppm()==100'000,"new statute applied same month");
+        verify(f.w.income_tax_ppm("A")==100'000,"new statute applied same month");
         f.w.advance();
-        verify(f.w.income_tax_ppm()==300'000,"valid legislature failed");
+        verify(f.w.income_tax_ppm("A")==300'000,"valid country legislature failed");
     });
     test.run(18, []{
         F f;IntegratedWorld::Plan p;
