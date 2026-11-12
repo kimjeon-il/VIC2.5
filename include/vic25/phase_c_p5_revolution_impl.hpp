@@ -141,7 +141,16 @@ inline void IntegratedWorld::p5_auto_resolve_crises(std::int64_t today) {
                 successor=person;break;
             }
         if(successor.empty()||
-           p1_pending_[today+1].contains(crisis.country))continue;
+           (p1_pending_.contains(today+1)&&
+            p1_pending_.at(today+1).contains(crisis.country)))continue;
+        bool verified=true;
+        for(const auto& region:evidence->second)
+            if(!sovereignty_.contains(region)||
+               sovereignty_.at(region)!=crisis.country||
+               !military_control_.contains(region)||
+               military_control_.at(region)!="P5:"+id)
+                verified=false;
+        if(!verified)continue;
         settlement.kind=P5SettlementKind::cabinet_overthrow;
         settlement.successor_head=successor;
         p5_settle(std::move(settlement));
