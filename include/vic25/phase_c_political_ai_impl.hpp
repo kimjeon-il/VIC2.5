@@ -2,6 +2,52 @@
 // National political AI issues ordinary lawful P1/P2 orders. It never
 // creates votes, changes laws directly, or invents legislative templates.
 namespace vic25::phasec {
+inline void IntegratedWorld::p2_propose_catalogue_reform(
+        const std::string& country,const std::string& domain,
+        const std::string& choice,const std::string& provenance,
+        std::int64_t today) {
+    require_stage({9});
+    ensure(!provenance.empty()&&today>=0&&
+           politics::catalogue().has(domain,choice)&&
+           governments_.contains(country),
+           "P2 autonomous reform needs an actual 1.15 law choice");
+    const P2BaseLaw* active=nullptr;
+    for(const auto& [slot,id]:p2_active_base_) {
+        const auto& law=p2_laws_.at(id);
+        if(law.country==country&&law.domain==domain&&
+           (law.scope.empty()||law.scope=="national")) {
+            active=&law;break;
+        }
+    }
+    ensure(active&&active->base_choice!=choice,
+           "P2 autonomous reform needs an existing different national law");
+    P2Bill bill;
+    bill.id="P2:auto:"+country+":"+domain+":"+
+            std::to_string(today);
+    bill.country=country;
+    bill.proposer=governments_.at(country).prime_minister;
+    bill.legal_basis=provenance;
+    const P2BaseLaw* templ=nullptr;
+    for(const auto& [id,law]:p2_laws_)
+        if(law.country==country&&law.domain==domain&&
+           law.base_choice==choice&&law.scope==active->scope&&
+           law.tier==active->tier) {
+            templ=&law;break;
+        }
+    if(templ)bill.proposed_base=*templ;
+    else {
+        // The catalogue is authoritative for a law choice and its native
+        // modifier lookup. Never transplant clauses of the *old* law.
+        bill.proposed_base=*active;
+        bill.proposed_base.base_choice=choice;
+        bill.proposed_base.clauses.clear();
+    }
+    bill.proposed_base.id=bill.id+":law";
+    bill.proposed_base.legal_basis=provenance;
+    for(auto& clause:bill.proposed_base.clauses)
+        clause.id=bill.proposed_base.id+":"+clause.id;
+    p2_submit_bill(std::move(bill),today);
+}
 inline void IntegratedWorld::p1_mark_player_country(
         const std::string& country,bool controlled) {
     ensure((stage_==-1&&commit_id_==0)||stage_==9,
@@ -331,40 +377,21 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                        other.status!=P2BillStatus::effective)
                         busy=true;
                 if(busy)break;
-                P2Bill bill;
-                bill.id="AI:bill:"+country+":"+std::to_string(today);
-                bill.country=country;
-                bill.proposer=g.prime_minister;
-                bill.legal_basis="ai-response-to:"+target;
-                // Never copy the *old* choice's material effects onto
-                // a different law. Only a validated historical template
-                // can supply the new choice's substantive clauses.
-                const P2BaseLaw* template_law=nullptr;
-                for(const auto& [law_id,known]:p2_laws_)
-                    if(known.country==country&&known.domain==m.issue_domain&&
-                       known.base_choice==m.desired_choice&&
-                       known.scope==current.scope&&known.tier==current.tier) {
-                        template_law=&known;break;
-                    }
-                if(!template_law)break;
-                bill.proposed_base=*template_law;
-                bill.proposed_base.id=bill.id+":norm";
-                bill.proposed_base.legal_basis=bill.legal_basis;
-                for(auto& clause:bill.proposed_base.clauses)
-                    clause.id=bill.proposed_base.id+":"+clause.id;
-                const auto key=bill.country+":"+
-                    std::to_string(static_cast<int>(bill.action))+":"+
-                    bill.proposed_base.domain+":"+
-                    bill.proposed_base.scope+":"+
-                    bill.proposed_base.base_choice;
-                if(!p2_retry_after_.contains(key)||
-                   p2_retry_after_.at(key)<=today) {
-                    const auto bill_id=bill.id;
-                    p2_submit_bill(std::move(bill),today);
-                    agenda.last_bill_id=bill_id;
-                    agenda.last_reform_choice=m.desired_choice;
-                    events_.push_back("p1-ai-proposed-political-law:"+bill_id);
-                }
+                const auto& catalog=politics::catalogue();
+                if(!catalog.has(m.issue_domain,m.desired_choice))break;
+                const auto key=country+":"+
+                    std::to_string(static_cast<int>(
+                        P2BillAction::enact_or_replace_base))+":"+
+                    m.issue_domain+":"+current.scope+":"+m.desired_choice;
+                if(p2_retry_after_.contains(key)&&
+                   p2_retry_after_.at(key)>today)break;
+                const auto bill_id="P2:auto:"+country+":"+
+                    m.issue_domain+":"+std::to_string(today);
+                p2_propose_catalogue_reform(country,m.issue_domain,
+                    m.desired_choice,"ai-response-to:"+target,today);
+                agenda.last_bill_id=bill_id;
+                agenda.last_reform_choice=m.desired_choice;
+                events_.push_back("p1-ai-proposed-political-law:"+bill_id);
                 break;
             }
         }

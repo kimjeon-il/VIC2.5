@@ -1866,6 +1866,10 @@ public:
     [[nodiscard]] bool p2_candidate_eligible(
         const std::string&,const std::string&)const;
     void p2_submit_bill(P2Bill,std::int64_t);
+    // Existing law template first; 1.15 catalogue choice otherwise.
+    void p2_propose_catalogue_reform(const std::string& country,
+        const std::string& domain,const std::string& choice,
+        const std::string& provenance,std::int64_t today);
     void p2_review_due(std::int64_t);
     [[nodiscard]] bool p2_has_review_due(std::int64_t)const;
     [[nodiscard]] bool p2_enactment_ready(const std::string&)const;
