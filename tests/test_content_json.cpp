@@ -71,6 +71,33 @@ static void parse_and_exercise_ruleset() {
     check(state.flags.contains("reform_celebrated|country:A"),
           "scheduled event default choice was not applied");
 }
+static void political_effect_schema() {
+    auto registry=json::load(R"({
+      "ruleset":"politics-commands",
+      "decisions":[
+        {"id":"reform","effects":[{"kind":"external","external":{
+          "kind":"propose_law","law_domain":"economic_system",
+          "law_choice":"interventionism"}}]},
+        {"id":"movement","effects":[{"kind":"external","external":{
+          "kind":"suppress_movement","movement_id":"MOV"}}]}
+      ]})");
+    check(registry.decisions.size()==2,
+          "political content actions not registered");
+    check(registry.decisions.at("reform").effects.front().external.kind==
+          ExternalKind::propose_law,
+          "content law proposal lost typed native action");
+    check(registry.decisions.at("movement").effects.front().external.kind==
+          ExternalKind::suppress_movement,
+          "content political mandate lost typed native action");
+    check(fails([]{json::load(R"({"ruleset":"bad","decisions":[
+      {"id":"d","effects":[{"kind":"external","external":{
+      "kind":"propose_law","law_domain":"economic_system"}}]}]})");}),
+          "content may not propose a law without a choice");
+    check(fails([]{json::load(R"({"ruleset":"bad","decisions":[
+      {"id":"d","effects":[{"kind":"external","external":{
+      "kind":"bolster_movement"}}]}]})");}),
+          "content may not order a nonexistent movement");
+}
 static void reject_untrusted_files() {
     check(fails([]{json::load("{");}),"unterminated JSON accepted");
     check(fails([]{json::load("{\"ruleset\":\"x\",\"ruleset\":\"y\"}");}),
@@ -101,6 +128,7 @@ static void reject_untrusted_files() {
 int main() {
     try {
         parse_and_exercise_ruleset();
+        political_effect_schema();
         reject_untrusted_files();
         std::cout<<"VIC2.5 CONTENT DATA LOADER PASS\n";
     } catch(const std::exception& e) {
