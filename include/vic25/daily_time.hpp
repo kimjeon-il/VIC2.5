@@ -568,6 +568,10 @@ public:
             if(gh.phase_c().p5_needs_daily_tick())
                 gh.phase_c().p5_auto_prepare_revolutions(today);
         });
+        real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
+            if(gh.phase_c().p5_needs_daily_tick())
+                gh.phase_c().p5_auto_resolve_crises(today);
+        });
         // Only journal due dates run guerrilla review. No daily all-world
         // militia battles or copied guerrilla population and supply ledgers.
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {

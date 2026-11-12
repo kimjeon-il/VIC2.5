@@ -1584,6 +1584,7 @@ public:
     [[nodiscard]] bool p5_needs_daily_tick()const;
     void p5_daily_advance(std::int64_t);
     void p5_auto_prepare_revolutions(std::int64_t);
+    void p5_auto_resolve_crises(std::int64_t);
     [[nodiscard]] bool p5_has_due_daily_strike(std::int64_t)const;
     void phase_time_apply_p5_strikes(std::int64_t);
     void p5_perform_action(P5CollectiveAction);
