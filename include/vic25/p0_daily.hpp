@@ -325,6 +325,7 @@ struct Policies {
     bool allow_endogenous_debt_repayment{true};
     bool allow_endogenous_input_procurement{true};
     phasec::IntegratedWorld::BankCreditRule bank_credit_rule{};
+    std::vector<phasegh::MerchantOffice> merchant_offices;
     std::vector<IndustryOpportunity> industry_opportunities;
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
@@ -334,6 +335,16 @@ struct Policies {
            monthly_clothing_units_per_person<0 ||
            autonomous_factory_cash_reserve<0||staffing_cash_reserve<0)
             throw std::invalid_argument("P0_INVALID_AUTONOMOUS_FISCAL_RULE");
+        std::set<std::pair<std::string,std::string>> seen_merchant_offices;
+        for(const auto& merchant:merchant_offices)
+            if(merchant.trader.empty()||merchant.market_region.empty()||
+               merchant.maximum_daily_units<=0||
+               merchant.minimum_cash_reserve<0||
+               merchant.minimum_margin_ppm<0||
+               merchant.minimum_margin_ppm>1'000'000||
+               !seen_merchant_offices.insert({
+                  merchant.trader,merchant.market_region}).second)
+                throw std::invalid_argument("P0_INVALID_MERCHANT_OFFICE");
         std::set<std::string> unique_industry_opportunities;
         for(const auto& opportunity:industry_opportunities) {
             const auto& p=opportunity.project;
@@ -1392,6 +1403,12 @@ public:
                     std::to_string(date.day),ai.country,ai.good,duty,ai.prime_minister);
             });
         }
+        // Merchant companies declare only their genuine home region and
+        // account; G finds sources, goods and transport itself each day.
+        for(const auto& office:decisions.merchant_offices)
+            plan[1].push_back([office](phasegh::Stage& gh) {
+                gh.register_daily_merchant(office);
+            });
         // Only an existing unfinished construction plan creates demand
         // for endogenous enterprise credit. C controls bank leverage, actual
         // receipts/margins and debtor exposure with one canonical ledger.
