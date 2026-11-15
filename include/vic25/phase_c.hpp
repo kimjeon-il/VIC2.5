@@ -3498,8 +3498,12 @@ public:
             if(only_peasants>0)
                 ensure(profession=="peasants"||profession=="peasant",
                        "P2 army model conscripts only peasants");
-            const double rate=std::clamp(p2_region_modifier_value(
-                demo.region,"state_conscription_rate_add"),0.0,1.0);
+            const double rate=std::clamp(
+                p2_region_modifier_value(demo.region,
+                    "state_conscription_rate_add")*
+                std::clamp(1.0+p2_region_modifier_value(demo.region,
+                    "state_conscription_rate_mult"),0.0,4.0),
+                0.0,1.0);
             People resident_population=0,already_active=0;
             for(const auto& [id,row]:people_.slices()) {
                 (void)id;
@@ -3523,6 +3527,36 @@ public:
         ensure(assigned(active) + n <= people_.slice(active).count, "duplicate military assignment");
         units_[unit][active] = phaseb::add_checked(units_[unit][active], n);
         events_.push_back("mobilization");
+    }
+    // Battlefield experience is backed by real completed C battle events.
+    // No phantom soldier, military-science stock or hidden daily XP accrual.
+    [[nodiscard]] double p2_unit_effectiveness(
+            const std::string& unit,const std::string& region)const {
+        const auto deploy=army_deployments_.find(unit);
+        const auto nation=deploy!=army_deployments_.end()?
+            deploy->second.country:
+            sovereignty_.contains(region)?sovereignty_.at(region):std::string{};
+        if(nation.empty())return 1.0;
+        const auto name="battle-unit:"+unit;
+        std::size_t fights=0;
+        for(const auto& event:events_)if(event==name)++fights;
+        const auto experience=std::clamp(
+            1.0+p2_catalog_modifier_value(
+                nation,"unit_experience_gain_mult"),0.05,4.0);
+        const auto morale=std::clamp(
+            1.0+p2_catalog_modifier_value(
+                nation,"unit_morale_loss_mult"),0.05,4.0);
+        const bool naval=stock(unit,region,"warships")>0||
+                         stock(unit,region,"warship")>0||
+                         stock(unit,region,"ship")>0;
+        const auto ship_bonus=naval?p2_catalog_modifier_value(
+            nation,"country_ship_crew_starting_veterancy_experience_add"):0;
+        // Experience earned from real events improves fighting ability;
+        // cumulative fatigue remains bounded and morale-law-sensitive.
+        const auto gain=std::min(0.75,
+            fights*0.025*experience)+ship_bonus*0.1;
+        const auto fatigue=std::min(0.5,fights*0.0075*morale);
+        return std::clamp(1.0+gain-fatigue,0.35,2.25);
     }
     void battle(const std::string& unit, Id source, const std::string& region,
                 CombatLoss loss) {
@@ -3556,6 +3590,7 @@ public:
                 units_[unit][e.to] = phaseb::add_checked(units_[unit][e.to], e.count);
         }
         events_.push_back("battle");
+        events_.push_back("battle-unit:"+unit);
     }
     // Phase E single-authority adapter: sovereignty lives only in Phase C.
     // Called by the spatial staged month during stage 0; Phase E never stores

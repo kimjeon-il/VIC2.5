@@ -774,6 +774,23 @@ inline void fight(phasec::IntegratedWorld& c,const Engagement& e) {
     const auto rifle_b=c.assigned_equipment(e.defender,e.region,"rifle");
     auto al=tactical_losses(a,ammo_b,rifle_b,e.defender_terrain_ppm,true);
     auto bl=tactical_losses(b,ammo_a,rifle_a,e.defender_terrain_ppm,false);
+    // Morale-loss and experience laws apply to the same real armed units.
+    // They alter casualty exposure, never ammunition or soldier headcount
+    // directly; C's battle command remains the exclusive casualties owner.
+    const double quality_a=c.p2_unit_effectiveness(e.attacker,e.region);
+    const double quality_b=c.p2_unit_effectiveness(e.defender,e.region);
+    const auto adjust=[](phasec::CombatLoss& loss,People count,
+                          double factor) {
+        const People impacted=phaseb::add_checked(
+            loss.killed,loss.acute);
+        const auto scaled=static_cast<People>(std::clamp(
+            static_cast<long double>(impacted)*factor,
+            0.0L,static_cast<long double>(count)));
+        loss.killed=scaled/4;
+        loss.acute=scaled-loss.killed;
+    };
+    adjust(al,a,std::clamp(quality_b/quality_a,0.25,4.0));
+    adjust(bl,b,std::clamp(quality_a/quality_b,0.25,4.0));
     al.ammunition=ammo_a;
     bl.ammunition=ammo_b;
     // Both loss counts are derived from the same pre-battle committed state.
