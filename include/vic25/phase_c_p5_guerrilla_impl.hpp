@@ -165,7 +165,8 @@ inline void IntegratedWorld::p5_begin_guerrilla(
     campaign.stage=campaign.units.empty()?
         P5GuerrillaStage::organizing:P5GuerrillaStage::active;
     campaign.next_review_day=campaign.started_day+7;
-    const auto id=campaign.id,review=campaign.next_review_day;
+    const auto id=campaign.id;
+    const auto review=campaign.next_review_day;
     p5_guerrilla_campaigns_.emplace(id,std::move(campaign));
     p5_guerrilla_review_due_[review].insert(id);
     events_.push_back("p5-guerrilla-regional-journal-created:"+id);
