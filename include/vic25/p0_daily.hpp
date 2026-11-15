@@ -118,6 +118,15 @@ struct Investment {
     Money reserve_cash{},minimum_output_price{};
     Quantity maximum_daily_work{1};
 };
+// A campaign-supplied blueprint can create a new company and a new type of
+// factory even when that region has no commissioned template to copy. The
+// project and recipe are saved in D only when an actual funded project starts.
+struct IndustryOpportunity {
+    std::string id,founder;
+    phased::ConstructionProject project;
+    phased::IndustryRecipe recipe;
+    Money new_firm_equity{},investor_cash_reserve{};
+};
 struct PoliticalReaction {
     Id population_slice{};
     std::string region,interest_group;
@@ -312,6 +321,9 @@ struct Policies {
     std::vector<HouseholdBasketRule> household_basket;
     bool allow_endogenous_staffing{true};
     Money staffing_cash_reserve{};
+    bool allow_endogenous_investment_credit{true};
+    bool allow_endogenous_debt_repayment{true};
+    std::vector<IndustryOpportunity> industry_opportunities;
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -320,6 +332,23 @@ struct Policies {
            monthly_clothing_units_per_person<0 ||
            autonomous_factory_cash_reserve<0||staffing_cash_reserve<0)
             throw std::invalid_argument("P0_INVALID_AUTONOMOUS_FISCAL_RULE");
+        std::set<std::string> unique_industry_opportunities;
+        for(const auto& opportunity:industry_opportunities) {
+            const auto& p=opportunity.project;
+            const auto& r=opportunity.recipe;
+            if(opportunity.id.empty()||opportunity.id.find(':')!=std::string::npos||
+               !unique_industry_opportunities.insert(opportunity.id).second||
+               p.region.empty()||p.contractor.empty()||
+               p.material_good.empty()||p.work_required<=0||
+               p.cash_price_per_work<=0||p.material_per_work<=0||
+               p.workers_per_work<=0||p.target_capacity<=0||
+               r.inputs.empty()||r.outputs.empty()||
+               opportunity.new_firm_equity<0||
+               opportunity.investor_cash_reserve<0||
+               (opportunity.new_firm_equity>0&&opportunity.founder.empty())||
+               (opportunity.new_firm_equity==0&&p.client.empty()))
+                throw std::invalid_argument("P0_INVALID_INDUSTRY_OPPORTUNITY");
+        }
         std::set<std::pair<std::string,std::string>> unique_needs;
         for(const auto& rule:household_basket)
             if(rule.good.empty()||rule.units_per_person_per_month<0||
@@ -1314,6 +1343,34 @@ public:
                     std::to_string(date.day),ai.country,ai.good,duty,ai.prime_minister);
             });
         }
+        // Only previously observed positive real receipts and a configured
+        // bank rate authorize endogenous investment credit. A loan remains
+        // matched bank assets/deposits in C; it never grants free construction.
+        if(decisions.allow_endogenous_investment_credit)
+            plan[1].push_back([](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                if(c.bank_insolvent()||c.annual_bank_interest_ppm()<=0)return;
+                std::set<std::string> borrowed;
+                for(const auto& [id,p]:gh.phase_d().state().constructions) {
+                    (void)id;
+                    if(p.ready||p.commissioned||c.firm_bankrupt(p.client)||
+                       !c.has_actor(p.client)||!borrowed.insert(p.client).second||
+                       p.paid_work>=p.work_required)continue;
+                    const auto finance=c.firm_finance(p.client);
+                    if(finance.book_surplus<=0||finance.receipts<=0)continue;
+                    const Money due=times(
+                        p.work_required-p.paid_work,p.cash_price_per_work);
+                    if(finance.available_cash>=due)continue;
+                    const Money cap=phaseb::mul_checked(
+                        finance.book_surplus,2);
+                    if(cap<=finance.outstanding_bank_loan)continue;
+                    const Money amount=std::min({
+                        due-finance.available_cash,
+                        cap-finance.outstanding_bank_loan,
+                        finance.receipts/2});
+                    if(amount>0)c.lend(p.client,amount);
+                }
+            });
         for(const auto& investment:decisions.investments) {
             auto work=std::make_shared<Quantity>(0);
             plan[1].push_back([investment,work](phasegh::Stage& gh){
@@ -2230,6 +2287,33 @@ public:
                     }
                 }
             });
+        // Solvent operating firms can retire outstanding principal without a
+        // separate AI debt ledger. Preserve part of real liquidity for payroll
+        // and material purchases; manual debt orders remain authoritative.
+        if(decisions.allow_endogenous_debt_repayment)
+            plan[8].push_back([manual=decisions.debt_service](
+                    phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::set<std::string> seen;
+                for(const auto& [site,f]:c.facilities()) {
+                    (void)site;
+                    if(!seen.insert(f.owner).second||c.firm_bankrupt(f.owner)||
+                       c.has_government(f.owner)||
+                       std::any_of(manual.begin(),manual.end(),
+                          [&](const DebtService& d){return d.borrower==f.owner;}))
+                        continue;
+                    const auto view=c.firm_finance(f.owner);
+                    if(view.outstanding_bank_loan<=0||view.book_surplus<=0||
+                       view.available_cash<=2)continue;
+                    const Money reserve=std::max<Money>(
+                        view.expenses/30,view.available_cash/2);
+                    if(view.available_cash<=reserve)continue;
+                    const Money payment=std::min(
+                        view.outstanding_bank_loan,
+                        (view.available_cash-reserve)/4);
+                    if(payment>0)c.repay(f.owner,payment);
+                }
+            });
         // Outstanding wages take precedence over unsecured bank principal.
         // Credits backed by G are retired through their actual facility first,
         // so G drawn balances cannot silently diverge from C loan principal.
@@ -2355,6 +2439,28 @@ public:
                     }
                 }
             });
+        // Supply-side investment opportunities come from the campaign's
+        // documented construction and production catalogue. Candidate goods
+        // must have solvent unmet demand in today's C market; no building or
+        // owner is created before the real project satisfies D's constraints.
+        if(date.day==1)
+            for(const auto& opportunity:decisions.industry_opportunities)
+                plan[9].push_back(
+                    [opportunity,month=game_c.month()](phasegh::Stage& gh) {
+                        auto project=opportunity.project;
+                        auto recipe=opportunity.recipe;
+                        const auto suffix=opportunity.id+":"+std::to_string(month);
+                        project.id="P0:ENTRY:"+suffix;
+                        project.target_site="P0:SITE:"+suffix;
+                        recipe.id="P0:RECIPE:"+suffix;
+                        recipe.site=project.target_site;
+                        if(opportunity.new_firm_equity>0)
+                            project.client="P0:FIRM:"+suffix;
+                        (void)gh.phase_d().propose_industry_entry(
+                            std::move(project),std::move(recipe),
+                            opportunity.founder,opportunity.new_firm_equity,
+                            opportunity.investor_cash_reserve);
+                    });
         // Actual creditor entries remain in C's balance sheet until paid.
         // No additional late-day payment pass is needed: employee wages
         // are prioritized before discretionary spending in Stage5.
