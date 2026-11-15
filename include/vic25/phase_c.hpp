@@ -1277,11 +1277,13 @@ public:
     // It is built once per active market day, not once per POP household.
     using MarketSellerIndex=std::map<
         std::pair<std::string,std::string>,std::vector<std::string>>;
-    [[nodiscard]] MarketSellerIndex market_seller_index()const {
+    [[nodiscard]] MarketSellerIndex market_seller_index(
+        bool include_bankrupt_estates=false)const {
         MarketSellerIndex result;
         for(const auto& [key,stock_now]:goods_.holdings()) {
             if(stock_now<=0||!actors_.contains(key.holder_id)||
                key.holder_id.starts_with("HH:")||
+               (!include_bankrupt_estates&&bankrupt_firms_.contains(key.holder_id))||
                !markets_.contains({key.region_id,key.good_id}))continue;
             result[{key.region_id,key.good_id}].push_back(key.holder_id);
         }
