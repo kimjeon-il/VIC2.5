@@ -88,7 +88,7 @@ inline std::map<phasee::Id,std::pair<phasee::Id,std::size_t>>
     return routes;
 }
 inline std::vector<March> choices(phasegh::Stage& gh) {
-    const auto& geo=gh.geography();
+    const auto& geo=gh.geography().spatial();
     const auto& c=gh.phase_c();
     const auto& diplomatic=gh.diplomacy();
     std::vector<March> candidates;
