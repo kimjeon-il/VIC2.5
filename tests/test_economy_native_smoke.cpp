@@ -98,7 +98,7 @@ static void endogenous_hiring_production_and_payroll() {
     auto& c=spatial.seed_core().seed_core();
     c.seed_actor("A",1);
     c.seed_actor("GROWER",200);
-    c.seed_market("R","food",10,1,100,0);
+    c.seed_market("R","food",9,1,100,0);
     c.seed_market("R","ore",1,1,100,0);
     c.seed_production_facility("FARM","GROWER","R",31);
     c.seed_stock("GROWER","R","ore",31);
