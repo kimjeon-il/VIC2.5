@@ -1,4 +1,5 @@
 #include "vic25/p0_daily.hpp"
+#include "vic25/daily_snapshot.hpp"
 #include <stdexcept>
 #include <string>
 using namespace vic25;
@@ -66,7 +67,21 @@ static void greenfield_from_real_cash() {
     check(after.core().cash(firm)==100,"new firm has fictitious/missing cash");
     check(after.core().shares("company:"+firm,"INVESTOR")==100,
           "founder did not receive real shares");
+    // New financed actors, corporate share certificates and unfinished
+    // construction must survive the native save/load boundary together.
+    const auto snapshot=daily::SnapshotCodec::encode(game.world());
+    auto restored=daily::SnapshotCodec::decode(snapshot);
+    check(restored.engine().base().core().core().cash(firm)==100 &&
+          restored.engine().base().core().core().shares(
+              "company:"+firm,"INVESTOR")==100 &&
+          restored.engine().base().core().state().constructions.contains(id),
+          "new company or real WIP planning lost on save/load");
+    p0::DailyGame replay(std::move(restored),policy);
     game.advance_day();
+    replay.advance_day();
+    check(daily::SnapshotCodec::encode(game.world())==
+          daily::SnapshotCodec::encode(replay.world()),
+          "the same saved corporate economy must replay deterministically");
     check(game.world().engine().base().core().construction(id).accepted_work==1,
           "new private project did not spend real work and material");
 }
