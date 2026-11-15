@@ -232,10 +232,40 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
     const People staff=employed_by(service.operator_id);
     const auto law_level=p2_rule(link.country,institution_id,
          P2ClauseKind::public_institution_level);
-    const auto level=law_level?
+    const auto base_level=law_level?
         static_cast<std::uint8_t>(*law_level):link.level;
-    const People slots=(service.monthly_slots/5)*level+
-                       ((service.monthly_slots%5)*level)/5;
+    std::string investment;
+    switch(link.kind) {
+      case P1InstitutionKind::policing:
+        investment="country_institution_police_max_investment_add";break;
+      case P1InstitutionKind::home_affairs:
+        investment="country_institution_home_affairs_max_investment_add";break;
+      case P1InstitutionKind::education:
+        investment="country_institution_schools_max_investment_add";break;
+      case P1InstitutionKind::welfare:
+        investment="country_institution_social_security_max_investment_add";break;
+      default:break;
+    }
+    const auto legal_bonus=investment.empty()?0:
+        static_cast<int>(std::clamp(
+            p2_catalog_modifier_value(link.country,investment),0.0,5.0));
+    const auto level=static_cast<std::uint8_t>(
+        std::min(10,static_cast<int>(base_level)+legal_bonus));
+    People slots=(service.monthly_slots/5)*level+
+                 ((service.monthly_slots%5)*level)/5;
+    if(link.kind==P1InstitutionKind::administration) {
+        const auto bureaucracy=std::clamp(
+            1.0+p2_catalog_modifier_value(link.country,
+                 "country_bureaucracy_mult"),0.1,4.0);
+        const auto capacity=std::clamp(
+            p2_catalog_modifier_value(link.country,
+                 "country_bureaucracy_add"),-100'000.0,100'000.0);
+        slots=std::max<People>(0,static_cast<People>(
+            std::clamp(static_cast<long double>(slots)*bureaucracy+
+                capacity,0.0L,
+                static_cast<long double>(
+                    std::numeric_limits<People>::max()/4))));
+    }
     const People staffed=std::min(slots,
         positive_product(staff,service.patients_per_worker));
     const bool funded=cash(service.operator_id)>0||

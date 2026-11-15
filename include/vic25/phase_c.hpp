@@ -2372,7 +2372,7 @@ public:
             Id household,std::string_view key,
             const std::string& modal_culture,
             const std::string& modal_religion,
-            Money national_wage)const {
+            Money national_wage,Quantity observed_waste=0)const {
         const auto sov=sovereignty_.find(d.region);
         if(sov==sovereignty_.end())return 0.0;
         const auto mod=[&](std::string_view law_key)->double {
@@ -2398,7 +2398,9 @@ public:
             return std::clamp(effect,-0.95,5.0);
         }
         if(key=="pop_illness_mult") {
-            if(food_grievance(d.region)<=0)return 0;
+            if(observed_waste<=0)return 0;
+            // Direct environmental cost originates in D verified production,
+            // not food scarcity, invented exposure or fictitious mortality.
             return std::clamp(-mod(
                 "state_pollution_reduction_health_mult"),-0.9,2.0);
         }
@@ -3222,6 +3224,52 @@ public:
                 authority=governments_.begin()->first; // historical fixture
             else throw std::invalid_argument("ambiguous national tax authority");
         }
+        // Salary laws affect only the *funded* gross wage payment.
+        // Existing POP contracts provide exact employee counts and legal
+        // status. Wages are never made payable by creating cash.
+        if(!authority.empty()) {
+            double wage_factor=1.0;
+            if(has_country_treasury(authority)&&
+               payer==country_treasury(authority))
+                wage_factor+=p2_catalog_modifier_value(authority,
+                    "country_government_wages_mult");
+            People counted=0;long double worker_factor=0;
+            const auto modal=p2_modal_population_identity(authority);
+            for(const auto& [slice,job]:people_.jobs()) {
+                if(job.count<=0||job.employer!=payer||
+                   !people_.has_slice(slice))continue;
+                const auto& demo=people_.demographic(
+                    people_.slice(slice).key.demographic);
+                const auto owner=sovereignty_.find(demo.region);
+                if(owner==sovereignty_.end()||
+                   owner->second!=authority)continue;
+                double factor=0.0;
+                if(!modal.second.empty()) {
+                    factor+=p2_catalog_modifier_value(authority,
+                        demo.religion==modal.second?
+                        "country_state_religion_wages_mult":
+                        "country_non_state_religion_wages_mult");
+                }
+                const auto acceptance=p2_policy_acceptance(
+                    demo,modal.first,modal.second);
+                const std::string status=acceptance>=80?"full_acceptance":
+                    acceptance>=60?"second_rate_citizen":
+                    acceptance>=40?"open_prejudice":
+                    acceptance>=20?"violent_hostility":"cultural_erasure";
+                factor+=p2_catalog_modifier_value(
+                    authority,"country_wage_"+status+"_mult");
+                counted=phaseb::add_checked(counted,job.count);
+                worker_factor+=static_cast<long double>(job.count)*factor;
+            }
+            if(counted>0)wage_factor+=static_cast<double>(
+                worker_factor/counted);
+            wage_factor=std::clamp(wage_factor,0.1,4.0);
+            const auto statutory=static_cast<Money>(std::min<long double>(
+                std::numeric_limits<Money>::max()/4,
+                std::ceil(static_cast<long double>(gross)*wage_factor)));
+            if(statutory>0&&statutory<=phase_d_cash_available(payer))
+                gross=statutory;
+        }
         const int rate=authority.empty()?income_tax_ppm_:
                         income_tax_ppm(authority);
         if(!authority.empty()) {
@@ -3638,7 +3686,9 @@ public:
     [[nodiscard]] bool daily_auto_demography_enabled() const {
         return demography_enabled_;
     }
-    void phase_time_auto_demography(int day,int days_in_month) {
+    void phase_time_auto_demography(
+            int day,int days_in_month,
+            const std::map<std::string,Quantity>& observed_pollution={}) {
         require_stage({10});
         if(!demography_enabled_)return;
         const auto before=people_.events().size();
@@ -3706,9 +3756,11 @@ public:
             const auto w=payroll.find(owner->second);
             const Money mean=w!=payroll.end()&&w->second.second>0?
                 w->second.first/w->second.second:0;
+            const auto pollution=observed_pollution.find(dem.region);
             return p2_population_law_modifier(dem,economic,household,key,
                 mode==modes.end()?std::string{}:mode->second.first,
-                mode==modes.end()?std::string{}:mode->second.second,mean);
+                mode==modes.end()?std::string{}:mode->second.second,mean,
+                pollution==observed_pollution.end()?0:pollution->second);
         };
         (void)phaseb::Engine{demographic_rules_}.advance_day(
             people_,day,days_in_month,state_effect,pop_effect);
@@ -3717,6 +3769,10 @@ public:
         const auto original=people_.slices();
         for(const auto& [id,snapshot]:original) {
             if(!people_.has_slice(id)||snapshot.count<=0)continue;
+            // Named politicians/electors and anchored institutional persons
+            // must retain valid source slices until a real succession event.
+            if(anchor_counts_.contains(id)&&anchor_counts_.at(id)>0)
+                continue;
             const auto dem=people_.demographic(
                 people_.slice(id).key.demographic);
             if(dem.service!=phaseb::Service::civilian&&

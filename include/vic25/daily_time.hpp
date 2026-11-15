@@ -585,8 +585,28 @@ public:
         // without user actions. The existing monthly rate is NOT replayed
         // at MonthClose.
         real_actions[10].push_back([current](phasegh::Stage& gh) {
+            // The sole pollution input is actual D production waste backed
+            // by verified site, batches and nonmarket waste, not a guessed
+            // environmental index or a second regional pollution stock.
+            std::map<std::string,phasec::Quantity> pollution;
+            const auto& domain=gh.phase_d().state();
+            for(const auto& run:domain.actual_production_runs) {
+                if(run.month!=domain.opening_month||run.batches<=0)continue;
+                const auto recipe=domain.recipes.find(run.recipe);
+                if(recipe==domain.recipes.end()||
+                   recipe->second.nonmarket_waste_per_batch<=0||
+                   !gh.phase_c().facilities().contains(recipe->second.site))
+                    continue;
+                const auto& facility=gh.phase_c().facility(
+                    recipe->second.site);
+                const auto amount=phaseb::mul_checked(
+                    run.batches,recipe->second.nonmarket_waste_per_batch);
+                pollution[facility.region]=phaseb::add_checked(
+                    pollution[facility.region],amount);
+            }
             gh.phase_c().phase_time_auto_demography(
-                current.day,days_in_month(current.year,current.month));
+                current.day,days_in_month(current.year,current.month),
+                pollution);
             // Phase C's Stage10 finalization reconciles P3/P5 POP refs
             // exactly once after all demographic and combat actions.
         });

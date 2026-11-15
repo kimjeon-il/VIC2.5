@@ -33,18 +33,30 @@ inline double paid_administration_cost_factor(
         const phasec::IntegratedWorld& c,const std::string& country,
         const std::string& recipient) {
     for(const auto& [id,link]:c.p1_institutions()) {
-        if(link.country!=country||
-           link.kind!=phasec::P1InstitutionKind::administration)
-            continue;
+        if(link.country!=country)continue;
         const auto service=c.public_institutions().find(id);
         if(service==c.public_institutions().end()||
            service->second.operator_id!=recipient||
-           c.phase_d_workforce(recipient)<=0)continue;
-        return std::clamp(
-            1.0+c.p2_region_modifier_value(
-                service->second.region,
-                "state_bureaucracy_population_base_cost_factor_mult"),
-            0.1,4.0);
+           c.phase_d_workforce(recipient)<=0||
+           c.p1_institution_capacity(id).usable_slots<=0)continue;
+        std::string key;
+        if(link.kind==phasec::P1InstitutionKind::healthcare)
+            key="country_institution_cost_institution_health_system_mult";
+        else if(link.kind==phasec::P1InstitutionKind::education)
+            key="country_institution_cost_institution_schools_mult";
+        else if(link.kind==phasec::P1InstitutionKind::home_affairs)
+            key="country_institution_cost_institution_home_affairs_mult";
+        else if(link.kind==phasec::P1InstitutionKind::welfare)
+            key="country_institution_cost_institution_social_security_mult";
+        const double service_cost=key.empty()?0.0:
+            c.p2_catalog_modifier_value(country,key);
+        const double administration=link.kind==
+            phasec::P1InstitutionKind::administration?
+                c.p2_region_modifier_value(service->second.region,
+                 "state_bureaucracy_population_base_cost_factor_mult")+
+                c.p2_catalog_modifier_value(country,
+                 "country_bureaucracy_investment_cost_factor_mult"):0.0;
+        return std::clamp(1.0+service_cost+administration,0.1,4.0);
     }
     return 1.0;
 }
@@ -599,7 +611,8 @@ inline Money actual_daily_worker_wage(const phasec::IntegratedWorld& c,
     return highest;
 }
 
-inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
+inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p,
+                          const phased::DomainState& industry) {
     if(c.firm_bankrupt(p.employer))return;
     // Count actual employment contracts in this region, NOT effective workers:
     // a strike is lost production for a day, not a vacant permanent job.
@@ -610,8 +623,44 @@ inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
         if(c.people().demographic(row.key.demographic).region==p.region)
             contracted=phaseb::add_checked(contracted,job.count);
     }
-    People need=p.wanted-contracted;
+    const auto& country=c.sovereignty(p.region);
+    double wanted_factor=std::clamp(
+        1.0+c.p2_region_modifier_value(
+            p.region,"state_working_adult_ratio_add"),0.2,2.0);
+    // A real staffed naval administration site is necessary to activate
+    // naval hiring-rate law effects; no naval profession is fabricated.
+    bool naval=false;
+    for(const auto& [id,recipe]:industry.recipes) {
+        (void)id;
+        if(!c.facilities().contains(recipe.site))continue;
+        const auto& site=c.facility(recipe.site);
+        if(site.owner!=p.employer||site.region!=p.region)continue;
+        naval=recipe.industry_class=="naval_administration"||
+              recipe.industry_class=="shipbuilding"||
+              recipe.industry_class=="naval";
+        if(naval)break;
+    }
+    if(naval)wanted_factor*=std::clamp(
+        1.0+c.p2_catalog_modifier_value(country,
+            "building_naval_administration_hiring_rate_mult"),0.1,3.0);
+    const People target=static_cast<People>(
+        std::min<long double>(
+            std::numeric_limits<People>::max()/4,
+            std::floor(static_cast<long double>(p.wanted)*wanted_factor)));
+    People need=target-contracted;
     if(need<=0)return;
+    double wage_factor=1.0;
+    if(c.p2_region_unincorporated_evidence(p.region))
+        wage_factor+=c.p2_region_modifier_value(
+            p.region,"state_unincorporated_starting_wages_mult");
+    if(c.army_deployments().contains(p.employer))
+        wage_factor+=c.p2_catalog_modifier_value(
+            country,"country_military_wages_mult");
+    const Money wage=static_cast<Money>(
+        std::clamp(static_cast<long double>(p.monthly_wage)*
+            std::clamp(wage_factor,0.1,4.0),
+            0.0L,static_cast<long double>(
+                std::numeric_limits<Money>::max()/4)));
     // This is not population creation. Only an eligible, truly uncontracted
     // regional slice can be hired; no cross-firm job overwrite.
     for(const auto& [id,s]:c.people().slices()) {
@@ -621,13 +670,13 @@ inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
         const auto* current_job=c.people().job(id);
         if(current_job && (current_job->employer!=p.employer ||
            current_job->occupation!="worker" ||
-           current_job->wage_per_month!=p.monthly_wage))continue;
+           current_job->wage_per_month!=wage))continue;
         const auto& econ=c.people().economic(s.key.economic);
         if(econ.profession!="worker"&&econ.profession!="unskilled_worker")continue;
         if(!c.people().eligible_for(id,phaseb::JobRequirements{}))continue;
         const People n=std::min(s.count-c.people().employed(id),need);
         if(n>0) {
-            c.hire(id,n,p.employer,p.monthly_wage);
+            c.hire(id,n,p.employer,wage);
             need-=n;
         }
     }
@@ -1246,7 +1295,7 @@ public:
         }
         for(const auto& staffing:decisions.staffing)
             plan[2].push_back([staffing](phasegh::Stage& gh){
-                hire_available(gh.phase_c(),staffing);
+                hire_available(gh.phase_c(),staffing,gh.phase_d().state());
             });
         for(const auto& firm:decisions.manufacturers) {
             auto workers=std::make_shared<People>(0);
@@ -2254,8 +2303,45 @@ public:
                 if(treasury==program.recipient)return;
                 const Money free=c.phase_d_cash_available(treasury);
                 if(free<=program.treasury_cash_reserve)return;
-                const auto multiplier=paid_administration_cost_factor(
+                double multiplier=paid_administration_cost_factor(
                     c,program.country,program.recipient);
+                // Welfare laws attach to real, entitled dependent households
+                // receiving an actual treasury transfer from this program.
+                if(program.recipient.rfind("HH:",0)==0) {
+                    double welfare=0;bool eligible=false;
+                    for(const auto& [id,pop]:c.people().slices()) {
+                        (void)id;
+                        if(pop.count<=0||
+                           program.recipient!="HH:"+
+                              std::to_string(pop.key.household))continue;
+                        const auto& dem=c.people().demographic(
+                            pop.key.demographic);
+                        const auto& econ=c.people().economic(
+                            pop.key.economic);
+                        if(c.sovereignty(dem.region)!=program.country||
+                           (econ.livelihood!="inactive"&&
+                            econ.labor_class!="retired"&&
+                            econ.labor_class!="unemployed"))
+                            continue;
+                        for(const auto& [service_id,link]:c.p1_institutions()) {
+                            if(link.country!=program.country||
+                               link.kind!=phasec::P1InstitutionKind::welfare)
+                                continue;
+                            const auto svc=c.public_institutions().find(service_id);
+                            if(svc==c.public_institutions().end()||
+                               svc->second.region!=dem.region||
+                               c.p1_institution_capacity(service_id).usable_slots<=0)
+                                continue;
+                            eligible=true;
+                            welfare=std::max(welfare,
+                                c.p2_region_modifier_value(
+                                    dem.region,"state_welfare_payments_add")+
+                                c.p2_region_modifier_value(
+                                    dem.region,"state_dependent_wage_mult"));
+                        }
+                    }
+                    if(eligible)multiplier*=std::clamp(1.0+welfare,0.1,4.0);
+                }
                 const Money statutory_need=static_cast<Money>(
                     std::min<long double>(
                         std::numeric_limits<Money>::max()/4,
