@@ -5,6 +5,11 @@
 > 상위: `phase-d-common/1.0`, `pop-design/1.1`, `phase-c-common/economy/politics/military/integration/1.0`, `phase-d-construction/1.0`.  
 > 기존 C-E1 기업·생산·원장·C-E2 상품·시장·E3 금융/E5 운송/정치·군사 및 D-D0 단일 월간 규칙을 유지한다.
 
+## 2026-11-15 원작 1.15 비교 보충 자료
+
+- [Victoria 3 1.15 산업·건물 99개 대응표](VIC3_1_15_BUILDING_INDUSTRY_CROSSWALK_2026-11-15.md) — 기존 13개 산업군에 원작 23/34/14/28 분류를 대응. 건물/산업/기업/실물 원장을 구분하고, 실제 건설/운영과 파생표시를 분리하는 **설계 문서**.
+- [99개 참조 행 JSON](../../../data/reference/vic3_115_building_crosswalk.json) — 개발 참고용만. `runtime_loaded: false`; 데이터 등록이 곧 C++ 실행 기능을 뜻하지 않는다.
+
 ## 설계 정본
 
 | 단계 | 상세 문서 | 설계 결정 |
