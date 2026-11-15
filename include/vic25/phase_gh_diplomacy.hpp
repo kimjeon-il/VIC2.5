@@ -541,6 +541,23 @@ inline InfluenceView World::assess_influence(const std::string& source,
             if(v.ideological_hostility_impact>0)v.political_known=true;
         }
     }
+    // Naval prestige is a derived observation of actually equipped,
+    // staffed C units; the law cannot conjure ships or global influence.
+    const auto& military=core_.core().core();
+    const auto navy=military.p2_observed_naval_projection(source);
+    if(navy>0) {
+        v.military_known=true;
+        v.naval_power_projection=navy;
+        v.naval_prestige_equivalent=static_cast<std::int64_t>(
+            std::min<long double>(
+                static_cast<long double>(
+                    std::numeric_limits<std::int64_t>::max()/8),
+                static_cast<long double>(navy)*
+                    std::clamp(1.0+military.p2_catalog_modifier_value(
+                        source,
+                        "country_prestige_from_navy_power_projection_mult"),
+                        0.0,4.0)));
+    }
     return v;
 }
 inline CrisisAdvice World::advise_crisis(const std::string& id,

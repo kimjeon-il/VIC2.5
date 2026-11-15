@@ -289,36 +289,72 @@ struct DomainState {
             const ConstructionProject& p,
             const phasec::IntegratedWorld& c)const {
         if(p.work_required<=0)return p.work_required;
-        // Most countries do not activate this specific amendment. Short
-        // circuit before scanning work packages and global industry classes.
-        const auto law=std::max(0.0,c.p2_region_modifier_value(
-            p.region,
-            "building_group_bg_agriculture_construction_efficiency_add"));
-        if(law<=0)return p.work_required;
+        // Work-package stages are explicit contractor commitments. Laws
+        // cannot retroactively remove their signed and certified scope.
         for(const auto& [id,work]:work_packages) {
             (void)id;
             if(work.project==p.id)return p.work_required;
         }
-        bool agriculture=false;
+        const auto& country=c.sovereignty(p.region);
+        double efficiency=0;
+        if(c.p2_has_registered_company_equity(p.client))
+            efficiency+=c.p2_catalog_modifier_value(country,
+                "country_company_construction_efficiency_bonus_add");
         for(const auto& [id,r]:recipes) {
             (void)id;
             if(r.site!=p.target_site)continue;
-            std::string kind=r.industry_class;
-            std::set<std::string> visited;
-            for(int depth=0;depth<12&&!kind.empty()&&
-                    visited.insert(kind).second;++depth) {
-                if(kind=="agriculture"||kind=="farming"||
-                   kind=="farm") {agriculture=true;break;}
-                auto parent=industry_classes.find(kind);
+            bool agriculture=false,ship=false;
+            std::string current=r.industry_class;
+            std::set<std::string> seen;
+            for(int depth=0;depth<12&&!current.empty()&&
+                    seen.insert(current).second;++depth) {
+                if(current=="agriculture"||current=="farming"||
+                   current=="farm")agriculture=true;
+                if(current=="shipbuilding"||current=="naval"||
+                   current=="shipyard")ship=true;
+                const auto parent=industry_classes.find(current);
                 if(parent==industry_classes.end())break;
-                kind=parent->second.parent;
+                current=parent->second.parent;
             }
-            if(agriculture)break;
+            if(agriculture)
+                efficiency+=c.p2_region_modifier_value(p.region,
+                    "building_group_bg_agriculture_construction_efficiency_add");
+            std::string type;
+            for(const auto& output:r.outputs) {
+                const auto& good=output.good;
+                if(good.find("ship")!=std::string::npos||
+                   good.find("cruiser")!=std::string::npos||
+                   good.find("torpedo")!=std::string::npos)
+                    ship=true;
+                for(const std::string candidate:{
+                    "armored_cruiser","early_troop_ship","light_cruiser",
+                    "protected_cruiser","troop_ship"})
+                    if(good.find(candidate)!=std::string::npos)
+                        type=candidate;
+            }
+            if(!ship)continue;
+            efficiency+=c.p2_catalog_modifier_value(country,
+                "country_ship_construction_efficiency_add");
+            if(!type.empty())
+                efficiency+=c.p2_catalog_modifier_value(country,
+                    "country_ship_type_"+type+"_construction_efficiency_add");
+            std::string group;
+            if(type.find("cruiser")!=std::string::npos)group="cruisers";
+            else if(type.find("troop")!=std::string::npos)group="supply_ships";
+            else if(r.industry_class.find("torpedo")!=std::string::npos)
+                group="torpedo_craft";
+            else if(r.industry_class.find("capital")!=std::string::npos)
+                group="capital_ships";
+            if(!group.empty())
+                efficiency+=c.p2_catalog_modifier_value(country,
+                    "country_ship_group_"+group+
+                    "_construction_efficiency_add");
         }
-        if(!agriculture)return p.work_required;
+        if(efficiency<=0)return p.work_required;
         return static_cast<Quantity>(std::clamp(
             std::ceil(static_cast<long double>(p.work_required)/
-                      (1.0L+static_cast<long double>(law))),
+                (1.0L+std::clamp(
+                    static_cast<long double>(efficiency),0.0L,3.0L))),
             1.0L,static_cast<long double>(p.work_required)));
     }
     void finalize(const phasec::IntegratedWorld& c) {

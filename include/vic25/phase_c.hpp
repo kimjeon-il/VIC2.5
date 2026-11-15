@@ -2064,6 +2064,8 @@ public:
         const std::string&,std::string_view,int institution_level=0)const;
     [[nodiscard]] bool p2_catalog_group_active(
         const std::string&,std::string_view)const;
+    [[nodiscard]] double p2_region_modifier_value(
+        const std::string&,std::string_view)const;
     [[nodiscard]] int p2_voting_age(const std::string&)const;
     [[nodiscard]] P2TermView p2_term(const std::string&)const;
     [[nodiscard]] bool p2_candidate_eligible(
@@ -3079,7 +3081,35 @@ public:
         require_stage({3, 7});
         ensure(qty > 0 && unit_price > 0 && stock(seller, region, good) >= qty,
                "insufficient sale stock");
-        const Money cost = positive_product(qty, unit_price);
+        // Military procurement laws affect paid purchases from existing
+        // sellers. Units already owned by the treasury consume their stored
+        // equipment without generating a government procurement invoice.
+        auto actual_price=unit_price;
+        const auto sov=sovereignty_.find(region);
+        if(sov!=sovereignty_.end()&&
+           has_country_treasury(sov->second)&&
+           (buyer==country_treasury(sov->second)||
+            (army_deployments_.contains(buyer)&&
+             army_deployments_.at(buyer).country==sov->second))) {
+            const bool navy=good.find("ship")!=std::string::npos||
+                            good.find("cruiser")!=std::string::npos||
+                            good.find("torpedo")!=std::string::npos;
+            const bool army=navy||good=="rifle"||good=="rifles"||
+                good=="ammunition"||good=="artillery"||good=="cannon";
+            if(army) {
+                double rate=p2_catalog_modifier_value(sov->second,
+                    "country_military_goods_cost_mult");
+                if(navy)rate+=p2_catalog_modifier_value(sov->second,
+                    "country_navy_goods_cost_mult");
+                actual_price=std::max<Money>(1,static_cast<Money>(
+                    std::clamp(static_cast<long double>(unit_price)*
+                         std::clamp(1.0L+
+                           static_cast<long double>(rate),0.1L,4.0L),
+                         1.0L,static_cast<long double>(
+                           std::numeric_limits<Money>::max()/4))));
+            }
+        }
+        const Money cost = positive_product(qty, actual_price);
         if(phase_d_reservation_mode_) {
             resources_.assert_goods_available({seller,region,good},qty,stock(seller,region,good));
             resources_.assert_cash_available(buyer,cost,cash(buyer));
@@ -3528,6 +3558,46 @@ public:
         units_[unit][active] = phaseb::add_checked(units_[unit][active], n);
         events_.push_back("mobilization");
     }
+    // A national war loss series is derived from actual recorded C battles
+    // during the last twelve observed calendar months, not a separate war
+    // popularity stock or reconstructed unrecorded casualties.
+    [[nodiscard]] People p2_recent_battle_casualties(
+            const std::string& country)const {
+        const std::string prefix="battle-loss:"+country+":";
+        People total=0;
+        for(const auto& item:events_) {
+            if(item.rfind(prefix,0)!=0)continue;
+            const auto monthEnd=item.find(':',prefix.size());
+            if(monthEnd==std::string::npos)continue;
+            const auto observed=std::stoll(
+                item.substr(prefix.size(),monthEnd-prefix.size()));
+            if(observed>month()||month()-observed>12)continue;
+            const auto losses=std::stoll(item.substr(monthEnd+1));
+            if(losses>0)total=phaseb::add_checked(total,losses);
+        }
+        return total;
+    }
+    [[nodiscard]] Quantity p2_observed_naval_projection(
+            const std::string& country)const {
+        Quantity tonnage=0;
+        for(const auto& [unit,deployment]:army_deployments_) {
+            if(deployment.country!=country||active_strength(unit)<=0)continue;
+            const auto& region=deployment.region;
+            const Quantity hulls=phaseb::add_checked(
+                phaseb::add_checked(stock(unit,region,"warships"),
+                                     stock(unit,region,"warship")),
+                stock(unit,region,"ships"));
+            if(hulls<=0)continue;
+            tonnage=phaseb::add_checked(tonnage,
+                std::min<Quantity>(active_strength(unit),hulls));
+        }
+        return static_cast<Quantity>(std::clamp<long double>(
+            static_cast<long double>(tonnage)*
+                std::clamp(1.0+p2_catalog_modifier_value(
+                    country,"ship_power_projection_mult"),0.1,4.0),
+            0.0L,static_cast<long double>(
+                std::numeric_limits<Quantity>::max()/8)));
+    }
     // Battlefield experience is backed by real completed C battle events.
     // No phantom soldier, military-science stock or hidden daily XP accrual.
     [[nodiscard]] double p2_unit_effectiveness(
@@ -3591,6 +3661,10 @@ public:
         }
         events_.push_back("battle");
         events_.push_back("battle-unit:"+unit);
+        if(const auto deployed=army_deployments_.find(unit);
+           deployed!=army_deployments_.end()&&casualties>0)
+            events_.push_back("battle-loss:"+deployed->second.country+":"+
+                std::to_string(month())+":"+std::to_string(casualties));
     }
     // Phase E single-authority adapter: sovereignty lives only in Phase C.
     // Called by the spatial staged month during stage 0; Phase E never stores

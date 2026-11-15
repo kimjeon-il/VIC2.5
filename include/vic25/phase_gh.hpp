@@ -402,6 +402,8 @@ struct InfluenceView {
     // Military/political/cultural dimensions remain unsupported, not zero.
     bool military_known{}, political_known{}, cultural_known{};
     Quantity military_goods_delivered{};
+    Quantity naval_power_projection{};
+    std::int64_t naval_prestige_equivalent{};
     Money military_material_value{}, cultural_funding{};
     std::uint64_t political_cooperation_actions{};
     std::string comparable_currency{"TEST"};

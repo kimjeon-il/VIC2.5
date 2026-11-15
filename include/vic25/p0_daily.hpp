@@ -1983,8 +1983,44 @@ public:
                     // An armed but wholly inactive front can also be a
                     // stalemate. Do not lock countries into endless war
                     // merely because both sides still own cartridges.
-                    const auto required_idle=war.armistice?90:
+                    const auto base_idle=war.armistice?90:
                         (fighting_capability?90:30);
+                    // Actual recent killed/injured POW counts affect peace
+                    // pressure; source laws change how casualty and battle
+                    // outcomes shift the chance of seeking a treaty.
+                    const auto own_loss=c.p2_recent_battle_casualties(
+                        war.attacker);
+                    const auto enemy_loss=c.p2_recent_battle_casualties(
+                        war.defender);
+                    const auto total_loss=phaseb::add_checked(
+                        own_loss,enemy_loss);
+                    double warweariness=0.0;
+                    if(total_loss>0&&war.last_combat_day>=war.started_day) {
+                        const auto ratio=static_cast<double>(own_loss)/
+                            static_cast<double>(total_loss);
+                        for(const auto& [nation,lossShare]:
+                            std::vector<std::pair<std::string,double>>{
+                                {war.attacker,ratio},
+                                {war.defender,1.0-ratio}}) {
+                            const auto decrease=std::clamp(
+                                1.0+c.p2_catalog_modifier_value(nation,
+                                    "country_war_support_battles_decrease_mult"),
+                                0.0,4.0);
+                            const auto increase=std::clamp(
+                                1.0+c.p2_catalog_modifier_value(nation,
+                                    "country_war_support_battles_increase_mult"),
+                                0.0,4.0);
+                            const auto attrition=std::clamp(
+                                1.0+c.p2_catalog_modifier_value(nation,
+                                    "country_war_support_casualties_mult"),
+                                0.0,4.0);
+                            warweariness+=(lossShare*decrease*attrition-
+                                    (1.0-lossShare)*increase)/2.0;
+                        }
+                    }
+                    const auto required_idle=static_cast<std::int64_t>(
+                        std::clamp(static_cast<double>(base_idle)*
+                            (1.0-0.35*warweariness),15.0,180.0));
                     if(today<idle_from||today-idle_from<required_idle)
                         continue;
                     phasegh::TreatyClause term;
