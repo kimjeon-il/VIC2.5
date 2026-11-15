@@ -136,7 +136,9 @@ inline void Stage::terminate_treaty(const std::string& id,
 inline Quantity Stage::lawful_trade_quantity(
             const std::string& seller_country,
             const std::string& buyer_country,
-            const std::string& good,Quantity requested) {
+            const std::string& good,Quantity requested,
+            const std::string& origin_region,
+            const std::string& destination_region) {
     require(requested>=0,"G_ERR_NEGATIVE_QUANTITY");
     // National economic-system trade prohibitions supersede ordinary
     // tariff orders. Domestic transactions remain lawful.
@@ -148,6 +150,27 @@ inline Quantity Stage::lawful_trade_quantity(
         return 0;
     Quantity allowed=requested;
     if(seller_country!=buyer_country) {
+        // Canton/Kyushu statutes restrict foreign trade to documented
+        // geographical ports, never to a guessed country-wide market.
+        const auto valid_port=[&](const std::string& nation,
+                             const std::string& region)->bool {
+            const auto has=[&](std::string_view term) {
+                return region.find(term)!=std::string::npos;
+            };
+            const auto& c=phase_c();
+            if(c.p2_catalog_modifier_value(nation,
+                "country_disallow_trade_outside_canton_bool")>0)
+                return has("Canton")||has("canton")||
+                       has("Guangdong")||has("Guangzhou");
+            if(c.p2_catalog_modifier_value(nation,
+                "country_disallow_trade_outside_kyushu_bool")>0)
+                return has("Kyushu")||has("kyushu")||has("Nagasaki")||
+                       has("Fukuoka");
+            return true;
+        };
+        if(!valid_port(seller_country,origin_region)||
+           !valid_port(buyer_country,destination_region))
+            return 0;
         const auto& core=phase_c();
         // Negative law trade-capacity multipliers restrict actual booked
         // quantity without creating market demand or additional shipping.
@@ -157,7 +180,14 @@ inline Quantity Stage::lawful_trade_quantity(
         const auto import_cap=std::max(0.0,1.0+
             core.p2_catalog_modifier_value(
                 buyer_country,"state_trade_capacity_mult"));
-        const auto legal_cap=std::min({1.0,export_cap,import_cap});
+        const auto source_center=std::clamp(1.0+
+            core.p2_region_modifier_value(origin_region,
+                "state_trade_center_max_limit_add")/100.0,0.1,2.0);
+        const auto target_center=std::clamp(1.0+
+            core.p2_region_modifier_value(destination_region,
+                "state_trade_center_max_limit_add")/100.0,0.1,2.0);
+        const auto legal_cap=std::min({1.0,
+            export_cap*source_center,import_cap*target_center});
         allowed=static_cast<Quantity>(
             static_cast<double>(allowed)*legal_cap);
     }

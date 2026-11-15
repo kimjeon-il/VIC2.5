@@ -445,7 +445,9 @@ class Stage {
     void plan_contracts();
     [[nodiscard]] Quantity lawful_trade_quantity(
         const std::string& seller_country,const std::string& buyer_country,
-        const std::string& good,Quantity requested);
+        const std::string& good,Quantity requested,
+        const std::string& origin_region={},
+        const std::string& destination_region={});
     void reserve_trade_quota(const std::string& seller_country,
                             const std::string& buyer_country,
                             const std::string& good,Quantity amount);
@@ -1531,10 +1533,14 @@ public:
             const double resistance=std::clamp(
                 state.p2_catalog_modifier_value(target,
                     "country_leverage_resistance_mult"),-0.9,4.0);
+            const double national_influence=std::clamp(
+                1.0+state.p2_catalog_modifier_value(source,
+                    "country_influence_mult"),0.0,4.0);
             view.effective_leverage_ppm=static_cast<std::int64_t>(
                 std::clamp(
                     static_cast<double>(view.trade_dependency_ppm)/
-                        (1.0+resistance),0.0,1'000'000.0));
+                        (1.0+resistance)*national_influence,
+                    0.0,1'000'000.0));
             for(const auto& [id,link]:diplomacy_.protectorates) {
                 (void)id;
                 if(!link.active||link.principal!=source||
@@ -1679,7 +1685,8 @@ inline void Stage::plan_contracts() {
             const auto main_cash=core.phase_d_cash_available(agreement.buyer);
             if(main_unit>0)q=std::min(q,main_cash/main_unit);
         }
-        q=lawful_trade_quantity(country_from,country_to,agreement.good,q);
+        q=lawful_trade_quantity(country_from,country_to,agreement.good,q,
+                                origin,dest);
         if(q<=0)continue;
         if(!agreement.partial && q!=agreement.contracted-agreement.fulfilled)
             continue;
@@ -1738,7 +1745,17 @@ inline void Stage::plan_autonomous_trade() {
         const Money unit_duty=(phaseb::mul_checked(price,ppm)+999'999)/1'000'000;
         const Money landed_unit=phaseb::add_checked(
                           phaseb::add_checked(price,unit_duty),unit_freight);
-        if(target_quote.price<=landed_unit)continue;
+        const double trade_advantage=std::clamp(
+            1.0+core.p2_region_modifier_value(origin,
+                "state_export_advantage_mult")+
+                core.p2_region_modifier_value(dest,
+                "state_import_advantage_mult")+
+                core.p2_region_modifier_value(origin,
+                "state_trade_advantage_mult"),0.1,4.0);
+        // Relative trade advantage changes actual willingness to ship.
+        // A booked shipment still pays the original quote, duty and freight.
+        if(static_cast<double>(target_quote.price)*
+           trade_advantage<=static_cast<double>(landed_unit))continue;
         const auto available_stock=core.phase_d_material_available(
                                  route.seller,origin,route.good);
         const auto available_cash=core.phase_d_cash_available(route.buyer);
@@ -1746,7 +1763,7 @@ inline void Stage::plan_autonomous_trade() {
         const Quantity available_on_day=day_budget(route.maximum_quantity,used_in_month);
         const Quantity qty=lawful_trade_quantity(from,to,route.good,
              std::min({available_on_day,max_route,available_stock,
-                       available_cash/landed_unit}));
+                       available_cash/landed_unit}),origin,dest);
         if(qty<=0)continue;
         const Money goods_cost=phaseb::mul_checked(qty,price);
         const Money duty=phaseb::mul_checked(goods_cost,ppm)/1'000'000;
@@ -1855,6 +1872,53 @@ inline void Stage::execute_autonomous_trade() {
                 order.freight;
             require(actual_freight==expected,
                     "G_ERR_FREIGHT_ACCOUNTING_MISMATCH");
+        }
+        if(order.settlement_currency=="TEST" &&
+           order.seller_country!=order.buyer_country) {
+            // Every export levy and trade subsidy is backed by an actual
+            // completed G fill. The historical policy cannot mint cash or
+            // tax goods not yet delivered.
+            const double export_rate=std::clamp(
+                core.p2_region_modifier_value(order.origin_region,
+                    "state_tariff_export_add"),0.0,1.0);
+            if(export_rate>0&&core.has_country_treasury(
+                   order.seller_country)) {
+                const auto& treasury=core.country_treasury(
+                    order.seller_country);
+                if(treasury!=order.seller) {
+                    const Money assessed=static_cast<Money>(
+                        std::floor(static_cast<long double>(goods_cost)*
+                                   export_rate));
+                    const Money due=std::min(assessed,
+                        core.phase_d_cash_available(order.seller));
+                    if(due>0) {
+                        core.phase_g_pay_customs(order.seller,treasury,due);
+                        trade_.customs.push_back({order.execution_id,
+                            order.seller_country,treasury,order.good,
+                            "H:law-export-tariff",core.month(),
+                            goods_cost,due,due,order.quantity});
+                    }
+                }
+            }
+            for(const bool import:{false,true}) {
+                const auto& country=import?
+                    order.buyer_country:order.seller_country;
+                if(!core.has_country_treasury(country))continue;
+                const auto& treasury=core.country_treasury(country);
+                const auto& recipient=import?order.buyer:order.seller;
+                if(treasury==recipient)continue;
+                const double rate=std::clamp(
+                    core.p2_region_modifier_value(import?
+                        order.destination_region:order.origin_region,
+                        import?"state_subvention_import_add":
+                               "state_subvention_export_add"),0.0,1.0);
+                const Money assessed=static_cast<Money>(
+                    std::floor(static_cast<long double>(goods_cost)*rate));
+                const Money paid=std::min(assessed,
+                    core.phase_d_cash_available(treasury));
+                if(paid>0)core.spend_country_budget(
+                    country,recipient,paid);
+            }
         }
         if(order.duty>0) {
             const auto& treasury=core.country_financial_wallet(order.buyer_country);
