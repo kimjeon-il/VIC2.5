@@ -1,0 +1,5 @@
+corridor_id	mode	craft	direction	period_as_reported	metric	observed_low	observed_high	original_unit	source_url	source_locator
+us-louisville-new-orleans	river	flatboat	downstream	1810-1819	freight_rate	16.55	16.55	reported_USD_per_ton	https://warwick.ac.uk/fac/soc/economics/research/centres/cage/manage/publications/wp736.2024.pdf	Section II p.4; Haites Mak Walton (1975)
+us-louisville-new-orleans	river	flatboat	downstream	1850-1860	freight_rate	5.55	5.55	reported_USD_per_ton	https://warwick.ac.uk/fac/soc/economics/research/centres/cage/manage/publications/wp736.2024.pdf	Section II p.4; Haites Mak Walton (1975)
+us-louisville-new-orleans	river	flatboat	downstream	early_1800s	journey	30	35	days	https://warwick.ac.uk/fac/soc/economics/research/centres/cage/manage/publications/wp736.2024.pdf	Section II p.4; do not infer exact years
+us-louisville-new-orleans	river	flatboat	downstream	1840s	journey	18	24	days	https://warwick.ac.uk/fac/soc/economics/research/centres/cage/manage/publications/wp736.2024.pdf	Section II p.4; approximate decade
