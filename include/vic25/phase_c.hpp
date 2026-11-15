@@ -318,6 +318,81 @@ public:
                 phaseb::add_checked(revenue,-expenses),outstanding_loan(firm),
                 outstanding_worker_wages(firm)};
     }
+    // Bank credit is a risk-limited policy evaluated over the *existing* C
+    // balance sheet. It has no separate bank-money or credit-rating ledger.
+    struct BankCreditRule {
+        int max_loans_to_reserves_ppm{2'000'000};
+        int max_firm_debt_to_revenue_ppm{1'000'000};
+        int minimum_margin_ppm{50'000};
+        int max_daily_draw_to_revenue_ppm{500'000};
+    };
+    struct BankCreditView {
+        Money bank_reserves{},total_deposits{},total_loans{},bank_bad_debt{};
+        Money bank_available{},firm_available{};
+        bool eligible{};
+    };
+    [[nodiscard]] BankCreditView assess_investment_credit(
+        const std::string& firm,const BankCreditRule& rule)const {
+        ensure(rule.max_loans_to_reserves_ppm>=0&&
+               rule.max_loans_to_reserves_ppm<=10'000'000&&
+               rule.max_firm_debt_to_revenue_ppm>=0&&
+               rule.max_firm_debt_to_revenue_ppm<=10'000'000&&
+               rule.max_daily_draw_to_revenue_ppm>=0&&
+               rule.max_daily_draw_to_revenue_ppm<=1'000'000&&
+               rule.minimum_margin_ppm>=0&&
+               rule.minimum_margin_ppm<=1'000'000,
+               "P0_INVALID_PRUDENTIAL_BANK_RULE");
+        ensure(actors_.contains(firm),"unregistered credit borrower");
+        const auto reserves=money_.balance("BANK:reserves");
+        const auto deposits=-money_.balance("BANK:deposit");
+        const auto loans=money_.balance("BANK:loan");
+        const auto loss=total_bad_debt_;
+        BankCreditView result{reserves,deposits,loans,loss,0,0,false};
+        if(bank_insolvent_||bank_interest_annual_ppm_<=0||
+           bankrupt_firms_.contains(firm)||
+           outstanding_worker_wages(firm)>0||
+           reserves<=0||deposits<=0||loans<0)return result;
+        const auto finance=firm_finance(firm);
+        if(finance.receipts<=0||finance.book_surplus<=0||
+           finance.expenses<0)return result;
+        const auto margin=phaseb::mul_checked(
+            finance.book_surplus/finance.receipts,1'000'000);
+        // Avoid integer flooring for small monetary amounts.
+        const auto margin_tail=phaseb::mul_checked(
+            finance.book_surplus%finance.receipts,1'000'000)/
+                finance.receipts;
+        if(phaseb::add_checked(margin,margin_tail)<rule.minimum_margin_ppm)
+            return result;
+        const auto scale=[](Money n,int ppm)->Money {
+            return phaseb::add_checked(
+                phaseb::mul_checked(n/1'000'000,ppm),
+                phaseb::mul_checked(n%1'000'000,ppm)/1'000'000);
+        };
+        const Money effective_reserves=std::max<Money>(0,reserves-loss);
+        const Money bank_limit=scale(effective_reserves,
+                                   rule.max_loans_to_reserves_ppm);
+        const Money firm_limit=scale(finance.receipts,
+                                   rule.max_firm_debt_to_revenue_ppm);
+        const Money daily_limit=scale(finance.receipts,
+                                    rule.max_daily_draw_to_revenue_ppm);
+        result.bank_available=std::max<Money>(0,bank_limit-loans);
+        result.firm_available=std::min({
+            result.bank_available,
+            std::max<Money>(0,firm_limit-finance.outstanding_bank_loan),
+            daily_limit});
+        result.eligible=result.firm_available>0;
+        return result;
+    }
+    Money lend_investment_credit(const std::string& firm,Money requested,
+                                 const BankCreditRule& rule) {
+        require_stage({1});
+        ensure(requested>=0,"P0_NEGATIVE_INVESTMENT_CREDIT_REQUEST");
+        if(requested==0)return 0;
+        const auto view=assess_investment_credit(firm,rule);
+        const auto amount=std::min(requested,view.firm_available);
+        if(amount>0)lend(firm,amount);
+        return amount;
+    }
     // New legal firms come from a real investor's cash at Stage 9. The
     // matching company equity certificate is a title, not a second deposit.
     // Bank reserves and aggregate cash remain unchanged.
