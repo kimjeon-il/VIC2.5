@@ -178,6 +178,9 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
         ensure(candidates.size()==1,"P4 single-party law forbids multiple candidates");
     for(const auto* party:candidates)
         ballot.votes.emplace(party->id,0);
+    People weighted_cast=0;
+    const Money national_average=
+        p2_observed_monthly_worker_wage(contest.country);
     // Build a single index per election, not a world-wide membership scan
     // for every POP and party (the election is event-driven, not daily).
     std::map<Id,std::vector<std::pair<std::string,People>>> slice_groups;
@@ -205,6 +208,16 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
         ballot.registered=phaseb::add_checked(ballot.registered,row.count);
         ballot.cast=phaseb::add_checked(ballot.cast,participating);
         if(participating==0)continue;
+        // Political power weights actual ballots; the final tally is
+        // normalized back to original cast (not a second vote ledger).
+        const double power=p2_electoral_weight(
+            contest.country,slice,national_average);
+        const People influence=std::max<People>(1,static_cast<People>(
+            std::min<long double>(
+                static_cast<long double>(
+                    std::numeric_limits<People>::max()/16),
+                std::floor(static_cast<long double>(participating)*power))));
+        weighted_cast=phaseb::add_checked(weighted_cast,influence);
         std::vector<std::pair<std::string,People>> weights;
         People weight_sum=0;
         for(const auto* party:candidates) {
@@ -279,11 +292,11 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
         People allocated=0;
         for(const auto& [id,weight]:weights) {
             const People share=phaseb::add_checked(
-                phaseb::mul_checked(participating/weight_sum,weight),
-                phaseb::mul_checked(participating%weight_sum,weight)/
+                phaseb::mul_checked(influence/weight_sum,weight),
+                phaseb::mul_checked(influence%weight_sum,weight)/
                     weight_sum);
             const People residue=phaseb::mul_checked(
-                participating%weight_sum,weight)%weight_sum;
+                influence%weight_sum,weight)%weight_sum;
             ballot.votes.at(id)=phaseb::add_checked(ballot.votes.at(id),share);
             allocated=phaseb::add_checked(allocated,share);
             rem.push_back({id,residue});
@@ -293,11 +306,40 @@ inline P4Ballot IntegratedWorld::p4_autonomous_ballot(
                 if(a.remainder!=b.remainder)return a.remainder>b.remainder;
                 return a.id<b.id;
             });
-        ensure(participating-allocated>=0 &&
-               participating-allocated<=static_cast<People>(rem.size()),
+        ensure(influence-allocated>=0 &&
+               influence-allocated<=static_cast<People>(rem.size()),
                "P4 proportional allocation failed");
-        for(People i=0;i<participating-allocated;++i)
+        for(People i=0;i<influence-allocated;++i)
             ++ballot.votes.at(rem[static_cast<std::size_t>(i)].id);
+    }
+    // Exactly conserve registered real cast, regardless of class-vote power.
+    if(weighted_cast>0&&weighted_cast!=ballot.cast) {
+        std::map<std::string,People> restored;
+        struct Remainder {std::string id;People remainder{};};
+        std::vector<Remainder> residues;
+        People assigned=0;
+        for(const auto& [party,votes]:ballot.votes) {
+            const auto numerator=static_cast<long double>(votes)*
+                static_cast<long double>(ballot.cast);
+            const auto whole=static_cast<People>(
+                std::floor(numerator/weighted_cast));
+            const auto exact=static_cast<People>(
+                std::fmod(numerator,static_cast<long double>(weighted_cast)));
+            restored[party]=whole;
+            assigned=phaseb::add_checked(assigned,whole);
+            residues.push_back({party,exact});
+        }
+        std::sort(residues.begin(),residues.end(),
+            [](const auto& a,const auto& b){
+                return a.remainder!=b.remainder?
+                       a.remainder>b.remainder:a.id<b.id;
+            });
+        const People deficit=ballot.cast-assigned;
+        ensure(deficit>=0&&deficit<=static_cast<People>(residues.size()),
+               "P4 weighted voting power must conserve real ballots");
+        for(People i=0;i<deficit;++i)
+            ++restored.at(residues[static_cast<std::size_t>(i)].id);
+        ballot.votes=std::move(restored);
     }
     return ballot;
 }

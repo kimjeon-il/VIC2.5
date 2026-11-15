@@ -467,15 +467,34 @@ inline double law_industry_throughput(const DomainState& state,
     std::string current=recipe.industry_class;
     std::set<std::string> visited;
     double bonus=0;
+    const bool unincorporated=c.p2_region_unincorporated_evidence(
+        facility.region);
+    if(unincorporated)
+        bonus+=c.p2_region_modifier_value(facility.region,
+            "building_unincorporated_throughput_add");
     for(int depth=0;depth<12&&!current.empty()&&
             visited.insert(current).second;++depth) {
         const auto alias=current=="manufacture"?"manufacturing":
-                         current=="mining"?"extraction":current;
+                         current=="mining"?"extraction":
+                         current=="art_academy"?"arts":current;
         if(alias=="manufacturing"||alias=="agriculture"||
            alias=="plantations"||alias=="extraction"||
            alias=="ranching"||alias=="logging")
-            bonus+=c.p2_catalog_modifier_value(country,
+            bonus+=c.p2_region_modifier_value(facility.region,
                 "building_group_bg_"+alias+"_throughput_add");
+        if(alias=="arts")
+            bonus+=c.p2_region_modifier_value(facility.region,
+                "building_art_academy_throughput_add");
+        if(unincorporated) {
+            // Every law effect applies to a concrete, verified industry
+            // class; no automatic bonus for an untyped factory.
+            const auto kind=alias=="extraction"?"mining":alias;
+            if(kind=="manufacturing"||kind=="plantations"||
+               kind=="logging"||kind=="mining"||kind=="rubber")
+                bonus+=c.p2_region_modifier_value(facility.region,
+                    "building_group_bg_"+kind+
+                    "_unincorporated_throughput_add");
+        }
         const auto parent=state.industry_classes.find(current);
         if(parent==state.industry_classes.end())break;
         current=parent->second.parent;
@@ -982,9 +1001,29 @@ public:
         // Extraction output is boosted from a verified deposit/harvest flow.
         // The depleted biomass and extraction service remain the *base* units.
         // Production is accounted in the original C goods ledger only once.
-        const double throughput=c_.p2_catalog_modifier_value(
-            c_.sovereignty(source.region),
-            "building_group_bg_extraction_throughput_add");
+        const auto& state=c_.sovereignty(source.region);
+        double throughput=c_.p2_region_modifier_value(
+            source.region,"building_group_bg_extraction_throughput_add");
+        if(c_.p2_region_unincorporated_evidence(source.region)) {
+            throughput+=c_.p2_region_modifier_value(
+                source.region,"building_unincorporated_throughput_add");
+            const auto& good=source.good;
+            if(good=="rubber")
+                throughput+=c_.p2_region_modifier_value(source.region,
+                    "building_group_bg_rubber_unincorporated_throughput_add");
+            else if(good=="wood"||good=="timber"||good=="lumber")
+                throughput+=c_.p2_region_modifier_value(source.region,
+                    "building_group_bg_logging_unincorporated_throughput_add");
+            else if(good=="ore"||good=="iron"||good=="coal"||
+                    good=="lead"||good=="sulfur")
+                throughput+=c_.p2_region_modifier_value(source.region,
+                    "building_group_bg_mining_unincorporated_throughput_add");
+            else if(good=="cotton"||good=="dye"||good=="sugar"||
+                    good=="coffee"||good=="tea")
+                throughput+=c_.p2_region_modifier_value(source.region,
+                    "building_group_bg_plantations_unincorporated_throughput_add");
+        }
+        (void)state;
         const auto yielded=law_verified_yield(
             source.produced_this_month,units,throughput);
         require(yielded>0,"law extraction yield is zero");

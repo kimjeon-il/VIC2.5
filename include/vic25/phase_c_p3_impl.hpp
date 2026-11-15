@@ -164,8 +164,39 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         const auto profession_mod=
             effect(dem.region,profession_key);
         const auto sponsor_mod=key.second==group?sponsor_power:0.0;
+        const auto in_government=[&]()->bool {
+            const auto coalition=p1_coalitions_.find(country);
+            if(coalition==p1_coalitions_.end())return false;
+            return std::find(coalition->second.ruling_groups.begin(),
+                coalition->second.ruling_groups.end(),key.second)!=
+                coalition->second.ruling_groups.end();
+        }();
+        const auto welfare_support=[&]()->double {
+            if(economic.labor_class!="unemployed"&&
+               economic.labor_class!="retired"&&
+               economic.livelihood!="inactive")return 0.0;
+            for(const auto& [id,link]:p1_institutions_) {
+                if(link.country!=country||
+                   link.kind!=P1InstitutionKind::welfare)continue;
+                const auto svc=public_institutions_.find(id);
+                if(svc==public_institutions_.end()||
+                   svc->second.region!=dem.region)continue;
+                if(p1_institution_capacity(id).usable_slots>0)
+                    return effect(dem.region,
+                       "state_political_strength_from_welfare_mult");
+            }
+            return 0.0;
+        }();
+        const auto attraction=effect(dem.region,
+            "state_pop_pol_str_add")+
+            (organization->second.type==P3GroupType::devout?
+             effect(dem.region,
+                "interest_group_ig_devout_pop_attraction_mult"):0.0)+
+            (in_government?p2_catalog_modifier_value(
+                country,"interest_group_in_government_attraction_mult"):0.0);
         const auto strength=std::clamp(
-            1.0+interest_mod+profession_mod+sponsor_mod,0.05,4.0);
+            1.0+interest_mod+profession_mod+sponsor_mod+
+            welfare_support+attraction,0.05,4.0);
         const auto organized=phaseb::add_checked(n,
              p4_scaled(n,organization->second.organization_ppm,1'000'000));
         const People weighted=static_cast<People>(

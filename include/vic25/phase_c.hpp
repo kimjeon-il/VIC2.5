@@ -877,6 +877,25 @@ public:
             public_institutions()const{return public_institutions_;}
     [[nodiscard]] const std::map<std::string,P1Institution>&
             p1_institutions()const{return p1_institutions_;}
+    // This is an explicit administrative-coverage proxy, NOT historical
+    // incorporation inferred from unlabelled geography. With no registered
+    // national administration evidence the state is unknown (not unincorporated).
+    [[nodiscard]] bool p2_region_unincorporated_evidence(
+            const std::string& region)const {
+        const auto sovereign=sovereignty_.find(region);
+        if(sovereign==sovereignty_.end())return false;
+        bool has_country_administration=false;
+        for(const auto& [id,link]:p1_institutions_) {
+            if(link.country!=sovereign->second||
+               link.kind!=P1InstitutionKind::administration)continue;
+            const auto institution=public_institutions_.find(id);
+            if(institution==public_institutions_.end())continue;
+            has_country_administration=true;
+            if(institution->second.region==region)
+                return false;
+        }
+        return has_country_administration;
+    }
     [[nodiscard]] People public_services_rendered(const std::string& id) const {
         return public_institutions_.at(id).provided;
     }
@@ -2241,6 +2260,64 @@ public:
             if (it != assignments.end()) total = phaseb::add_checked(total, it->second);
         }
         return total;
+    }
+    // Election weights use actual registered POPs and cash evidence.
+    // They change the share of the SAME legally cast ballots, never create
+    // phantom voters or extra seats. V3's wealth and literacy power are
+    // represented in the simplified national proportional ballot below.
+    [[nodiscard]] double p2_electoral_weight(
+           const std::string& country,Id slice,
+           Money national_average)const {
+        const auto& row=people_.slice(slice);
+        const auto& demo=people_.demographic(row.key.demographic);
+        const auto& econ=people_.economic(row.key.economic);
+        std::string profession=econ.profession;
+        if(profession=="clerk")profession="clerks";
+        else if(profession=="clergyman")profession="clergymen";
+        else if(profession=="aristocrat")profession="aristocrats";
+        else if(profession=="laborer")profession="laborers";
+        else if(profession=="bureaucrat")profession="bureaucrats";
+        else if(profession=="farmer")profession="farmers";
+        else if(profession=="shopkeeper")profession="shopkeepers";
+        else if(profession=="soldier")profession="soldiers";
+        else if(profession=="capitalist")profession="capitalists";
+        else if(profession=="machinist")profession="machinists";
+        else if(profession=="academic")profession="academics";
+        else if(profession=="officer")profession="officers";
+        else if(profession=="peasant")profession="peasants";
+        double points=50.0+p2_catalog_modifier_value(
+            country,"country_voting_power_base_add");
+        if(!profession.empty())
+            points+=p2_catalog_modifier_value(
+                country,"country_"+profession+"_voting_power_add");
+        points+=p2_catalog_modifier_value(
+            country,"country_voting_power_from_literacy_add")*
+                people_.education(econ.education).literacy/100.0;
+        const auto household="HH:"+std::to_string(row.key.household);
+        if(actors_.contains(household)) {
+            if(national_average>0) {
+                const double wealth=std::clamp(
+                    static_cast<double>(cash(household))*100.0/
+                        static_cast<double>(national_average),0.0,200.0);
+                const double threshold=p2_catalog_modifier_value(
+                    country,"country_voting_power_wealth_threshold_add");
+                if(wealth<threshold)
+                    points-=std::max(0.0,threshold-wealth);
+                points*=1.0+std::clamp(
+                    p2_region_modifier_value(demo.region,
+                        "state_political_strength_from_wealth_mult"),
+                    -0.95,3.0)*std::min(wealth,100.0)/100.0;
+            }
+        }
+        if((econ.livelihood=="inactive"||
+            econ.labor_class=="retired")&&
+           people_.age_months_slice(slice)>=16*12)
+            points+=50.0*p2_region_modifier_value(
+                demo.region,"state_dependent_political_participation_add");
+        points*=std::clamp(
+            1.0+p2_catalog_modifier_value(
+                country,"country_voting_power_mult"),0.05,4.0);
+        return std::clamp(points/50.0,0.05,8.0);
     }
     [[nodiscard]] People eligible_voters() const {
         People total = 0;
