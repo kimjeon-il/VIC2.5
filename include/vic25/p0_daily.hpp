@@ -1520,9 +1520,9 @@ public:
                     reform=phaseb::add_checked(reform,preference);
                     incumbent=phaseb::add_checked(incumbent,voters-preference);
                 }
-                const People registered=phaseb::add_checked(incumbent,reform);
-                if(registered>0)
-                    c.hold_country_election(election.country,registered,0,
+                const People registered_voters=phaseb::add_checked(incumbent,reform);
+                if(registered_voters>0)
+                    c.hold_country_election(election.country,registered_voters,0,
                          {{election.incumbent_party,incumbent},
                           {election.reform_party,reform}});
             });
