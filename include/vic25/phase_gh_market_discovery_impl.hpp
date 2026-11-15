@@ -25,7 +25,8 @@ inline void Stage::plan_market_discovery() {
         offices[{office.trader,office.market_region}]=office;
     trade_.daily_merchant_offices.clear();
     struct Source {std::string seller,region,good;};
-    std::vector<Source> supply;
+    // Group real seller holdings by commodity once per day.
+    std::map<std::string,std::vector<Source>> supply;
     for(const auto& [stock_key,qty]:c.physical_inventory()) {
         if(qty<=0||!c.has_actor(stock_key.holder_id)||
            c.firm_bankrupt(stock_key.holder_id)||
@@ -33,8 +34,8 @@ inline void Stage::plan_market_discovery() {
            !geo.regions.contains(stock_key.region_id)||
            !c.has_market(stock_key.region_id,stock_key.good_id))
             continue;
-        supply.push_back({stock_key.holder_id,stock_key.region_id,
-                          stock_key.good_id});
+        supply[stock_key.good_id].push_back({
+            stock_key.holder_id,stock_key.region_id,stock_key.good_id});
     }
     for(const auto& [key,merchant]:offices) {
         (void)key;
@@ -53,10 +54,14 @@ inline void Stage::plan_market_discovery() {
         Money price_chosen=0,duty_chosen=0,spread_chosen=0;
         Quantity quantity_chosen=0;
         std::string exporting,importing;
-        for(const auto& offer:supply) {
+        std::map<std::string,std::optional<PathQuote>> path_quotes;
+        for(const auto& [good,offer_group]:supply) {
+            if(!c.has_market(merchant.market_region,good)||
+               c.market(merchant.market_region,good).target_stock<=0)
+                continue;
+            for(const auto& offer:offer_group) {
             if(offer.seller==merchant.trader||
-               offer.region==merchant.market_region||
-               !c.has_market(merchant.market_region,offer.good))continue;
+               offer.region==merchant.market_region)continue;
             const auto& source_price=c.market(offer.region,offer.good);
             const auto& dest_price=c.market(merchant.market_region,offer.good);
             if(source_price.price<=0||dest_price.price<=source_price.price||
@@ -83,9 +88,14 @@ inline void Stage::plan_market_discovery() {
             const Quantity actual_stock=c.phase_d_material_available(
                 offer.seller,offer.region,offer.good);
             if(actual_stock<=0)continue;
-            const auto candidate=quote_daily_freight_path(
-                trade_,geo.regions.at(offer.region),destination,c.month(),
-                day_of_month_,days_in_month_,nullptr,true,nullptr,true);
+            auto cached_path=path_quotes.find(offer.region);
+            if(cached_path==path_quotes.end())
+                cached_path=path_quotes.emplace(
+                    offer.region,quote_daily_freight_path(
+                        trade_,geo.regions.at(offer.region),destination,c.month(),
+                        day_of_month_,days_in_month_,nullptr,true,nullptr,true))
+                    .first;
+            const auto& candidate=cached_path->second;
             if(!candidate||candidate->edges.empty()||
                candidate->capacity<=0)continue;
             bool documented=true;
@@ -132,6 +142,7 @@ inline void Stage::plan_market_discovery() {
                 quantity_chosen=available;price_chosen=source_price.price;
                 duty_chosen=rate;spread_chosen=margin;
                 exporting=from;importing=to;
+            }
             }
         }
         if(!found||quantity_chosen<=0)continue;
