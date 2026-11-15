@@ -324,6 +324,7 @@ struct Policies {
     bool allow_endogenous_investment_credit{true};
     bool allow_endogenous_debt_repayment{true};
     bool allow_endogenous_input_procurement{true};
+    phasec::IntegratedWorld::BankCreditRule bank_credit_rule{};
     std::vector<IndustryOpportunity> industry_opportunities;
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
@@ -1391,32 +1392,41 @@ public:
                     std::to_string(date.day),ai.country,ai.good,duty,ai.prime_minister);
             });
         }
-        // Only previously observed positive real receipts and a configured
-        // bank rate authorize endogenous investment credit. A loan remains
-        // matched bank assets/deposits in C; it never grants free construction.
+        // Only an existing unfinished construction plan creates demand
+        // for endogenous enterprise credit. C controls bank leverage, actual
+        // receipts/margins and debtor exposure with one canonical ledger.
         if(decisions.allow_endogenous_investment_credit)
-            plan[1].push_back([](phasegh::Stage& gh) {
+            plan[1].push_back([rule=decisions.bank_credit_rule](
+                              phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
-                if(c.bank_insolvent()||c.annual_bank_interest_ppm()<=0)return;
-                std::set<std::string> borrowed;
+                std::map<std::string,Money> obligations;
                 for(const auto& [id,p]:gh.phase_d().state().constructions) {
                     (void)id;
-                    if(p.ready||p.commissioned||c.firm_bankrupt(p.client)||
-                       !c.has_actor(p.client)||!borrowed.insert(p.client).second||
-                       p.paid_work>=p.work_required)continue;
-                    const auto finance=c.firm_finance(p.client);
-                    if(finance.book_surplus<=0||finance.receipts<=0)continue;
+                    if(p.ready||p.commissioned||
+                       p.paid_work>=p.work_required||
+                       !c.has_actor(p.client)||c.firm_bankrupt(p.client)||
+                       c.has_government(p.client))continue;
                     const Money due=times(
                         p.work_required-p.paid_work,p.cash_price_per_work);
+                    obligations[p.client]=phaseb::add_checked(
+                        obligations[p.client],due);
+                }
+                for(const auto& [firm,due]:obligations) {
+                    if(c.firm_bankrupt(firm)||due<=0)continue;
+                    // G trade-credit drawn shares C's actual loan principal;
+                    // do not offer a second unrelated unsecured facility.
+                    bool pledged=false;
+                    for(const auto& [id,line]:gh.commerce().credit) {
+                        (void)id;
+                        if(line.active&&line.borrower==firm&&line.drawn>0){
+                            pledged=true;break;
+                        }
+                    }
+                    if(pledged)continue;
+                    const auto finance=c.firm_finance(firm);
                     if(finance.available_cash>=due)continue;
-                    const Money cap=phaseb::mul_checked(
-                        finance.book_surplus,2);
-                    if(cap<=finance.outstanding_bank_loan)continue;
-                    const Money amount=std::min({
-                        due-finance.available_cash,
-                        cap-finance.outstanding_bank_loan,
-                        finance.receipts/2});
-                    if(amount>0)c.lend(p.client,amount);
+                    (void)c.lend_investment_credit(
+                        firm,due-finance.available_cash,rule);
                 }
             });
         for(const auto& investment:decisions.investments) {
@@ -2426,6 +2436,14 @@ public:
                        std::any_of(manual.begin(),manual.end(),
                           [&](const DebtService& d){return d.borrower==f.owner;}))
                         continue;
+                    bool pledged_credit=false;
+                    for(const auto& [id,line]:gh.commerce().credit) {
+                        (void)id;
+                        if(line.active&&line.borrower==f.owner&&line.drawn>0) {
+                            pledged_credit=true;break;
+                        }
+                    }
+                    if(pledged_credit)continue;
                     const auto view=c.firm_finance(f.owner);
                     if(view.outstanding_bank_loan<=0||view.book_surplus<=0||
                        view.available_cash<=2)continue;
