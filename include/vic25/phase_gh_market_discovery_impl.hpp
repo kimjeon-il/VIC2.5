@@ -85,7 +85,7 @@ inline void Stage::plan_market_discovery() {
             if(actual_stock<=0)continue;
             const auto candidate=quote_daily_freight_path(
                 trade_,geo.regions.at(offer.region),destination,c.month(),
-                day_of_month_,days_in_month_,nullptr,true);
+                day_of_month_,days_in_month_,nullptr,true,nullptr,true);
             if(!candidate||candidate->edges.empty()||
                candidate->capacity<=0)continue;
             bool documented=true;
