@@ -1230,6 +1230,7 @@ public:
         MarketSellerIndex result;
         for(const auto& [key,stock_now]:goods_.holdings()) {
             if(stock_now<=0||!actors_.contains(key.holder_id)||
+               key.holder_id.starts_with("HH:")||
                !markets_.contains({key.region_id,key.good_id}))continue;
             result[{key.region_id,key.good_id}].push_back(key.holder_id);
         }
@@ -1338,17 +1339,29 @@ public:
             (void)region;
             if(n>0)n-=std::max<People>(1,n/20);
         }
+        // Sales leave the seller's real inventory; unsold merchandise is
+        // also supply when there were no buyers today. No duplicate stock.
+        std::map<std::pair<std::string,std::string>,Quantity> unsold_supply;
+        for(const auto& [stock_key,quantity]:goods_.holdings()) {
+            if(quantity<=0||!actors_.contains(stock_key.holder_id)||
+               stock_key.holder_id.starts_with("HH:")||
+               bankrupt_firms_.contains(stock_key.holder_id))continue;
+            const auto key=std::make_pair(stock_key.region_id,stock_key.good_id);
+            if(markets_.contains(key))
+                unsold_supply[key]=phaseb::add_checked(
+                    unsold_supply[key],quantity);
+        }
         for(auto& [key,m]:markets_) {
-            const auto& [region,good]=key;
-            (void)region;
-            (void)good; // Need gaps were already counted once at stage 7.
-            // 1% nominal pressure per active day, with deterministic discrete
-            // currency ticks for prices below 100 units.
+            m.stock_offered=std::max(m.stock_offered,
+                phaseb::add_checked(m.delivered,unsold_supply[key]));
+            // Keep the native daily ceiling of ~1% instead of a volatile
+            // instant-clearing price. Lack of buyers now lowers an observed
+            // stock glut rather than leaving the quote frozen indefinitely.
             const Money step=m.price>=100?std::max<Money>(1,m.price/100):
-                    (day_index%std::max<Money>(1,100/m.price)==0?1:0);
-            if(m.unmet>0 && step>0)
+                (day_index%std::max<Money>(1,100/m.price)==0?1:0);
+            if(m.unmet>0&&step>0)
                 m.price=std::min(m.ceiling,phaseb::add_checked(m.price,step));
-            else if(m.unmet==0 && m.solvent_demand>0 &&
+            else if(m.unmet==0 &&
                     m.stock_offered>phaseb::add_checked(m.solvent_demand,m.target_stock) &&
                     step>0)
                 m.price=std::max(m.floor,m.price-step);
