@@ -304,6 +304,57 @@ public:
                 {"BANK:reserves", amount, 0}, {"BANK:deposit", 0, amount}}});
         }
     }
+    struct FirmFinanceView {
+        Money cash{},available_cash{},receipts{},expenses{},book_surplus{};
+        Money outstanding_bank_loan{},outstanding_wages{};
+    };
+    // Ledger-only view: receipts minus booked expenses is not historical
+    // accrual profit (unsold material has no arbitrary book valuation).
+    [[nodiscard]] FirmFinanceView firm_finance(const std::string& firm)const {
+        ensure(actors_.contains(firm),"unknown firm balance sheet");
+        const Money revenue=-money_.balance(account(firm,"revenue"));
+        const Money expenses=money_.balance(account(firm,"expense"));
+        return {cash(firm),phase_d_cash_available(firm),revenue,expenses,
+                phaseb::add_checked(revenue,-expenses),outstanding_loan(firm),
+                outstanding_worker_wages(firm)};
+    }
+    // New legal firms come from a real investor's cash at Stage 9. The
+    // matching company equity certificate is a title, not a second deposit.
+    // Bank reserves and aggregate cash remain unchanged.
+    void phase_time_found_firm(const std::string& firm,
+                               const std::string& founder,Money equity) {
+        require_stage({9});
+        ensure(!firm.empty()&&!founder.empty()&&firm!=founder&&
+               equity>0&&actors_.contains(founder)&&
+               !actors_.contains(firm)&&!bankrupt_firms_.contains(founder)&&
+               phase_d_cash_available(founder)>=equity,
+               "unfunded or duplicate private company");
+        const auto asset="company:"+firm;
+        ensure(!tracked_assets_.contains(asset),
+               "duplicate founding company equity title");
+        register_typed(EntityKind::actor,firm);
+        actors_.insert(firm);
+        for (const auto& [suffix,type]:
+             std::array<std::pair<std::string,AccountType>,7>{{
+                {"cash",AccountType::asset},
+                {"capital",AccountType::equity},
+                {"revenue",AccountType::revenue},
+                {"expense",AccountType::expense},
+                {"debt",AccountType::liability},
+                {"reparations_payable",AccountType::liability},
+                {"reparations_receivable",AccountType::asset}}})
+            money_.add_account(account(firm,suffix),firm,type);
+        ownership_.issue(asset,founder,equity);
+        tracked_assets_.insert(asset);
+        ensure_security_account(founder,asset);
+        money_.post({unique("found-company"),
+            "founder subscribes real cash in exchange for new company shares",{
+            {security_account(founder,asset),equity,0},
+            {account(founder,"cash"),0,equity},
+            {account(firm,"cash"),equity,0},
+            {account(firm,"capital"),0,equity}}});
+        events_.push_back("founded-funded-company:"+firm);
+    }
     void seed_stock(std::string holder, std::string region, std::string good, Quantity qty) {
         ensure(stage_ == -1 && commit_id_ == 0, "stock seed after simulation start");
         ensure(qty > 0, "invalid initial stock");
