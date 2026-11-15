@@ -165,7 +165,8 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         std::int32_t day_of_month=0,std::int32_t days_in_month=0,
         const std::map<std::string,Quantity>* provisional_edges=nullptr,
         bool verified_day_edges_only=false,
-        const std::map<std::string,std::int32_t>* override_days=nullptr) {
+        const std::map<std::string,std::int32_t>* override_days=nullptr,
+        bool documented_services_only=false) {
     if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
     if(trade.transport_edges.empty())return std::nullopt;
     using Item=std::tuple<Money,Month,Id>;
@@ -195,6 +196,11 @@ inline std::optional<PathQuote> quote_daily_freight_path(
                 }
             }
             if(verified_day_edges_only&&actual_days<=0)continue;
+            if(documented_services_only&&
+               (edge.mode=="legacy"||edge.evidence_id.empty()||
+                edge.valid_from_month<0||
+                edge.valid_through_month<edge.valid_from_month))
+                continue;
             if(edge.valid_from_month>=0 && month<edge.valid_from_month)continue;
             if(edge.valid_through_month>=0 && month>edge.valid_through_month)continue;
             const Quantity committed=trade.edge_usage.contains({month,edge_id})?
