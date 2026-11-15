@@ -513,6 +513,8 @@ public:
            recipe.workers_per_batch<=0||recipe.capacity_per_batch<=0||
            recipe.needs_retrofit||
            recipe.requires_same_stage_nonstorable_energy||
+           (!recipe.industry_class.empty()&&
+              !d_.industry_classes.contains(recipe.industry_class))||
            !recipe.tech_id.empty()||project.permit_required||
            project.inspection_required||project.allow_accrued_invoice_commission||
            project.work_required<=0||project.material_per_work<=0||
