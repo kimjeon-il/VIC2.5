@@ -59,7 +59,7 @@ static void greenfield_from_real_cash() {
     p0::DailyGame game(daily::World::adopt(std::move(gh),9),policy);
     game.advance_day();
     const auto id="P0:ENTRY:new-food:24000";
-    const auto firm="P0:FIRM:new-food:24000";
+    const std::string firm="P0:FIRM:new-food:24000";
     const auto& after=game.world().engine().base().core();
     check(after.state().constructions.contains(id),"new project not entered");
     check(after.core().cash("INVESTOR")==400,"founder cash not debited");
