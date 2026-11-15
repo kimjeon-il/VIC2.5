@@ -33,6 +33,14 @@ static phasegh::World commerce_fixture(bool future=false) {
     edge.valid_from_month=future?24001:23999;
     edge.valid_through_month=24012;
     gh.seed_transport_edge(edge);
+    // This cheaper synthetic/legacy link is *not* historical service proof.
+    // The merchant must find the dated sourced rail alternative instead.
+    phasegh::TransportEdge fictional;
+    fictional.id="legacy-month-only";fictional.carrier="CARRIER";
+    fictional.from=1;fictional.to=2;fictional.mode="legacy";
+    fictional.monthly_capacity=100;fictional.freight_per_unit=0;
+    fictional.transit_days=1;
+    gh.seed_transport_edge(fictional);
     gh.validate();
     return gh;
 }
@@ -52,6 +60,7 @@ static void merchant_discovers_seller_goods_and_path() {
     const auto& trades=game.world().engine().commerce();
     verify(trades.fills.size()==1 &&
            trades.fills.front().physical_path.size()==1 &&
+           trades.fills.front().physical_path.front()=="documented-freight" &&
            trades.fills.front().route_id.starts_with("G:DISCOVERY:"),
            "merchant did not discover its own genuine service");
     verify(trades.fills.front().quantity==2 &&
