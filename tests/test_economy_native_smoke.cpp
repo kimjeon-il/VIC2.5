@@ -89,7 +89,45 @@ static void priority_and_class_demand() {
     check(basket.at({"R",h,"furniture"}).quantity==2 &&
           basket.at({"R",h,"furniture"}).priority==2,"class basket wrong");
 }
+static void endogenous_hiring_production_and_payroll() {
+    phasegh::World gh(24000);
+    auto& spatial=gh.seed_geography();
+    spatial.seed_province(1,"R","A");
+    spatial.seed_unit(11,"A","ROOT");
+    spatial.seed_assignment(1,11);
+    auto& c=spatial.seed_core().seed_core();
+    c.seed_actor("A",1);
+    c.seed_actor("GROWER",200);
+    c.seed_market("R","food",10,1,100,0);
+    c.seed_market("R","ore",1,1,100,0);
+    c.seed_production_facility("FARM","GROWER","R",31);
+    c.seed_stock("GROWER","R","ore",31);
+    c.seed_government("A","HEAD","PRIME",5,3);
+    const auto slice=add_worker(gh);
+    const auto household=c.seed_population().slice(slice).key.household;
+    c.seed_actor("HH:"+std::to_string(household),0);
+    phased::IndustryRecipe recipe;
+    recipe.id="GRAIN";recipe.site="FARM";
+    recipe.inputs={{"ore",1}};
+    recipe.outputs={{"food",2}};
+    recipe.workers_per_batch=1;recipe.capacity_per_batch=1;
+    spatial.seed_core().seed_recipe(recipe);
+    p0::Policies policy;
+    policy.monthly_clothing_units_per_person=0;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),8),policy);
+    game.advance_day();
+    const auto& core=game.world().engine().base().core().core();
+    check(core.people().employed(slice)==1,"real unemployed POP not hired");
+    check(core.stock("GROWER","R","ore")==30,"factory ignored real inputs");
+    check(core.stock("GROWER","R","food")==1,"wage-funded food was not bought");
+    check(core.cash("HH:"+std::to_string(household))==0,
+          "first-day wage or paid consumption was omitted");
+    check(core.cash("GROWER")==200,
+          "real wage and goods sale failed to balance");
+}
+
 int main() {
     priority_and_class_demand();
+    endogenous_hiring_production_and_payroll();
     greenfield_from_real_cash();
 }
