@@ -1176,6 +1176,7 @@ public:
                     }
                 });
         auto salary_shortfall=std::make_shared<std::set<std::string>>();
+        std::set<Id> preplanned_payroll_slices;
         // A real Employment contract can pay a real household wallet each
         // calendar day. The C bank/tax ledger remains the sole authority.
         // P0 scenario payroll, when explicitly configured, owns that firm's
@@ -1212,6 +1213,7 @@ public:
             if(contract.employer==wallet||contract.employer==treasury||
                wallet==treasury)continue;
             const auto employer=contract.employer;
+            preplanned_payroll_slices.insert(slice_id);
             const auto purpose="P0:CONTRACT-WAGE:"+std::to_string(world_.day_index())+
                                ":"+std::to_string(slice_id);
             auto reserved=std::make_shared<Money>(0);
@@ -1251,6 +1253,43 @@ public:
                         gross,today);
                 });
         }
+        // Jobs accepted at Stage2 did not exist when the Stage1 wage plan
+        // was assembled. Accrue their first day's real salary at Stage5
+        // rather than silently giving newly recruited workers an unpaid day.
+        // Those claims join the same C arrears and tax settlement below.
+        plan[5].push_back([preplanned_payroll_slices,scenario_payroll,
+                           date,dim,today=world_.day_index()](phasegh::Stage& gh) {
+            auto& c=gh.phase_c();
+            for(const auto& [slice_id,job]:c.people().jobs()) {
+                if(preplanned_payroll_slices.contains(slice_id)||
+                   job.count<=0||job.wage_per_month<=0||
+                   scenario_payroll.contains(job.employer)||
+                   c.firm_bankrupt(job.employer))continue;
+                const auto& row=c.people().slice(slice_id);
+                const auto& demographic=c.people().demographic(
+                    row.key.demographic);
+                const std::string wallet="HH:"+std::to_string(row.key.household);
+                const auto& country=c.sovereignty(demographic.region);
+                if(!c.has_actor(wallet)||!c.has_actor(job.employer)||
+                   !c.has_actor(country)&&!c.has_country_treasury(country))
+                    continue;
+                if(c.has_government(country)&&!c.has_country_treasury(country))
+                    continue;
+                if(!c.has_government(country)&&c.has_any_government())
+                    continue;
+                const auto treasury=c.has_government(country)?
+                     c.country_treasury(country):country;
+                if(treasury==wallet||treasury==job.employer||
+                   wallet==job.employer)continue;
+                const Money gross=daily_increment(
+                    times(job.count,job.wage_per_month),date.day,dim);
+                if(gross<=0)continue;
+                const auto claim="P0:CONTRACT-WAGE:"+
+                    std::to_string(today)+":"+std::to_string(slice_id);
+                c.phase_time_accrue_contract_wage(claim,job.employer,wallet,
+                    treasury,c.has_government(country)?country:"",gross,today);
+            }
+        });
         // Earned wages are accrued by the preceding Stage5 employer
         // commands. Creditors are now paid before optional public transfers,
         // dividends or other discretionary local business expenditures.
