@@ -323,6 +323,7 @@ struct Policies {
     Money staffing_cash_reserve{};
     bool allow_endogenous_investment_credit{true};
     bool allow_endogenous_debt_repayment{true};
+    bool allow_endogenous_input_procurement{true};
     std::vector<IndustryOpportunity> industry_opportunities;
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
@@ -1718,6 +1719,82 @@ public:
                     }
                     if(good=="food" && still_due>0)
                         c.phase_time_record_food_need_gap(region,still_due);
+                }
+            });
+        // Goods purchased on this Stage7 stay in the buyer's C inventory,
+        // ready for a later Stage4 production run. No in-day teleportation:
+        // interregional inputs still require the existing F/G transport path.
+        // Household essential orders have already been processed first.
+        if(decisions.allow_endogenous_input_procurement)
+            plan[7].push_back(
+                [regional_need,date,dim](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto& domain=gh.phase_d().state();
+                using GoodsKey=std::tuple<std::string,std::string,std::string>;
+                std::map<GoodsKey,Quantity> inputs_wanted;
+                for(const auto& [recipe_id,recipe]:domain.recipes) {
+                    (void)recipe_id;
+                    if(recipe.inputs.empty()||recipe.outputs.empty()||
+                       recipe.needs_retrofit||
+                       recipe.requires_same_stage_nonstorable_energy||
+                       !c.facilities().contains(recipe.site))continue;
+                    const auto& facility=c.facility(recipe.site);
+                    if(c.firm_bankrupt(facility.owner)||
+                       facility.capacity<=facility.damaged||
+                       !c.has_market(facility.region,recipe.outputs.front().good))
+                        continue;
+                    const auto& primary=recipe.outputs.front();
+                    const auto& quote=c.market(facility.region,primary.good);
+                    auto need=regional_need.find({facility.region,primary.good});
+                    const Quantity consumer_need=need==regional_need.end()?0:need->second;
+                    if(quote.solvent_demand<=0&&consumer_need<=0&&
+                       quote.target_stock<=0)continue;
+                    const Quantity desired_stock=phaseb::add_checked(
+                        quote.target_stock,consumer_need);
+                    if(c.stock(facility.owner,facility.region,primary.good)>=
+                        std::max<Quantity>(primary.per_unit,desired_stock))
+                        continue;
+                    const People employed=c.phase_d_workforce(facility.owner);
+                    if(employed<=0||recipe.workers_per_batch<=0||
+                       recipe.capacity_per_batch<=0)continue;
+                    const Quantity monthly=facility.capacity-facility.damaged;
+                    const Quantity day_cap=monthly/dim+(monthly%dim!=0?1:0);
+                    const Quantity batches=std::min<Quantity>(
+                        day_cap/recipe.capacity_per_batch,
+                        employed/recipe.workers_per_batch);
+                    if(batches<=0)continue;
+                    Money input_cost=0;
+                    bool priced=true;
+                    for(const auto& item:recipe.inputs) {
+                        if(!c.has_market(facility.region,item.good)) {
+                            priced=false;break;
+                        }
+                        input_cost=phaseb::add_checked(input_cost,
+                            times(item.per_unit,
+                                c.market(facility.region,item.good).price));
+                    }
+                    const Money wage=times(recipe.workers_per_batch,
+                        actual_daily_worker_wage(c,facility.owner,date.day,dim));
+                    if(!priced||times(primary.per_unit,quote.price)<=
+                        phaseb::add_checked(input_cost,wage))continue;
+                    for(const auto& item:recipe.inputs) {
+                        const auto key=std::make_tuple(
+                            facility.owner,facility.region,item.good);
+                        inputs_wanted[key]=phaseb::add_checked(
+                            inputs_wanted[key],times(batches,item.per_unit));
+                    }
+                }
+                const auto sellers=c.market_seller_index();
+                for(const auto& [key,target]:inputs_wanted) {
+                    const auto& [buyer,region,good]=key;
+                    if(!c.has_market(region,good))continue;
+                    const Quantity current=c.phase_d_material_available(
+                        buyer,region,good);
+                    if(current>=target)continue;
+                    auto it=sellers.find({region,good});
+                    if(it==sellers.end())continue;
+                    (void)c.clear_household_market(
+                        buyer,region,good,target-current,it->second);
                 }
             });
         for(const auto& p:decisions.political_reactions) {
