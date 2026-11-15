@@ -618,6 +618,14 @@ household_daily_needs(
         for(const auto& rule:basket) {
             if(!rule.labor_class.empty()&&rule.labor_class!=econ.labor_class)
                 continue;
+            // A class-specific rule overrides its universal fallback.
+            if(rule.labor_class.empty()&&
+               std::any_of(basket.begin(),basket.end(),
+                   [&](const HouseholdBasketRule& specific) {
+                       return specific.good==rule.good &&
+                              !specific.labor_class.empty() &&
+                              specific.labor_class==econ.labor_class;
+                   }))continue;
             if(rule.good=="food")custom_food=true;
             if(rule.good=="clothing")custom_clothing=true;
             add(rule.good,daily_increment(
@@ -2373,7 +2381,7 @@ public:
         if(decisions.allow_market_liquidation_of_real_stock)
             plan[7].push_back([](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
-                const auto index=c.market_seller_index();
+                const auto index=c.market_seller_index(true);
                 for(const auto& [key,sellers]:index) {
                     const auto& [region,good]=key;
                     if(!c.has_market(region,good))continue;
