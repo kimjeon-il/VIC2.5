@@ -114,14 +114,12 @@ inline void Stage::plan_market_discovery() {
                 candidate->freight_per_unit);
             if(landed<=0||landed>=dest_price.price)continue;
             const Money margin=dest_price.price-landed;
-            if((margin/1'000'000)*1'000'000+
-               (margin%1'000'000)*1'000'000/dest_price.price <
-               merchant.minimum_margin_ppm) {
-                // Ratio approximation is conservative, except for huge
-                // integer magnitudes where no floating point is introduced.
-                if(phaseb::mul_checked(margin,1'000'000)/
-                   dest_price.price<merchant.minimum_margin_ppm)continue;
-            }
+            const Money minimum_spread=phaseb::add_checked(
+                phaseb::mul_checked(dest_price.price/1'000'000,
+                    merchant.minimum_margin_ppm),
+                phaseb::mul_checked(dest_price.price%1'000'000,
+                    merchant.minimum_margin_ppm)/1'000'000);
+            if(margin<minimum_spread)continue;
             const Quantity available=lawful_trade_quantity(from,to,offer.good,
                 std::min({gap,actual_stock,candidate->capacity,
                      merchant.maximum_daily_units,(free-reserve)/landed}));
