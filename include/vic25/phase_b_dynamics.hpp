@@ -73,7 +73,10 @@ public:
     MonthReport advance_day(
         World& w,int day,int days_in_month,
         const std::function<double(const std::string&,std::string_view)>&
-            state_law_modifier={})const {
+            state_law_modifier={},
+        const std::function<double(const Demographic&,const Economic&,
+                                   Id,std::string_view)>&
+            pop_law_modifier={})const {
         require(days_in_month>=28&&days_in_month<=31&&day>=1&&
                 day<=days_in_month,"invalid autonomous POP calendar day");
         w.set_native_calendar_day(day);
@@ -115,7 +118,8 @@ public:
         const auto prior=w.events().size();
         if(!today.monthly_vacancies.empty())
             (void)w.match_jobs(today.monthly_vacancies,today.labor);
-        engine.do_demography(w,report,true,month_end,state_law_modifier);
+        engine.do_demography(w,report,true,month_end,
+                            state_law_modifier,pop_law_modifier);
         w.release_ineligible(today.labor);
         w.prune_residuals();
         require(w.validate(today.labor),"autonomous daily demographic invariant");
@@ -148,7 +152,10 @@ private:
         World& w,MonthReport& report,
         bool education_milestones=true,bool lifecycle_due=true,
         const std::function<double(const std::string&,std::string_view)>&
-            state_law_modifier={})const{
+            state_law_modifier={},
+        const std::function<double(const Demographic&,const Economic&,
+                                   Id,std::string_view)>&
+            pop_law_modifier={})const{
         const auto original=w.slices();
         for(const auto& [id,initial]:original){
             if(!w.has_slice(id))continue;
@@ -163,6 +170,10 @@ private:
                 return state_law_modifier?
                     state_law_modifier(d.region,key):0.0;
             };
+            const auto pop_mod=[&](std::string_view key)->double {
+                return pop_law_modifier?
+                    pop_law_modifier(d,econ,initial.key.household,key):0.0;
+            };
             const auto scaled=[&](People base,double multiplier)->People {
                 return static_cast<People>(std::clamp(
                     static_cast<double>(base)*(1.0+multiplier),
@@ -173,7 +184,8 @@ private:
                     static_cast<double>(base)+addition*PPM,
                     0.0,static_cast<double>(PPM)));
             };
-            double mortality=mod("state_mortality_mult");
+            double mortality=mod("state_mortality_mult")+
+                             pop_mod("pop_mortality_mult");
             if(econ.profession=="farmer"||econ.profession=="farmers")
                 mortality+=mod("state_farmers_mortality_mult");
             else if(econ.profession=="laborer"||econ.profession=="laborers")
@@ -214,7 +226,9 @@ private:
                     w.change_health(id,recovered,next,EventKind::recovery,job_allocation(w,id,recovered));
                     report.recovered=add_checked(report.recovered,recovered);}
             }else{
-                auto sick=w.allocate_rate(id,"ill-incidence",remaining,rules_.illness_incidence_ppm);
+                auto sick=w.allocate_rate(id,"ill-incidence",remaining,
+                    scaled(rules_.illness_incidence_ppm,
+                           pop_mod("pop_illness_mult")));
                 if(sick){Health next=hp;next.ill=true;next.illness_severity=1;
                     w.change_health(id,sick,next,EventKind::illness,job_allocation(w,id,sick));
                     report.new_illness=add_checked(report.new_illness,sick);}
@@ -228,7 +242,9 @@ private:
                     report.rehabilitated=add_checked(report.rehabilitated,healed);}
             }else if(age>=16*12 && age<75*12 &&
                      (econ.livelihood=="wage"||econ.livelihood=="self_employed"||econ.livelihood=="subsistence")){
-                auto injured=w.allocate_rate(id,"accident",remaining,rules_.accident_ppm);
+                auto injured=w.allocate_rate(id,"accident",remaining,
+                    scaled(rules_.accident_ppm,
+                           pop_mod("pop_workplace_accident_mult")));
                 if(injured){
                     const auto permanent=w.allocate_rate(id,"permanent-share",injured,rules_.accident_permanent_share_ppm);
                     if(permanent){
@@ -263,7 +279,7 @@ private:
                     double access=mod("state_education_access_add");
                     if(econ.profession=="peasant"||econ.profession=="peasants")
                         access+=mod("state_peasants_education_access_add");
-                    rate=flat(rate,access);
+                    rate=flat(rate,access+pop_mod("pop_school_access_add"));
                     const auto multiplier=rules_.education_access_multiplier_ppm[static_cast<std::size_t>(d.sex)];
                     rate=(rate/PPM)*multiplier + (rate%PPM)*multiplier/PPM;
                     const auto n=w.allocate_rate(id,"school",remaining,rate);
@@ -277,7 +293,8 @@ private:
                w.employed(id)>0 && ed.occupational_skill<100){
                 const auto trained_rate=scaled(rules_.training_ppm,
                     mod("state_pop_qualifications_mult")+
-                    mod("building_training_rate_mult"));
+                    mod("building_training_rate_mult")+
+                    pop_mod("pop_qualification_growth_mult"));
                 const auto n=w.allocate_rate(id,"training",
                     w.employed(id),trained_rate);
                 if(n){Education next=ed;next.occupational_skill=static_cast<std::uint8_t>(std::min(100,static_cast<int>(next.occupational_skill)+10));
@@ -322,14 +339,19 @@ private:
                 const auto& economic=w.economic(initial.key.economic);
                 if((economic.profession=="peasant"||
                     economic.profession=="peasants")&&state_law_modifier&&
-                   state_law_modifier(d.region,
-                     "state_peasants_internal_migration_disallowed_bool")>0)
+                   (state_law_modifier(d.region,
+                     "state_peasants_internal_migration_disallowed_bool")>0||
+                    state_law_modifier(d.region,
+                     "state_peasants_mass_migration_disallowed_bool")>0))
                     continue;
                 if(state_law_modifier&&state_law_modifier(
                     dest_it->second,"country_migration_restrictiveness_add")>=100)
                     continue; // Closed Borders blocks real in-migration.
-                const double pull=state_law_modifier?state_law_modifier(
-                    dest_it->second,"state_migration_pull_mult"):0.0;
+                const double pull=(state_law_modifier?state_law_modifier(
+                    dest_it->second,"state_migration_pull_mult"):0.0)+
+                    (state_law_modifier?state_law_modifier(
+                    dest_it->second,
+                    "state_migration_pull_unincorporated_mult"):0.0);
                 const People rate=static_cast<People>(std::clamp(
                     static_cast<double>(rules_.migration_ppm)*
                         (1.0+std::clamp(pull,-1.0,4.0)),

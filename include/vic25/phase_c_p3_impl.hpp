@@ -322,8 +322,31 @@ inline P3MovementView IntegratedWorld::p3_movement_view(
         auto& already=support[key.first];
         already=std::max(already,n);
     }
-    for(const auto& [slice,n]:support) {
-        (void)slice;
+    // A law modifies the participation of *existing potential supporters*.
+    // Every slice remains bounded by its real B headcount and affiliation.
+    for(auto& [slice,n]:support) {
+        const auto& row=people_.slice(slice);
+        const auto& dem=people_.demographic(row.key.demographic);
+        const auto& econ=people_.economic(row.key.economic);
+        const auto issue=movement.issue_domain+":"+movement.desired_choice;
+        double rate=0.0;
+        const auto legal=[&](std::string_view key)->double {
+            return p2_region_modifier_value(dem.region,key);
+        };
+        if(issue.find("anti_slavery")!=std::string::npos||
+           issue.find("slavery_banned")!=std::string::npos)
+            if(dem.legal_status!="enslaved"&&
+               dem.legal_status!="slave")
+                rate+=legal(
+                   "state_free_state_pop_support_movement_anti_slavery_mult");
+        for(const std::string kind:{"anarchist","communist","labor","socialist"})
+            if(issue.find(kind)!=std::string::npos)
+                rate+=legal("state_pop_support_movement_"+kind+"_mult");
+        rate=std::clamp(rate,-0.95,4.0);
+        n=static_cast<People>(std::clamp(
+            static_cast<long double>(n)*(1.0L+rate),
+            0.0L,static_cast<long double>(row.count)));
+        (void)econ;
         view.supporters=phaseb::add_checked(view.supporters,n);
     }
     if(population>0)view.support_ppm=p3_fraction(view.supporters,population);
@@ -387,6 +410,7 @@ inline bool IntegratedWorld::p3_needs_daily_tick()const {
 inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
     require_stage({9});
     std::map<std::pair<std::string,std::string>,double> regional_effect_cache;
+    std::map<std::string,std::pair<std::string,std::string>> observed_identity;
     const auto effect=[&](const std::string& region,
                           std::string_view key)->double {
         const auto slot=std::make_pair(region,std::string(key));
@@ -465,8 +489,37 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
         // never reduces actual food consumption or fabricates household cash.
         const auto expected_sol=std::clamp(
             1.0+effect(dem.region,"state_expected_sol_mult"),0.1,3.0);
+        const auto owner=sovereignty_.find(dem.region);
+        int acceptance=50;
+        if(owner!=sovereignty_.end()) {
+            if(!observed_identity.contains(owner->second))
+                observed_identity.emplace(owner->second,
+                    p2_modal_population_identity(owner->second));
+            const auto& [culture,religion]=observed_identity.at(owner->second);
+            acceptance=p2_policy_acceptance(dem,culture,religion);
+        }
+        const auto household=row.key.household;
+        const auto social_living=p2_population_law_modifier(
+            dem,economic,household,"pop_political_expectation",
+            "", "",0);
+        const auto legal_status=acceptance>=80?"full_acceptance":
+            acceptance>=60?"second_rate_citizen":
+            acceptance>=40?"open_prejudice":
+            acceptance>=20?"violent_hostility":"cultural_erasure";
+        const auto prejudice=effect(dem.region,
+            "state_radicalism_increases_"+std::string(legal_status)+"_mult");
+        const auto turmoil=effect(dem.region,"state_turmoil_effects_mult");
+        const auto political_sol=effect(
+            dem.region,"state_radicals_and_loyalists_from_sol_change_mult");
+        const double scarcity_protection=std::clamp(
+            1.0-effect(dem.region,"state_food_security_add"),
+            0.0,4.0);
+        const double social_pressure=std::clamp(
+            1.0-social_living+prejudice+turmoil+political_sol,
+            0.0,5.0);
         const auto effective_pressure=static_cast<std::int64_t>(
-            pressure*radical_factor*expected_sol);
+            (unemployment/400.0+scarcity/250.0*scarcity_protection)*
+            radical_factor*expected_sol*social_pressure);
         attitude.radical_ppm=static_cast<std::int32_t>(
             std::clamp<std::int64_t>(
                 static_cast<std::int64_t>(attitude.radical_ppm)+
@@ -483,9 +536,21 @@ inline void IntegratedWorld::p3_daily_react(std::int64_t today) {
             std::clamp<std::int64_t>(
                 static_cast<std::int64_t>(attitude.loyal_ppm)+
                 loyalty_delta,0,1'000'000-attitude.radical_ppm));
+        double fervor=0.0;
+        if(owner!=sovereignty_.end()&&
+           observed_identity.contains(owner->second)) {
+            const auto& primary=observed_identity.at(owner->second).first;
+            if(dem.culture==primary)
+                fervor+=p2_catalog_modifier_value(owner->second,
+                    "country_primary_culture_fervor_from_laws_add");
+            if(dem.culture=="basque")
+                fervor+=p2_catalog_modifier_value(owner->second,
+                    "country_fervor_target_basque_add");
+        }
         attitude.engagement_ppm=static_cast<std::int32_t>(
             std::clamp<std::int64_t>(
-                100'000+static_cast<std::int64_t>(attitude.radical_ppm)/2+
+                static_cast<std::int64_t>(100'000.0+fervor*1000.0)+
+                static_cast<std::int64_t>(attitude.radical_ppm)/2+
                 static_cast<std::int64_t>(attitude.loyal_ppm)/4,
                 0,1'000'000));
         attitude.observed_day=today;

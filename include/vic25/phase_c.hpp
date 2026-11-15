@@ -2261,6 +2261,209 @@ public:
         }
         return total;
     }
+    // Derived identity is a demographic observation, NOT an invented
+    // official culture/religion register. Empty population means unknown.
+    [[nodiscard]] std::pair<std::string,std::string>
+    p2_modal_population_identity(const std::string& country)const {
+        std::map<std::string,People> cultures,religions;
+        for(const auto& [id,pop]:people_.slices()) {
+            (void)id;
+            if(pop.count<=0)continue;
+            const auto& d=people_.demographic(pop.key.demographic);
+            const auto sovereign=sovereignty_.find(d.region);
+            if(sovereign==sovereignty_.end()||
+               sovereign->second!=country)continue;
+            if(!d.culture.empty()) {
+                cultures[d.culture]=phaseb::add_checked(
+                    cultures[d.culture],pop.count);
+            }
+            if(!d.religion.empty())
+                religions[d.religion]=phaseb::add_checked(
+                    religions[d.religion],pop.count);
+        }
+        const auto modal=[](const std::map<std::string,People>& values) {
+            std::string found;People best=0;
+            for(const auto& [name,n]:values)if(n>best) {
+                best=n;found=name;
+            }
+            return found;
+        };
+        return {modal(cultures),modal(religions)};
+    }
+    [[nodiscard]] int p2_policy_acceptance(
+          const phaseb::Demographic& d,const std::string& modal_culture,
+          const std::string& modal_religion)const {
+        const auto owner=sovereignty_.find(d.region);
+        if(owner==sovereignty_.end())return 50;
+        const auto mod=[&](std::string_view key)->double {
+            return p2_region_modifier_value(d.region,key);
+        };
+        const auto culture=d.culture.substr(
+            0,d.culture.find_first_of(";|"));
+        const auto majority=modal_culture.substr(
+            0,modal_culture.find_first_of(";|"));
+        double score=50.0;
+        if(!culture.empty()&&culture==majority)
+            score+=mod("country_acceptance_primary_culture_add");
+        if(!d.religion.empty()&&d.religion==modal_religion)
+            score+=mod("country_acceptance_state_religion_add");
+        const bool no_homeland=d.legal_status.find("non_homeland")!=
+              std::string::npos ||
+              d.legal_status.find("outside_homeland")!=std::string::npos;
+        const bool homeland=!no_homeland &&
+              d.legal_status.find("homeland")!=std::string::npos;
+        if(no_homeland)score+=mod("country_acceptance_not_homeland_add");
+        else if(homeland)score+=mod("country_acceptance_homeland_add");
+        if(culture=="basque")score+=mod("country_basque_cultural_acceptance_add");
+        if(culture=="polish")score+=mod("country_polish_cultural_acceptance_add");
+        const auto trait=[](const std::string& source,
+                            const std::string& field)->std::string {
+            const auto marker=field+":";
+            auto i=source.find(marker);
+            if(i==std::string::npos)return {};
+            i+=marker.size();
+            const auto end=source.find_first_of(";|",i);
+            return source.substr(i,end==std::string::npos?
+                              std::string::npos:end-i);
+        };
+        for(const std::string kind:{"heritage","language","tradition"}) {
+            const auto pop_trait=trait(d.culture,kind);
+            const auto base_trait=trait(modal_culture,kind);
+            if(pop_trait.empty()||base_trait.empty())continue;
+            if(pop_trait==base_trait) {
+                score+=mod("country_acceptance_shared_"+kind+"_trait_add");
+                score+=mod("country_acceptance_shared_"+kind+"_trait_group_add");
+            } else
+                score+=mod("country_acceptance_no_shared_"+kind+"_trait_add");
+        }
+        if(!d.religion.empty()&&!modal_religion.empty()) {
+            if(d.religion==modal_religion) {
+                score+=mod("country_acceptance_shared_religious_trait_add");
+                score+=mod("country_acceptance_shared_religious_trait_group_add");
+            } else
+                score+=mod("country_acceptance_no_shared_religious_trait_add");
+        }
+        // Real historical legal strata are explicitly tagged in the existing
+        // POP Demographic. Unknown caste/edo social class gets no class cap.
+        const auto strata=d.legal_status;
+        std::string category;
+        for(const std::string type:{"brahmins","kshatriyas","vaishyas",
+           "shudras","dalit","strata_samurai_high","strata_samurai_low",
+           "strata_commoners_townspeople","strata_commoners_peasants",
+           "strata_outcastes","strata_religious"}) {
+            if(strata==type||strata.find(type+";")!=std::string::npos||
+               strata.find(type+"|")!=std::string::npos) {
+                category=type;break;
+            }
+        }
+        if(!category.empty()) {
+            score=50+(score-50)*std::clamp(
+                1.0+mod("country_"+category+"_cultural_acceptance_mult"),
+                0.0,3.0);
+            const auto minimum=mod("country_"+category+"_acceptance_min_add");
+            const auto maximum=mod("country_"+category+"_acceptance_max_add");
+            if(minimum!=0.0)score=std::max(score,minimum);
+            if(maximum!=0.0)score=std::min(score,maximum);
+        }
+        return static_cast<int>(std::clamp(score,0.0,100.0));
+    }
+    [[nodiscard]] double p2_population_law_modifier(
+            const phaseb::Demographic& d,const phaseb::Economic& econ,
+            Id household,std::string_view key,
+            const std::string& modal_culture,
+            const std::string& modal_religion,
+            Money national_wage)const {
+        const auto sov=sovereignty_.find(d.region);
+        if(sov==sovereignty_.end())return 0.0;
+        const auto mod=[&](std::string_view law_key)->double {
+            return p2_region_modifier_value(d.region,law_key);
+        };
+        const std::string caste=d.legal_status;
+        const bool poor=econ.profession=="peasant"||
+            econ.profession=="peasants"||
+            econ.profession=="laborer"||
+            econ.profession=="laborers"||
+            econ.labor_class=="unemployed"||
+            econ.livelihood=="subsistence";
+        const auto actor="HH:"+std::to_string(household);
+        const auto wealthy=actors_.contains(actor)&&national_wage>0&&
+              cash(actor)>national_wage;
+        if(key=="pop_mortality_mult") {
+            double effect=0;
+            if(d.legal_status.find("non_homeland")!=std::string::npos)
+                effect+=mod("state_non_homeland_mortality_mult");
+            if(wealthy)effect+=mod("state_mortality_wealth_mult");
+            if(food_grievance(d.region)>0)
+                effect+=mod("state_mortality_turmoil_mult");
+            return std::clamp(effect,-0.95,5.0);
+        }
+        if(key=="pop_illness_mult") {
+            if(food_grievance(d.region)<=0)return 0;
+            return std::clamp(-mod(
+                "state_pollution_reduction_health_mult"),-0.9,2.0);
+        }
+        if(key=="pop_workplace_accident_mult")
+            return std::clamp(-mod("building_working_conditions_mult"),
+                              -0.9,4.0);
+        if(key=="pop_school_access_add") {
+            double opportunity=wealthy?mod(
+                "state_education_access_wealth_add"):0.0;
+            for(const std::string category:{"brahmins","kshatriyas",
+                "vaishyas","shudras","dalit"})if(caste==category) {
+                opportunity+=mod("country_"+category+"_education_access_mult")*
+                   0.5;
+                break;
+            }
+            return std::clamp(opportunity,-0.9,0.9);
+        }
+        if(key=="pop_qualification_growth_mult") {
+            double qualification=0;
+            for(const std::string category:{"brahmins","kshatriyas",
+                "vaishyas","shudras","dalit",
+                "strata_commoners_peasants","strata_commoners_townspeople",
+                "strata_outcastes","strata_religious",
+                "strata_samurai_high","strata_samurai_low"})
+                if(caste==category) {
+                    qualification+=mod("country_"+category+
+                        "_qualification_growth_mult");
+                    qualification+=mod("country_"+category+
+                        "_qualification_growth_same_class_mult");
+                    if(econ.profession=="peasant"||
+                       econ.profession=="peasants"||
+                       econ.profession=="unskilled_worker")
+                        qualification+=mod("country_"+category+
+                            "_qualification_growth_other_class_mult");
+                    break;
+                }
+            if(poor&&caste=="")
+                qualification+=mod("state_pop_qualifications_mult");
+            if(econ.profession=="officer"||econ.profession=="officers")
+                if(mod("country_limit_officers_qualifications_to_upper_strata")>0&&
+                   caste!="upper"&&caste!="brahmins"&&
+                   caste!="strata_samurai_high")
+                    qualification=-1;
+            return std::clamp(qualification,-1.0,4.0);
+        }
+        if(key=="pop_political_expectation") {
+            double living=mod("state_standard_of_living_add");
+            living+=mod(poor?"state_lower_strata_standard_of_living_add":
+                             "state_upper_strata_standard_of_living_add");
+            living+=mod(poor?"state_lower_strata_expected_sol_add":
+                             "state_middle_strata_expected_sol_add");
+            if(poor) {
+                living+=mod("building_group_bg_subsistence_agriculture_peasants_standard_of_living_add");
+                living+=mod("building_group_bg_subsistence_ranching_peasants_standard_of_living_add");
+            }
+            if(econ.profession=="aristocrat"||econ.profession=="aristocrats")
+                living+=mod("building_group_bg_manor_houses_aristocrats_standard_of_living_add");
+            if(econ.profession=="farmer"||econ.profession=="farmers")
+                living+=mod("building_group_bg_agriculture_standard_of_living_add");
+            return std::clamp(living,-1.0,3.0);
+        }
+        if(key=="pop_assimilation_acceptance")
+            return p2_policy_acceptance(d,modal_culture,modal_religion)/100.0;
+        return 0.0;
+    }
     // Election weights use actual registered POPs and cash evidence.
     // They change the share of the SAME legally cast ballots, never create
     // phantom voters or extra seats. V3's wealth and literacy power are
@@ -3439,20 +3642,152 @@ public:
         require_stage({10});
         if(!demography_enabled_)return;
         const auto before=people_.events().size();
-        // Cache country/region projections for one daily demographic pass.
-        // The real Phase B birth/death/education ledger remains authoritative.
-        std::map<std::pair<std::string,std::string>,double> regional_modifiers;
-        const auto law_modifier=[&](const std::string& region,
-                                    std::string_view key)->double {
-            const auto name=std::make_pair(region,std::string(key));
-            const auto found=regional_modifiers.find(name);
-            if(found!=regional_modifiers.end())return found->second;
-            const auto effect=p2_region_modifier_value(region,key);
-            regional_modifiers.emplace(name,effect);
-            return effect;
+        // One native population pass builds country modal identities and
+        // actual payroll benchmarks. Do not rescan every POP for each nation.
+        std::map<std::string,std::map<std::string,People>>
+            culture_counts,religion_counts;
+        for(const auto& [slice,pop]:people_.slices()) {
+            (void)slice;
+            if(pop.count<=0)continue;
+            const auto& d=people_.demographic(pop.key.demographic);
+            const auto owner=sovereignty_.find(d.region);
+            if(owner==sovereignty_.end())continue;
+            if(!d.culture.empty())
+                culture_counts[owner->second][d.culture]=phaseb::add_checked(
+                    culture_counts[owner->second][d.culture],pop.count);
+            if(!d.religion.empty())
+                religion_counts[owner->second][d.religion]=
+                    phaseb::add_checked(
+                    religion_counts[owner->second][d.religion],pop.count);
+        }
+        std::map<std::string,std::pair<std::string,std::string>> modes;
+        const auto best=[](const std::map<std::string,People>& group) {
+            std::string result;People largest=0;
+            for(const auto& [name,n]:group)if(n>largest) {
+                largest=n;result=name;
+            }
+            return result;
+        };
+        for(const auto& [country,records]:culture_counts)
+            modes[country].first=best(records);
+        for(const auto& [country,records]:religion_counts)
+            modes[country].second=best(records);
+        std::map<std::string,std::pair<Money,People>> payroll;
+        for(const auto& [id,job]:people_.jobs()) {
+            if(job.count<=0||job.wage_per_month<=0||
+               !people_.has_slice(id))continue;
+            const auto& d=people_.demographic(
+                people_.slice(id).key.demographic);
+            const auto owner=sovereignty_.find(d.region);
+            if(owner==sovereignty_.end())continue;
+            auto& [total,n]=payroll[owner->second];
+            total=phaseb::add_checked(total,
+                 phaseb::mul_checked(job.count,job.wage_per_month));
+            n=phaseb::add_checked(n,job.count);
+        }
+        std::map<std::pair<std::string,std::string>,double> regional;
+        const auto state_effect=[&](const std::string& region,
+                                     std::string_view key)->double {
+            const auto slot=std::make_pair(region,std::string(key));
+            const auto it=regional.find(slot);
+            if(it!=regional.end())return it->second;
+            const auto rate=(key=="state_migration_pull_unincorporated_mult"&&
+                !p2_region_unincorporated_evidence(region))?0.0:
+                p2_region_modifier_value(region,key);
+            regional.emplace(slot,rate);
+            return rate;
+        };
+        const auto pop_effect=[&](const phaseb::Demographic& dem,
+                    const phaseb::Economic& economic,Id household,
+                    std::string_view key)->double {
+            const auto owner=sovereignty_.find(dem.region);
+            if(owner==sovereignty_.end())return 0;
+            const auto mode=modes.find(owner->second);
+            const auto w=payroll.find(owner->second);
+            const Money mean=w!=payroll.end()&&w->second.second>0?
+                w->second.first/w->second.second:0;
+            return p2_population_law_modifier(dem,economic,household,key,
+                mode==modes.end()?std::string{}:mode->second.first,
+                mode==modes.end()?std::string{}:mode->second.second,mean);
         };
         (void)phaseb::Engine{demographic_rules_}.advance_day(
-            people_,day,days_in_month,law_modifier);
+            people_,day,days_in_month,state_effect,pop_effect);
+        // Native law-driven identity changes are actual slice transfers:
+        // no duplicated identities, census headcount or employment.
+        const auto original=people_.slices();
+        for(const auto& [id,snapshot]:original) {
+            if(!people_.has_slice(id)||snapshot.count<=0)continue;
+            const auto dem=people_.demographic(
+                people_.slice(id).key.demographic);
+            if(dem.service!=phaseb::Service::civilian&&
+               dem.service!=phaseb::Service::reserve)continue;
+            const auto owner=sovereignty_.find(dem.region);
+            if(owner==sovereignty_.end())continue;
+            const auto mode=modes.find(owner->second);
+            if(mode==modes.end())continue;
+            const auto& [majority,religion]=mode->second;
+            const int acceptance=p2_policy_acceptance(
+                dem,majority,religion);
+            // For a partial transfer, explicitly carry the real matching
+            // fraction of the source's existing employment contract.
+            const auto transfer_jobs=[&](People requested)->People {
+                const auto count=people_.slice(id).count;
+                const auto employed=people_.employed(id);
+                return count>0?
+                    (employed/count)*requested+
+                    phaseb::mul_checked(employed%count,requested)/count:0;
+            };
+            const double assimilate=state_effect(
+                dem.region,"state_assimilation_mult");
+            if(!majority.empty()&&dem.culture!=majority&&
+               assimilate!=0.0&&acceptance>=25) {
+                const auto rate=static_cast<People>(std::clamp(
+                    50.0*(1.0+assimilate)*acceptance/100.0,
+                    0.0,1'000'000.0));
+                if(rate>0) {
+                    const auto n=people_.allocate_rate(
+                        id,"p2-daily-cultural-assimilation",
+                        people_.slice(id).count,rate);
+                    if(n>0)people_.change_identity(id,n,majority,
+                        dem.religion,dem.legal_status,transfer_jobs(n));
+                }
+            }
+            if(!people_.has_slice(id)||religion.empty()||
+               religion==dem.religion)continue;
+            const std::string category=acceptance>=80?"full_acceptance":
+                acceptance>=60?"second_rate_citizen":
+                acceptance>=40?"open_prejudice":
+                acceptance>=20?"violent_hostility":"cultural_erasure";
+            const auto allowed=p2_catalog_modifier_value(owner->second,
+                "country_allow_conversion_"+category+"_bool")>0;
+            if(!allowed)continue;
+            const auto conversion=state_effect(dem.region,
+                "state_conversion_mult");
+            const auto& occupation=people_.economic(
+                people_.slice(id).key.economic);
+            const bool lower=occupation.livelihood=="subsistence"||
+                occupation.profession=="peasant"||
+                occupation.profession=="peasants"||
+                occupation.profession=="laborer"||
+                occupation.profession=="laborers";
+            const auto orthodoxy=(religion=="orthodox"&&lower)?
+                state_effect(dem.region,
+                    "state_orthodox_lower_strata_conversion_rate_add"):0.0;
+            const auto religious_fervor=p2_catalog_modifier_value(
+                owner->second,"country_education_fervor_add");
+            const auto rate=static_cast<People>(std::clamp(
+                30.0*(1.0+conversion+orthodoxy+religious_fervor/100.0),
+                0.0,1'000'000.0));
+            if(rate<=0)continue;
+            const auto n=people_.allocate_rate(id,"p2-daily-religious-conversion",
+                people_.slice(id).count,rate);
+            if(n>0) {
+                const auto now=people_.demographic(
+                    people_.slice(id).key.demographic);
+                people_.change_identity(id,n,now.culture,religion,
+                    now.legal_status,transfer_jobs(n));
+            }
+        }
         sync_service_transitions(before);
         events_.push_back("daily-auto-demography");
     }
