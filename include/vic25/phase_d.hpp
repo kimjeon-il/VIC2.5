@@ -5,6 +5,7 @@
 // This deliberately does not claim all D-C/I/T acceptance cases are implemented.
 
 #include "vic25/phase_c.hpp"
+#include "vic25/building_catalog.hpp"
 #include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <array>
@@ -140,6 +141,8 @@ struct DomainState {
     std::map<std::string,ConstructionProject> constructions;
     std::map<std::string,WorkPackage> work_packages;
     std::map<std::string,IndustryClass> industry_classes;
+    // Site -> immutable archetype identifier; descriptive binding, never a second asset ledger.
+    std::map<std::string,std::string> site_archetypes;
     std::map<std::string,ResourceSite> resource_sites;
     std::map<std::string,Quantity> cumulative_nonmarket_waste;
     std::map<std::string,IndustryRecipe> recipes;
@@ -354,6 +357,18 @@ struct DomainState {
                     industry_classes.contains(cl.parent)),
                     "unknown industrial taxonomy ancestry");
         }
+        for(const auto& [site,id]:site_archetypes) {
+            const auto* archetype=building::find(id);
+            require(archetype && archetype->site_eligible() &&
+                    building::industry_exists(archetype->industry),
+                    "invalid Phase D building archetype binding");
+            bool known_site=c.facilities().contains(site);
+            for(const auto& [project_id,project]:constructions) {
+                (void)project_id;
+                if(project.target_site==site)known_site=true;
+            }
+            require(known_site,"building archetype has no real or planned site");
+        }
         for(const auto& [id,v]:cumulative_nonmarket_waste){
             (void)id;require(v>=0,"negative accumulated nonmarket waste");
         }
@@ -502,6 +517,9 @@ public:
         production.id=recipe_id;production.site=site;
         d_.constructions.emplace(id,std::move(project));
         d_.recipes.emplace(recipe_id,std::move(production));
+        if(const auto bound=d_.site_archetypes.find(model.target_site);
+           bound!=d_.site_archetypes.end())
+            d_.site_archetypes.emplace(site,bound->second);
         d_.append(c_.month(),"endogenous-funded-factory-project",id);
         return true;
     }
@@ -770,6 +788,13 @@ public:
         // Only explicit industry class IDs may opt in: never guess industry
         // from a company name, product label or national culture.
         const auto production_group=[&]() -> std::string {
+            if(const auto bound=d_.site_archetypes.find(r.site);
+               bound!=d_.site_archetypes.end()) {
+                const auto* archetype=building::find(bound->second);
+                if(archetype && archetype->industry==r.industry_class &&
+                   !archetype->throughput_modifier.empty())
+                    return std::string(archetype->throughput_modifier);
+            }
             const auto& type=r.industry_class;
             if(type=="bg_manufacturing"||type=="manufacturing")
                 return "building_group_bg_manufacturing_throughput_add";
@@ -1186,6 +1211,109 @@ public:
                 (cl.parent.empty()||domain_.industry_classes.contains(cl.parent)),
                 "invalid industry taxonomy parent or ID");
         domain_.industry_classes.emplace(cl.id,std::move(cl));
+    }
+    // P0: the 13-category industry taxonomy is static configuration, not
+    // 13 businesses or 13 stock ledgers.
+    void seed_standard_industries() {
+        require(core_.commit_id()==0,"industry catalog seed after simulation start");
+        for(const auto& item:building::industries) {
+            const std::string id(item.id);
+            if(const auto found=domain_.industry_classes.find(id);
+               found!=domain_.industry_classes.end()) {
+                require(found->second.parent.empty(),
+                        "existing industry conflicts with standard root taxonomy");
+                continue;
+            }
+            seed_industry_class({id,"",std::string(item.name_ko)});
+        }
+    }
+    // P1: attach a physical business archetype to an already seeded facility.
+    // All ownership, staff, cash, equipment and output remain in C/D ledgers.
+    void bind_building_site(const std::string& site,const std::string& archetype_id) {
+        require(core_.commit_id()==0 && !site.empty() &&
+                core_.facilities().contains(site) &&
+                !domain_.site_archetypes.contains(site),
+                "missing or duplicate physical building site");
+        const auto* archetype=building::find(archetype_id);
+        require(archetype && archetype->site_eligible() &&
+                building::industry_exists(archetype->industry),
+                "nonphysical or unknown building archetype");
+        domain_.site_archetypes.emplace(site,archetype_id);
+    }
+    void seed_building_facility(const std::string& site,
+                                const std::string& owner,
+                                const std::string& region,Quantity capacity,
+                                const std::string& archetype_id) {
+        require(core_.commit_id()==0 && !domain_.site_archetypes.contains(site),
+                "building seed after start or duplicate site");
+        const auto* archetype=building::find(archetype_id);
+        require(archetype && archetype->site_eligible() &&
+                building::industry_exists(archetype->industry),
+                "cannot materialize a nonphysical building type");
+        core_.seed_production_facility(site,owner,region,capacity);
+        domain_.site_archetypes.emplace(site,archetype_id);
+    }
+    // A project is only a proposed, funded-in-stages facility. Completion
+    // still requires the original construction, material, wage and WIP flow.
+    void seed_building_construction(ConstructionProject p,
+                                    const std::string& archetype_id) {
+        require(core_.commit_id()==0 && !p.target_site.empty() &&
+                !core_.facilities().contains(p.target_site) &&
+                !domain_.site_archetypes.contains(p.target_site),
+                "building construction target already occupied");
+        const auto* archetype=building::find(archetype_id);
+        require(archetype && archetype->site_eligible() &&
+                building::industry_exists(archetype->industry),
+                "nonphysical building construction archetype");
+        for(const auto& [id,old]:domain_.constructions) {
+            (void)id;
+            require(old.target_site!=p.target_site,"duplicate construction target");
+        }
+        const auto site=p.target_site;
+        seed_construction(std::move(p));
+        domain_.site_archetypes.emplace(site,archetype_id);
+    }
+    // Site-bound recipes use original Stage4 transforms and declared tech.
+    // There are deliberately no fictional fixed Vic3 per-level coefficients.
+    void seed_building_recipe(IndustryRecipe recipe) {
+        require(core_.commit_id()==0 && !recipe.site.empty(),
+                "invalid building recipe seed time or site");
+        const auto it=domain_.site_archetypes.find(recipe.site);
+        require(it!=domain_.site_archetypes.end(),"recipe has no building site binding");
+        const auto* archetype=building::find(it->second);
+        require(archetype && archetype->factory_recipe_eligible() &&
+                recipe.industry_class==archetype->industry &&
+                domain_.industry_classes.contains(recipe.industry_class),
+                "recipe incompatible with building class");
+        if(!archetype->representative_good.empty())
+            require(std::any_of(recipe.outputs.begin(),recipe.outputs.end(),
+                [&](const Input& good) {
+                    return good.good==archetype->representative_good;
+                }),"recipe does not supply representative building output");
+        if(!recipe.tech_id.empty())
+            require(domain_.technologies.contains(recipe.tech_id),
+                    "recipe technology unknown in local research catalog");
+        seed_recipe(std::move(recipe));
+    }
+    // Mines, logging and fishing may use actual ResourceSite flow instead of
+    // a manufacturing transformation. The resource is not underground stock.
+    void seed_building_resource_site(ResourceSite source) {
+        require(core_.commit_id()==0 && !source.site.empty(),
+                "invalid building extraction seed");
+        const auto it=domain_.site_archetypes.find(source.site);
+        require(it!=domain_.site_archetypes.end(),"unbound extraction site");
+        const auto* archetype=building::find(it->second);
+        require(archetype && archetype->extraction_eligible() &&
+                archetype->industry=="EXTR" &&
+                (archetype->representative_good.empty() ||
+                 source.good==archetype->representative_good),
+                "source and mining archetype disagree");
+        seed_resource_site(std::move(source));
+    }
+    [[nodiscard]] const building::Archetype* site_archetype(
+            const std::string& site) const {
+        const auto it=domain_.site_archetypes.find(site);
+        return it==domain_.site_archetypes.end()?nullptr:building::find(it->second);
     }
     void seed_resource_site(ResourceSite source){
         require(core_.commit_id()==0&&!source.id.empty() &&
