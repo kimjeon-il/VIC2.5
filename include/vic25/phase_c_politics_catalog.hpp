@@ -8,6 +8,7 @@
 #include "vic25/phase_c_p1.hpp"
 #include "vic25/phase_c_p2.hpp"
 #include "vic25/phase_c_p3.hpp"
+#include "vic25/phase_c_p2_catalog_115.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
