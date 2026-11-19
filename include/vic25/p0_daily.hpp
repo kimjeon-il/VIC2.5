@@ -800,6 +800,7 @@ public:
         // P2: switch between ALREADY REGISTERED, physically compatible
         // recipes on one commissioned site. No free facility retooling or
         // automatic technology adoption; explicit player policies win.
+        std::set<std::string> autonomous_operating_recipes;
         std::set<std::string> explicitly_managed_sites;
         for(const auto& p:decisions.manufacturers)
             explicitly_managed_sites.insert(industry.recipes.at(p.recipe).site);
@@ -840,6 +841,7 @@ public:
             const auto& market=game_c.market(facility.region,product.good);
             decisions.manufacturers.push_back(Manufacturer{
                 chosen,std::max<Quantity>(product.per_unit,market.target_stock)});
+            autonomous_operating_recipes.insert(chosen);
         }
         // Hire from real regional POP only where an operating recipe
         // demonstrates demand and a locally observed wage. No worker spawn.
@@ -1353,35 +1355,17 @@ public:
                         country,p.region,"state_construction_mult"));
                 if(work_budget<=0 || trait<=-1'000'000)return;
                 Money free=c.phase_d_cash_available(p.client);
-                // A bank loan is never created just because investment looks
-                // profitable. Use only an existing G pledged credit facility:
-                // drawing it posts the real C bank loan and matching deposit.
-                if(collateral_credit && !c.bank_insolvent() &&
-                   free<phaseb::add_checked(
-                       investment.reserve_cash,p.cash_price_per_work)) {
-                    Money shortfall=phaseb::add_checked(
+                // Only a previously approved real collateral line may fund
+                // the shortfall. Stage1 G draws post the original C loan.
+                if(collateral_credit && free<
+                      phaseb::add_checked(investment.reserve_cash,
+                                          p.cash_price_per_work)) {
+                    const Money request=phaseb::add_checked(
                         investment.reserve_cash,p.cash_price_per_work)-free;
-                    for(const auto& [line_id,line]:gh.commerce().credit) {
-                        if(shortfall<=0)break;
-                        if(!line.active||line.borrower!=p.client ||
-                           line.effective>c.month()||line.drawn>=line.limit||
-                           c.stock(line.borrower,line.pledge_region,
-                                   line.pledge_good)<line.pledged_goods)
-                            continue;
-                        // Never spend construction materials backing this loan.
-                        if(line.borrower==p.contractor &&
-                           line.pledge_region==p.region &&
-                           line.pledge_good==p.material_good &&
-                           c.stock(p.contractor,p.region,p.material_good)<
-                               phaseb::add_checked(line.pledged_goods,p.material_per_work))
-                            continue;
-                        const Money draw=std::min(shortfall,line.limit-line.drawn);
-                        if(draw<=0)continue;
-                        gh.draw_trade_credit(line_id,draw);
-                        free=c.phase_d_cash_available(p.client);
-                        shortfall=std::max<Money>(0,phaseb::add_checked(
-                            investment.reserve_cash,p.cash_price_per_work)-free);
-                    }
+                    (void)enterprise_ai::draw_documented_credit(
+                        gh,p.client,request,p.region,p.material_good,
+                        p.client==p.contractor?p.material_per_work:0);
+                    free=c.phase_d_cash_available(p.client);
                 }
                 if(free<=investment.reserve_cash)return;
                 const Quantity affordable=(free-investment.reserve_cash)/p.cash_price_per_work;
@@ -1426,6 +1410,91 @@ public:
             });
             plan[8].push_back([investment,work](phasegh::Stage& gh){
                 if(*work>0)gh.phase_d().capitalize_work(investment.construction_project,*work);
+            });
+        }
+        // P2 operating-cycle procurement uses existing C local markets,
+        // G's already-issued collateral lines and the real Stage3 trade
+        // ledger. Remote inputs are NEVER teleported: a verified route is
+        // only an investment signal until a G shipment actually arrives.
+        for(const auto& recipe_id:autonomous_operating_recipes) {
+            plan[1].push_back([recipe_id,date,dim,
+                collateral_credit=decisions.allow_collateralized_enterprise_credit]
+                (phasegh::Stage& gh) {
+                if(!collateral_credit)return;
+                auto& c=gh.phase_c();
+                const auto& domain=gh.phase_d().state();
+                const auto& r=domain.recipes.at(recipe_id);
+                if(!c.facilities().contains(r.site))return;
+                const auto& f=c.facility(r.site);
+                const auto estimate=enterprise_ai::evaluate(
+                    c,domain,gh.geography().spatial(),
+                    gh.commerce(),r,date.day,dim);
+                if(!estimate.valid)return;
+                const Quantity day_budget=daily_budget::cumulative(
+                    f.capacity-f.damaged,date.day,dim);
+                const Quantity used=used_site_capacity(domain,r.site,c.month());
+                if(day_budget<=used ||
+                   day_budget-used<r.capacity_per_batch)return;
+                Money purchasing=0;
+                for(const auto& input:r.inputs) {
+                    const Quantity have=c.phase_d_material_available(
+                        f.owner,f.region,input.good);
+                    if(have>=input.per_unit)continue;
+                    if(!c.has_market(f.region,input.good))return;
+                    Quantity local=0;
+                    for(const auto& [key,qty]:c.physical_inventory())
+                        if(key.region_id==f.region && key.good_id==input.good &&
+                           key.holder_id!=f.owner && c.has_actor(key.holder_id))
+                            local=phaseb::add_checked(local,qty);
+                    if(local<input.per_unit-have)return;
+                    purchasing=phaseb::add_checked(purchasing,
+                        times(input.per_unit-have,c.market(f.region,input.good).price));
+                }
+                const Money observed=enterprise_ai::observed_wage(
+                    c,f.owner,f.region,date.day,dim);
+                if(observed<=0)return;
+                const Money target=phaseb::add_checked(purchasing,
+                                  times(observed,r.workers_per_batch));
+                const Money free=c.phase_d_cash_available(f.owner);
+                if(free<target)
+                    (void)enterprise_ai::draw_documented_credit(
+                         gh,f.owner,target-free);
+            });
+            plan[3].push_back([recipe_id,date,dim](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto& domain=gh.phase_d().state();
+                const auto& r=domain.recipes.at(recipe_id);
+                if(!c.facilities().contains(r.site))return;
+                const auto& f=c.facility(r.site);
+                if(c.firm_bankrupt(f.owner) || f.capacity<=f.damaged)return;
+                const Quantity available=daily_budget::cumulative(
+                    f.capacity-f.damaged,date.day,dim);
+                const Quantity used=used_site_capacity(domain,r.site,c.month());
+                if(available<=used || available-used<r.capacity_per_batch)
+                    return;
+                // One batch's missing materials are an actual, payable local
+                // purchase; the factory cannot consume newly produced goods
+                // retroactively from later Stage4.
+                for(const auto& input:r.inputs) {
+                    if(!c.has_market(f.region,input.good))continue;
+                    const Money price=c.market(f.region,input.good).price;
+                    Quantity need=std::max<Quantity>(0,input.per_unit-
+                        c.phase_d_material_available(f.owner,f.region,input.good));
+                    if(need<=0)continue;
+                    for(const auto& [key,available_stock]:c.physical_inventory()) {
+                        if(need<=0)break;
+                        if(key.region_id!=f.region||key.good_id!=input.good||
+                           key.holder_id==f.owner||!c.has_actor(key.holder_id)||
+                           available_stock<=0)continue;
+                        const Quantity quantity=std::min({
+                            need,c.phase_d_material_available(
+                                key.holder_id,f.region,input.good),
+                            c.phase_d_cash_available(f.owner)/price});
+                        if(quantity<=0)continue;
+                        c.trade(key.holder_id,f.owner,f.region,input.good,quantity,price);
+                        need-=quantity;
+                    }
+                }
             });
         }
         for(const auto& staffing:decisions.staffing)
