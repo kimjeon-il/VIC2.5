@@ -1552,7 +1552,14 @@ public:
                     policy.wage_per_unit:
                     times(actual_daily_worker_wage(c,src.owner,date.day,dim),
                           src.workers_per_unit);
-                if(quote.price<=wage_per_unit ||
+                Money unit_cost=wage_per_unit;
+                for(const auto& input:src.operational_inputs_per_unit) {
+                    if(!c.has_market(src.region,input.good))return;
+                    unit_cost=phaseb::add_checked(unit_cost,
+                        times(input.per_unit,
+                              c.market(src.region,input.good).price));
+                }
+                if(quote.price<=unit_cost ||
                    c.stock(src.owner,src.region,src.good)>=policy.target_inventory)
                     return;
                 if(src.monthly_capacity<src.produced_this_month||
@@ -1575,6 +1582,10 @@ public:
                 if(already_site>=facility_limit)return;
                 available=std::min(available,
                          (facility_limit-already_site)/src.site_service_per_unit);
+                for(const auto& input:src.operational_inputs_per_unit)
+                    available=std::min(available,
+                        c.phase_d_material_available(
+                            src.owner,src.region,input.good)/input.per_unit);
                 if(policy.wage_per_unit>0)
                     available=std::min(available,
                          c.phase_d_cash_available(src.owner)/policy.wage_per_unit);
