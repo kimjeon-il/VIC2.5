@@ -1,0 +1,17 @@
+name: VIC2.5 focused logistics merchants bank credit
+on:
+  push:
+    branches: [work/economy-logistics-merchant-credit-20261115]
+  workflow_dispatch:
+jobs:
+  native-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile small merchant, dated-freight and bank-credit checks
+        run: g++ -std=c++20 -O0 -Iinclude tests/test_economy_transport_trade_credit_smoke.cpp -o /tmp/vic25-logistics-credit
+      - name: Check real cash, time-gated routes, physical freight and bank risk limits
+        run: /tmp/vic25-logistics-credit
+      - name: Check dated historical line evidence (Python stdlib only)
+        run: python3 scripts/compile_historical_rail_lifetimes.py
