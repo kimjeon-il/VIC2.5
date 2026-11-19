@@ -122,6 +122,28 @@ static void test_construction_and_recipe_before_commission() {
           restored.state().recipes.contains("MAKE_STEEL") &&
           !restored.core().facilities().contains("STEEL_SITE"),
           "planned building or recipe lost across save/load");
+    // Completion is not inferred from a building type. It still costs real
+    // construction labor, materials and a settled construction invoice.
+    c.seed_stock("BUILDER","R","stone",1);
+    const auto worker=seed_worker(w,1);
+    World::Plan construction;
+    construction[1].push_back([](Stage& s){s.plan_work("NEW_STEEL",1);});
+    construction[2].push_back([worker](Stage& s){
+        s.phase_c().hire(worker,1,"BUILDER",1);
+    });
+    construction[4].push_back([](Stage& s){s.perform_work("NEW_STEEL",1);});
+    construction[5].push_back([](Stage& s){s.pay_work("NEW_STEEL",1);});
+    construction[8].push_back([](Stage& s){s.capitalize_work("NEW_STEEL",1);});
+    w.advance(construction);
+    check(w.construction("NEW_STEEL").ready &&
+          !w.core().facilities().contains("STEEL_SITE"),
+          "proposed industrial site started before construction completion");
+    w.advance();
+    check(w.construction("NEW_STEEL").commissioned &&
+          w.core().facility("STEEL_SITE").capacity==4 &&
+          w.site_archetype("STEEL_SITE")->industry=="MANU" &&
+          w.core().phase_d_wip("CLIENT")==0,
+          "commissioning lost archetype or bypassed real WIP");
 }
 int main() {
     try {
