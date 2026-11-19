@@ -42,9 +42,6 @@ modifiers = {
     "LIVE": "building_group_bg_ranching_throughput_add",
     "EXTR": "building_group_bg_mining_throughput_add",
 }
-allowed = {"production_site", "resource_extraction", "service_site",
-           "government_service_site", "utility_site",
-           "network_and_service_site", "commercial_site", "multiuse_asset"}
 def literal(value):
     return json.dumps(value, ensure_ascii=False)
 
@@ -66,8 +63,6 @@ body = [
     "    std::string_view throughput_modifier; // existing law/trait projection key",
     "    [[nodiscard]] constexpr bool site_eligible()const {",
 ]
-for mode in sorted(allowed):
-    pass
 body += [
     '        return ' + ' ||\n               '.join(f'mapping_kind=="{mode}"' for mode in [
         "production_site", "resource_extraction", "service_site",
