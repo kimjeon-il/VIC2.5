@@ -119,6 +119,12 @@ static void test_construction_and_recipe_before_commission() {
     recipe.id="MAKE_STEEL";recipe.site="STEEL_SITE";recipe.industry_class="MANU";
     recipe.inputs={{"iron",1},{"coal",1}};
     recipe.outputs={{"steel",1}};recipe.workers_per_batch=1;
+    auto missing_coal=recipe;
+    missing_coal.id="BAD_STEEL";
+    missing_coal.inputs={{"iron",1}};
+    check(rejects([&]{w.seed_building_recipe(missing_coal);}) &&
+          !w.state().recipes.contains("BAD_STEEL"),
+          "steel archetype accepted recipe without physical coal input");
     w.seed_building_recipe(recipe);
     check(!c.facilities().contains("STEEL_SITE") &&
           !w.construction("NEW_STEEL").commissioned &&
@@ -171,6 +177,8 @@ static void test_farm_with_real_material_and_renewable_crop() {
     p[2].push_back([worker](Stage& s){s.phase_c().hire(worker,3,"FARMER",1);});
     p[4].push_back([](Stage& s){s.extract_resource("WHEAT",2);});
     w.advance(p);
+    check(w.building_resource_capacity("WHEAT").feasible_units==1,
+          "crop capacity ignored remaining paid inputs or physical resource flow");
     check(w.core().stock("FARMER","R","grain")==2 &&
           w.core().stock("FARMER","R","seed_material")==1 &&
           w.resource_site("WHEAT").standing_biomass==3,
