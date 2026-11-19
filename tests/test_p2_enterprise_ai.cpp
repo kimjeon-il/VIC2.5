@@ -137,11 +137,52 @@ static void collateralized_autonomous_new_factory() {
           game.world().engine().base().core().core()
             .facilities().contains("NEW_FOOD"),
           "unpaid or immediate site creation incorrectly bypassed commissioning");
+    game.advance_day(); // factory hires real POP, buys real grain and produces
+    const auto& live_factory=game.world().engine().base().core().core();
+    check(live_factory.stock("OWNER","R","groceries")>=2 &&
+          live_factory.stock("SUPPLIER","R","grain")<=14 &&
+          live_factory.outstanding_loan("OWNER")>=25,
+          "new enterprise did not finance and consume physical working capital");
+}
+static void selects_best_compatible_factory_recipe() {
+    phasegh::World gh{24000};
+    gh.seed_geography().seed_province(1,"R","STATE");
+    auto& d=gh.seed_geography().seed_core();
+    auto& c=d.seed_core();
+    c.seed_actor("STATE",0);c.seed_actor("OWNER",150);
+    c.seed_market("R","groceries",30,1,100,10);
+    c.seed_market("R","grain",2,1,10);
+    c.seed_market("R","meat",20,1,50);
+    c.seed_stock("OWNER","R","grain",10);
+    c.seed_stock("OWNER","R","meat",5);
+    d.seed_standard_industries();
+    d.seed_building_facility("FOOD","OWNER","R",40,
+                            "vic3_115.urban.food_industries");
+    phased::IndustryRecipe costly;
+    costly.id="COSTLY";costly.site="FOOD";costly.industry_class="MANU";
+    costly.inputs={{"grain",1},{"meat",1}};
+    costly.outputs={{"groceries",2}};costly.workers_per_batch=1;
+    phased::IndustryRecipe cheap=costly;
+    cheap.id="CHEAP";cheap.inputs={{"grain",1}};
+    d.seed_building_recipe(costly);
+    d.seed_building_recipe(cheap);
+    worker(gh,"R","OWNER");
+    p0::DailyGame game(daily::World::adopt(std::move(gh),9));
+    game.advance_day();
+    bool cheap_produced=false,costly_produced=false;
+    const auto& runs=game.world().engine().base().core().state().actual_production_runs;
+    for(const auto& run:runs) {
+        if(run.recipe=="CHEAP")cheap_produced=true;
+        if(run.recipe=="COSTLY")costly_produced=true;
+    }
+    check(cheap_produced&&!costly_produced,
+          "enterprise AI did not choose the more profitable installed recipe");
 }
 int main() {
     try {
         quote_requires_real_supply_and_verified_route();
         collateralized_autonomous_new_factory();
+        selects_best_compatible_factory_recipe();
         std::cout<<"P2 enterprise market/logistics/secured construction cases PASS\n";
         return 0;
     }catch(const std::exception& e) {
