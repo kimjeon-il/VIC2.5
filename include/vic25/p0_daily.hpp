@@ -2787,6 +2787,22 @@ public:
                             (*budget_spent_today)[program.country],amount);
                 }
             });
+        // A 1.15 aristocratic reinvestment law uses actual recorded
+        // company-share owners and their available HH cash. Limit this to a
+        // monthly decision, not a new parallel daily income stream.
+        if(date.day==1)
+            plan[7].push_back([](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::set<std::string> companies;
+                for(const auto& [id,p]:gh.phase_d().state().constructions) {
+                    (void)id;
+                    if(!p.commissioned||
+                       !c.facilities().contains(p.target_site))continue;
+                    const auto& owner=c.facility(p.target_site).owner;
+                    if(!companies.insert(owner).second)continue;
+                    (void)c.p2_invest_from_aristocratic_shareholders(owner);
+                }
+            });
         // Only observed profitable-demand-shortfall industrial examples may
         // open a new project. The D construction ledger will still require
         // actual investor cash, materials, employees, payments and WIP before
@@ -2828,6 +2844,30 @@ public:
                             opportunity.founder,opportunity.new_firm_equity,
                             opportunity.investor_cash_reserve);
                     });
+        // In an adopted national-investment-command economy, a real
+        // sovereign treasury may acquire one existing commissioned factory
+        // per month. The Phase D legal path checks compensation, lawful
+        // title, cash, WIP value, employees and ownership atomically.
+        if(date.day==1)
+            plan[7].push_back([](phasegh::Stage& gh) {
+                const auto& domain=gh.phase_d().state();
+                auto& c=gh.phase_c();
+                std::set<std::string> acquired;
+                for(const auto& [id,project]:domain.constructions) {
+                    (void)id;
+                    if(!project.commissioned||project.capitalized_value<=0)
+                        continue;
+                    const auto& country=c.sovereignty(project.region);
+                    if(acquired.contains(country)||
+                       !c.has_country_treasury(country)||
+                       c.p2_catalog_modifier_value(
+                           country,"country_disable_investment_pool_bool")<=0)
+                        continue;
+                    if(gh.phase_d().nationalize_commissioned_factory(
+                           project.target_site))
+                        acquired.insert(country);
+                }
+            });
         // Actual creditor entries remain in C's balance sheet until paid.
         // No additional late-day payment pass is needed: employee wages
         // are prioritized before discretionary spending in Stage5.
