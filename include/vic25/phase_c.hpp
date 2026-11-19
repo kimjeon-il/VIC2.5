@@ -24,6 +24,7 @@
 #include "vic25/shared_reservations.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <iterator>
@@ -996,6 +997,231 @@ public:
         pay(buyer,old,price);
         f.owner=buyer;
         events_.push_back("bankrupt-real-factory-cash-sale");
+    }
+    void phase_d_transfer_factory_legal(const std::string& site,
+            const std::string& buyer,Money price,Money project_book_value) {
+        require_stage({7});
+        auto& f=facilities_.at(site);
+        const auto old=f.owner;
+        ensure(actors_.contains(buyer)&&old!=buyer&&
+               !firm_bankrupt(buyer)&&price>=0&&project_book_value>=0&&
+               phase_d_cash_available(buyer)>=price,
+               "unfunded physical factory title transfer");
+        // A private sale to its own state is still nationalization and
+        // cannot bypass the free-market prohibition through a lower-level
+        // C ownership adapter.
+        const auto& sovereign=sovereignty_.at(f.region);
+        if(has_country_treasury(sovereign)&&
+           buyer==country_treasury(sovereign))
+            ensure(p2_catalog_modifier_value(sovereign,
+                       "country_disable_nationalization_bool")<=0,
+                   "P2 economic-system law disallows state nationalization");
+        // The only permitted non-cash transfer is state nationalization
+        // under a law that does not require compensation. Other property
+        // transfers still require actual money and legal title.
+        if(price==0) {
+            const auto& country=sovereignty_.at(f.region);
+            ensure(project_book_value>0&&
+                   has_country_treasury(country)&&
+                   buyer==country_treasury(country)&&
+                   p2_catalog_modifier_value(country,
+                       "country_disable_nationalization_without_compensation_bool")<=0,
+                   "P2 law forbids uncompensated state acquisition");
+        }
+        const auto title="FACILITY:"+site;
+        if(tracked_assets_.contains(title)) {
+            ensure(ownership_.units(title,old)==1,
+                   "factory and canonical legal title disagree");
+            // A securities-backed title must carry its same accounting
+            // ownership. Non-security facility titles have no share accounts.
+            if(security_accounts_.contains({old,title})) {
+                ensure_security_account(buyer,title);
+                money_.post({unique("factory-title-security-transfer"),
+                   "transfer real facility security title",{
+                   {security_account(buyer,title),1,0},
+                   {security_account(old,title),0,1}}});
+            }
+        }
+        // A completed factory's book value is existing paid WIP, never
+        // the bid itself. Transfer it only where C actually holds that asset.
+        const auto old_asset=account(old,"fixed_asset");
+        if(project_book_value>0&&money_.has_account(old_asset)&&
+           money_.balance(old_asset)>=project_book_value) {
+            const auto new_asset=account(buyer,"fixed_asset");
+            if(!money_.has_account(new_asset))
+                money_.add_account(new_asset,buyer,AccountType::asset);
+            money_.post({unique("factory-book-value-transfer"),
+                "carry existing paid fixed capital to new operator",{
+                {new_asset,project_book_value,0},
+                {old_asset,0,project_book_value}}});
+        }
+        if(price>0)pay(buyer,old,price);
+        if(tracked_assets_.contains(title))
+            ownership_.transfer(title,old,buyer,1);
+        // Only real employees of this operation face a dated workplace
+        // political shock. Reduced compensation raises grievance; the
+        // command economy's -75% law lowers its magnitude, but never
+        // fabricates radicals or military participants.
+        if(project_book_value>price&&has_government(
+                 sovereignty_.at(f.region))&&
+           has_country_treasury(sovereignty_.at(f.region))&&
+           buyer==country_treasury(sovereignty_.at(f.region))) {
+            const auto nation=sovereignty_.at(f.region);
+            const double severity=std::clamp(
+                1.0+p2_catalog_modifier_value(nation,
+                      "building_nationalization_radicals_mult"),0.0,4.0);
+            const double shortfall=static_cast<double>(
+                project_book_value-price)/static_cast<double>(
+                project_book_value);
+            const auto shock=static_cast<std::int32_t>(
+                40'000.0*severity*shortfall);
+            if(shock>0)
+                for(const auto& [slice,job]:people_.jobs()) {
+                    if(job.count<=0||job.employer!=old||
+                       !people_.has_slice(slice))continue;
+                    const auto& dem=people_.demographic(
+                        people_.slice(slice).key.demographic);
+                    if(dem.region!=f.region)continue;
+                    auto& view=p3_attitudes_[slice];
+                    view.slice=slice;
+                    view.radical_ppm=std::clamp(
+                        view.radical_ppm+shock,0,1'000'000);
+                    view.loyal_ppm=std::min(
+                        view.loyal_ppm,1'000'000-view.radical_ppm);
+                }
+        }
+        f.owner=buyer;
+        events_.push_back(price>0?
+            "funded-existing-factory-ownership-transfer":
+            "lawful-uncompensated-government-factory-acquisition");
+    }
+    void phase_d_transfer_factory_paid(const std::string& site,
+            const std::string& buyer,Money price,Money project_book_value) {
+        ensure(price>0,"paid factory sale must transfer actual cash");
+        phase_d_transfer_factory_legal(site,buyer,price,project_book_value);
+    }
+    void phase_d_transfer_factory_uncompensated(const std::string& site,
+            const std::string& government,Money project_book_value) {
+        phase_d_transfer_factory_legal(site,government,0,project_book_value);
+    }
+    // Company investment efficiency is derived strictly from existing
+    // shareholder titles and their actual Phase B household occupation
+    // slices. Unknown corporate/foreign investors have no guessed profession
+    // bonus and no fabricated investment cash.
+    [[nodiscard]] double p2_real_investment_pool_efficiency(
+            const std::string& company)const {
+        const auto asset="company:"+company;
+        if(!tracked_assets_.contains(asset))return 0.0;
+        const auto holdings=ownership_.holders(asset);
+        // Most businesses have no registered household shareholders.
+        // Avoid all-POP scans for those firms.
+        bool household_shareholder=false;
+        for(const auto& [holder,units]:holdings)
+            if(units>0&&holder.rfind("HH:",0)==0) {
+                household_shareholder=true;break;
+            }
+        if(!household_shareholder)return 0.0;
+        long double eligible_shares=0, weighted_shares=0;
+        std::map<Id,People> members;
+        for(const auto& [id,pop]:people_.slices())
+            if(pop.count>0)
+                members[pop.key.household]=phaseb::add_checked(
+                    members[pop.key.household],pop.count);
+        for(const auto& [holder,shares]:holdings) {
+            if(shares<=0)continue;
+            eligible_shares+=static_cast<long double>(shares);
+        }
+        if(eligible_shares<=0)return 0.0;
+        for(const auto& [id,pop]:people_.slices()) {
+            if(pop.count<=0)continue;
+            const auto holding=holdings.find(
+                "HH:"+std::to_string(pop.key.household));
+            if(holding==holdings.end()||holding->second<=0)continue;
+            const auto& occupation=people_.economic(
+                pop.key.economic).profession;
+            std::string profession=occupation;
+            if(profession=="capitalist")profession="capitalists";
+            else if(profession=="farmer")profession="farmers";
+            else if(profession=="aristocrat")profession="aristocrats";
+            else if(profession=="shopkeeper")profession="shopkeepers";
+            else if(profession=="bureaucrat")profession="bureaucrats";
+            else if(profession=="clergyman")profession="clergymen";
+            if(profession!="capitalists"&&profession!="farmers"&&
+               profession!="aristocrats"&&profession!="shopkeepers"&&
+               profession!="bureaucrats"&&profession!="clergymen")continue;
+            const auto& demo=people_.demographic(pop.key.demographic);
+            const auto total=members.at(pop.key.household);
+            if(total<=0)continue;
+            const auto mod=p2_region_modifier_value(demo.region,
+                "state_"+profession+"_investment_pool_efficiency_mult");
+            weighted_shares+=static_cast<long double>(holding->second)*
+                static_cast<long double>(pop.count)/
+                static_cast<long double>(total)*
+                static_cast<long double>(mod);
+        }
+        return std::clamp(
+            static_cast<double>(weighted_shares/eligible_shares),
+            -0.95,3.0);
+    }
+    [[nodiscard]] bool p2_has_registered_company_equity(
+            const std::string& owner)const {
+        return tracked_assets_.contains("company:"+owner);
+    }
+    // The aristocratic investment-pool law changes actual private capital
+    // subscribed out of household wallets. A contributor must own existing
+    // company shares and contain real eligible aristocratic POP; no stock,
+    // bond or deposit is issued in exchange for a synthetic contribution.
+    Money p2_invest_from_aristocratic_shareholders(
+            const std::string& company) {
+        require_stage({7});
+        if(!actors_.contains(company)||
+           !p2_has_registered_company_equity(company)||
+           firm_bankrupt(company))return 0;
+        const auto holders=ownership_.holders("company:"+company);
+        Money contributed=0;
+        for(const auto& [holder,shares]:holders) {
+            if(shares<=0||holder.rfind("HH:",0)!=0||
+               !actors_.contains(holder))continue;
+            People total=0,aristocrats=0;
+            long double weighted_mod=0;
+            for(const auto& [id,pop]:people_.slices()) {
+                (void)id;
+                if(pop.count<=0||
+                   holder!="HH:"+std::to_string(pop.key.household))continue;
+                total=phaseb::add_checked(total,pop.count);
+                const auto& econ=people_.economic(pop.key.economic);
+                if(econ.profession!="aristocrat"&&
+                   econ.profession!="aristocrats")continue;
+                const auto& dem=people_.demographic(pop.key.demographic);
+                aristocrats=phaseb::add_checked(aristocrats,pop.count);
+                weighted_mod+=static_cast<long double>(pop.count)*
+                    std::max(0.0,p2_region_modifier_value(dem.region,
+                        "state_aristocrats_investment_pool_contribution_add"));
+            }
+            if(total<=0||aristocrats<=0||weighted_mod<=0)continue;
+            const double fraction=std::clamp(
+                static_cast<double>(weighted_mod/total),0.0,0.5);
+            const Money available=std::max<Money>(
+                0,phase_d_cash_available(holder));
+            const Money amount=static_cast<Money>(
+                std::floor(static_cast<long double>(available)*fraction));
+            if(amount<=0)continue;
+            if(phase_d_reservation_mode_)
+                resources_.assert_cash_available(
+                    holder,amount,cash(holder));
+            // Existing shareholder recapitalization, not a fictitious
+            // sale or operating revenue. Securities remain unchanged.
+            money_.post({unique("real-shareholder-capital"),
+                "existing shareholder injects actual bank deposits",{
+                {account(holder,"capital"),amount,0},
+                {account(holder,"cash"),0,amount},
+                {account(company,"cash"),amount,0},
+                {account(company,"capital"),0,amount}}});
+            contributed=phaseb::add_checked(contributed,amount);
+        }
+        if(contributed>0)
+            events_.push_back("real-aristocratic-shareholder-investment");
+        return contributed;
     }
     // Phase D additive bridge: material/production share C's real inventory
     // and Phase B's real employment, not an independent Phase D stock.
