@@ -1,0 +1,25 @@
+name: VIC2.5 law merge minimal verification
+on:
+  push:
+    branches: [work/merge-law-20261119]
+  workflow_dispatch:
+jobs:
+  law:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile law catalogue and source integration tests
+        run: |
+          g++ -std=c++20 -O0 -Iinclude tests/test_p2_catalog_115.cpp -o /tmp/vic25-law-catalog
+          g++ -std=c++20 -O0 -Iinclude tests/test_p2_remaining_economic_modifiers_115.cpp -o /tmp/vic25-law-rows
+          g++ -std=c++20 -O0 -Iinclude tests/test_merged_law_projection.cpp -o /tmp/vic25-law-merged
+      - name: Run catalogue, rows and actual P2 effects
+        run: |
+          /tmp/vic25-law-catalog
+          /tmp/vic25-law-rows
+          /tmp/vic25-law-merged
+      - name: Compile current economy against merged P2 API
+        run: g++ -std=c++20 -O0 -Iinclude tests/test_economy_native_smoke.cpp -o /tmp/vic25-economy-smoke
+      - name: Run economy smoke
+        run: /tmp/vic25-economy-smoke
