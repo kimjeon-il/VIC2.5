@@ -848,6 +848,7 @@ public:
         if(decisions.allow_autonomous_recipe_comparison) {
             std::map<std::pair<std::string,std::string>,People> wanted_by_owner;
             for(const auto& policy:decisions.manufacturers) {
+                if(!autonomous_operating_recipes.contains(policy.recipe))continue;
                 const auto& recipe=industry.recipes.at(policy.recipe);
                 const auto& f=game_c.facility(recipe.site);
                 if(game_c.firm_bankrupt(f.owner))continue;
