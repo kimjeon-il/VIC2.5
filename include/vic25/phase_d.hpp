@@ -1405,6 +1405,52 @@ public:
                                     v.labor_batches,v.input_batches});
         return v;
     }
+    struct ResourceCapacityView {
+        Quantity available_flow{},available_biomass{},equipment_units{};
+        Quantity labor_units{},consumable_units{},feasible_units{};
+    };
+    [[nodiscard]] ResourceCapacityView building_resource_capacity(
+            const std::string& source_id) const {
+        const auto& source=domain_.resource_sites.at(source_id);
+        ResourceCapacityView v;
+        const auto facility_it=core_.facilities().find(source.site);
+        if(facility_it==core_.facilities().end())return v;
+        const auto& f=facility_it->second;
+        if(f.owner!=source.owner || f.region!=source.region ||
+           f.capacity<=f.damaged || source.monthly_capacity<=source.produced_this_month)
+            return v;
+        v.available_flow=source.monthly_capacity-source.produced_this_month;
+        v.available_biomass=source.renewable?source.standing_biomass:v.available_flow;
+        Quantity used=0;
+        for(const auto& run:domain_.actual_production_runs) {
+            if(run.month!=core_.month())continue;
+            const auto& r=domain_.recipes.at(run.recipe);
+            if(r.site==source.site)
+                used=phaseb::add_checked(used,
+                                        product(run.batches,r.capacity_per_batch));
+        }
+        for(const auto& [id,other]:domain_.resource_sites) {
+            (void)id;
+            if(other.site==source.site)
+                used=phaseb::add_checked(used,
+                  product(other.produced_this_month,other.site_service_per_unit));
+        }
+        for(const auto& evidence:domain_.research_evidence)
+            if(evidence.month==core_.month() &&
+               domain_.researches.at(evidence.project).lab_site==source.site)
+                used=phaseb::add_checked(used,evidence.units);
+        const Quantity facility_available=used>=f.capacity-f.damaged?
+             0:f.capacity-f.damaged-used;
+        v.equipment_units=facility_available/source.site_service_per_unit;
+        v.labor_units=core_.phase_d_workforce(source.owner)/source.workers_per_unit;
+        v.consumable_units=v.available_flow;
+        for(const auto& input:source.operational_inputs_per_unit)
+            v.consumable_units=std::min(v.consumable_units,
+                core_.stock(source.owner,source.region,input.good)/input.per_unit);
+        v.feasible_units=std::min({v.available_flow,v.available_biomass,
+                                   v.equipment_units,v.labor_units,v.consumable_units});
+        return v;
+    }
     [[nodiscard]] const building::OperatingProfile* site_operating_profile(
             const std::string& site) const {
         const auto it=domain_.site_archetypes.find(site);
