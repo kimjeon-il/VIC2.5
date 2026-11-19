@@ -506,6 +506,103 @@ public:
         return true;
     }
 
+    // A campaign industry blueprint may enter a region without a previously
+    // commissioned factory of this type. The blueprint is a recipe/contract,
+    // never free production capacity. The firm, if new, is capitalized from
+    // its real founder only after all nonmutating feasibility checks pass.
+    bool propose_industry_entry(ConstructionProject project,
+                                IndustryRecipe recipe,
+                                const std::string& founder,
+                                Money new_firm_equity,
+                                Money investor_reserve=0) {
+        must(9);
+        if(project.id.empty()||project.client.empty()||
+           project.contractor.empty()||project.region.empty()||
+           project.material_good.empty()||project.target_site.empty()||
+           recipe.id.empty()||recipe.site!=project.target_site||
+           recipe.outputs.empty()||recipe.inputs.empty()||
+           recipe.workers_per_batch<=0||recipe.capacity_per_batch<=0||
+           recipe.needs_retrofit||
+           recipe.requires_same_stage_nonstorable_energy||
+           (!recipe.industry_class.empty()&&
+              !d_.industry_classes.contains(recipe.industry_class))||
+           !recipe.tech_id.empty()||project.permit_required||
+           project.inspection_required||project.allow_accrued_invoice_commission||
+           project.work_required<=0||project.material_per_work<=0||
+           project.workers_per_work<=0||project.cash_price_per_work<=0||
+           project.target_capacity<=0||investor_reserve<0||
+           project.ready||project.commissioned||
+           project.accepted_work!=0||project.paid_work!=0||
+           project.capitalized_work!=0||project.capitalized_value!=0||
+           d_.constructions.contains(project.id)||
+           d_.recipes.contains(recipe.id)||c_.facilities().contains(project.target_site)||
+           !c_.has_actor(project.contractor)||
+           c_.firm_bankrupt(project.contractor)||
+           !c_.has_market(project.region,recipe.outputs.front().good)||
+           c_.phase_d_workforce(project.contractor)<project.workers_per_work||
+           c_.phase_d_material_available(project.contractor,project.region,
+                  project.material_good)<project.material_per_work)
+            return false;
+        // No template bypass: every ingredient must be quoted and every
+        // recipe must have nonnegative physical material inputs.
+        Money inputs=0;
+        for(const auto& item:recipe.inputs) {
+            if(item.good.empty()||item.per_unit<=0||
+               !c_.has_market(project.region,item.good))return false;
+            inputs=phaseb::add_checked(inputs,
+                product(item.per_unit,c_.market(project.region,item.good).price));
+        }
+        const auto& output=recipe.outputs.front();
+        if(output.good.empty()||output.per_unit<=0)return false;
+        const auto quote=c_.market(project.region,output.good);
+        if(quote.unmet<=0||
+           product(output.per_unit,quote.price)<=inputs)return false;
+        for(const auto& item:recipe.outputs)
+            if(item.good.empty()||item.per_unit<=0)return false;
+        for(const auto& item:recipe.byproducts)
+            if(item.good.empty()||item.per_unit<=0)return false;
+        for(const auto& [id,existing]:d_.constructions) {
+            (void)id;
+            if(existing.commissioned||existing.region!=project.region)continue;
+            for(const auto& [rid,other_recipe]:d_.recipes) {
+                (void)rid;
+                if(other_recipe.site==existing.target_site&&
+                   !other_recipe.outputs.empty()&&
+                   other_recipe.outputs.front().good==output.good)
+                    return false; // one unresolved supply investment per market
+            }
+        }
+        const Money project_cost=product(project.work_required,
+                                         project.cash_price_per_work);
+        const bool new_firm=!c_.has_actor(project.client);
+        if(new_firm) {
+            if(founder.empty()||!c_.has_actor(founder)||
+               c_.firm_bankrupt(founder)||founder==project.client||
+               new_firm_equity<project_cost||
+               c_.phase_d_cash_available(founder)<
+                   phaseb::add_checked(new_firm_equity,investor_reserve))
+                return false;
+        } else {
+            if(new_firm_equity!=0||c_.firm_bankrupt(project.client)||
+               c_.phase_d_cash_available(project.client)<
+                   phaseb::add_checked(project_cost,investor_reserve))
+                return false;
+        }
+        // A successful entry moves existing deposits; there is no instant
+        // building or phantom share wealth. Stage0 commissioning still
+        // requires actual certified, paid construction and financial WIP.
+        if(new_firm)c_.phase_time_found_firm(
+            project.client,founder,new_firm_equity);
+        project.planned_work=0;
+        project.ready_month=-1;
+        const auto project_id=project.id;
+        const auto recipe_id=recipe.id;
+        d_.constructions.emplace(project_id,std::move(project));
+        d_.recipes.emplace(recipe_id,std::move(recipe));
+        d_.append(c_.month(),"economy-funded-new-industry-project",project_id);
+        return true;
+    }
+
     // Only a commissioned industry site without a separate extraction
     // concession, active laboratory contract or unfinished development may
     // change hands through a simple cash sale. All others require their
