@@ -27,7 +27,8 @@ struct Archetype {
         return mapping_kind=="production_site";
     }
     [[nodiscard]] constexpr bool extraction_eligible()const {
-        return mapping_kind=="resource_extraction";
+        return mapping_kind=="resource_extraction" ||
+               (industry=="FISH" && mapping_kind=="production_site");
     }
 };
 inline constexpr std::array<IndustryCategory,13> industries{{ 
@@ -167,6 +168,8 @@ inline constexpr std::size_t group_count(std::string_view group) {
     return n;
 }
 static_assert(archetypes.size()==99 && industries.size()==13);
+static_assert(group_count("urban")==23 && group_count("rural")==34);
+static_assert(group_count("development")==14 && group_count("special")==28);
 static_assert(find("vic3_115.urban.steel_mills")!=nullptr);
 static_assert(find("vic3_115.rural.iron_mines")->extraction_eligible());
 static_assert(!find("vic3_115.urban.urban_center")->site_eligible());
