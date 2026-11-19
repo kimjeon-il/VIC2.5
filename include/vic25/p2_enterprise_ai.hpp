@@ -179,6 +179,35 @@ inline Quote evaluate(const phasec::IntegratedWorld& c,
     q.valid=q.margin_per_batch>0 && q.feasible_supply_batches>0;
     return q;
 }
+// Draw only an existing, fully pledged G line. No speculative bank
+// lending or new balance-sheet replica is authorized by the AI.
+inline Money draw_documented_credit(phasegh::Stage& gh,
+                                   const std::string& borrower,Money requested,
+                                   const std::string& spending_region="",
+                                   const std::string& spending_good="",
+                                   Quantity required_spending_units=0) {
+    auto& c=gh.phase_c();
+    if(requested<=0 || c.bank_insolvent() ||
+       !c.has_actor(borrower) || c.firm_bankrupt(borrower))return 0;
+    Money borrowed=0;
+    for(const auto& [id,line]:gh.commerce().credit) {
+        if(borrowed>=requested)break;
+        if(!line.active||line.borrower!=borrower ||
+           line.effective>c.month()||line.drawn>=line.limit||
+           c.stock(borrower,line.pledge_region,line.pledge_good)<
+                      line.pledged_goods)continue;
+        if(line.pledge_region==spending_region &&
+           line.pledge_good==spending_good &&
+           c.stock(borrower,spending_region,spending_good)<
+              phaseb::add_checked(line.pledged_goods,required_spending_units))
+            continue;
+        const Money draw=std::min(requested-borrowed,line.limit-line.drawn);
+        if(draw<=0)continue;
+        gh.draw_trade_credit(id,draw);
+        borrowed=phaseb::add_checked(borrowed,draw);
+    }
+    return borrowed;
+}
 inline Money approved_credit_remaining(const phasec::IntegratedWorld& c,
                                         const phasegh::TradeState& trade,
                                         const std::string& owner) {
