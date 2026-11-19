@@ -1250,6 +1250,7 @@ public:
         require(archetype && archetype->site_eligible() &&
                 building::industry_exists(archetype->industry),
                 "cannot materialize a nonphysical building type");
+        (void)core_.sovereignty(region); // actual known state location, not a phantom region
         core_.seed_production_facility(site,owner,region,capacity);
         domain_.site_archetypes.emplace(site,archetype_id);
     }
@@ -1269,6 +1270,9 @@ public:
             (void)id;
             require(old.target_site!=p.target_site,"duplicate construction target");
         }
+        (void)core_.sovereignty(p.region);
+        require(core_.has_actor(p.client) && core_.has_actor(p.contractor),
+                "construction requires real investor and contractor actors");
         const auto site=p.target_site;
         seed_construction(std::move(p));
         domain_.site_archetypes.emplace(site,archetype_id);
