@@ -14,6 +14,11 @@ int main() {
     c.seed_actor("A",100);
     c.seed_actor("FIRM",100);
     c.seed_government("A","HEAD","PM",5,3);
+    c.seed_p1_constitution("A",{
+        phasec::P1GovernancePrinciple::monarchy,
+        phasec::P1PowerDistribution::autocracy,
+        phasec::P1LegislatureKind::none,
+        "constitution:seed"});
     phasec::P2BaseLaw law;
     law.id="ECONOMY";law.country="A";law.domain="economic_system";
     law.base_choice="law_industry_banned";law.scope="national";
