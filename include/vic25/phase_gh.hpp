@@ -43,6 +43,13 @@ struct Route {
     Quantity arrival_loss{}; // confirmed physical accident input, not a risk forecast
 };
 
+// A merchant's existing bank account and market office, never a preset route.
+struct MerchantOffice {
+    std::string trader,market_region;
+    Quantity maximum_daily_units{100};
+    Money minimum_cash_reserve{};
+    int minimum_margin_ppm{50'000};
+};
 struct TradeFill {
     std::string execution_id, route_id, seller_country, buyer_country;
     Month month{};
@@ -144,6 +151,8 @@ struct TradeState {
     std::map<std::string,DailyTradeTransit> daily_shipments;
     // Stage1->Stage7 only. A save is always taken outside the transaction.
     std::map<std::string,DayCargoReservation> day_cargo_reservations;
+    // Ephemeral Stage1 preference; cleared before any saved/committed state.
+    std::vector<MerchantOffice> daily_merchant_offices;
     std::set<std::string> executed;
     std::uint64_t revision{};
 };
@@ -158,7 +167,8 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         bool verified_day_edges_only=false,
         const std::map<std::string,std::int32_t>* override_days=nullptr,
         const std::function<Quantity(const TransportEdge&)>*
-            effective_capacity=nullptr) {
+            effective_capacity=nullptr,
+        bool documented_services_only=false) {
     if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
     if(trade.transport_edges.empty())return std::nullopt;
     using Item=std::tuple<Money,Month,Id>;
@@ -188,6 +198,11 @@ inline std::optional<PathQuote> quote_daily_freight_path(
                 }
             }
             if(verified_day_edges_only&&actual_days<=0)continue;
+            if(documented_services_only&&
+               (edge.mode=="legacy"||edge.evidence_id.empty()||
+                edge.valid_from_month<0||
+                edge.valid_through_month<edge.valid_from_month))
+                continue;
             if(edge.valid_from_month>=0 && month<edge.valid_from_month)continue;
             if(edge.valid_through_month>=0 && month>edge.valid_through_month)continue;
             const Quantity committed=trade.edge_usage.contains({month,edge_id})?
@@ -924,6 +939,20 @@ public:
     }
 
     void plan_autonomous_trade();
+    void plan_market_discovery();
+    void register_daily_merchant(MerchantOffice office) {
+        at(1);
+        require(!office.trader.empty()&&!office.market_region.empty()&&
+                office.maximum_daily_units>0&&
+                office.minimum_cash_reserve>=0&&
+                office.minimum_margin_ppm>=0&&
+                office.minimum_margin_ppm<=1'000'000&&
+                phase_c().has_actor(office.trader)&&
+                !phase_c().firm_bankrupt(office.trader)&&
+                spatial_.spatial().regions.contains(office.market_region),
+                "G_ERR_INVALID_MERCHANT_OFFICE");
+        trade_.daily_merchant_offices.push_back(std::move(office));
+    }
     void execute_autonomous_trade();
     void settle_due_daily_trade_cargo() {
         at(0);
@@ -1369,7 +1398,8 @@ private:
                             "G_ERR_NATIVE_INTERMODAL_MISSING_EDGE");
             }
         }
-        require(g.pending.empty()&&g.day_cargo_reservations.empty(),
+        require(g.pending.empty()&&g.day_cargo_reservations.empty()&&
+                g.daily_merchant_offices.empty(),
                 "G_ERR_UNSETTLED_RESERVATIONS");
     }
 public:
@@ -1431,6 +1461,7 @@ public:
                             stage.reserve_collateral();
                             stage.plan_contracts();
                             stage.plan_autonomous_trade();
+                            stage.plan_market_discovery();
                         }
                         if(n==5)stage.settle_insurance_claims();
                         if(n==7){
@@ -1456,7 +1487,9 @@ public:
     [[nodiscard]] bool has_autonomous_daily_trade()const {
         return !trade_.routes.empty()||!trade_.contracts.empty()||
                !trade_.credit.empty()||!trade_.insurance.empty()||
-               !trade_.daily_shipments.empty();
+               !trade_.daily_shipments.empty()||
+               (!trade_.transport_edges.empty()&&
+                !core_.core().core().facilities().empty());
     }
     phasec::AdvanceReport advance_daily(const phasec::IntegratedWorld::Plan& commands) {
         World staged=*this;
@@ -1924,3 +1957,4 @@ inline void Stage::execute_autonomous_trade() {
 #include "vic25/phase_gh_diplomacy.hpp"
 #include "vic25/phase_gh_political_power.hpp"
 #include "vic25/phase_gh_infamy_impl.hpp"
+#include "vic25/phase_gh_market_discovery_impl.hpp"
