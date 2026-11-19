@@ -6,6 +6,7 @@
 
 #include "vic25/phase_c.hpp"
 #include "vic25/building_catalog.hpp"
+#include "vic25/building_operating_profiles.hpp"
 #include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <array>
@@ -69,6 +70,9 @@ struct ResourceSite {
     std::uint32_t decline_ppm_active_month{}; // activity-based next-month throughput decline
     Quantity decline_remainder{};        // fractional ppm remainder, NOT reserve quantity
     bool renewable{};
+    // Real operational consumables, optionally specified by scenario; unlike
+    // extraction equipment these goods are actually debited per harvested unit.
+    std::vector<Input> operational_inputs_per_unit;
 };
 struct IndustryRecipe {
     std::string id, site, tech_id, industry_class;
@@ -336,6 +340,9 @@ struct DomainState {
         for(const auto& [owner,amount]:outstanding)
             require(c.phase_d_wip(owner)>=amount,"unbacked project WIP");
         for(const auto& [id,source]:resource_sites) {
+            for(const auto& input:source.operational_inputs_per_unit)
+                require(!input.good.empty() && input.per_unit>0,
+                        "invalid extraction operating material requirement");
             require(id==source.id && source.monthly_capacity>=0 &&
                     source.produced_this_month>=0 &&
                     source.produced_this_month<=source.monthly_capacity &&
@@ -708,8 +715,15 @@ public:
         const auto& site=c_.facility(source.site);
         require(site.owner==source.owner&&site.region==source.region,
                 "extraction has no effective owned extraction site");
+        for(const auto& input:source.operational_inputs_per_unit)
+            require(c_.stock(source.owner,source.region,input.good)>=
+                    product(units,input.per_unit),
+                    "extraction missing real operating goods");
         occupy_labor(source.owner,product(units,source.workers_per_unit));
         occupy_site(source.site,product(units,source.site_service_per_unit));
+        for(const auto& input:source.operational_inputs_per_unit)
+            c_.phase_d_use_material(source.owner,source.region,input.good,
+                                    product(units,input.per_unit));
         c_.phase_d_emit_extraction(source.owner,source.region,source.good,units,id);
         source.produced_this_month=phaseb::add_checked(source.produced_this_month,units);
         source.cumulative_output=phaseb::add_checked(source.cumulative_output,units);
@@ -1285,7 +1299,8 @@ public:
         const auto it=domain_.site_archetypes.find(recipe.site);
         require(it!=domain_.site_archetypes.end(),"recipe has no building site binding");
         const auto* archetype=building::find(it->second);
-        require(archetype && archetype->factory_recipe_eligible() &&
+        const auto* spec=building::profile(it->second);
+        require(archetype && spec && spec->operation==building::Operation::recipe &&
                 recipe.industry_class==archetype->industry &&
                 domain_.industry_classes.contains(recipe.industry_class),
                 "recipe incompatible with building class");
@@ -1294,6 +1309,19 @@ public:
                 [&](const Input& good) {
                     return good.good==archetype->representative_good;
                 }),"recipe does not supply representative building output");
+        // Baseline commodity requirements are expressed as good IDs only.
+        // The scenario must provide actual quantities, labor and asset service
+        // units; it cannot get free goods from a building level or template.
+        bool valid_output=false;
+        for(const auto& good:recipe.outputs)
+            valid_output|=spec->output_allowed(good.good);
+        require(valid_output,"recipe output incompatible with physical building");
+        for(const auto required:spec->required_input_goods) {
+            if(required.empty())continue;
+            require(std::any_of(recipe.inputs.begin(),recipe.inputs.end(),
+                    [&](const Input& item){return item.good==required;}),
+                    "recipe missing required intermediate good");
+        }
         if(!recipe.tech_id.empty())
             require(domain_.technologies.contains(recipe.tech_id),
                     "recipe technology unknown in local research catalog");
@@ -1307,19 +1335,80 @@ public:
         const auto it=domain_.site_archetypes.find(source.site);
         require(it!=domain_.site_archetypes.end(),"unbound extraction site");
         const auto* archetype=building::find(it->second);
-        require(archetype && archetype->extraction_eligible() &&
-                (archetype->industry=="EXTR" ||
-                 archetype->industry=="FORE" ||
-                 archetype->industry=="FISH") &&
-                (archetype->representative_good.empty() ||
-                 source.good==archetype->representative_good),
-                "source and mining archetype disagree");
+        const auto* spec=building::profile(it->second);
+        require(archetype && spec &&
+                spec->operation==building::Operation::resource &&
+                spec->output_allowed(source.good) &&
+                (spec->siting==building::Siting::mineral ||
+                 spec->siting==building::Siting::oil_site ?
+                  !source.renewable : source.renewable),
+                "resource, goods or renewable flow incompatible with building type");
+        // A farm/forest/fishing site must have an observed renewable pool;
+        // mine/oil sites instead use an operational flow, not reserve totals.
+        for(const auto& input:source.operational_inputs_per_unit)
+            require(!input.good.empty() && input.per_unit>0,
+                    "resource operating goods need actual material quantities");
         seed_resource_site(std::move(source));
     }
     [[nodiscard]] const building::Archetype* site_archetype(
             const std::string& site) const {
         const auto it=domain_.site_archetypes.find(site);
         return it==domain_.site_archetypes.end()?nullptr:building::find(it->second);
+    }
+    struct ProductionCapacityView {
+        Quantity equipment_batches{},labor_batches{},input_batches{},feasible_batches{};
+        bool commissioned{}, technology_ready{};
+    };
+    // Forecast from the *same* existing physical site, POP workforce and
+    // actual delivered inventory; this is not a second capacity ledger.
+    [[nodiscard]] ProductionCapacityView building_production_capacity(
+            const std::string& recipe_id) const {
+        const auto& r=domain_.recipes.at(recipe_id);
+        ProductionCapacityView v;
+        const auto facility_it=core_.facilities().find(r.site);
+        if(facility_it==core_.facilities().end())return v;
+        const auto& f=facility_it->second;
+        v.commissioned=true;
+        v.technology_ready=r.tech_id.empty() ||
+            (domain_.active_site_tech.contains(r.site) &&
+             domain_.active_site_tech.at(r.site)==r.tech_id);
+        if(!v.technology_ready || r.needs_retrofit ||
+           r.requires_same_stage_nonstorable_energy || f.capacity<=f.damaged)
+            return v;
+        Quantity consumed=0;
+        for(const auto& run:domain_.actual_production_runs) {
+            if(run.month!=core_.month())continue;
+            const auto& completed=domain_.recipes.at(run.recipe);
+            if(completed.site==r.site)
+                consumed=phaseb::add_checked(consumed,
+                    product(run.batches,completed.capacity_per_batch));
+        }
+        for(const auto& [id,source]:domain_.resource_sites) {
+            (void)id;
+            if(source.site==r.site)
+                consumed=phaseb::add_checked(consumed,
+                    product(source.produced_this_month,source.site_service_per_unit));
+        }
+        for(const auto& evidence:domain_.research_evidence)
+            if(evidence.month==core_.month() &&
+               domain_.researches.at(evidence.project).lab_site==r.site)
+                consumed=phaseb::add_checked(consumed,evidence.units);
+        const Quantity available=consumed>=f.capacity-f.damaged?
+            0:f.capacity-f.damaged-consumed;
+        v.equipment_batches=available/r.capacity_per_batch;
+        v.labor_batches=core_.phase_d_workforce(f.owner)/r.workers_per_batch;
+        v.input_batches=v.equipment_batches;
+        for(const auto& input:r.inputs)
+            v.input_batches=std::min(v.input_batches,
+                 core_.stock(f.owner,f.region,input.good)/input.per_unit);
+        v.feasible_batches=std::min({v.equipment_batches,
+                                    v.labor_batches,v.input_batches});
+        return v;
+    }
+    [[nodiscard]] const building::OperatingProfile* site_operating_profile(
+            const std::string& site) const {
+        const auto it=domain_.site_archetypes.find(site);
+        return it==domain_.site_archetypes.end()?nullptr:building::profile(it->second);
     }
     void seed_resource_site(ResourceSite source){
         require(core_.commit_id()==0&&!source.id.empty() &&
