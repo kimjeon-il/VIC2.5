@@ -12,7 +12,8 @@
     "source_name_en is an interface label, not the Paradox internal definition key",
     "special variant indices are local indexing of repeated visible names, not Paradox internal definition IDs",
     "crosswalk categories are VIC2.5 design recommendations, not current implemented engine status",
-    "no production numbers, construction costs, technology dates or unlock levels are copied"
+    "no production numbers, construction costs, technology dates or unlock levels are copied",
+    "native site binding requires existing physical facility or funded construction; no company, personnel, output, trade route or transport service is seeded automatically"
   ],
   "source_counts": {
     "urban": 23,
@@ -84,7 +85,7 @@
       "name_ko": "무기공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.artillery_foundry",
@@ -93,7 +94,7 @@
       "name_ko": "화포주조소",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.arts_academy",
@@ -102,7 +103,7 @@
       "name_ko": "예술원",
       "industry_class": "SERV",
       "mapping_kind": "service_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.automotive_industries",
@@ -111,7 +112,7 @@
       "name_ko": "자동차공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.company_headquarter",
@@ -120,7 +121,7 @@
       "name_ko": "기업 본사",
       "industry_class": "FINA",
       "mapping_kind": "organizational_view",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.urban.electrics_industries",
@@ -129,7 +130,7 @@
       "name_ko": "전기기기공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.explosives_factory",
@@ -138,7 +139,7 @@
       "name_ko": "폭약공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.fertilizer_plants",
@@ -147,7 +148,7 @@
       "name_ko": "비료공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.financial_districts",
@@ -156,7 +157,7 @@
       "name_ko": "금융지구",
       "industry_class": "FINA",
       "mapping_kind": "ownership_view",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.urban.food_industries",
@@ -165,7 +166,7 @@
       "name_ko": "식품공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.furniture_manufacturies",
@@ -174,7 +175,7 @@
       "name_ko": "가구공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.glassworks",
@@ -183,7 +184,7 @@
       "name_ko": "유리·도자기공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.manor_houses",
@@ -192,7 +193,7 @@
       "name_ko": "장원 저택",
       "industry_class": "FINA",
       "mapping_kind": "ownership_view",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.urban.motor_industries",
@@ -201,7 +202,7 @@
       "name_ko": "동력기관공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.munition_plants",
@@ -210,7 +211,7 @@
       "name_ko": "탄약공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.paper_mills",
@@ -219,7 +220,7 @@
       "name_ko": "제지공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.regional_company_headquarter",
@@ -228,7 +229,7 @@
       "name_ko": "지역 기업 본부",
       "industry_class": "FINA",
       "mapping_kind": "organizational_view",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.urban.shipyards",
@@ -237,7 +238,7 @@
       "name_ko": "조선소",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.steel_mills",
@@ -246,7 +247,7 @@
       "name_ko": "제철소",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.synthetics_plants",
@@ -255,7 +256,7 @@
       "name_ko": "합성물공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.textile_mills",
@@ -264,7 +265,7 @@
       "name_ko": "방직공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.tooling_workshops",
@@ -273,7 +274,7 @@
       "name_ko": "공구공장",
       "industry_class": "MANU",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.urban.urban_center",
@@ -282,7 +283,7 @@
       "name_ko": "도시 중심지",
       "industry_class": "SERV",
       "mapping_kind": "derived_view",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.rural.banana_plantations",
@@ -291,7 +292,7 @@
       "name_ko": "바나나 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.coal_mines",
@@ -300,7 +301,7 @@
       "name_ko": "석탄광산",
       "industry_class": "EXTR",
       "mapping_kind": "resource_extraction",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.coffee_plantations",
@@ -309,7 +310,7 @@
       "name_ko": "커피 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.copper_mines",
@@ -318,7 +319,7 @@
       "name_ko": "구리광산",
       "industry_class": "EXTR",
       "mapping_kind": "resource_extraction",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.cossack_host",
@@ -327,7 +328,7 @@
       "name_ko": "코사크 군단",
       "industry_class": "NONE",
       "mapping_kind": "military_organization",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.rural.cotton_plantations",
@@ -336,7 +337,7 @@
       "name_ko": "목화 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.dye_plantations",
@@ -345,7 +346,7 @@
       "name_ko": "염료 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.fishing_wharves",
@@ -354,7 +355,7 @@
       "name_ko": "어항·어업시설",
       "industry_class": "FISH",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.gold_fields",
@@ -363,7 +364,7 @@
       "name_ko": "노천 금광지",
       "industry_class": "EXTR",
       "mapping_kind": "resource_activity_marker",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.rural.gold_mines",
@@ -372,7 +373,7 @@
       "name_ko": "금광산",
       "industry_class": "EXTR",
       "mapping_kind": "resource_extraction",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.iron_mines",
@@ -381,7 +382,7 @@
       "name_ko": "철광산",
       "industry_class": "EXTR",
       "mapping_kind": "resource_extraction",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.lead_mines",
@@ -390,7 +391,7 @@
       "name_ko": "납광산",
       "industry_class": "EXTR",
       "mapping_kind": "resource_extraction",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.livestock_ranches",
@@ -399,7 +400,7 @@
       "name_ko": "목장",
       "industry_class": "LIVE",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.logging_camps",
@@ -408,7 +409,7 @@
       "name_ko": "벌목장",
       "industry_class": "FORE",
       "mapping_kind": "resource_extraction",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.maize_farms",
@@ -417,7 +418,7 @@
       "name_ko": "옥수수 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.millet_farms",
@@ -426,7 +427,7 @@
       "name_ko": "잡곡 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.oil_rigs",
@@ -435,7 +436,7 @@
       "name_ko": "유정",
       "industry_class": "EXTR",
       "mapping_kind": "resource_extraction",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.opium_plantations",
@@ -444,7 +445,7 @@
       "name_ko": "아편 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.rice_farms",
@@ -453,7 +454,7 @@
       "name_ko": "벼 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.rubber_plantations",
@@ -462,7 +463,7 @@
       "name_ko": "고무 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.rye_farms",
@@ -471,7 +472,7 @@
       "name_ko": "호밀 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.silk_plantations",
@@ -480,7 +481,7 @@
       "name_ko": "양잠 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.subsistence_farms",
@@ -489,7 +490,7 @@
       "name_ko": "생계 농가",
       "industry_class": "AGRI",
       "mapping_kind": "own_account_activity",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.rural.subsistence_fishing_villages",
@@ -498,7 +499,7 @@
       "name_ko": "생계 어촌",
       "industry_class": "FISH",
       "mapping_kind": "own_account_activity",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.rural.subsistence_orchards",
@@ -507,7 +508,7 @@
       "name_ko": "생계 과수원",
       "industry_class": "AGRI",
       "mapping_kind": "own_account_activity",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.rural.subsistence_pastures",
@@ -516,7 +517,7 @@
       "name_ko": "생계 목축지",
       "industry_class": "LIVE",
       "mapping_kind": "own_account_activity",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.rural.subsistence_rice_paddies",
@@ -525,7 +526,7 @@
       "name_ko": "생계 논",
       "industry_class": "AGRI",
       "mapping_kind": "own_account_activity",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.rural.sugar_plantations",
@@ -534,7 +535,7 @@
       "name_ko": "설탕 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.sulfur_mines",
@@ -543,7 +544,7 @@
       "name_ko": "유황광산",
       "industry_class": "EXTR",
       "mapping_kind": "resource_extraction",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.tea_plantations",
@@ -552,7 +553,7 @@
       "name_ko": "차 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.tobacco_plantations",
@@ -561,7 +562,7 @@
       "name_ko": "담배 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.vineyards",
@@ -570,7 +571,7 @@
       "name_ko": "포도원",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.whaling_stations",
@@ -579,7 +580,7 @@
       "name_ko": "포경기지",
       "industry_class": "FISH",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.rural.wheat_farms",
@@ -588,7 +589,7 @@
       "name_ko": "밀 농장",
       "industry_class": "AGRI",
       "mapping_kind": "production_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.development.army_logistics_center",
@@ -597,7 +598,7 @@
       "name_ko": "육군 병참 거점",
       "industry_class": "NONE",
       "mapping_kind": "military_service_view",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.development.barracks",
@@ -606,7 +607,7 @@
       "name_ko": "병영",
       "industry_class": "NONE",
       "mapping_kind": "military_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.development.conscription_center",
@@ -615,7 +616,7 @@
       "name_ko": "징병소",
       "industry_class": "NONE",
       "mapping_kind": "recruitment_service",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.development.construction_sector",
@@ -624,7 +625,7 @@
       "name_ko": "건설 부문",
       "industry_class": "CONS",
       "mapping_kind": "capacity_view",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.development.government_administration",
@@ -633,7 +634,7 @@
       "name_ko": "정부청사",
       "industry_class": "SERV",
       "mapping_kind": "government_service_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.development.naval_administration",
@@ -642,7 +643,7 @@
       "name_ko": "해군 행정기관",
       "industry_class": "NONE",
       "mapping_kind": "military_administration_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.development.naval_fortification",
@@ -651,7 +652,7 @@
       "name_ko": "해안 요새",
       "industry_class": "NONE",
       "mapping_kind": "military_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.development.naval_logistics_center",
@@ -660,7 +661,7 @@
       "name_ko": "해군 병참 거점",
       "industry_class": "NONE",
       "mapping_kind": "military_service_view",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.development.port",
@@ -669,7 +670,7 @@
       "name_ko": "항만",
       "industry_class": "LOGI",
       "mapping_kind": "network_and_service_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.development.power_plants",
@@ -678,7 +679,7 @@
       "name_ko": "발전소",
       "industry_class": "ENER",
       "mapping_kind": "utility_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.development.railway",
@@ -687,7 +688,7 @@
       "name_ko": "철도",
       "industry_class": "LOGI",
       "mapping_kind": "network_and_service_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.development.skyscraper",
@@ -696,7 +697,7 @@
       "name_ko": "마천루",
       "industry_class": "TRAD",
       "mapping_kind": "multiuse_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.development.trade_center",
@@ -705,7 +706,7 @@
       "name_ko": "무역센터",
       "industry_class": "TRAD",
       "mapping_kind": "commercial_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.development.university",
@@ -714,7 +715,7 @@
       "name_ko": "대학",
       "industry_class": "SERV",
       "mapping_kind": "service_site",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "native_site_bindable"
     },
     {
       "reference_id": "vic3_115.special.angkor_wat.1",
@@ -725,7 +726,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.atocha_railway_station.1",
@@ -736,7 +737,7 @@
       "source_name_variant_count": 1,
       "industry_class": "LOGI",
       "mapping_kind": "unique_transport_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.big_ben.1",
@@ -747,7 +748,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.cristo_redentor.1",
@@ -758,7 +759,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.forbidden_city.1",
@@ -769,7 +770,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.grand_theater_of_havana.1",
@@ -780,7 +781,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.hagia_sophia.1",
@@ -791,7 +792,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.kaiserforum.1",
@@ -802,7 +803,7 @@
       "source_name_variant_count": 4,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.kaiserforum.2",
@@ -813,7 +814,7 @@
       "source_name_variant_count": 4,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.kaiserforum.3",
@@ -824,7 +825,7 @@
       "source_name_variant_count": 4,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.kaiserforum.4",
@@ -835,7 +836,7 @@
       "source_name_variant_count": 4,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.kiel_canal.1",
@@ -846,7 +847,7 @@
       "source_name_variant_count": 1,
       "industry_class": "LOGI",
       "mapping_kind": "unique_transport_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.manila_cathedral.1",
@@ -857,7 +858,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.mosque_of_djenne.1",
@@ -868,7 +869,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.panama_canal.1",
@@ -879,7 +880,7 @@
       "source_name_variant_count": 1,
       "industry_class": "LOGI",
       "mapping_kind": "unique_transport_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.pena_palace.1",
@@ -890,7 +891,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.power_bloc_statue.1",
@@ -901,7 +902,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.sagrada_fami_lia_cathedral.1",
@@ -912,7 +913,7 @@
       "source_name_variant_count": 3,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.sagrada_fami_lia_cathedral.2",
@@ -923,7 +924,7 @@
       "source_name_variant_count": 3,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.sagrada_fami_lia_cathedral.3",
@@ -934,7 +935,7 @@
       "source_name_variant_count": 3,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.saint_basils_cathedral.1",
@@ -945,7 +946,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.statue_of_liberty.1",
@@ -956,7 +957,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.suez_canal.1",
@@ -967,7 +968,7 @@
       "source_name_variant_count": 1,
       "industry_class": "LOGI",
       "mapping_kind": "unique_transport_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.taj_mahal.1",
@@ -978,7 +979,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.the_eiffel_tower.1",
@@ -989,7 +990,7 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.vatican_city.1",
@@ -1000,7 +1001,7 @@
       "source_name_variant_count": 1,
       "industry_class": "NONE",
       "mapping_kind": "polity_reference",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.victoria_terminus.1",
@@ -1011,7 +1012,7 @@
       "source_name_variant_count": 1,
       "industry_class": "LOGI",
       "mapping_kind": "unique_transport_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     },
     {
       "reference_id": "vic3_115.special.white_house.1",
@@ -1022,7 +1023,16 @@
       "source_name_variant_count": 1,
       "industry_class": "SERV",
       "mapping_kind": "government_heritage_asset",
-      "vic25_mapping_status": "design_only"
+      "vic25_mapping_status": "catalog_reference_only"
     }
-  ]
+  ],
+  "native_catalog": "include/vic25/building_catalog.hpp",
+  "native_catalog_generated_with": "scripts/generate_building_catalog.py",
+  "native_catalog_compiled": true,
+  "native_site_categories": {
+    "placeable": 52,
+    "views": 47,
+    "recipes": 36,
+    "resources": 10
+  }
 }
