@@ -1,6 +1,7 @@
 #pragma once
 #include "vic25/phase_f.hpp"
 #include "vic25/phase_h_front_ai.hpp"
+#include "vic25/p2_enterprise_ai.hpp"
 #include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <cstdint>
@@ -303,6 +304,8 @@ struct Policies {
     std::vector<BondBuyerOrder> bond_buyer_orders;
     std::vector<BondSecondaryAsk> bond_secondary_asks;
     std::vector<BondSecondaryBid> bond_secondary_bids;
+    bool allow_autonomous_recipe_comparison{true};
+    bool allow_collateralized_enterprise_credit{true};
     std::vector<GovernmentFormation> government_formations; // append-only
     std::vector<ParliamentNoConfidence> no_confidence_votes;
     std::vector<ParliamentDissolution> dissolutions;
@@ -794,21 +797,49 @@ public:
                !treasury_ready)
                 payroll_needs_explicit_placement.insert(job.employer);
         }
-        for(const auto& [id,recipe]:industry.recipes) {
-            if(recipe.outputs.empty() ||
-               std::any_of(decisions.manufacturers.begin(),
-                           decisions.manufacturers.end(),
-                    [&](const Manufacturer& p){return p.recipe==id;}))
-                continue;
-            const auto& facility=game_c.facility(recipe.site);
-            const auto& output=recipe.outputs.front();
+        // P2: switch between ALREADY REGISTERED, physically compatible
+        // recipes on one commissioned site. No free facility retooling or
+        // automatic technology adoption; explicit player policies win.
+        std::set<std::string> explicitly_managed_sites;
+        for(const auto& p:decisions.manufacturers)
+            explicitly_managed_sites.insert(industry.recipes.at(p.recipe).site);
+        std::map<std::string,std::vector<std::string>> site_recipes;
+        for(const auto& [id,recipe]:industry.recipes)
+            if(game_c.facilities().contains(recipe.site))
+                site_recipes[recipe.site].push_back(id);
+        for(const auto& [site,options]:site_recipes) {
+            if(explicitly_managed_sites.contains(site))continue;
+            const auto& facility=game_c.facility(site);
             if(game_c.firm_bankrupt(facility.owner) ||
-               payroll_needs_explicit_placement.contains(facility.owner) ||
-               !game_c.has_market(facility.region,output.good))
-                continue; // Do not invent a household wage recipient.
-            const auto& quote=game_c.market(facility.region,output.good);
+               payroll_needs_explicit_placement.contains(facility.owner))
+                continue;
+            std::string chosen;
+            Money best_margin=std::numeric_limits<Money>::min();
+            for(const auto& id:options) {
+                const auto& recipe=industry.recipes.at(id);
+                if(recipe.outputs.empty() ||
+                   !game_c.has_market(facility.region,recipe.outputs.front().good))
+                    continue;
+                if(!decisions.allow_autonomous_recipe_comparison ||
+                   options.size()==1) {
+                    chosen=id;
+                    break; // historic single-line behavior remains unchanged
+                }
+                const auto quote=enterprise_ai::evaluate(
+                    game_c,industry,world_.engine().base().spatial(),
+                    world_.engine().commerce(),recipe,date.day,dim);
+                if(quote.valid && (quote.margin_per_batch>best_margin ||
+                   (quote.margin_per_batch==best_margin &&
+                    (chosen.empty()||id<chosen)))) {
+                    best_margin=quote.margin_per_batch;
+                    chosen=id;
+                }
+            }
+            if(chosen.empty())continue;
+            const auto& product=industry.recipes.at(chosen).outputs.front();
+            const auto& market=game_c.market(facility.region,product.good);
             decisions.manufacturers.push_back(Manufacturer{
-                id,std::max<Quantity>(output.per_unit,quote.target_stock)});
+                chosen,std::max<Quantity>(product.per_unit,market.target_stock)});
         }
         for(const auto& [id,site]:industry.resource_sites) {
             if(std::any_of(decisions.extractors.begin(),
@@ -830,6 +861,7 @@ public:
                 continue;
             decisions.researches.push_back(ResearchPolicy{id,1});
         }
+        std::set<std::string> autonomous_projects;
         for(const auto& [id,project]:industry.constructions) {
             if(game_c.firm_bankrupt(project.client) ||
                project.ready||project.commissioned||
@@ -837,12 +869,32 @@ public:
                std::any_of(decisions.investments.begin(),decisions.investments.end(),
                     [&](const Investment& p){return p.construction_project==id;}))
                 continue;
+            // An existing registered construction design is the only source
+            // of new factory type/technology/cost; no guessed blueprint.
             for(const auto& [recipe_id,recipe]:industry.recipes) {
                 (void)recipe_id;
                 if(recipe.site!=project.target_site||recipe.outputs.empty())continue;
-                const auto& good=recipe.outputs.front().good;
-                if(!game_c.has_market(project.region,good))continue;
-                decisions.investments.push_back(Investment{id,good,0,1,1});
+                const auto quote=enterprise_ai::evaluate(
+                    game_c,industry,world_.engine().base().spatial(),
+                    world_.engine().commerce(),recipe,date.day,dim,&project);
+                if(!quote.valid || quote.demand_batches<=0)continue;
+                if(!game_c.has_market(project.region,quote.product))continue;
+                const Money capex=times(project.work_required,project.cash_price_per_work);
+                const Money capital=phaseb::add_checked(
+                    game_c.phase_d_cash_available(project.client),
+                    decisions.allow_collateralized_enterprise_credit?
+                        enterprise_ai::approved_credit_remaining(
+                            game_c,world_.engine().commerce(),project.client):0);
+                if(capital<capex+decisions.autonomous_factory_cash_reserve)continue;
+                const Quantity batches=std::min({
+                    quote.demand_batches,quote.feasible_supply_batches,
+                    project.target_capacity/recipe.capacity_per_batch});
+                if(batches<=0||
+                   times(quote.margin_per_batch,batches)*12<=capex)continue;
+                decisions.investments.push_back(
+                    Investment{id,quote.product,
+                      decisions.autonomous_factory_cash_reserve,1,1});
+                autonomous_projects.insert(id);
                 break;
             }
         }
