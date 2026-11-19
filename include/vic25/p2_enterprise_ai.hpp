@@ -31,9 +31,11 @@ inline Money observed_wage(const phasec::IntegratedWorld& c,
         if(job.count<=0||job.wage_per_month<=0)continue;
         const auto& demo=c.people().demographic(c.people().slice(slice).key.demographic);
         if(demo.region!=region)continue;
-        const Money daily=day>0 && days>=28?
-            daily_budget::increment(job.wage_per_month,day,days):
-            (job.wage_per_month+29)/30;
+        const Money period=(day>0 && days>=28 && days<=31)?days:30;
+        // Conservative forecast: the observed monthly wage is positive even
+        // on dates whose actual payable rounded increment is temporarily 0.
+        const Money daily=job.wage_per_month/period+
+                          (job.wage_per_month%period!=0);
         regional=std::max(regional,daily);
         if(job.employer==owner)wage=std::max(wage,daily);
     }
