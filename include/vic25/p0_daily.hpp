@@ -885,12 +885,12 @@ public:
                     decisions.allow_collateralized_enterprise_credit?
                         enterprise_ai::approved_credit_remaining(
                             game_c,world_.engine().commerce(),project.client):0);
-                if(capital<capex+decisions.autonomous_factory_cash_reserve)continue;
+                if(capital<phaseb::add_checked(capex,decisions.autonomous_factory_cash_reserve))continue;
                 const Quantity batches=std::min({
                     quote.demand_batches,quote.feasible_supply_batches,
                     project.target_capacity/recipe.capacity_per_batch});
                 if(batches<=0||
-                   times(quote.margin_per_batch,batches)*12<=capex)continue;
+                   times(times(quote.margin_per_batch,batches),12)<=capex)continue;
                 decisions.investments.push_back(
                     Investment{id,quote.product,
                       decisions.autonomous_factory_cash_reserve,1,1});
@@ -1246,18 +1246,68 @@ public:
         }
         for(const auto& investment:decisions.investments) {
             auto work=std::make_shared<Quantity>(0);
-            plan[1].push_back([investment,work](phasegh::Stage& gh){
+            const bool generated=autonomous_projects.contains(investment.construction_project);
+            plan[1].push_back([investment,work,generated,date,dim,
+                collateral_credit=decisions.allow_collateralized_enterprise_credit]
+                (phasegh::Stage& gh){
                 const auto& domain=gh.phase_d().state();
                 const auto& p=domain.constructions.at(investment.construction_project);
                 auto& c=gh.phase_c();
                 if(p.ready||p.commissioned||p.accepted_work>=p.work_required ||
                    c.market(p.region,investment.output_good).price<investment.minimum_output_price)
                     return;
-                const Money free=c.phase_d_cash_available(p.client);
-                if(free<=investment.reserve_cash)return;
+                // Auto-construction only when a REAL recipe, local or
+                // verified routed inputs, workforce and margin substantiate it.
+                if(generated) {
+                    bool profitable=false;
+                    for(const auto& [recipe_id,recipe]:domain.recipes) {
+                        (void)recipe_id;
+                        if(recipe.site!=p.target_site)continue;
+                        const auto q=enterprise_ai::evaluate(
+                            c,domain,gh.geography().spatial(),
+                            gh.commerce(),recipe,date.day,dim,&p);
+                        if(q.valid && q.product==investment.output_good) {
+                            profitable=true;break;
+                        }
+                    }
+                    if(!profitable)return;
+                }
                 const Quantity materials=c.phase_d_material_available(
                               p.contractor,p.region,p.material_good)/p.material_per_work;
                 const People staff=c.phase_d_workforce(p.contractor);
+                if(materials<=0||staff<p.workers_per_work)return;
+                Money free=c.phase_d_cash_available(p.client);
+                // A bank loan is never created just because investment looks
+                // profitable. Use only an existing G pledged credit facility:
+                // drawing it posts the real C bank loan and matching deposit.
+                if(collateral_credit &&
+                   free<phaseb::add_checked(
+                       investment.reserve_cash,p.cash_price_per_work)) {
+                    Money shortfall=phaseb::add_checked(
+                        investment.reserve_cash,p.cash_price_per_work)-free;
+                    for(const auto& [line_id,line]:gh.commerce().credit) {
+                        if(shortfall<=0)break;
+                        if(!line.active||line.borrower!=p.client ||
+                           line.effective>c.month()||line.drawn>=line.limit||
+                           c.stock(line.borrower,line.pledge_region,
+                                   line.pledge_good)<line.pledged_goods)
+                            continue;
+                        // Never spend construction materials backing this loan.
+                        if(line.borrower==p.contractor &&
+                           line.pledge_region==p.region &&
+                           line.pledge_good==p.material_good &&
+                           c.stock(p.contractor,p.region,p.material_good)-
+                               materials*p.material_per_work<line.pledged_goods)
+                            continue;
+                        const Money draw=std::min(shortfall,line.limit-line.drawn);
+                        if(draw<=0)continue;
+                        gh.draw_trade_credit(line_id,draw);
+                        free=c.phase_d_cash_available(p.client);
+                        shortfall=std::max<Money>(0,phaseb::add_checked(
+                            investment.reserve_cash,p.cash_price_per_work)-free);
+                    }
+                }
+                if(free<=investment.reserve_cash)return;
                 const Quantity affordable=(free-investment.reserve_cash)/p.cash_price_per_work;
                 Quantity work_budget=investment.maximum_daily_work;
                 const auto country=c.sovereignty(p.region);
