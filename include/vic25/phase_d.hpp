@@ -479,8 +479,11 @@ public:
     bool propose_firm_expansion(const std::string& template_project,
                                 const std::string& template_recipe,
                                 const std::string& new_id,
-                                Quantity minimum_untapped_cash) {
+                                Quantity minimum_untapped_cash,
+                                Money documented_undrawn_credit=0) {
         must(9);
+        require(minimum_untapped_cash>=0 && documented_undrawn_credit>=0,
+                "negative project reserve or unapproved credit allowance");
         auto old=d_.constructions.find(template_project);
         auto ri=d_.recipes.find(template_recipe);
         if(old==d_.constructions.end()||ri==d_.recipes.end()||
@@ -526,7 +529,12 @@ public:
            c_.phase_d_workforce(model.contractor)<model.workers_per_work)
             return false;
         const Money cost=product(model.work_required,model.cash_price_per_work);
-        if(c_.phase_d_cash_available(model.client)<
+        // Stage9 creates only an unfunded construction proposal. A
+        // *previously issued* secured credit line may be counted in the
+        // opportunity assessment, but the next Stage1 must actually draw it
+        // in C/G before any paid construction takes place.
+        if(phaseb::add_checked(c_.phase_d_cash_available(model.client),
+                               documented_undrawn_credit)<
            phaseb::add_checked(cost,minimum_untapped_cash))
             return false;
         const Quantity stock=c_.phase_d_material_available(
