@@ -1276,39 +1276,6 @@ public:
                               p.contractor,p.region,p.material_good)/p.material_per_work;
                 const People staff=c.phase_d_workforce(p.contractor);
                 if(materials<=0||staff<p.workers_per_work)return;
-                Money free=c.phase_d_cash_available(p.client);
-                // A bank loan is never created just because investment looks
-                // profitable. Use only an existing G pledged credit facility:
-                // drawing it posts the real C bank loan and matching deposit.
-                if(collateral_credit &&
-                   free<phaseb::add_checked(
-                       investment.reserve_cash,p.cash_price_per_work)) {
-                    Money shortfall=phaseb::add_checked(
-                        investment.reserve_cash,p.cash_price_per_work)-free;
-                    for(const auto& [line_id,line]:gh.commerce().credit) {
-                        if(shortfall<=0)break;
-                        if(!line.active||line.borrower!=p.client ||
-                           line.effective>c.month()||line.drawn>=line.limit||
-                           c.stock(line.borrower,line.pledge_region,
-                                   line.pledge_good)<line.pledged_goods)
-                            continue;
-                        // Never spend construction materials backing this loan.
-                        if(line.borrower==p.contractor &&
-                           line.pledge_region==p.region &&
-                           line.pledge_good==p.material_good &&
-                           c.stock(p.contractor,p.region,p.material_good)-
-                               materials*p.material_per_work<line.pledged_goods)
-                            continue;
-                        const Money draw=std::min(shortfall,line.limit-line.drawn);
-                        if(draw<=0)continue;
-                        gh.draw_trade_credit(line_id,draw);
-                        free=c.phase_d_cash_available(p.client);
-                        shortfall=std::max<Money>(0,phaseb::add_checked(
-                            investment.reserve_cash,p.cash_price_per_work)-free);
-                    }
-                }
-                if(free<=investment.reserve_cash)return;
-                const Quantity affordable=(free-investment.reserve_cash)/p.cash_price_per_work;
                 Quantity work_budget=investment.maximum_daily_work;
                 const auto country=c.sovereignty(p.region);
                 const bool privately_funded=
@@ -1347,6 +1314,45 @@ public:
                             phaseb::mul_checked(work_budget/1'000'000,decree),
                             phaseb::mul_checked(work_budget%1'000'000,decree)/
                                 1'000'000));
+                const auto trait=phaseb::add_checked(
+                    c.p3_trait_modifier_ppm(
+                        country,"state_construction_mult"),
+                    c.p1_local_decree_ppm(
+                        country,p.region,"state_construction_mult"));
+                if(work_budget<=0 || trait<=-1'000'000)return;
+                Money free=c.phase_d_cash_available(p.client);
+                // A bank loan is never created just because investment looks
+                // profitable. Use only an existing G pledged credit facility:
+                // drawing it posts the real C bank loan and matching deposit.
+                if(collateral_credit && !c.bank_insolvent() &&
+                   free<phaseb::add_checked(
+                       investment.reserve_cash,p.cash_price_per_work)) {
+                    Money shortfall=phaseb::add_checked(
+                        investment.reserve_cash,p.cash_price_per_work)-free;
+                    for(const auto& [line_id,line]:gh.commerce().credit) {
+                        if(shortfall<=0)break;
+                        if(!line.active||line.borrower!=p.client ||
+                           line.effective>c.month()||line.drawn>=line.limit||
+                           c.stock(line.borrower,line.pledge_region,
+                                   line.pledge_good)<line.pledged_goods)
+                            continue;
+                        // Never spend construction materials backing this loan.
+                        if(line.borrower==p.contractor &&
+                           line.pledge_region==p.region &&
+                           line.pledge_good==p.material_good &&
+                           c.stock(p.contractor,p.region,p.material_good)<
+                               phaseb::add_checked(line.pledged_goods,p.material_per_work))
+                            continue;
+                        const Money draw=std::min(shortfall,line.limit-line.drawn);
+                        if(draw<=0)continue;
+                        gh.draw_trade_credit(line_id,draw);
+                        free=c.phase_d_cash_available(p.client);
+                        shortfall=std::max<Money>(0,phaseb::add_checked(
+                            investment.reserve_cash,p.cash_price_per_work)-free);
+                    }
+                }
+                if(free<=investment.reserve_cash)return;
+                const Quantity affordable=(free-investment.reserve_cash)/p.cash_price_per_work;
                 Quantity n=std::min({work_budget,
                      p.work_required-p.accepted_work,materials,
                      static_cast<Quantity>(staff/p.workers_per_work),affordable});
@@ -1354,11 +1360,7 @@ public:
                 // paid daily construction work, not a synthetic construction
                 // progress bar. Bonuses cannot create additional materials,
                 // workers or funds beyond the observed feasible work.
-                const auto trait=phaseb::add_checked(
-                    c.p3_trait_modifier_ppm(
-                        country,"state_construction_mult"),
-                    c.p1_local_decree_ppm(
-                        country,p.region,"state_construction_mult"));
+
                 if(trait<0&&n>0) {
                     const auto legal=std::clamp<std::int64_t>(
                         1'000'000+trait,0,1'000'000);
