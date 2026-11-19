@@ -16,7 +16,9 @@ enum class P1PowerDistribution : std::uint8_t {
     autocracy, oligarchy, landed_vote, wealth_vote,
     universal_vote, single_party, technocracy,
     bakufu, neo_absolutism, organic_regulation, elder_council,
-    census_vote, labor_suffrage, anarchy
+    census_vote, labor_suffrage, anarchy,
+    // Alternate source spelling aliases keep the same serialized values.
+    census_voting=census_vote, labour_suffrage=labor_suffrage
 };
 enum class P1LegislatureKind : std::uint8_t { none, unicameral, bicameral };
 enum class P1FormationRule : std::uint8_t {
