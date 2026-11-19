@@ -1304,7 +1304,9 @@ public:
         require(it!=domain_.site_archetypes.end(),"unbound extraction site");
         const auto* archetype=building::find(it->second);
         require(archetype && archetype->extraction_eligible() &&
-                archetype->industry=="EXTR" &&
+                (archetype->industry=="EXTR" ||
+                 archetype->industry=="FORE" ||
+                 archetype->industry=="FISH") &&
                 (archetype->representative_good.empty() ||
                  source.good==archetype->representative_good),
                 "source and mining archetype disagree");
