@@ -1481,17 +1481,22 @@ public:
                     Quantity need=std::max<Quantity>(0,input.per_unit-
                         c.phase_d_material_available(f.owner,f.region,input.good));
                     if(need<=0)continue;
-                    for(const auto& [key,available_stock]:c.physical_inventory()) {
+                    std::vector<std::string> sellers;
+                    for(const auto& [key,available_stock]:c.physical_inventory())
+                        if(key.region_id==f.region && key.good_id==input.good &&
+                           key.holder_id!=f.owner && c.has_actor(key.holder_id) &&
+                           available_stock>0)
+                            sellers.push_back(key.holder_id);
+                    std::sort(sellers.begin(),sellers.end());
+                    sellers.erase(std::unique(sellers.begin(),sellers.end()),sellers.end());
+                    for(const auto& seller:sellers) {
                         if(need<=0)break;
-                        if(key.region_id!=f.region||key.good_id!=input.good||
-                           key.holder_id==f.owner||!c.has_actor(key.holder_id)||
-                           available_stock<=0)continue;
                         const Quantity quantity=std::min({
                             need,c.phase_d_material_available(
-                                key.holder_id,f.region,input.good),
+                                seller,f.region,input.good),
                             c.phase_d_cash_available(f.owner)/price});
                         if(quantity<=0)continue;
-                        c.trade(key.holder_id,f.owner,f.region,input.good,quantity,price);
+                        c.trade(seller,f.owner,f.region,input.good,quantity,price);
                         need-=quantity;
                     }
                 }
