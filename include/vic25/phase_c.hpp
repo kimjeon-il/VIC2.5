@@ -1987,6 +1987,16 @@ public:
     // with 1,000,000 representing 1.0, including legacy raw unit +100.
     [[nodiscard]] std::int64_t p2_modifier_ppm(
         const std::string& country,const std::string& effect_key)const;
+    [[nodiscard]] double p2_catalog_modifier_value(
+        const std::string& country,std::string_view key,
+        int institution_level=0)const;
+    [[nodiscard]] double p2_region_modifier_value(
+        const std::string& region,std::string_view key)const;
+    [[nodiscard]] bool p2_catalog_group_active(
+        const std::string& country,std::string_view group)const;
+    [[nodiscard]] std::string p2_taxation_choice(
+        const std::string& country)const;
+
     [[nodiscard]] std::map<std::string,politics::LawModifier>
         p2_active_modifiers(const std::string& country)const;
     void p2_seed_culture(P2CultureTraits);
