@@ -2456,23 +2456,81 @@ public:
                             (*budget_spent_today)[program.country],amount);
                 }
             });
-        // Only observed profitable-demand-shortfall industrial examples may
-        // open a new project. The D construction ledger will still require
-        // actual investor cash, materials, employees, payments and WIP before
-        // Stage0 creates the new facility on a later date.
+        // P2 portfolio choice: compare every compatible industrial
+        // blueprint instead of blindly cloning the first recipe. A new
+        // project has no site or output until the original D-C ledger
+        // finances and commissions it on subsequent days.
         if(decisions.allow_endogenous_factory_expansion && date.day==1)
             plan[9].push_back([reserve=decisions.autonomous_factory_cash_reserve,
-                              today=world_.day_index()](phasegh::Stage& gh) {
+                              credit=decisions.allow_collateralized_enterprise_credit,
+                              date,dim,today=world_.day_index()](phasegh::Stage& gh) {
                 const auto& domain=gh.phase_d().state();
+                const auto& c=gh.phase_c();
+                struct Candidate {
+                    std::string project,recipe;
+                    Money score{},approved_credit{};
+                };
+                std::map<std::string,Candidate> best_by_owner;
                 for(const auto& [id,p]:domain.constructions) {
-                    if(!p.commissioned)continue;
-                    for(const auto& [recipe_id,recipe]:domain.recipes) {
-                        if(recipe.site!=p.target_site)continue;
-                        const auto expansion_key=id+":"+std::to_string(today);
-                        (void)gh.phase_d().propose_firm_expansion(
-                            id,recipe_id,expansion_key,reserve);
-                        break;
+                    if(!p.commissioned||p.permit_required||p.inspection_required||
+                       p.allow_accrued_invoice_commission||
+                       c.firm_bankrupt(p.client)||c.firm_bankrupt(p.contractor)||
+                       p.work_required<=0||p.cash_price_per_work<=0||
+                       p.workers_per_work<=0||p.material_per_work<=0||
+                       c.phase_d_workforce(p.contractor)<p.workers_per_work||
+                       c.phase_d_material_available(
+                           p.contractor,p.region,p.material_good)<p.material_per_work)
+                        continue;
+                    const Money capex=times(p.work_required,p.cash_price_per_work);
+                    const Money cash=c.phase_d_cash_available(p.client);
+                    const Money unused_credit=credit?
+                        enterprise_ai::approved_credit_remaining(
+                            c,gh.commerce(),p.client):0;
+                    if(phaseb::add_checked(cash,unused_credit)<
+                       phaseb::add_checked(capex,reserve))continue;
+                    for(const auto& [rid,r]:domain.recipes) {
+                        if(r.site!=p.target_site||r.tech_id.size()||
+                           r.needs_retrofit||r.requires_same_stage_nonstorable_energy)
+                            continue;
+                        const auto quote=enterprise_ai::evaluate(
+                            c,domain,gh.geography().spatial(),gh.commerce(),
+                            r,date.day,dim);
+                        if(!quote.valid || !c.has_market(p.region,quote.product) ||
+                           c.market(p.region,quote.product).unmet<=0)
+                            continue;
+                        const Quantity candidate_batches=std::min({
+                            quote.feasible_supply_batches,quote.demand_batches,
+                            p.target_capacity/r.capacity_per_batch});
+                        if(candidate_batches<=0)continue;
+                        const Money expected=times(times(
+                            quote.margin_per_batch,candidate_batches),12);
+                        const Money borrowed=std::max<Money>(
+                            0,phaseb::add_checked(capex,reserve)-cash);
+                        const Money interest=times(
+                            borrowed,c.annual_bank_interest_ppm())/1'000'000;
+                        if(expected<=phaseb::add_checked(capex,interest))continue;
+                        const Money value=expected-
+                                           phaseb::add_checked(capex,interest);
+                        const auto key=std::make_pair(id,rid);
+                        const auto existing=best_by_owner.find(p.client);
+                        if(existing==best_by_owner.end()||
+                           value>existing->second.score ||
+                           (value==existing->second.score &&
+                            key<std::make_pair(existing->second.project,
+                                               existing->second.recipe))) {
+                            best_by_owner[p.client]=Candidate{id,rid,value,unused_credit};
+                        }
                     }
+                }
+                // At most one new project per owner per month, with a stable
+                // tie break. Credit remains a FUTURE draw, never a Stage9
+                // deposit or a fabricated construction WIP balance.
+                for(const auto& [owner,choice]:best_by_owner) {
+                    (void)owner;
+                    const auto key=choice.project+":"+std::to_string(today);
+                    (void)gh.phase_d().propose_firm_expansion(
+                        choice.project,choice.recipe,key,reserve,
+                        choice.approved_credit);
                 }
             });
         // Actual creditor entries remain in C's balance sheet until paid.
