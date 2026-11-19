@@ -66,6 +66,7 @@ struct Staffing {
     std::string employer,region;
     People wanted{};
     Money monthly_wage{};
+    bool require_payroll_wallet{}; // autonomous only; old explicit jobs unchanged
 };
 struct Manufacturer {
     std::string recipe;
@@ -94,6 +95,13 @@ struct Buyer {
     std::string household_actor,seller,region,good;
     Quantity units_per_person_per_day{1};
 };
+// Scenario-defined demand, not a new stock ledger. Priority 0 is essential;
+// optional labor_class matches the existing Phase B economic classification.
+struct HouseholdBasketRule {
+    std::string good, labor_class;
+    Quantity units_per_person_per_month{};
+    int priority{2};
+};
 // Real owner repair decision, with a strict daily labor/material budget.
 // Autonomous credit principal repayment uses the canonical C bank ledger;
  // no separate debt balance or generated repayment funds.
@@ -112,6 +120,15 @@ struct Investment {
     std::string construction_project,output_good;
     Money reserve_cash{},minimum_output_price{};
     Quantity maximum_daily_work{1};
+};
+// A campaign-supplied blueprint can create a new company and a new type of
+// factory even when that region has no commissioned template to copy. The
+// project and recipe are saved in D only when an actual funded project starts.
+struct IndustryOpportunity {
+    std::string id,founder;
+    phased::ConstructionProject project;
+    phased::IndustryRecipe recipe;
+    Money new_firm_equity{},investor_cash_reserve{};
 };
 struct PoliticalReaction {
     Id population_slice{};
@@ -310,14 +327,58 @@ struct Policies {
     std::vector<LegislativeOrder> legislative_orders; // append-only
     std::set<std::string> player_controlled_countries; // never autonomously governed
     std::vector<PoliticalOrder> political_orders; // date-scoped lawful P1 commands
+    // Optional demand classes and autonomous hiring; old campaign aggregates
+    // remain source compatible because new fields are append-only.
+    std::vector<HouseholdBasketRule> household_basket;
+    bool allow_endogenous_staffing{true};
+    Money staffing_cash_reserve{};
+    bool allow_endogenous_investment_credit{true};
+    bool allow_endogenous_debt_repayment{true};
+    bool allow_endogenous_input_procurement{true};
+    phasec::IntegratedWorld::BankCreditRule bank_credit_rule{};
+    std::vector<phasegh::MerchantOffice> merchant_offices;
+    std::vector<IndustryOpportunity> industry_opportunities;
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
            autonomous_tax_ceiling_ppm>1'000'000||
            daily_food_units_per_person<0||
            monthly_clothing_units_per_person<0 ||
-           autonomous_factory_cash_reserve<0)
+           autonomous_factory_cash_reserve<0||staffing_cash_reserve<0)
             throw std::invalid_argument("P0_INVALID_AUTONOMOUS_FISCAL_RULE");
+        std::set<std::pair<std::string,std::string>> seen_merchant_offices;
+        for(const auto& merchant:merchant_offices)
+            if(merchant.trader.empty()||merchant.market_region.empty()||
+               merchant.maximum_daily_units<=0||
+               merchant.minimum_cash_reserve<0||
+               merchant.minimum_margin_ppm<0||
+               merchant.minimum_margin_ppm>1'000'000||
+               !seen_merchant_offices.insert({
+                  merchant.trader,merchant.market_region}).second)
+                throw std::invalid_argument("P0_INVALID_MERCHANT_OFFICE");
+        std::set<std::string> unique_industry_opportunities;
+        for(const auto& opportunity:industry_opportunities) {
+            const auto& p=opportunity.project;
+            const auto& r=opportunity.recipe;
+            if(opportunity.id.empty()||opportunity.id.find(':')!=std::string::npos||
+               !unique_industry_opportunities.insert(opportunity.id).second||
+               p.region.empty()||p.contractor.empty()||
+               p.material_good.empty()||p.work_required<=0||
+               p.cash_price_per_work<=0||p.material_per_work<=0||
+               p.workers_per_work<=0||p.target_capacity<=0||
+               r.inputs.empty()||r.outputs.empty()||
+               opportunity.new_firm_equity<0||
+               opportunity.investor_cash_reserve<0||
+               (opportunity.new_firm_equity>0&&opportunity.founder.empty())||
+               (opportunity.new_firm_equity==0&&p.client.empty()))
+                throw std::invalid_argument("P0_INVALID_INDUSTRY_OPPORTUNITY");
+        }
+        std::set<std::pair<std::string,std::string>> unique_needs;
+        for(const auto& rule:household_basket)
+            if(rule.good.empty()||rule.units_per_person_per_month<0||
+               rule.priority<0||rule.priority>5||
+               !unique_needs.insert({rule.good,rule.labor_class}).second)
+                throw std::invalid_argument("P0_INVALID_HOUSEHOLD_BASKET");
         std::set<std::string> seen_firms,seen_projects,seen_countries;
         std::set<std::string> financed_countries;
         for(const auto& b:sovereign_financing)
@@ -561,6 +622,79 @@ struct Policies {
     }
 };
 
+// Forecast and actual purchase use precisely the same real POP demand rules.
+// An empty labor_class is universal. Rules for food/clothing override the
+// legacy built-in basket only for the matching cohort.
+using HouseholdNeedKey=std::tuple<std::string,Id,std::string>;
+struct HouseholdNeedAmount {
+    int priority{};
+    Quantity quantity{};
+};
+inline std::map<HouseholdNeedKey,HouseholdNeedAmount>
+household_daily_needs(
+    const phaseb::World& people,int day,int days,
+    Quantity food_per_day,Quantity clothing_per_month,
+    const std::vector<HouseholdBasketRule>& basket,
+    const std::set<std::pair<Id,std::string>>& explicit_goods={}) {
+    std::map<HouseholdNeedKey,HouseholdNeedAmount> needs;
+    for(const auto& [slice_id,pop]:people.slices()) {
+        if(pop.count<=0)continue;
+        const auto& demo=people.demographic(pop.key.demographic);
+        const auto& econ=people.economic(pop.key.economic);
+        const auto add=[&](const std::string& good,Quantity units,int priority) {
+            if(units<=0||explicit_goods.contains({slice_id,good}))return;
+            auto& need=needs[{demo.region,pop.key.household,good}];
+            if(need.quantity==0)need.priority=priority;
+            else need.priority=std::min(need.priority,priority);
+            need.quantity=phaseb::add_checked(need.quantity,units);
+        };
+        bool custom_food=false,custom_clothing=false;
+        for(const auto& rule:basket) {
+            if(!rule.labor_class.empty()&&rule.labor_class!=econ.labor_class)
+                continue;
+            // A class-specific rule overrides its universal fallback.
+            if(rule.labor_class.empty()&&
+               std::any_of(basket.begin(),basket.end(),
+                   [&](const HouseholdBasketRule& specific) {
+                       return specific.good==rule.good &&
+                              !specific.labor_class.empty() &&
+                              specific.labor_class==econ.labor_class;
+                   }))continue;
+            if(rule.good=="food")custom_food=true;
+            if(rule.good=="clothing")custom_clothing=true;
+            add(rule.good,daily_increment(
+                times(pop.count,rule.units_per_person_per_month),day,days),
+                rule.priority);
+        }
+        if(!custom_food)add("food",times(pop.count,food_per_day),0);
+        if(!custom_clothing)add("clothing",daily_increment(
+            times(pop.count,clothing_per_month),day,days),1);
+    }
+    return needs;
+}
+
+inline Money regional_monthly_wage(const phasec::IntegratedWorld& c,
+                                  const std::string& region,
+                                  Quantity food_per_day,int days) {
+    std::vector<Money> observed;
+    for(const auto& [slice,job]:c.people().jobs()) {
+        if(job.count<=0||job.wage_per_month<=0)continue;
+        const auto& pop=c.people().slice(slice);
+        if(c.people().demographic(pop.key.demographic).region==region)
+            observed.push_back(job.wage_per_month);
+    }
+    Money wage=0;
+    if(!observed.empty()) {
+        std::sort(observed.begin(),observed.end());
+        wage=observed[observed.size()/2];
+    } else if(c.has_market(region,"food")&&food_per_day>0) {
+        // No invented historical wage: a transparent subsistence-price proxy
+        // is used only when the region actually has a quoted food market.
+        wage=times(times(c.market(region,"food").price,food_per_day),days);
+    }
+    return wage;
+}
+
 // Contract wage is an economic cost even when payroll is scheduled outside
 // the manufacture command. Conservative highest rate prevents firms from
 // treating unpaid or omitted payroll as zero-cost labor.
@@ -601,6 +735,8 @@ inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
         if(current_job && (current_job->employer!=p.employer ||
            current_job->occupation!="worker" ||
            current_job->wage_per_month!=p.monthly_wage))continue;
+        if(p.require_payroll_wallet &&
+           !c.has_actor("HH:"+std::to_string(s.key.household)))continue;
         const auto& econ=c.people().economic(s.key.economic);
         if(econ.profession!="worker"&&econ.profession!="unskilled_worker")continue;
         if(!c.people().eligible_for(id,phaseb::JobRequirements{}))continue;
@@ -794,7 +930,30 @@ public:
                !treasury_ready)
                 payroll_needs_explicit_placement.insert(job.employer);
         }
+        std::set<std::pair<Id,std::string>> explicit_demand;
+        for(const auto& buyer:decisions.buyers)
+            explicit_demand.insert({buyer.population_slice,buyer.good});
+        const auto household_forecast=household_daily_needs(
+            game_c.people(),date.day,dim,
+            decisions.daily_food_units_per_person,
+            decisions.monthly_clothing_units_per_person,
+            decisions.household_basket,explicit_demand);
+        std::map<std::pair<std::string,std::string>,Quantity> regional_need;
+        for(const auto& [key,need]:household_forecast) {
+            const auto& [region,household,good]=key;
+            (void)household;
+            regional_need[{region,good}]=phaseb::add_checked(
+                regional_need[{region,good}],need.quantity);
+        }
+        for(const auto& buyer:decisions.buyers)
+            if(game_c.people().has_slice(buyer.population_slice)) {
+                const auto count=game_c.people().slice(buyer.population_slice).count;
+                regional_need[{buyer.region,buyer.good}]=phaseb::add_checked(
+                    regional_need[{buyer.region,buyer.good}],
+                    times(count,buyer.units_per_person_per_day));
+            }
         for(const auto& [id,recipe]:industry.recipes) {
+            if(!game_c.facilities().contains(recipe.site))continue;
             if(recipe.outputs.empty() ||
                std::any_of(decisions.manufacturers.begin(),
                            decisions.manufacturers.end(),
@@ -808,7 +967,9 @@ public:
                 continue; // Do not invent a household wage recipient.
             const auto& quote=game_c.market(facility.region,output.good);
             decisions.manufacturers.push_back(Manufacturer{
-                id,std::max<Quantity>(output.per_unit,quote.target_stock)});
+                id,std::max<Quantity>(output.per_unit,phaseb::add_checked(
+                    quote.target_stock,
+                    regional_need[{facility.region,output.good}]))});
         }
         for(const auto& [id,site]:industry.resource_sites) {
             if(std::any_of(decisions.extractors.begin(),
@@ -820,7 +981,95 @@ public:
                !game_c.has_market(site.region,site.good))continue;
             const auto& quote=game_c.market(site.region,site.good);
             decisions.extractors.push_back(Extractor{
-                id,std::max<Quantity>(1,quote.target_stock)});
+                id,std::max<Quantity>(1,phaseb::add_checked(
+                    quote.target_stock,regional_need[{site.region,site.good}]))});
+        }
+        if(decisions.allow_endogenous_staffing) {
+            // A commissioned site may recruit from the existing unemployed
+            // POP pool. The monthly capacity is prorated to a day; no worker,
+            // employer deposit or labor contract is manufactured.
+            std::map<std::tuple<std::string,std::string,std::string>,People> site_jobs;
+            std::map<std::pair<std::string,std::string>,Money> regional_wages;
+            for(const auto& [id,recipe]:industry.recipes) {
+                (void)id;
+                if(!game_c.facilities().contains(recipe.site)||
+                   recipe.outputs.empty()||recipe.workers_per_batch<=0||
+                   recipe.capacity_per_batch<=0||
+                   recipe.needs_retrofit||
+                   recipe.requires_same_stage_nonstorable_energy)continue;
+                const auto& facility=game_c.facility(recipe.site);
+                if(game_c.firm_bankrupt(facility.owner)||
+                   payroll_needs_explicit_placement.contains(facility.owner)||
+                   facility.capacity<=facility.damaged)continue;
+                const auto& output=recipe.outputs.front();
+                if(!game_c.has_market(facility.region,output.good))continue;
+                const auto& quote=game_c.market(facility.region,output.good);
+                if(quote.price<=0||
+                   game_c.stock(facility.owner,facility.region,output.good)>=
+                      phaseb::add_checked(quote.target_stock,
+                          regional_need[{facility.region,output.good}]))
+                    continue;
+                const auto key=std::make_pair(facility.owner,facility.region);
+                const auto wage_it=regional_wages.find(key);
+                Money wage=wage_it==regional_wages.end()?
+                    regional_monthly_wage(game_c,facility.region,
+                        decisions.daily_food_units_per_person,dim):
+                    wage_it->second;
+                const auto& country=game_c.sovereignty(facility.region);
+                wage=std::max<Money>(wage,game_c.p2_rule(
+                    country,country,
+                    phasec::P2ClauseKind::minimum_monthly_contract_wage)
+                    .value_or(0));
+                if(wage<=0)continue;
+                regional_wages[key]=wage;
+                Money input_cost=0;
+                bool priced=true;
+                for(const auto& input:recipe.inputs) {
+                    if(!game_c.has_market(facility.region,input.good)) {
+                        priced=false;break;
+                    }
+                    input_cost=phaseb::add_checked(input_cost,
+                        times(input.per_unit,
+                              game_c.market(facility.region,input.good).price));
+                }
+                const Money wage_day=daily_increment(wage,date.day,dim);
+                if(!priced||times(output.per_unit,quote.price)<=
+                    phaseb::add_checked(input_cost,
+                        times(recipe.workers_per_batch,wage_day)))continue;
+                const Quantity capacity=facility.capacity-facility.damaged;
+                const Quantity batches=(
+                    capacity/dim+(capacity%dim!=0?1:0))/
+                    recipe.capacity_per_batch;
+                if(batches<=0)continue;
+                const People desired=times(batches,recipe.workers_per_batch);
+                const auto site_key=std::make_tuple(
+                    facility.owner,facility.region,recipe.site);
+                site_jobs[site_key]=std::max(site_jobs[site_key],desired);
+            }
+            std::map<std::pair<std::string,std::string>,People> wanted;
+            for(const auto& [key,count]:site_jobs) {
+                const auto& [owner,region,site]=key;
+                (void)site;
+                wanted[{owner,region}]=phaseb::add_checked(
+                    wanted[{owner,region}],count);
+            }
+            for(const auto& [key,count]:wanted) {
+                const auto& [owner,region]=key;
+                if(std::any_of(decisions.staffing.begin(),decisions.staffing.end(),
+                    [&](const Staffing& s) {
+                        return s.employer==owner&&s.region==region;
+                    }))continue;
+                const Money wage=regional_wages.at(key);
+                const Money wage_day=daily_increment(wage,date.day,dim);
+                if(wage_day<=0)continue;
+                const Money free=std::max<Money>(0,
+                    game_c.phase_d_cash_available(owner)-
+                    decisions.staffing_cash_reserve);
+                const People affordable=free/wage_day;
+                if(affordable>0)
+                    decisions.staffing.push_back(Staffing{
+                        owner,region,std::min(count,affordable),wage,true});
+            }
         }
         for(const auto& [id,research]:industry.researches) {
             if(game_c.firm_bankrupt(research.sponsor) ||
@@ -1025,6 +1274,7 @@ public:
                     }
                 });
         auto salary_shortfall=std::make_shared<std::set<std::string>>();
+        std::set<Id> preplanned_payroll_slices;
         // A real Employment contract can pay a real household wallet each
         // calendar day. The C bank/tax ledger remains the sole authority.
         // P0 scenario payroll, when explicitly configured, owns that firm's
@@ -1061,6 +1311,7 @@ public:
             if(contract.employer==wallet||contract.employer==treasury||
                wallet==treasury)continue;
             const auto employer=contract.employer;
+            preplanned_payroll_slices.insert(slice_id);
             const auto purpose="P0:CONTRACT-WAGE:"+std::to_string(world_.day_index())+
                                ":"+std::to_string(slice_id);
             auto reserved=std::make_shared<Money>(0);
@@ -1100,6 +1351,43 @@ public:
                         gross,today);
                 });
         }
+        // Jobs accepted at Stage2 did not exist when the Stage1 wage plan
+        // was assembled. Accrue their first day's real salary at Stage5
+        // rather than silently giving newly recruited workers an unpaid day.
+        // Those claims join the same C arrears and tax settlement below.
+        plan[5].push_back([preplanned_payroll_slices,scenario_payroll,
+                           date,dim,today=world_.day_index()](phasegh::Stage& gh) {
+            auto& c=gh.phase_c();
+            for(const auto& [slice_id,job]:c.people().jobs()) {
+                if(preplanned_payroll_slices.contains(slice_id)||
+                   job.count<=0||job.wage_per_month<=0||
+                   scenario_payroll.contains(job.employer)||
+                   c.firm_bankrupt(job.employer))continue;
+                const auto& row=c.people().slice(slice_id);
+                const auto& demographic=c.people().demographic(
+                    row.key.demographic);
+                const std::string wallet="HH:"+std::to_string(row.key.household);
+                const auto& country=c.sovereignty(demographic.region);
+                if(!c.has_actor(wallet)||!c.has_actor(job.employer)||
+                   !c.has_actor(country)&&!c.has_country_treasury(country))
+                    continue;
+                if(c.has_government(country)&&!c.has_country_treasury(country))
+                    continue;
+                if(!c.has_government(country)&&c.has_any_government())
+                    continue;
+                const auto treasury=c.has_government(country)?
+                     c.country_treasury(country):country;
+                if(treasury==wallet||treasury==job.employer||
+                   wallet==job.employer)continue;
+                const Money gross=daily_increment(
+                    times(job.count,job.wage_per_month),date.day,dim);
+                if(gross<=0)continue;
+                const auto claim="P0:CONTRACT-WAGE:"+
+                    std::to_string(today)+":"+std::to_string(slice_id);
+                c.phase_time_accrue_contract_wage(claim,job.employer,wallet,
+                    treasury,c.has_government(country)?country:"",gross,today);
+            }
+        });
         // Earned wages are accrued by the preceding Stage5 employer
         // commands. Creditors are now paid before optional public transfers,
         // dividends or other discretionary local business expenditures.
@@ -1192,6 +1480,49 @@ public:
                     std::to_string(date.day),ai.country,ai.good,duty,ai.prime_minister);
             });
         }
+        // Merchant companies declare only their genuine home region and
+        // account; G finds sources, goods and transport itself each day.
+        for(const auto& office:decisions.merchant_offices)
+            plan[1].push_back([office](phasegh::Stage& gh) {
+                gh.register_daily_merchant(office);
+            });
+        // Only an existing unfinished construction plan creates demand
+        // for endogenous enterprise credit. C controls bank leverage, actual
+        // receipts/margins and debtor exposure with one canonical ledger.
+        if(decisions.allow_endogenous_investment_credit)
+            plan[1].push_back([rule=decisions.bank_credit_rule](
+                              phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::map<std::string,Money> obligations;
+                for(const auto& [id,p]:gh.phase_d().state().constructions) {
+                    (void)id;
+                    if(p.ready||p.commissioned||
+                       p.paid_work>=p.work_required||
+                       !c.has_actor(p.client)||c.firm_bankrupt(p.client)||
+                       c.has_government(p.client))continue;
+                    const Money due=times(
+                        p.work_required-p.paid_work,p.cash_price_per_work);
+                    obligations[p.client]=phaseb::add_checked(
+                        obligations[p.client],due);
+                }
+                for(const auto& [firm,due]:obligations) {
+                    if(c.firm_bankrupt(firm)||due<=0)continue;
+                    // G trade-credit drawn shares C's actual loan principal;
+                    // do not offer a second unrelated unsecured facility.
+                    bool pledged=false;
+                    for(const auto& [id,line]:gh.commerce().credit) {
+                        (void)id;
+                        if(line.active&&line.borrower==firm&&line.drawn>0){
+                            pledged=true;break;
+                        }
+                    }
+                    if(pledged)continue;
+                    const auto finance=c.firm_finance(firm);
+                    if(finance.available_cash>=due)continue;
+                    (void)c.lend_investment_credit(
+                        firm,due-finance.available_cash,rule);
+                }
+            });
         for(const auto& investment:decisions.investments) {
             auto work=std::make_shared<Quantity>(0);
             plan[1].push_back([investment,work](phasegh::Stage& gh){
@@ -1533,42 +1864,33 @@ public:
                 }
             });
         }
-        // All canonical households make endogenous daily essential-goods
-        // decisions after wages and actual production.  A household wallet is
-        // required to spend money; self-held food/clothing can be consumed
-        // in kind.  Explicit scenario Buyer policies take precedence per POP
-        // and good, so no duplicate consumption is created.
+        // Real household demand is classified by priority before spending:
+        // essential food cannot lose the entire budget to clothing or luxury.
+        // Optional class baskets use the same ledger as default food/clothing.
+        // Explicit scenario buyers continue to override individual POP goods.
         std::set<std::pair<Id,std::string>> explicitly_managed_demand;
         for(const auto& buyer:decisions.buyers)
             explicitly_managed_demand.insert({buyer.population_slice,buyer.good});
         plan[7].push_back(
             [explicitly_managed_demand,date,dim,
              food_units=decisions.daily_food_units_per_person,
-             clothing_monthly=decisions.monthly_clothing_units_per_person]
+             clothing_monthly=decisions.monthly_clothing_units_per_person,
+             basket=decisions.household_basket]
             (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
-                const auto& people=c.people();
-                using NeedKey=std::tuple<std::string,Id,std::string>;
-                std::map<NeedKey,Quantity> needs;
-                for(const auto& [slice_id,pop]:people.slices()) {
-                    if(pop.count<=0)continue;
-                    const auto& d=people.demographic(pop.key.demographic);
-                    const std::array<std::pair<std::string,Quantity>,2> baskets{{
-                        {"food",times(pop.count,food_units)},
-                        {"clothing",daily_increment(
-                            times(pop.count,clothing_monthly),date.day,dim)}
-                    }};
-                    for(const auto& [good,amount]:baskets) {
-                        if(amount<=0 ||
-                           explicitly_managed_demand.contains({slice_id,good}))
-                            continue;
-                        auto& due=needs[{d.region,pop.key.household,good}];
-                        due=phaseb::add_checked(due,amount);
-                    }
-                }
+                const auto needs=household_daily_needs(c.people(),date.day,dim,
+                    food_units,clothing_monthly,basket,explicitly_managed_demand);
+                std::vector<std::pair<HouseholdNeedKey,HouseholdNeedAmount>> ordered(
+                    needs.begin(),needs.end());
+                std::sort(ordered.begin(),ordered.end(),
+                    [](const auto& a,const auto& b) {
+                        return std::tuple{a.second.priority,a.first}<
+                               std::tuple{b.second.priority,b.first};
+                    });
                 const auto sellers=c.market_seller_index();
-                for(const auto& [key,demand]:needs) {
+                for(const auto& [key,need]:ordered) {
                     const auto& [region,household,good]=key;
+                    const Quantity demand=need.quantity;
                     const std::string wallet="HH:"+std::to_string(household);
                     Quantity still_due=demand;
                     const Quantity in_kind=std::min(still_due,
@@ -1591,6 +1913,82 @@ public:
                     }
                     if(good=="food" && still_due>0)
                         c.phase_time_record_food_need_gap(region,still_due);
+                }
+            });
+        // Goods purchased on this Stage7 stay in the buyer's C inventory,
+        // ready for a later Stage4 production run. No in-day teleportation:
+        // interregional inputs still require the existing F/G transport path.
+        // Household essential orders have already been processed first.
+        if(decisions.allow_endogenous_input_procurement)
+            plan[7].push_back(
+                [regional_need,date,dim](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto& domain=gh.phase_d().state();
+                using GoodsKey=std::tuple<std::string,std::string,std::string>;
+                std::map<GoodsKey,Quantity> inputs_wanted;
+                for(const auto& [recipe_id,recipe]:domain.recipes) {
+                    (void)recipe_id;
+                    if(recipe.inputs.empty()||recipe.outputs.empty()||
+                       recipe.needs_retrofit||
+                       recipe.requires_same_stage_nonstorable_energy||
+                       !c.facilities().contains(recipe.site))continue;
+                    const auto& facility=c.facility(recipe.site);
+                    if(c.firm_bankrupt(facility.owner)||
+                       facility.capacity<=facility.damaged||
+                       !c.has_market(facility.region,recipe.outputs.front().good))
+                        continue;
+                    const auto& primary=recipe.outputs.front();
+                    const auto& quote=c.market(facility.region,primary.good);
+                    auto need=regional_need.find({facility.region,primary.good});
+                    const Quantity consumer_need=need==regional_need.end()?0:need->second;
+                    if(quote.solvent_demand<=0&&consumer_need<=0&&
+                       quote.target_stock<=0)continue;
+                    const Quantity desired_stock=phaseb::add_checked(
+                        quote.target_stock,consumer_need);
+                    if(c.stock(facility.owner,facility.region,primary.good)>=
+                        std::max<Quantity>(primary.per_unit,desired_stock))
+                        continue;
+                    const People employed=c.phase_d_workforce(facility.owner);
+                    if(employed<=0||recipe.workers_per_batch<=0||
+                       recipe.capacity_per_batch<=0)continue;
+                    const Quantity monthly=facility.capacity-facility.damaged;
+                    const Quantity day_cap=monthly/dim+(monthly%dim!=0?1:0);
+                    const Quantity batches=std::min<Quantity>(
+                        day_cap/recipe.capacity_per_batch,
+                        employed/recipe.workers_per_batch);
+                    if(batches<=0)continue;
+                    Money input_cost=0;
+                    bool priced=true;
+                    for(const auto& item:recipe.inputs) {
+                        if(!c.has_market(facility.region,item.good)) {
+                            priced=false;break;
+                        }
+                        input_cost=phaseb::add_checked(input_cost,
+                            times(item.per_unit,
+                                c.market(facility.region,item.good).price));
+                    }
+                    const Money wage=times(recipe.workers_per_batch,
+                        actual_daily_worker_wage(c,facility.owner,date.day,dim));
+                    if(!priced||times(primary.per_unit,quote.price)<=
+                        phaseb::add_checked(input_cost,wage))continue;
+                    for(const auto& item:recipe.inputs) {
+                        const auto key=std::make_tuple(
+                            facility.owner,facility.region,item.good);
+                        inputs_wanted[key]=phaseb::add_checked(
+                            inputs_wanted[key],times(batches,item.per_unit));
+                    }
+                }
+                const auto sellers=c.market_seller_index();
+                for(const auto& [key,target]:inputs_wanted) {
+                    const auto& [buyer,region,good]=key;
+                    if(!c.has_market(region,good))continue;
+                    const Quantity current=c.phase_d_material_available(
+                        buyer,region,good);
+                    if(current>=target)continue;
+                    auto it=sellers.find({region,good});
+                    if(it==sellers.end())continue;
+                    (void)c.clear_household_market(
+                        buyer,region,good,target-current,it->second);
                 }
             });
         for(const auto& p:decisions.political_reactions) {
@@ -1679,9 +2077,9 @@ public:
                     reform=phaseb::add_checked(reform,preference);
                     incumbent=phaseb::add_checked(incumbent,voters-preference);
                 }
-                const People registered=phaseb::add_checked(incumbent,reform);
-                if(registered>0)
-                    c.hold_country_election(election.country,registered,0,
+                const People registered_voters=phaseb::add_checked(incumbent,reform);
+                if(registered_voters>0)
+                    c.hold_country_election(election.country,registered_voters,0,
                          {{election.incumbent_party,incumbent},
                           {election.reform_party,reform}});
             });
@@ -2187,7 +2585,7 @@ public:
         if(decisions.allow_market_liquidation_of_real_stock)
             plan[7].push_back([](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
-                const auto index=c.market_seller_index();
+                const auto index=c.market_seller_index(true);
                 for(const auto& [key,sellers]:index) {
                     const auto& [region,good]=key;
                     if(!c.has_market(region,good))continue;
@@ -2215,6 +2613,41 @@ public:
                                     quote.price);
                         }
                     }
+                }
+            });
+        // Solvent operating firms can retire outstanding principal without a
+        // separate AI debt ledger. Preserve part of real liquidity for payroll
+        // and material purchases; manual debt orders remain authoritative.
+        if(decisions.allow_endogenous_debt_repayment)
+            plan[8].push_back([manual=decisions.debt_service](
+                    phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::set<std::string> seen;
+                for(const auto& [site,f]:c.facilities()) {
+                    (void)site;
+                    if(!seen.insert(f.owner).second||c.firm_bankrupt(f.owner)||
+                       c.has_government(f.owner)||
+                       std::any_of(manual.begin(),manual.end(),
+                          [&](const DebtService& d){return d.borrower==f.owner;}))
+                        continue;
+                    bool pledged_credit=false;
+                    for(const auto& [id,line]:gh.commerce().credit) {
+                        (void)id;
+                        if(line.active&&line.borrower==f.owner&&line.drawn>0) {
+                            pledged_credit=true;break;
+                        }
+                    }
+                    if(pledged_credit)continue;
+                    const auto view=c.firm_finance(f.owner);
+                    if(view.outstanding_bank_loan<=0||view.book_surplus<=0||
+                       view.available_cash<=2)continue;
+                    const Money reserve=std::max<Money>(
+                        view.expenses/30,view.available_cash/2);
+                    if(view.available_cash<=reserve)continue;
+                    const Money payment=std::min(
+                        view.outstanding_bank_loan,
+                        (view.available_cash-reserve)/4);
+                    if(payment>0)c.repay(f.owner,payment);
                 }
             });
         // Outstanding wages take precedence over unsecured bank principal.
@@ -2373,6 +2806,28 @@ public:
                     }
                 }
             });
+        // Supply-side investment opportunities come from the campaign's
+        // documented construction and production catalogue. Candidate goods
+        // must have solvent unmet demand in today's C market; no building or
+        // owner is created before the real project satisfies D's constraints.
+        if(date.day==1)
+            for(const auto& opportunity:decisions.industry_opportunities)
+                plan[9].push_back(
+                    [opportunity,month=game_c.month()](phasegh::Stage& gh) {
+                        auto project=opportunity.project;
+                        auto recipe=opportunity.recipe;
+                        const auto suffix=opportunity.id+":"+std::to_string(month);
+                        project.id="P0:ENTRY:"+suffix;
+                        project.target_site="P0:SITE:"+suffix;
+                        recipe.id="P0:RECIPE:"+suffix;
+                        recipe.site=project.target_site;
+                        if(opportunity.new_firm_equity>0)
+                            project.client="P0:FIRM:"+suffix;
+                        (void)gh.phase_d().propose_industry_entry(
+                            std::move(project),std::move(recipe),
+                            opportunity.founder,opportunity.new_firm_equity,
+                            opportunity.investor_cash_reserve);
+                    });
         // Actual creditor entries remain in C's balance sheet until paid.
         // No additional late-day payment pass is needed: employee wages
         // are prioritized before discretionary spending in Stage5.
