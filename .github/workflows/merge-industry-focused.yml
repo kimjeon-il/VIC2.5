@@ -1,0 +1,21 @@
+name: VIC2.5 industry integration minimal checks
+on:
+  push:
+    branches: [work/merge-industry-20261119]
+  workflow_dispatch:
+jobs:
+  focused:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run native building sites and construction
+        run: |
+          g++ -std=c++20 -O0 -Iinclude tests/test_phase_d_buildings.cpp -o /tmp/vic25-buildings-smoke
+          /tmp/vic25-buildings-smoke
+      - name: Compile and run integrated economy and law
+        run: |
+          g++ -std=c++20 -O0 -Iinclude tests/test_economy_native_smoke.cpp -o /tmp/vic25-economy-smoke
+          /tmp/vic25-economy-smoke
+          g++ -std=c++20 -O0 -Iinclude tests/test_merged_law_projection.cpp -o /tmp/vic25-law-smoke
+          /tmp/vic25-law-smoke
