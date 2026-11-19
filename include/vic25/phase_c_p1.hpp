@@ -91,6 +91,10 @@ struct P1InstitutionView {
        static_cast<unsigned>(c.legislature)>
            static_cast<unsigned>(P1LegislatureKind::bicameral)||
        c.legal_basis.empty())return false;
+    // Anarchist distribution cannot simultaneously retain a separate
+    // hereditary or executive head-of-state: council governance only.
+    if(c.power==P1PowerDistribution::anarchy&&
+       c.governance!=P1GovernancePrinciple::council_republic)return false;
     if((c.governance==P1GovernancePrinciple::parliamentary_republic ||
         c.governance==P1GovernancePrinciple::council_republic ||
         c.governance==P1GovernancePrinciple::social_monarchy) &&
