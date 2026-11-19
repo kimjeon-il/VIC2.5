@@ -12,6 +12,13 @@ namespace vic25::phasec {
 enum class P2NormTier : std::uint8_t {
     constitution, statute, delegated_regulation, local_ordinance
 };
+// One P2 parliamentary threshold; constitutional laws require two thirds.
+[[nodiscard]] constexpr std::int64_t p2_chamber_quorum(
+        std::int64_t seats,std::int64_t ordinary_quorum,
+        P2NormTier tier) {
+    return tier==P2NormTier::constitution?
+        seats-seats/3:ordinary_quorum;
+}
 enum class P2ClauseKind : std::uint8_t {
     term_months, max_consecutive_terms, max_lifetime_terms,
     term_cycle_mode, dissolution_authorized, dissolution_max_delay_days,
