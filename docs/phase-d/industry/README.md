@@ -8,7 +8,9 @@
 ## 2026-11-15 원작 1.15 비교 보충 자료
 
 - [Victoria 3 1.15 산업·건물 99개 대응표](VIC3_1_15_BUILDING_INDUSTRY_CROSSWALK_2026-11-15.md) — 기존 13개 산업군에 원작 23/34/14/28 분류를 대응. 건물/산업/기업/실물 원장을 구분하고, 실제 건설/운영과 파생표시를 분리하는 **설계 문서**.
-- [99개 참조 행 JSON](../../../data/reference/vic3_115_building_crosswalk.json) — 개발 참고용만. `runtime_loaded: false`; 데이터 등록이 곧 C++ 실행 기능을 뜻하지 않는다.
+- [99개 참조 행 JSON](../../../data/reference/vic3_115_building_crosswalk.json) — JSON 파일 자체는 런타임에서 읽지 않고, 생성된 C++ 헤더가 99개를 조회한다. 실제 건물 시설·공사·생산 바인딩은 Phase D P0/P1 API에서만 생성된다.
+
+P0/P1 C++ 연결: `include/vic25/building_catalog.hpp`, `include/vic25/phase_d.hpp`, `tests/test_phase_d_buildings.cpp` (검사 미실행). 기존 산업 전체 구현 완료를 의미하지 않음.
 
 ## 설계 정본
 

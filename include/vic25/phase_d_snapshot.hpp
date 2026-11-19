@@ -134,6 +134,7 @@ template<class A,class X> void state(A& a,X& d) {
     map(a,d.constructions,[](auto& ar,auto& v){construction(ar,v);});
     map(a,d.work_packages,[](auto& ar,auto& v){work_package(ar,v);});
     map(a,d.industry_classes,[](auto& ar,auto& v){industry_class(ar,v);});
+    a(d.site_archetypes);
     map(a,d.resource_sites,[](auto& ar,auto& v){resource_site(ar,v);});
     a(d.cumulative_nonmarket_waste);
     map(a,d.recipes,[](auto& ar,auto& v){industry(ar,v);});
@@ -156,8 +157,8 @@ template<class A,class X> void state(A& a,X& d) {
 } // namespace detail
 
 struct SnapshotCodec {
-    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_6";
-    static constexpr const char* contract_version="phase-d-cpp/0.6";
+    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_7";
+    static constexpr const char* contract_version="phase-d-cpp/0.7";
     static std::string encode(const World& w) {
         w.validate();
         const auto core_payload=phasec::SnapshotCodec::encode(w.core_);
