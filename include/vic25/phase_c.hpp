@@ -310,6 +310,132 @@ public:
                 {"BANK:reserves", amount, 0}, {"BANK:deposit", 0, amount}}});
         }
     }
+    struct FirmFinanceView {
+        Money cash{},available_cash{},receipts{},expenses{},book_surplus{};
+        Money outstanding_bank_loan{},outstanding_wages{};
+    };
+    // Ledger-only view: receipts minus booked expenses is not historical
+    // accrual profit (unsold material has no arbitrary book valuation).
+    [[nodiscard]] FirmFinanceView firm_finance(const std::string& firm)const {
+        ensure(actors_.contains(firm),"unknown firm balance sheet");
+        const Money revenue=-money_.balance(account(firm,"revenue"));
+        const Money expenses=money_.balance(account(firm,"expense"));
+        return {cash(firm),phase_d_cash_available(firm),revenue,expenses,
+                phaseb::add_checked(revenue,-expenses),outstanding_loan(firm),
+                outstanding_worker_wages(firm)};
+    }
+    // Bank credit is a risk-limited policy evaluated over the *existing* C
+    // balance sheet. It has no separate bank-money or credit-rating ledger.
+    struct BankCreditRule {
+        int max_loans_to_reserves_ppm{2'000'000};
+        int max_firm_debt_to_revenue_ppm{1'000'000};
+        int minimum_margin_ppm{50'000};
+        int max_daily_draw_to_revenue_ppm{500'000};
+    };
+    struct BankCreditView {
+        Money bank_reserves{},total_deposits{},total_loans{},bank_bad_debt{};
+        Money bank_available{},firm_available{};
+        bool eligible{};
+    };
+    [[nodiscard]] BankCreditView assess_investment_credit(
+        const std::string& firm,const BankCreditRule& rule)const {
+        ensure(rule.max_loans_to_reserves_ppm>=0&&
+               rule.max_loans_to_reserves_ppm<=10'000'000&&
+               rule.max_firm_debt_to_revenue_ppm>=0&&
+               rule.max_firm_debt_to_revenue_ppm<=10'000'000&&
+               rule.max_daily_draw_to_revenue_ppm>=0&&
+               rule.max_daily_draw_to_revenue_ppm<=1'000'000&&
+               rule.minimum_margin_ppm>=0&&
+               rule.minimum_margin_ppm<=1'000'000,
+               "P0_INVALID_PRUDENTIAL_BANK_RULE");
+        ensure(actors_.contains(firm),"unregistered credit borrower");
+        const auto reserves=money_.balance("BANK:reserves");
+        const auto deposits=-money_.balance("BANK:deposit");
+        const auto loans=money_.balance("BANK:loan");
+        const auto loss=total_bad_debt_;
+        BankCreditView result{reserves,deposits,loans,loss,0,0,false};
+        if(bank_insolvent_||bank_interest_annual_ppm_<=0||
+           bankrupt_firms_.contains(firm)||
+           outstanding_worker_wages(firm)>0||
+           reserves<=0||deposits<=0||loans<0)return result;
+        const auto finance=firm_finance(firm);
+        if(finance.receipts<=0||finance.book_surplus<=0||
+           finance.expenses<0)return result;
+        const auto margin=phaseb::mul_checked(
+            finance.book_surplus/finance.receipts,1'000'000);
+        // Avoid integer flooring for small monetary amounts.
+        const auto margin_tail=phaseb::mul_checked(
+            finance.book_surplus%finance.receipts,1'000'000)/
+                finance.receipts;
+        if(phaseb::add_checked(margin,margin_tail)<rule.minimum_margin_ppm)
+            return result;
+        const auto scale=[](Money n,int ppm)->Money {
+            return phaseb::add_checked(
+                phaseb::mul_checked(n/1'000'000,ppm),
+                phaseb::mul_checked(n%1'000'000,ppm)/1'000'000);
+        };
+        const Money effective_reserves=std::max<Money>(0,reserves-loss);
+        const Money bank_limit=scale(effective_reserves,
+                                   rule.max_loans_to_reserves_ppm);
+        const Money firm_limit=scale(finance.receipts,
+                                   rule.max_firm_debt_to_revenue_ppm);
+        const Money daily_limit=scale(finance.receipts,
+                                    rule.max_daily_draw_to_revenue_ppm);
+        result.bank_available=std::max<Money>(0,bank_limit-loans);
+        result.firm_available=std::min({
+            result.bank_available,
+            std::max<Money>(0,firm_limit-finance.outstanding_bank_loan),
+            daily_limit});
+        result.eligible=result.firm_available>0;
+        return result;
+    }
+    Money lend_investment_credit(const std::string& firm,Money requested,
+                                 const BankCreditRule& rule) {
+        require_stage({1});
+        ensure(requested>=0,"P0_NEGATIVE_INVESTMENT_CREDIT_REQUEST");
+        if(requested==0)return 0;
+        const auto view=assess_investment_credit(firm,rule);
+        const auto amount=std::min(requested,view.firm_available);
+        if(amount>0)lend(firm,amount);
+        return amount;
+    }
+    // New legal firms come from a real investor's cash at Stage 9. The
+    // matching company equity certificate is a title, not a second deposit.
+    // Bank reserves and aggregate cash remain unchanged.
+    void phase_time_found_firm(const std::string& firm,
+                               const std::string& founder,Money equity) {
+        require_stage({9});
+        ensure(!firm.empty()&&!founder.empty()&&firm!=founder&&
+               equity>0&&actors_.contains(founder)&&
+               !actors_.contains(firm)&&!bankrupt_firms_.contains(founder)&&
+               phase_d_cash_available(founder)>=equity,
+               "unfunded or duplicate private company");
+        const auto asset="company:"+firm;
+        ensure(!tracked_assets_.contains(asset),
+               "duplicate founding company equity title");
+        register_typed(EntityKind::actor,firm);
+        actors_.insert(firm);
+        for (const auto& [suffix,type]:
+             std::array<std::pair<std::string,AccountType>,7>{{
+                {"cash",AccountType::asset},
+                {"capital",AccountType::equity},
+                {"revenue",AccountType::revenue},
+                {"expense",AccountType::expense},
+                {"debt",AccountType::liability},
+                {"reparations_payable",AccountType::liability},
+                {"reparations_receivable",AccountType::asset}}})
+            money_.add_account(account(firm,suffix),firm,type);
+        ownership_.issue(asset,founder,equity);
+        tracked_assets_.insert(asset);
+        ensure_security_account(founder,asset);
+        money_.post({unique("found-company"),
+            "founder subscribes real cash in exchange for new company shares",{
+            {security_account(founder,asset),equity,0},
+            {account(founder,"cash"),0,equity},
+            {account(firm,"cash"),equity,0},
+            {account(firm,"capital"),0,equity}}});
+        events_.push_back("founded-funded-company:"+firm);
+    }
     void seed_stock(std::string holder, std::string region, std::string good, Quantity qty) {
         ensure(stage_ == -1 && commit_id_ == 0, "stock seed after simulation start");
         ensure(qty > 0, "invalid initial stock");
@@ -1277,10 +1403,13 @@ public:
     // It is built once per active market day, not once per POP household.
     using MarketSellerIndex=std::map<
         std::pair<std::string,std::string>,std::vector<std::string>>;
-    [[nodiscard]] MarketSellerIndex market_seller_index()const {
+    [[nodiscard]] MarketSellerIndex market_seller_index(
+        bool include_bankrupt_estates=false)const {
         MarketSellerIndex result;
         for(const auto& [key,stock_now]:goods_.holdings()) {
             if(stock_now<=0||!actors_.contains(key.holder_id)||
+               key.holder_id.starts_with("HH:")||
+               (!include_bankrupt_estates&&bankrupt_firms_.contains(key.holder_id))||
                !markets_.contains({key.region_id,key.good_id}))continue;
             result[{key.region_id,key.good_id}].push_back(key.holder_id);
         }
@@ -1389,17 +1518,29 @@ public:
             (void)region;
             if(n>0)n-=std::max<People>(1,n/20);
         }
+        // Sales leave the seller's real inventory; unsold merchandise is
+        // also supply when there were no buyers today. No duplicate stock.
+        std::map<std::pair<std::string,std::string>,Quantity> unsold_supply;
+        for(const auto& [stock_key,quantity]:goods_.holdings()) {
+            if(quantity<=0||!actors_.contains(stock_key.holder_id)||
+               stock_key.holder_id.starts_with("HH:")||
+               bankrupt_firms_.contains(stock_key.holder_id))continue;
+            const auto key=std::make_pair(stock_key.region_id,stock_key.good_id);
+            if(markets_.contains(key))
+                unsold_supply[key]=phaseb::add_checked(
+                    unsold_supply[key],quantity);
+        }
         for(auto& [key,m]:markets_) {
-            const auto& [region,good]=key;
-            (void)region;
-            (void)good; // Need gaps were already counted once at stage 7.
-            // 1% nominal pressure per active day, with deterministic discrete
-            // currency ticks for prices below 100 units.
+            m.stock_offered=std::max(m.stock_offered,
+                phaseb::add_checked(m.delivered,unsold_supply[key]));
+            // Keep the native daily ceiling of ~1% instead of a volatile
+            // instant-clearing price. Lack of buyers now lowers an observed
+            // stock glut rather than leaving the quote frozen indefinitely.
             const Money step=m.price>=100?std::max<Money>(1,m.price/100):
-                    (day_index%std::max<Money>(1,100/m.price)==0?1:0);
-            if(m.unmet>0 && step>0)
+                (day_index%std::max<Money>(1,100/m.price)==0?1:0);
+            if(m.unmet>0&&step>0)
                 m.price=std::min(m.ceiling,phaseb::add_checked(m.price,step));
-            else if(m.unmet==0 && m.solvent_demand>0 &&
+            else if(m.unmet==0 &&
                     m.stock_offered>phaseb::add_checked(m.solvent_demand,m.target_stock) &&
                     step>0)
                 m.price=std::max(m.floor,m.price-step);
