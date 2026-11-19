@@ -376,6 +376,38 @@ struct DomainState {
             }
             require(known_site,"building archetype has no real or planned site");
         }
+        for(const auto& [id,r]:recipes) {
+            (void)id;
+            const auto binding=site_archetypes.find(r.site);
+            if(binding==site_archetypes.end())continue;
+            const auto* spec=building::profile(binding->second);
+            require(spec && spec->operation==building::Operation::recipe &&
+                    building::find(binding->second)->industry==r.industry_class,
+                    "bound building recipe has wrong industry or activity");
+            bool output_valid=false;
+            for(const auto& output:r.outputs)
+                output_valid|=spec->output_allowed(output.good);
+            require(output_valid,"bound recipe produces incorrect goods");
+            for(const auto input:spec->required_input_goods) {
+                if(input.empty())continue;
+                require(std::any_of(r.inputs.begin(),r.inputs.end(),
+                    [&](const Input& v){return v.good==input;}),
+                    "bound recipe missing original mandatory material");
+            }
+        }
+        for(const auto& [id,resource]:resource_sites) {
+            (void)id;
+            const auto binding=site_archetypes.find(resource.site);
+            if(binding==site_archetypes.end())continue;
+            const auto* spec=building::profile(binding->second);
+            const bool mineral=spec &&
+                (spec->siting==building::Siting::mineral ||
+                 spec->siting==building::Siting::oil_site);
+            require(spec && spec->operation==building::Operation::resource &&
+                    spec->output_allowed(resource.good) &&
+                    resource.renewable!=mineral,
+                    "bound resource source disagrees with building or land flow");
+        }
         for(const auto& [id,v]:cumulative_nonmarket_waste){
             (void)id;require(v>=0,"negative accumulated nonmarket waste");
         }
