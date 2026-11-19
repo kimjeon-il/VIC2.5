@@ -112,19 +112,24 @@ inline Quote evaluate(const phasec::IntegratedWorld& c,
                       const phasee::SpatialState& spatial,
                       const phasegh::TradeState& trade,
                       const phased::IndustryRecipe& recipe,
-                      int day=0,int days=0) {
+                      int day=0,int days=0,
+                      const phased::ConstructionProject* planned=nullptr) {
     Quote q;
     q.recipe=recipe.id;
     if(recipe.outputs.empty()||recipe.inputs.empty()||
        recipe.workers_per_batch<=0||recipe.capacity_per_batch<=0||
        recipe.needs_retrofit||recipe.requires_same_stage_nonstorable_energy)
         return q;
-    auto site=c.facilities().find(recipe.site);
-    if(site==c.facilities().end())return q;
-    const auto& f=site->second;
-    q.owner=f.owner;q.region=f.region;
-    if(c.firm_bankrupt(f.owner))return q;
+    const auto site=c.facilities().find(recipe.site);
+    if(site==c.facilities().end() &&
+       (!planned || planned->target_site!=recipe.site ||
+        planned->ready || planned->commissioned ||
+        planned->target_capacity<=0))return q;
+    q.owner=site==c.facilities().end()?planned->client:site->second.owner;
+    q.region=site==c.facilities().end()?planned->region:site->second.region;
+    if(c.firm_bankrupt(q.owner))return q;
     if(!recipe.tech_id.empty()) {
+        if(site==c.facilities().end())return q; // no free adoption in a planned site
         const auto tech=domain.active_site_tech.find(recipe.site);
         if(tech==domain.active_site_tech.end()||
            tech->second!=recipe.tech_id)return q;
@@ -139,22 +144,22 @@ inline Quote evaluate(const phasec::IntegratedWorld& c,
            archetype->industry!=recipe.industry_class)return q;
     }
     for(const auto& out:recipe.outputs) {
-        if(!c.has_market(f.region,out.good))return q;
+        if(!c.has_market(q.region,out.good))return q;
         q.revenue_per_batch=phaseb::add_checked(q.revenue_per_batch,
-                          positive_mult(c.market(f.region,out.good).price,out.per_unit));
+                          positive_mult(c.market(q.region,out.good).price,out.per_unit));
     }
     const auto& primary=recipe.outputs.front();
     q.product=primary.good;
-    const auto& output_quote=c.market(f.region,primary.good);
+    const auto& output_quote=c.market(q.region,primary.good);
     const Quantity shortage=std::max<Quantity>(
         output_quote.unmet,std::max<Quantity>(
-            0,output_quote.target_stock-c.stock(f.owner,f.region,primary.good)));
+            0,output_quote.target_stock-c.stock(q.owner,q.region,primary.good)));
     q.demand_batches=shortage/primary.per_unit+
                      (shortage%primary.per_unit?1:0);
     if(q.demand_batches<=0)return q;
     for(const auto& in:recipe.inputs) {
         const auto supply=observed_supply(c,spatial,trade,
-                          f.region,in.good,in.per_unit,day,days);
+                          q.region,in.good,in.per_unit,day,days);
         if(!supply)return q;
         q.inputs_per_batch=phaseb::add_checked(q.inputs_per_batch,
              positive_mult(supply->price_per_unit,in.per_unit));
@@ -164,8 +169,8 @@ inline Quote evaluate(const phasec::IntegratedWorld& c,
         q.feasible_supply_batches=std::min(q.feasible_supply_batches,
                                            supply->actual_units/in.per_unit);
     }
-    const Money wage=observed_wage(c,f.owner,f.region,day,days);
-    if(wage<=0 || regional_workers(c,f.owner,f.region)<recipe.workers_per_batch)
+    const Money wage=observed_wage(c,q.owner,q.region,day,days);
+    if(wage<=0 || regional_workers(c,q.owner,q.region)<recipe.workers_per_batch)
         return q; // unknown wage or genuinely absent recruitment pool
     q.wages_per_batch=positive_mult(wage,recipe.workers_per_batch);
     const Money costs=phaseb::add_checked(phaseb::add_checked(
