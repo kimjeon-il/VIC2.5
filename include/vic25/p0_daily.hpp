@@ -914,20 +914,22 @@ public:
                 if(!quote.valid || quote.demand_batches<=0)continue;
                 if(!game_c.has_market(project.region,quote.product))continue;
                 const Money capex=times(project.work_required,project.cash_price_per_work);
+                const Money operating_reserve=std::max(
+                    decisions.autonomous_factory_cash_reserve,
+                    quote.wages_per_batch);
                 const Money capital=phaseb::add_checked(
                     game_c.phase_d_cash_available(project.client),
                     decisions.allow_collateralized_enterprise_credit?
                         enterprise_ai::approved_credit_remaining(
                             game_c,world_.engine().commerce(),project.client):0);
-                if(capital<phaseb::add_checked(capex,decisions.autonomous_factory_cash_reserve))continue;
+                if(capital<phaseb::add_checked(capex,operating_reserve))continue;
                 const Quantity batches=std::min({
                     quote.demand_batches,quote.feasible_supply_batches,
                     project.target_capacity/recipe.capacity_per_batch});
                 if(batches<=0||
                    times(times(quote.margin_per_batch,batches),12)<=capex)continue;
                 decisions.investments.push_back(
-                    Investment{id,quote.product,
-                      decisions.autonomous_factory_cash_reserve,1,1});
+                    Investment{id,quote.product,operating_reserve,1,1});
                 autonomous_projects.insert(id);
                 break;
             }
@@ -2576,7 +2578,7 @@ public:
                 const auto& c=gh.phase_c();
                 struct Candidate {
                     std::string project,recipe;
-                    Money score{},approved_credit{};
+                    Money score{},approved_credit{},operating_reserve{};
                 };
                 std::map<std::string,Candidate> best_by_owner;
                 for(const auto& [id,p]:domain.constructions) {
@@ -2612,8 +2614,13 @@ public:
                         if(candidate_batches<=0)continue;
                         const Money expected=times(times(
                             quote.margin_per_batch,candidate_batches),12);
+                        const Money planned_reserve=std::max(
+                            reserve,quote.wages_per_batch);
+                        if(phaseb::add_checked(cash,unused_credit)<
+                           phaseb::add_checked(capex,planned_reserve))
+                            continue;
                         const Money borrowed=std::max<Money>(
-                            0,phaseb::add_checked(capex,reserve)-cash);
+                            0,phaseb::add_checked(capex,planned_reserve)-cash);
                         const Money interest=times(
                             borrowed,c.annual_bank_interest_ppm())/1'000'000;
                         if(expected<=phaseb::add_checked(capex,interest))continue;
@@ -2626,7 +2633,8 @@ public:
                            (value==existing->second.score &&
                             key<std::make_pair(existing->second.project,
                                                existing->second.recipe))) {
-                            best_by_owner[p.client]=Candidate{id,rid,value,unused_credit};
+                            best_by_owner[p.client]=Candidate{
+                                id,rid,value,unused_credit,planned_reserve};
                         }
                     }
                 }
@@ -2637,8 +2645,8 @@ public:
                     (void)owner;
                     const auto key=choice.project+":"+std::to_string(today);
                     (void)gh.phase_d().propose_firm_expansion(
-                        choice.project,choice.recipe,key,reserve,
-                        choice.approved_credit);
+                        choice.project,choice.recipe,key,
+                        choice.operating_reserve,choice.approved_credit);
                 }
             });
         // Actual creditor entries remain in C's balance sheet until paid.
