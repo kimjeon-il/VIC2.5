@@ -1,5 +1,7 @@
 #include "vic25/phase_d_snapshot.hpp"
 #include "vic25/building_catalog.hpp"
+#include "vic25/building_operating_profiles.hpp"
+#include "vic25/phase_e.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -24,6 +26,8 @@ static Id seed_worker(World& w,People count) {
 }
 static void test_native_catalog_and_actual_production() {
     check(vic25::building::archetypes.size()==99 &&
+          vic25::building::operating_profiles.size()==52 &&
+          vic25::building::valid_profiles() &&
           vic25::building::industries.size()==13 &&
           vic25::building::group_count("urban")==23 &&
           vic25::building::group_count("rural")==34 &&
@@ -73,6 +77,8 @@ static void test_native_catalog_and_actual_production() {
     food.workers_per_batch=1;
     w.seed_building_recipe(food);
     core.seed_stock("FIRM","R","grain",2);
+    check(w.building_production_capacity("BREAD").feasible_batches==0,
+          "unemployed staff incorrectly created product capacity");
     const auto worker=seed_worker(w,2);
     World::Plan p;
     p[2].push_back([worker](Stage& s){
@@ -80,6 +86,8 @@ static void test_native_catalog_and_actual_production() {
     });
     p[4].push_back([](Stage& s){s.manufacture("BREAD",2);});
     w.advance(p);
+    check(w.building_production_capacity("BREAD").feasible_batches==0,
+          "exhausted physical inputs should cap future production");
     check(w.core().stock("FIRM","R","groceries")==4 &&
           w.core().stock("FIRM","R","grain")==0 &&
           w.realized_batches("MANU",4200,4200)==2,
@@ -145,10 +153,85 @@ static void test_construction_and_recipe_before_commission() {
           w.core().phase_d_wip("CLIENT")==0,
           "commissioning lost archetype or bypassed real WIP");
 }
+static void test_farm_with_real_material_and_renewable_crop() {
+    World w{4400};auto& c=w.seed_core();
+    c.seed_actor("FARMER",50);c.seed_region("R","STATE");
+    w.seed_standard_industries();
+    w.seed_building_facility("FIELD","FARMER","R",4,
+                            "vic3_115.rural.wheat_farms");
+    ResourceSite crop;
+    crop.id="WHEAT";crop.site="FIELD";crop.owner="FARMER";crop.region="R";
+    crop.good="grain";crop.monthly_capacity=4;
+    crop.renewable=true;crop.standing_biomass=4;crop.carrying_capacity=6;
+    crop.renewal_per_month=1;crop.operational_inputs_per_unit={{"seed_material",1}};
+    w.seed_building_resource_site(crop);
+    c.seed_stock("FARMER","R","seed_material",3);
+    const auto worker=seed_worker(w,3);
+    World::Plan p;
+    p[2].push_back([worker](Stage& s){s.phase_c().hire(worker,3,"FARMER",1);});
+    p[4].push_back([](Stage& s){s.extract_resource("WHEAT",2);});
+    w.advance(p);
+    check(w.core().stock("FARMER","R","grain")==2 &&
+          w.core().stock("FARMER","R","seed_material")==1 &&
+          w.resource_site("WHEAT").standing_biomass==3,
+          "real crop resources/materials not consumed or generated atomically");
+    const auto bytes=SnapshotCodec::encode(w);
+    check(SnapshotCodec::encode(SnapshotCodec::decode(bytes))==bytes,
+          "farm operational input was lost by snapshot codec");
+    World::Plan unsupported;
+    unsupported[4].push_back([](Stage& s){s.extract_resource("WHEAT",2);});
+    check(rejects([&]{w.advance(unsupported);}) &&
+          w.core().stock("FARMER","R","seed_material")==1 &&
+          w.core().stock("FARMER","R","grain")==2,
+          "farm material shortage must rollback all actual production");
+}
+static void test_actual_geographic_site_conditions() {
+    vic25::phasee::World map{4500};
+    auto& c=map.seed_core().seed_core();
+    c.seed_actor("FARMER",0);c.seed_actor("CARRIER",0);
+    c.seed_actor("MINER",0);
+    map.seed_province(10,"INLAND","STATE",1000);
+    map.seed_province(11,"COAST","STATE",1000);
+    check(rejects([&]{
+        map.seed_building_in_province("FALSE_PORT","CARRIER",10,2,
+                                     "vic3_115.development.port");
+    }),"inland port accepted without coastal topology");
+    map.seed_coast(11,55);
+    map.seed_building_in_province("PORT","CARRIER",11,2,
+                                 "vic3_115.development.port");
+    check(rejects([&]{
+        map.seed_building_in_province("UNOWNED_FIELD","FARMER",10,2,
+                                     "vic3_115.rural.wheat_farms");
+    }),"unowned farmland treated as a cultivated parcel");
+    c.seed_shares("land:INLAND:field1","FARMER",1);
+    map.seed_building_in_province("FARM","FARMER",10,2,
+                                 "vic3_115.rural.wheat_farms",
+                                 "land:INLAND:field1");
+    check(rejects([&]{
+        map.seed_building_in_province("FALSE_MINE","MINER",10,2,
+                                     "vic3_115.rural.iron_mines");
+    }),"mineral facility accepted with no established extraction title");
+    c.seed_shares("mining_right:INLAND:ore1","MINER",1);
+    map.seed_building_in_province("MINE","MINER",10,2,
+                                 "vic3_115.rural.iron_mines",
+                                 "mining_right:INLAND:ore1");
+    check(rejects([&]{
+        map.seed_building_in_province("NO_RAIL","CARRIER",10,2,
+                                     "vic3_115.development.railway");
+    }),"rail hub without physical rail link accepted");
+    map.seed_geographic_link("RAIL1",10,11,"rail");
+    map.seed_building_in_province("RAIL","CARRIER",10,2,
+                                 "vic3_115.development.railway");
+    check(map.core().site_archetype("PORT")->industry=="LOGI" &&
+          map.core().site_archetype("MINE")->industry=="EXTR",
+          "siting eligibility did not create validated physical buildings");
+}
 int main() {
     try {
         test_native_catalog_and_actual_production();
         test_construction_and_recipe_before_commission();
+        test_farm_with_real_material_and_renewable_crop();
+        test_actual_geographic_site_conditions();
         std::cout<<"Vic3 1.15 / VIC2.5 building P0/P1 catalogue, recipe, snapshot PASS\n";
         return 0;
     } catch(const std::exception& e) {
