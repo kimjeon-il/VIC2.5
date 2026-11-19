@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
 #include <functional>
 #include <map>
 #include <stdexcept>
@@ -390,6 +391,121 @@ struct DomainState {
         }
     }
 };
+
+// Research-rate law effects reduce the *required funded evidence*; they do
+// not mint fictitious scientists, goods, cash or completed research work.
+// Speed is evaluated at review time, so repealing a reform also matters.
+// A throughput law changes the yields from *verified paid-material and labor
+// batches*, not the plant capacity, not the market quote, and not a phantom
+// free source. Cumulative rounding makes ten one-unit batches with a +10% law
+// yield exactly eleven units, even across separate daily production orders.
+inline Quantity law_verified_yield(Quantity before,Quantity produced,
+                                  double throughput) {
+    require(before>=0&&produced>=0,"negative industry yield units");
+    const auto cumulative=phaseb::add_checked(before,produced);
+    const long double multiplier=std::clamp(
+        1.0L+static_cast<long double>(throughput),0.05L,4.0L);
+    const auto adjusted=[&](Quantity n)->Quantity {
+        const long double total=std::floor(static_cast<long double>(n)*
+                                            multiplier);
+        require(total>=0&&total<=static_cast<long double>(
+                   std::numeric_limits<Quantity>::max()/4),
+                "law throughput overflows physical goods");
+        return static_cast<Quantity>(total);
+    };
+    return adjusted(cumulative)-adjusted(before);
+}
+// Industry-class parents are explicit Phase D taxonomy: do not assign a
+// plantation/farm law to an unknown mine from the name of its output good.
+inline double law_industry_throughput(const DomainState& state,
+        const phasec::IntegratedWorld& c,const IndustryRecipe& recipe) {
+    const auto& facility=c.facility(recipe.site);
+    const auto& country=c.sovereignty(facility.region);
+    std::string current=recipe.industry_class;
+    std::set<std::string> visited;
+    double bonus=0;
+    const bool unincorporated=false; // no region-level incorporation evidence in current E
+    if(unincorporated)
+        bonus+=c.p2_region_modifier_value(facility.region,
+            "building_unincorporated_throughput_add");
+    for(int depth=0;depth<12&&!current.empty()&&
+            visited.insert(current).second;++depth) {
+        const auto alias=current=="manufacture"?"manufacturing":
+                         current=="mining"?"extraction":
+                         current=="art_academy"?"arts":current;
+        if(alias=="manufacturing"||alias=="agriculture"||
+           alias=="plantations"||alias=="extraction"||
+           alias=="ranching"||alias=="logging")
+            bonus+=c.p2_region_modifier_value(facility.region,
+                "building_group_bg_"+alias+"_throughput_add");
+        if(alias=="arts")
+            bonus+=c.p2_region_modifier_value(facility.region,
+                "building_art_academy_throughput_add");
+        if(unincorporated) {
+            // Every law effect applies to a concrete, verified industry
+            // class; no automatic bonus for an untyped factory.
+            const auto kind=alias=="extraction"?"mining":alias;
+            if(kind=="manufacturing"||kind=="plantations"||
+               kind=="logging"||kind=="mining"||kind=="rubber")
+                bonus+=c.p2_region_modifier_value(facility.region,
+                    "building_group_bg_"+kind+
+                    "_unincorporated_throughput_add");
+        }
+        const auto parent=state.industry_classes.find(current);
+        if(parent==state.industry_classes.end())break;
+        current=parent->second.parent;
+    }
+    return std::clamp(bonus,-0.95,3.0);
+}
+inline Quantity effective_research_evidence(
+        const ResearchProject& p,const DomainState& d,
+        const phasec::IntegratedWorld& c) {
+    if(p.required_evidence<=0)return p.required_evidence;
+    const auto& country=c.sovereignty(p.region);
+    if(!c.has_government(country))return p.required_evidence;
+    double speed=c.p2_catalog_modifier_value(
+        country,"country_tech_research_speed_mult");
+    const bool production=std::any_of(d.recipes.begin(),d.recipes.end(),
+        [&](const auto& entry){return entry.second.tech_id==p.tech_id;});
+    if(production)
+        speed+=c.p2_catalog_modifier_value(
+            country,"country_production_tech_research_speed_mult");
+    const double multiplier=std::clamp(1.0+speed,0.25,4.0);
+    return static_cast<Quantity>(std::clamp(
+        std::ceil(static_cast<double>(p.required_evidence)/multiplier),
+        1.0,static_cast<double>(
+            std::numeric_limits<Quantity>::max()/4)));
+}
+
+inline Quantity effective_contact_instruction(
+        const KnowledgeContact& contact,const DomainState& d,
+        const phasec::IntegratedWorld& c) {
+    std::string country;
+    if(c.has_government(contact.target))country=contact.target;
+    else {
+        for(const auto& [id,site]:c.facilities()) {
+            (void)id;
+            if(site.owner!=contact.target)continue;
+            const auto sovereign=c.sovereignty(site.region);
+            if(country.empty())country=sovereign;
+            else if(country!=sovereign)return contact.required_instruction;
+        }
+    }
+    if(country.empty()||!c.has_government(country))
+        return contact.required_instruction;
+    double speed=c.p2_catalog_modifier_value(
+        country,"country_tech_spread_mult");
+    const bool production=std::any_of(d.recipes.begin(),d.recipes.end(),
+        [&](const auto& entry){return entry.second.tech_id==contact.tech;});
+    if(production)
+        speed+=c.p2_catalog_modifier_value(
+            country,"country_production_tech_spread_mult");
+    const double multiplier=std::clamp(1.0+speed,0.25,4.0);
+    return static_cast<Quantity>(std::clamp(
+        std::ceil(static_cast<double>(contact.required_instruction)/multiplier),
+        1.0,static_cast<double>(
+            std::numeric_limits<Quantity>::max()/4)));
+}
 
 class Stage {
     phasec::IntegratedWorld& c_;
@@ -950,6 +1066,65 @@ public:
         manufacture(recipe,batches);
     }
 
+    // One actual market-priced asset purchase by the national treasury.
+    // The physical facility, commissioned construction title and C security
+    // ownership move together; stock, workers and money remain in C.
+    bool nationalize_commissioned_factory(const std::string& site) {
+        must(7);
+        const auto& asset=c_.facility(site);
+        const auto& country=c_.sovereignty(asset.region);
+        if(!c_.has_country_treasury(country)||
+           c_.p2_catalog_modifier_value(
+               country,"country_disable_nationalization_bool")>0)return false;
+        const auto& treasury=c_.country_treasury(country);
+        if(asset.owner==treasury||c_.firm_bankrupt(asset.owner))return false;
+        std::string project_id;
+        for(const auto& [id,p]:d_.constructions)
+            if(p.target_site==site) {
+                if(!p.commissioned||!project_id.empty())return false;
+                project_id=id;
+            }
+        if(project_id.empty())return false;
+        for(const auto& [id,resource]:d_.resource_sites) {
+            (void)id;
+            if(resource.site==site)return false;
+        }
+        for(const auto& [id,research]:d_.researches) {
+            (void)id;
+            if(research.lab_site==site&&!research.reviewed)return false;
+        }
+        const auto& p=d_.constructions.at(project_id);
+        if(p.capitalized_value<=0)return false;
+        const auto cost_factor=std::clamp(1.0+
+            c_.p2_catalog_modifier_value(
+                country,"building_nationalization_cost_mult"),0.1,4.0);
+        const auto owner_return=std::clamp(1.0+
+            c_.p2_catalog_modifier_value(
+                country,"building_nationalization_investment_return_add"),
+            0.1,4.0);
+        const auto required=std::ceil(
+            static_cast<long double>(p.capitalized_value)*
+            cost_factor*owner_return);
+        if(required>static_cast<long double>(
+             std::numeric_limits<Money>::max()/4))return false;
+        const auto price=static_cast<Money>(required);
+        if(price<=0)return false;
+        const bool can_pay=c_.phase_d_cash_available(treasury)>=price;
+        const bool compensation_required=c_.p2_catalog_modifier_value(
+            country,"country_disable_nationalization_without_compensation_bool")>0;
+        if(!can_pay&&compensation_required)return false;
+        if(can_pay)
+            c_.phase_d_transfer_factory_paid(
+                site,treasury,price,p.capitalized_value);
+        else
+            c_.phase_d_transfer_factory_uncompensated(
+                site,treasury,p.capitalized_value);
+        d_.constructions.at(project_id).client=treasury;
+        d_.append(c_.month(),can_pay?
+            "lawfully-compensated-factory-nationalization":
+            "uncompensated-nationalization-subject-to-current-law",site);
+        return true;
+    }
     void plan_research(const std::string& project,Quantity units) {
         must(1);
         auto& p=d_.researches.at(project);
