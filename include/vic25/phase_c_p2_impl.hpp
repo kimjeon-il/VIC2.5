@@ -355,29 +355,75 @@ inline std::optional<std::string> IntegratedWorld::p2_selected_law(
 inline std::map<std::string,politics::LawModifier>
 IntegratedWorld::p2_active_modifiers(const std::string& country)const {
     ensure(governments_.contains(country),"P2 modifiers require actual country");
-    std::map<std::string,politics::LawModifier> combined;
+    using Effect=politics::LawModifier;
+    using EffectSet=std::map<std::string,Effect>;
+    // One source-index build, not 1,117 law-row scans for every POP/day.
+    // Sourced 1.15 direct modifiers take precedence over earlier compact
+    // wiki-derived values for the same specific active law/effect key.
+    static const std::map<std::string,EffectSet> raw=[] {
+        std::map<std::string,EffectSet> index;
+        for(const auto& source:p2_catalog_115().modifiers) {
+            if(source.institution||source.sponsor)continue;
+            const auto id=std::string(source.source_id);
+            const auto key=std::string(source.key);
+            const std::int64_t value=source.boolean?
+                static_cast<std::int64_t>(source.value!=0):
+                static_cast<std::int64_t>(
+                    source.value*1'000'000.0+
+                    (source.value>=0?0.5:-0.5));
+            auto [it,inserted]=index[id].emplace(
+                key,Effect{value,source.boolean});
+            if(!inserted) {
+                ensure(it->second.boolean==source.boolean,
+                    "P2 catalog source mixes boolean and numeric values");
+                if(source.boolean)
+                    it->second.value_ppm=std::max(it->second.value_ppm,value);
+                else
+                    it->second.value_ppm=phaseb::add_checked(
+                        it->second.value_ppm,value);
+            }
+        }
+        return index;
+    }();
+    EffectSet combined;
+    const auto accumulate=[&](const EffectSet& effects) {
+        for(const auto& [key,effect]:effects) {
+            auto [it,inserted]=combined.emplace(key,effect);
+            if(inserted)continue;
+            ensure(it->second.boolean==effect.boolean,
+                   "P2 mixed boolean and numeric law modifier");
+            if(effect.boolean)
+                it->second.value_ppm=std::max(
+                    it->second.value_ppm,effect.value_ppm);
+            else
+                it->second.value_ppm=phaseb::add_checked(
+                    it->second.value_ppm,effect.value_ppm);
+        }
+    };
     for(const auto& [slot,id]:p2_active_base_) {
         (void)slot;
         const auto& adopted=p2_laws_.at(id);
         if(adopted.country!=country)continue;
-        const auto it=politics::catalogue().modifiers.find(
-            politics::bare_law(adopted.base_choice));
-        if(it==politics::catalogue().modifiers.end())continue;
-        for(const auto& [key,effect]:it->second) {
-            auto entry=combined.find(key);
-            if(entry==combined.end()) {
-                combined.emplace(key,effect);
-                continue;
-            }
-            ensure(entry->second.boolean==effect.boolean,
-                   "P2 mixed boolean and numeric law modifier");
-            if(effect.boolean)
-                entry->second.value_ppm=std::max(entry->second.value_ppm,
-                                                 effect.value_ppm);
-            else
-                entry->second.value_ppm=phaseb::add_checked(
-                    entry->second.value_ppm,effect.value_ppm);
-        }
+        EffectSet resolved;
+        const auto normalized=politics::bare_law(adopted.base_choice);
+        const auto old=politics::catalogue().modifiers.find(normalized);
+        if(old!=politics::catalogue().modifiers.end())
+            resolved=old->second;
+        const auto canonical=p2_catalog_canonical_choice(normalized);
+        const auto source=raw.find(canonical);
+        if(source!=raw.end())
+            for(const auto& [key,effect]:source->second)
+                resolved[key]=effect; // never sum old and new same-law effects
+        accumulate(resolved);
+    }
+    for(const auto& amendment_id:p2_active_amendments_) {
+        const auto& amendment=p2_amendments_.at(amendment_id);
+        const auto& parent=p2_laws_.at(amendment.law_id);
+        if(parent.country!=country)continue;
+        // Sponsor-only effects require an actual P3 sponsoring group and
+        // cannot be granted just because an amendment identifier exists.
+        const auto source=raw.find(amendment.id);
+        if(source!=raw.end())accumulate(source->second);
     }
     return combined;
 }
@@ -387,6 +433,55 @@ inline std::int64_t IntegratedWorld::p2_modifier_ppm(
     if(auto it=effects.find(effect_key);it!=effects.end())
         return it->second.value_ppm;
     return 0;
+}
+inline double IntegratedWorld::p2_catalog_modifier_value(
+        const std::string& country,std::string_view key,
+        int institution_level)const {
+    ensure(institution_level>=0&&institution_level<=100,
+           "P2 invalid institutional effect level");
+    // Institution modifiers are a projected effect of a genuine institutional
+    // level, never an extra national account or invented facility.
+    if(institution_level>0) {
+        double sourced=0;
+        bool found=false;
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(law.country!=country)continue;
+            const auto canonical=p2_catalog_canonical_choice(
+                politics::bare_law(law.base_choice));
+            for(const auto& row:p2_catalog_115().modifiers)
+                if(row.source_id==canonical&&row.key==key) {
+                    found=true;break;
+                }
+            if(found)sourced+=p2_catalog_raw_modifier(
+                canonical,key,institution_level);
+        }
+        if(found)return sourced;
+    }
+    const auto effects=p2_active_modifiers(country);
+    const auto it=effects.find(std::string(key));
+    if(it==effects.end())return 0.0;
+    return it->second.boolean?
+        static_cast<double>(it->second.value_ppm):
+        static_cast<double>(it->second.value_ppm)/1'000'000.0;
+}
+inline double IntegratedWorld::p2_region_modifier_value(
+        const std::string& region,std::string_view key)const {
+    const auto owner=sovereignty_.find(region);
+    if(owner==sovereignty_.end()||!governments_.contains(owner->second))
+        return 0.0;
+    return p2_catalog_modifier_value(owner->second,key);
+}
+inline bool IntegratedWorld::p2_catalog_group_active(
+        const std::string& country,std::string_view group)const {
+    return p2_selected_law(country,std::string(group)).has_value();
+}
+inline std::string IntegratedWorld::p2_taxation_choice(
+        const std::string& country)const {
+    if(const auto choice=p2_selected_law(country,"taxation"))
+        return p2_catalog_canonical_choice(*choice);
+    return {};
 }
 
 inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
