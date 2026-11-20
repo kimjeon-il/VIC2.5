@@ -1380,7 +1380,23 @@ static p0::DailyGame autonomous_war_fixture(bool combined_arms) {
     game.advance_day(crisis);
     while(game.world().date()<daily::Date{2000,3,1})
         game.advance_day();
-    game.advance_day(); // actual armed crisis automatically becomes war
+    game.advance_day(); // first effective crisis tick
+    for(int i=0;i<40&&!game.world().engine().diplomacy().wars.contains(
+            "WAR:P2:CRISIS");++i)
+        game.advance_day(); // legal effective-day transitions
+    if(!game.world().engine().diplomacy().wars.contains("WAR:P2:CRISIS")) {
+        const auto& diplomacy=game.world().engine().diplomacy();
+        const auto& cr=diplomacy.crises.at("P2:CRISIS");
+        const auto& now=c(game);
+        std::cerr<<"WAR DEBUG status="<<static_cast<int>(cr.status)
+                 <<" effective="<<cr.effective_month
+                 <<" month="<<now.month()
+                 <<" armyA="<<now.active_strength("LAND_A")
+                 <<" ammoA="<<now.stock("LAND_A","RA","ammunition")
+                 <<" armyB="<<now.active_strength("LAND_B")
+                 <<" ammoB="<<now.stock("LAND_B","RB","ammunition")
+                 <<std::endl;
+    }
     return game;
 }
 static void automatic_frontline_uses_adjacent_real_troops() {
