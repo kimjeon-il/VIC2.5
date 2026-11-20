@@ -1258,7 +1258,8 @@ public:
                phase_c().military_service_branch(unit)!=
                    phasec::MilitaryServiceBranch::army||
                phase_c().p5_guerrilla_is_insurgent_unit(unit)||
-               !phase_c().military_readiness(unit,front).combat_capable())
+               !phase_c().military_readiness(
+                   unit,deployment.region).combat_capable())
                 continue;
             if(deployment.country==claimant)claimant_ready=true;
             if(deployment.country==crisis.respondent)respondent_ready=true;
