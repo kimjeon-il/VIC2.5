@@ -600,6 +600,63 @@ public:
         }
         ++trade_.revision;
     }
+    // The effective blockade is a derived maritime-control observation,
+    // never an independent invented embargo or naval-strength stock. Without
+    // documented E coastal seas and commissioned, fueled, supplied hulls,
+    // an ordinary trade lane cannot be blocked.
+    [[nodiscard]] bool naval_blockaded_edge(const TransportEdge& edge) {
+        if(edge.mode!="sea"&&edge.mode!="maritime")return false;
+        const auto& geo=spatial_.spatial();
+        if(!geo.provinces.contains(edge.from)||
+           !geo.provinces.contains(edge.to))return false;
+        std::set<phasee::Id> zones=
+            geo.provinces.at(edge.from).coastal_seas;
+        zones.insert(geo.provinces.at(edge.to).coastal_seas.begin(),
+                     geo.provinces.at(edge.to).coastal_seas.end());
+        if(zones.empty())return false;
+        const auto& c=phase_c();
+        const auto& from_country=c.sovereignty(
+            geo.provinces.at(edge.from).region);
+        const auto& to_country=c.sovereignty(
+            geo.provinces.at(edge.to).region);
+        for(const auto& [war_id,war]:diplomacy_.wars) {
+            (void)war_id;
+            if(!war.active||war.armistice)continue;
+            std::string protected_country;
+            if(from_country==war.attacker||from_country==war.defender)
+                protected_country=from_country;
+            else if(to_country==war.attacker||to_country==war.defender)
+                protected_country=to_country;
+            else continue;
+            const auto& hostile=protected_country==war.attacker?
+                                war.defender:war.attacker;
+            phaseb::People own=0,enemy=0;
+            for(const auto& [hull_id,hull]:c.commissioned_naval_hulls()) {
+                (void)hull_id;
+                if(!hull.commissioned||hull.current_hp<=0||
+                   !c.army_deployments().contains(hull.unit))continue;
+                const auto& d=c.army_deployments().at(hull.unit);
+                if(d.country!=hostile&&d.country!=protected_country)continue;
+                const auto base=geo.regions.find(d.region);
+                if(base==geo.regions.end())continue;
+                bool in_zone=false;
+                for(const auto zone:geo.provinces.at(base->second).coastal_seas)
+                    if(zones.contains(zone)){in_zone=true;break;}
+                if(!in_zone||c.stock(hull.unit,d.region,"fuel")<=0||
+                   c.stock(hull.unit,d.region,"ammunition")<=0)
+                    continue;
+                const auto crew=c.active_strength(hull.unit);
+                if(crew<=0)continue;
+                const auto strength=std::min<phaseb::People>({
+                    crew,hull.current_hp,c.stock(hull.unit,d.region,"ammunition")});
+                if(d.country==hostile)
+                    enemy=phaseb::add_checked(enemy,strength);
+                else own=phaseb::add_checked(own,strength);
+            }
+            if(enemy>own)return true;
+        }
+        return false;
+    }
     // Reserve real seller stock, carrier fare and G edge capacity before
     // autonomous merchants make competing Stage1 purchases that same day.
     void reserve_daily_cargo(const std::string& cargo_id,
@@ -620,6 +677,8 @@ public:
                 (edge.from==geo.regions.at(origin)||
                  edge.to==geo.regions.at(origin)),
                 "F_ERR_ROUTE_NOT_CONNECTED");
+        require(!naval_blockaded_edge(edge),
+                "H_ERR_REAL_NAVAL_BLOCKADE");
         const auto key=std::make_pair(phase_c().month(),edge_id);
         const Quantity used=trade_.edge_usage[key];
         require(quantity<=daily_budget::remaining(
@@ -656,6 +715,8 @@ public:
                 ((edge.from==origin_id&&edge.to==destination_id) ||
                  (edge.to==origin_id&&edge.from==destination_id)),
                 "G_DAILY_UNREACHABLE_DESTINATION");
+        require(!naval_blockaded_edge(edge),
+                "H_ERR_REAL_NAVAL_BLOCKADE");
         const auto key=std::make_pair(phase_c().month(),edge_id);
         const auto used=trade_.edge_usage[key];
         const auto capacity=daily_budget::cumulative(
