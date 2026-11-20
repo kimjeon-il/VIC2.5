@@ -2341,6 +2341,22 @@ public:
                 gh.hold_organization_vote(rule.organization,rule.decision_id,
                        rule.subject,votes,rule.proposer,rule.prime_minister);
             });
+        // Fulfil already-recognized treaty obligations by transferring REAL
+        // currency; an insolvent signatory retains the unpaid liability.
+        if(decisions.allow_autonomous_war_peace)
+            plan[5].push_back([](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                for(const auto& [id,term]:c.recognized_reparations()) {
+                    if(!term.recognized||term.remaining<=0||
+                       c.firm_bankrupt(term.payer))continue;
+                    const Money free=std::max<Money>(0,
+                        c.phase_d_cash_available(term.payer));
+                    // Daily liquidity guard: use at most one-twentieth of
+                    // available cash, never fictional money or debt forgiveness.
+                    const Money amount=std::min(term.remaining,free/20);
+                    if(amount>0)c.pay_reparation(id,amount);
+                }
+            });
         // A claim does not itself declare war. Only an unresolved
         // documented crisis with both sides' real, armed deployed units at
         // the same contested province may create this state's lawful war.
@@ -2405,12 +2421,64 @@ public:
                     term.kind=war.armistice?
                         phasegh::ClauseKind::peace_settlement:
                         phasegh::ClauseKind::ceasefire;
+                    std::vector<phasegh::TreatyClause> terms{term};
+                    if(war.armistice) {
+                        const auto& geo=gh.geography().spatial();
+                        // Settlement claims come ONLY from pre-existing
+                        // E territorial claims and effective occupation.
+                        // Unoccupied or unattested claims are not annexed.
+                        for(const auto& country:{war.attacker,war.defender}) {
+                            const auto& opponent=country==war.attacker?
+                                 war.defender:war.attacker;
+                            People friendly=0,hostile=0;
+                            for(const auto& [unit,d]:c.army_deployments()) {
+                                if(c.military_service_branch(unit)!=
+                                       phasec::MilitaryServiceBranch::army)
+                                    continue;
+                                if(d.country==country)
+                                    friendly=phaseb::add_checked(
+                                        friendly,c.military_readiness(
+                                            unit,d.region).combat_capacity());
+                                else if(d.country==opponent)
+                                    hostile=phaseb::add_checked(
+                                        hostile,c.military_readiness(
+                                            unit,d.region).combat_capacity());
+                            }
+                            if(friendly<=hostile)continue;
+                            phasee::Id admin=0;
+                            for(const auto& [admin_id,unit]:geo.units)
+                                if(unit.country==country&&unit.active&&
+                                   unit.parent==0) {
+                                    admin=admin_id;break;
+                                }
+                            if(admin==0)continue;
+                            for(const auto& [province,claimants]:geo.claims) {
+                                if(!claimants.contains(country)||
+                                   !geo.provinces.contains(province))continue;
+                                const auto& region=
+                                    geo.provinces.at(province).region;
+                                if(c.sovereignty(region)!=opponent||
+                                   c.military_control(region)!=country)
+                                    continue;
+                                phasegh::TreatyClause cession;
+                                cession.id="occupied-claim-"+
+                                    std::to_string(province);
+                                cession.obligor=opponent;
+                                cession.beneficiary=country;
+                                cession.kind=
+                                    phasegh::ClauseKind::territorial_cession;
+                                cession.province=province;
+                                cession.receiving_admin=admin;
+                                terms.push_back(std::move(cession));
+                            }
+                        }
+                    }
                     const auto& first_pm=
                         c.government(war.attacker).prime_minister;
                     const auto& second_pm=
                         c.government(war.defender).prime_minister;
                     gh.propose_treaty_package(treaty_id,
-                        {war.attacker,war.defender},{term},
+                        {war.attacker,war.defender},std::move(terms),
                         war.attacker,first_pm);
                     gh.ratify_package_member(treaty_id,
                         war.defender,second_pm);
@@ -2774,6 +2842,10 @@ public:
         if(decisions.allow_operational_battle_ai)
             plan[10].push_back([](phasegh::Stage& gh) {
                 frontai::occupy_decisive_fronts(gh);
+            });
+        if(decisions.allow_autonomous_war_peace)
+            plan[10].push_back([](phasegh::Stage& gh) {
+                theaterai::withdraw_after_peace(gh);
             });
         
         // Aggregate all policy categories under a single national cash
