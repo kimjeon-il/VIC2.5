@@ -219,7 +219,7 @@ inline AirSupport ground_air_support(phasegh::Stage& gh,
 // service, in the same real E coastal sea, with a real crewed transport hull,
 // assigned landing berths, fuel, ammunition and an unoccupied claimed shore.
 // Longer passages require a distinct troop-in-transit state (not invented).
-inline void conduct_verified_landings(phasegh::Stage& gh) {
+inline std::set<std::string> conduct_verified_landings(phasegh::Stage& gh) {
     auto& c=gh.phase_c();
     const auto& geo=gh.geography().spatial();
     const auto& trade=gh.commerce();
@@ -290,5 +290,6 @@ inline void conduct_verified_landings(phasegh::Stage& gh) {
             }
         }
     }
+    return used_armies;
 }
 } // namespace vic25::theaterai

@@ -1,6 +1,7 @@
 #pragma once
 #include "vic25/phase_f.hpp"
 #include "vic25/phase_h_front_ai.hpp"
+#include "vic25/phase_h_theater_ai.hpp"
 #include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <cstdint>
@@ -341,6 +342,9 @@ struct Policies {
     // Per-country military programmes are persistent Phase C strategic policy.
     // P0 only executes lawful procurement/training/personnel orders each day.
     bool allow_autonomous_peacetime_military_ai{true};
+    // All theater decisions are delegated; manual ground battles remain
+    // optional scenario overrides, not required user micro-management.
+    bool allow_autonomous_naval_air_ai{true};
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -839,7 +843,8 @@ inline phasec::CombatLoss tactical_losses(People victim,
     return loss;
 }
 
-inline void fight(phasec::IntegratedWorld& c,const Engagement& e) {
+inline void fight(phasec::IntegratedWorld& c,const Engagement& e,
+                  const theaterai::AirSupport& support={}) {
     if(!c.people().has_slice(e.attacker_slice)||!c.people().has_slice(e.defender_slice))return;
     const People a=c.people().slice(e.attacker_slice).count;
     const People b=c.people().slice(e.defender_slice).count;
@@ -852,9 +857,18 @@ inline void fight(phasec::IntegratedWorld& c,const Engagement& e) {
     if(!ready_a.combat_capable()||!ready_b.combat_capable())return;
     const Quantity ammo_a=ready_a.ammunition_supported;
     const Quantity ammo_b=ready_b.ammunition_supported;
-    auto al=tactical_losses(a,ready_b.combat_capacity(false),
+    const auto air_bonus=[](People force,std::int64_t ppm)->People {
+        const auto rate=std::clamp<std::int64_t>(ppm,0,300'000);
+        const People whole=phaseb::mul_checked(force/1'000'000,rate);
+        const People fract=phaseb::mul_checked(force%1'000'000,rate)/1'000'000;
+        return phaseb::add_checked(
+            force,phaseb::add_checked(whole,fract));
+    };
+    auto al=tactical_losses(a,air_bonus(
+            ready_b.combat_capacity(false),support.defender_ppm),
                             e.defender_terrain_ppm,true);
-    auto bl=tactical_losses(b,ready_a.combat_capacity(true),
+    auto bl=tactical_losses(b,air_bonus(
+            ready_a.combat_capacity(true),support.attacker_ppm),
                             e.defender_terrain_ppm,false);
     // Apply IG traits to REAL, already-armed battle casualties. The
     // original C battle() remains the sole military casualty/population
@@ -2402,14 +2416,31 @@ public:
                         war.defender,second_pm);
                 }
             });
+        auto flown_air=std::make_shared<std::set<std::string>>();
+        auto landed_armies=std::make_shared<std::set<std::string>>();
+        if(decisions.allow_autonomous_naval_air_ai &&
+           std::any_of(world_.engine().diplomacy().wars.begin(),
+                       world_.engine().diplomacy().wars.end(),
+                       [](const auto& pair) {
+                           return pair.second.active&&!pair.second.armistice;
+                       }))
+            plan[10].push_back([flown_air,landed_armies]
+                              (phasegh::Stage& gh) {
+                theaterai::resolve_naval_engagements(gh);
+                theaterai::resolve_air_engagements(gh,*flown_air);
+                *landed_armies=theaterai::conduct_verified_landings(gh);
+            });
         if(decisions.allow_operational_battle_ai) {
             std::set<std::string> manual;
             for(const auto& battle:decisions.engagements) {
                 manual.insert(battle.attacker);
                 manual.insert(battle.defender);
             }
-            plan[10].push_back([manual](phasegh::Stage& gh) {
-                frontai::allocate_marches(gh,manual);
+            plan[10].push_back([manual,landed_armies](phasegh::Stage& gh) {
+                auto occupied_units=manual;
+                occupied_units.insert(landed_armies->begin(),
+                                      landed_armies->end());
+                frontai::allocate_marches(gh,occupied_units);
             });
         }
         for(const auto& combat:decisions.engagements)
@@ -2422,7 +2453,9 @@ public:
                 manual_forces.insert(combat.attacker);
                 manual_forces.insert(combat.defender);
             }
-            plan[10].push_back([manual_forces](phasegh::Stage& gh) {
+            plan[10].push_back([manual_forces,flown_air,
+                                allow_air=decisions.allow_autonomous_naval_air_ai]
+                               (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 struct Participant {
                     std::string unit,country;
@@ -2478,8 +2511,12 @@ public:
                             const auto& b=defend[i];
                             const Quantity before=c.stock(
                                 a.unit,front,"ammunition");
+                            const auto air=allow_air?
+                                theaterai::ground_air_support(
+                                    gh,war,front,*flown_air):
+                                theaterai::AirSupport{};
                             fight(c,Engagement{a.unit,b.unit,front,
-                                               a.slice,b.slice,1'000'000});
+                                               a.slice,b.slice,1'000'000},air);
                             if(c.stock(a.unit,front,"ammunition")<before)
                                 gh.record_actual_war_engagement(war_id);
                             used.insert(a.unit);
