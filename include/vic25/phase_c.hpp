@@ -620,6 +620,20 @@ public:
         }
         return MilitaryServiceBranch::army;
     }
+    [[nodiscard]] const std::map<std::string,P1NavalHull>&
+            commissioned_naval_hulls()const {return p1_naval_hulls_;}
+    // Only previously registered and crew-backed real hulls can be damaged.
+    // Combat losses do not issue a second imaginary ship or asset record.
+    void phase_time_damage_naval_hull(const std::string& hull_id,
+                                      Quantity actual_damage) {
+        require_stage({10});
+        auto it=p1_naval_hulls_.find(hull_id);
+        ensure(it!=p1_naval_hulls_.end()&&it->second.commissioned&&
+               actual_damage>0&&actual_damage<=it->second.current_hp,
+               "unsupported naval damage without an actual intact hull");
+        it->second.current_hp-=actual_damage;
+        events_.push_back("actual-commissioned-hull-combat-damage");
+    }
     [[nodiscard]] const std::map<std::string,PeacetimeMilitaryProgram>&
             peacetime_military_programs()const {
         return peacetime_military_programs_;
@@ -748,6 +762,8 @@ public:
         acquire(p.equipment_good,p.equipment_target);
         acquire("ammunition",p.ammunition_target);
         acquire("spare_parts",p.spare_parts_target);
+        if(p.branch!=MilitaryServiceBranch::army)
+            acquire("fuel",p.ammunition_target);
         const Quantity equipment_on_hand=stock(unit,region,p.equipment_good);
         const Quantity assigned=assigned_equipment(unit,region,p.equipment_good);
         if(equipment_on_hand>assigned&&p.equipment_target>assigned)
@@ -765,6 +781,29 @@ public:
             funds-=cost;
             state.worn_equipment-=repair;
             events_.push_back("military-paid-maintenance");
+        }
+        // The commissioned hull's existing physical HP is the only ship
+        // condition ledger. Repairs consume REAL spare parts and paid work.
+        if(p.branch==MilitaryServiceBranch::navy&&p.repair_fee>0&&
+           p.daily_repair_limit>repair) {
+            for(auto& [hull_id,hull]:p1_naval_hulls_) {
+                (void)hull_id;
+                if(hull.unit!=unit||!hull.commissioned||
+                   hull.current_hp>=hull.max_hp)continue;
+                const Quantity service=std::min({
+                    p.daily_repair_limit-repair,
+                    static_cast<Quantity>(hull.max_hp-hull.current_hp),
+                    phase_d_material_available(unit,region,"spare_parts"),
+                    static_cast<Quantity>(funds/p.repair_fee)});
+                if(service<=0)break;
+                const Money paid=phaseb::mul_checked(service,p.repair_fee);
+                pay(treasury,p.service_provider,paid);
+                consume(unit,region,"spare_parts",service);
+                hull.current_hp+=service;
+                funds-=paid;
+                events_.push_back("real-shipyard-repair");
+                break;
+            }
         }
         // Training requires living assigned personnel, serviceable issued
         // equipment, real drill ammunition and a paid instructor.
