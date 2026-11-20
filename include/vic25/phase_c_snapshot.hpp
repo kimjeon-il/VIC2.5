@@ -259,6 +259,15 @@ void fields(Archive& a,T& x) {
         V(issue_day);V(maturity_day);
     } else if constexpr(std::is_same_v<X,ArmyDeployment>) {
         V(unit);V(country);V(region);
+    } else if constexpr(std::is_same_v<X,PeacetimeMilitaryProgram>) {
+        V(unit);V(country);V(equipment_good);V(service_provider);
+        V(branch);V(doctrine);V(standing_target);V(regional_reserve_target);
+        V(daily_enlist_limit);V(equipment_target);V(ammunition_target);
+        V(spare_parts_target);V(daily_procurement_limit);V(daily_drill_limit);
+        V(daily_repair_limit);V(daily_budget);V(treasury_cash_reserve);
+        V(drill_fee);V(repair_fee);
+    } else if constexpr(std::is_same_v<X,PeacetimeMilitaryState>) {
+        V(proficiency_ppm);V(worn_equipment);
     } else {
         static_assert(sizeof(X)==0,"SnapshotCodec needs an explicit struct layout");
     }
@@ -485,6 +494,12 @@ struct SnapshotCodec {
             ar(std::string("VIC25_PHASEC_ARMY_DEPLOYMENTS_1"));
             ar(w.army_deployments_);
         }
+        if(!w.peacetime_military_programs_.empty()||
+           !w.peacetime_military_states_.empty()) {
+            ar(std::string("VIC25_PHASEC_PEACETIME_MILITARY_1"));
+            ar(w.peacetime_military_programs_);
+            ar(w.peacetime_military_states_);
+        }
         if(!w.completed_liquidations_.empty()) {
             ar(std::string("VIC25_PHASEC_ESTATE_CLOSURES_1"));
             ar(w.completed_liquidations_);
@@ -674,7 +689,8 @@ struct SnapshotCodec {
              seen_enactment=false,seen_campaigns=false,
              seen_characters=false,seen_political_dynamics=false,
              seen_political_ai=false,seen_political_policies=false,
-             seen_separation=false,seen_confidence=false;
+             seen_separation=false,seen_confidence=false,
+             seen_peacetime_military=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -734,6 +750,14 @@ struct SnapshotCodec {
                 ar(w.army_deployments_);
                 if(w.army_deployments_.size()>1'000'000)
                     throw std::runtime_error("oversized army deployment records");
+            } else if(extension=="VIC25_PHASEC_PEACETIME_MILITARY_1"&&
+                      !seen_peacetime_military) {
+                seen_peacetime_military=true;
+                ar(w.peacetime_military_programs_);
+                ar(w.peacetime_military_states_);
+                if(w.peacetime_military_programs_.size()>100'000||
+                   w.peacetime_military_states_.size()>100'000)
+                    throw std::runtime_error("oversized military policy extension");
             } else if(extension=="VIC25_PHASEC_ESTATE_CLOSURES_1"&&
                       !seen_estates) {
                 seen_estates=true;

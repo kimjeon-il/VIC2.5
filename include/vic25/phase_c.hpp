@@ -126,6 +126,25 @@ struct UnitAssignment {
     Id slice{};
     People count{};
 };
+enum class MilitaryServiceBranch : std::uint8_t { army, navy, air };
+enum class MilitaryDoctrine : std::uint8_t {
+    balanced, offensive, defensive, maneuver
+};
+// An approved strategic programme, not additional personnel/cash/goods.
+struct PeacetimeMilitaryProgram {
+    std::string unit,country,equipment_good{"rifle"},service_provider;
+    MilitaryServiceBranch branch{MilitaryServiceBranch::army};
+    MilitaryDoctrine doctrine{MilitaryDoctrine::balanced};
+    People standing_target{},regional_reserve_target{},daily_enlist_limit{};
+    Quantity equipment_target{},ammunition_target{},spare_parts_target{};
+    Quantity daily_procurement_limit{},daily_drill_limit{},daily_repair_limit{};
+    Money daily_budget{},treasury_cash_reserve{},drill_fee{},repair_fee{};
+};
+// Only training and physical condition persist. POP and equipment remain C-owned.
+struct PeacetimeMilitaryState {
+    std::int32_t proficiency_ppm{};
+    Quantity worn_equipment{};
+};
 struct CombatLoss {
     People killed{}, acute{}, long_term{}, pow{}, missing{};
     Quantity ammunition{};
@@ -135,11 +154,27 @@ struct CombatLoss {
 struct MilitaryReadiness {
     People assigned_people{},ammunition_supported{},equipped_supported{};
     Quantity ammunition{},issued_small_arms{};
+    std::int32_t training_ppm{};
+    Quantity worn_equipment{};
+    MilitaryServiceBranch branch{MilitaryServiceBranch::army};
+    MilitaryDoctrine doctrine{MilitaryDoctrine::balanced};
     [[nodiscard]] bool combat_capable()const {
-        return ammunition_supported>0;
+        return branch==MilitaryServiceBranch::army&&ammunition_supported>0;
     }
-    [[nodiscard]] People combat_capacity()const {
-        return phaseb::add_checked(ammunition_supported,equipped_supported);
+    [[nodiscard]] People combat_capacity(bool attacking=false)const {
+        if(branch!=MilitaryServiceBranch::army)return 0;
+        const People baseline=phaseb::add_checked(
+            ammunition_supported,equipped_supported);
+        const People proficiency=phaseb::mul_checked(
+            equipped_supported,training_ppm)/4'000'000;
+        const bool doctrine_matches=
+            (doctrine==MilitaryDoctrine::offensive&&attacking)||
+            (doctrine==MilitaryDoctrine::defensive&&!attacking);
+        const People doctrine_bonus=doctrine_matches?
+            equipped_supported/10:
+            (doctrine==MilitaryDoctrine::maneuver?equipped_supported/20:0);
+        return phaseb::add_checked(
+            phaseb::add_checked(baseline,proficiency),doctrine_bonus);
     }
 };
 struct AdvanceReport {
@@ -552,8 +587,306 @@ public:
                 assigned_equipment(unit,region,"musket")),
                 assigned_equipment(unit,region,"small_arms"));
         const People supplied=std::min<People>(assigned,ammunition);
-        const People equipped=std::min<People>(supplied,arms);
-        return {assigned,supplied,equipped,ammunition,arms};
+        MilitaryReadiness result;
+        result.assigned_people=assigned;
+        result.ammunition_supported=supplied;
+        result.ammunition=ammunition;
+        result.issued_small_arms=arms;
+        result.branch=military_service_branch(unit);
+        if(const auto program=peacetime_military_programs_.find(unit);
+           program!=peacetime_military_programs_.end())
+            result.doctrine=program->second.doctrine;
+        if(const auto state=peacetime_military_states_.find(unit);
+           state!=peacetime_military_states_.end()) {
+            result.training_ppm=state->second.proficiency_ppm;
+            result.worn_equipment=std::min(arms,state->second.worn_equipment);
+        }
+        result.equipped_supported=std::min<People>(
+            supplied,arms-result.worn_equipment);
+        return result;
+    }
+    [[nodiscard]] MilitaryServiceBranch military_service_branch(
+            const std::string& unit)const {
+        if(const auto p=peacetime_military_programs_.find(unit);
+           p!=peacetime_military_programs_.end())return p->second.branch;
+        for(const auto& [id,hull]:p1_naval_hulls_) {
+            (void)id;
+            if(hull.unit==unit&&hull.commissioned)
+                return MilitaryServiceBranch::navy;
+        }
+        return MilitaryServiceBranch::army;
+    }
+    [[nodiscard]] const std::map<std::string,PeacetimeMilitaryProgram>&
+            peacetime_military_programs()const {
+        return peacetime_military_programs_;
+    }
+    [[nodiscard]] PeacetimeMilitaryState peacetime_military_state(
+            const std::string& unit)const {
+        const auto it=peacetime_military_states_.find(unit);
+        return it==peacetime_military_states_.end()?
+               PeacetimeMilitaryState{}:it->second;
+    }
+    [[nodiscard]] People military_regional_reserves(
+            const std::string& country,const std::string& region)const {
+        People total=0;
+        for(const auto& [id,s]:people_.slices()) {
+            (void)id;
+            const auto& d=people_.demographic(s.key.demographic);
+            if(d.region==region&&d.service==phaseb::Service::reserve&&
+               d.citizenship=="citizen"&&sovereignty_.contains(region)&&
+               sovereignty_.at(region)==country)
+                total=phaseb::add_checked(total,s.count);
+        }
+        return total;
+    }
+    // This policy is set by the lawful cabinet at Stage9 (effective at the
+    // next day's Stage7), or from historical scenario setup at Stage -1.
+    void set_peacetime_military_program(PeacetimeMilitaryProgram p,
+                                        const std::string& prime="") {
+        ensure((stage_==-1&&commit_id_==0)||stage_==9,
+               "military programme must be adopted at cabinet stage");
+        ensure(units_.contains(p.unit)&&army_deployments_.contains(p.unit)&&
+               army_deployments_.at(p.unit).country==p.country&&
+               governments_.contains(p.country)&&
+               !p.equipment_good.empty()&&
+               p.equipment_good!="ammunition"&&
+               p.equipment_good!="spare_parts"&&
+               static_cast<unsigned>(p.branch)<=
+                   static_cast<unsigned>(MilitaryServiceBranch::air)&&
+               static_cast<unsigned>(p.doctrine)<=
+                   static_cast<unsigned>(MilitaryDoctrine::maneuver)&&
+               p.standing_target>=0&&p.regional_reserve_target>=0&&
+               p.daily_enlist_limit>=0&&p.equipment_target>=0&&
+               p.ammunition_target>=0&&p.spare_parts_target>=0&&
+               p.daily_procurement_limit>=0&&p.daily_drill_limit>=0&&
+               p.daily_repair_limit>=0&&p.daily_budget>=0&&
+               p.treasury_cash_reserve>=0&&
+               p.drill_fee>=0&&p.repair_fee>=0,
+               "unlawful or invalid military programme");
+        if(stage_==9)
+            ensure(governments_.at(p.country).prime_minister==prime,
+                   "military programme lacks legal executive authorization");
+        if(p.daily_drill_limit>0||p.daily_repair_limit>0)
+            ensure(actors_.contains(p.service_provider)&&
+                   p.service_provider!=country_treasury(p.country)&&
+                   (p.daily_drill_limit==0||p.drill_fee>0)&&
+                   (p.daily_repair_limit==0||p.repair_fee>0),
+                   "military instruction/repair needs paid real provider");
+        if(p.branch==MilitaryServiceBranch::army)
+            ensure(p.equipment_good=="rifle"||
+                   p.equipment_good=="musket"||
+                   p.equipment_good=="small_arms",
+                   "army small arms must be a real equipment type");
+        const auto old=peacetime_military_programs_.find(p.unit);
+        if(old!=peacetime_military_programs_.end()) {
+            auto& state=peacetime_military_states_[p.unit];
+            if(old->second.equipment_good!=p.equipment_good)
+                ensure(state.worn_equipment==0,
+                       "unrepaired equipment cannot silently change category");
+            if(old->second.doctrine!=p.doctrine)
+                state.proficiency_ppm=state.proficiency_ppm*3/4;
+        }
+        peacetime_military_programs_[p.unit]=std::move(p);
+        events_.push_back("military-program-adopted");
+    }
+    // Stage7 procurement reuses the C physical inventory and money ledger.
+    // Material cannot teleport: only suppliers in the deployed region qualify.
+    void peacetime_military_support(const std::string& unit) {
+        require_stage({7});
+        const auto& p=peacetime_military_programs_.at(unit);
+        const auto& deployment=army_deployments_.at(unit);
+        ensure(p.country==deployment.country,"military policy foreign unit");
+        if(!has_country_treasury(p.country))return;
+        const auto& treasury=country_treasury(p.country);
+        const std::string region=deployment.region;
+        Money funds=std::min(p.daily_budget,
+            std::max<Money>(0,phase_d_cash_available(treasury)-
+                               p.treasury_cash_reserve));
+        Quantity procurement_left=p.daily_procurement_limit;
+        const auto acquire=[&](const std::string& good,Quantity target) {
+            if(target<=stock(unit,region,good))return;
+            auto shortage=target-stock(unit,region,good);
+            if(treasury!=unit) {
+                const Quantity locally=std::min(shortage,
+                    phase_d_material_available(treasury,region,good));
+                if(locally>0) {
+                    phase_g_transfer_goods(treasury,unit,region,good,locally);
+                    shortage-=locally;
+                }
+            }
+            if(shortage<=0||procurement_left<=0||funds<=0||
+               !has_market(region,good))return;
+            const Money price=market(region,good).price;
+            if(price<=0)return;
+            std::vector<std::string> suppliers;
+            for(const auto& [key,available]:physical_inventory())
+                if(key.region_id==region&&key.good_id==good&&
+                   available>0&&key.holder_id!=treasury&&
+                   actors_.contains(key.holder_id)&&
+                   !firm_bankrupt(key.holder_id))
+                    suppliers.push_back(key.holder_id);
+            for(const auto& supplier:suppliers) {
+                if(shortage<=0||procurement_left<=0||funds<price)break;
+                const Quantity quantity=std::min({
+                    shortage,procurement_left,
+                    phase_d_material_available(supplier,region,good),
+                    static_cast<Quantity>(funds/price)});
+                if(quantity<=0)continue;
+                trade(supplier,treasury,region,good,quantity,price);
+                if(treasury!=unit)
+                    phase_g_transfer_goods(treasury,unit,region,good,quantity);
+                shortage-=quantity;
+                procurement_left-=quantity;
+                funds-=phaseb::mul_checked(quantity,price);
+                events_.push_back("military-funded-procurement");
+            }
+        };
+        acquire(p.equipment_good,p.equipment_target);
+        acquire("ammunition",p.ammunition_target);
+        acquire("spare_parts",p.spare_parts_target);
+        const Quantity equipment_on_hand=stock(unit,region,p.equipment_good);
+        const Quantity assigned=assigned_equipment(unit,region,p.equipment_good);
+        if(equipment_on_hand>assigned&&p.equipment_target>assigned)
+            assign_equipment(unit,region,p.equipment_good,
+                std::min(equipment_on_hand-assigned,p.equipment_target-assigned));
+        auto& state=peacetime_military_states_[unit];
+        const Quantity repair=std::min({
+            state.worn_equipment,p.daily_repair_limit,
+            phase_d_material_available(unit,region,"spare_parts"),
+            p.repair_fee>0?static_cast<Quantity>(funds/p.repair_fee):Quantity{0}});
+        if(repair>0) {
+            const Money cost=phaseb::mul_checked(repair,p.repair_fee);
+            pay(treasury,p.service_provider,cost);
+            consume(unit,region,"spare_parts",repair);
+            funds-=cost;
+            state.worn_equipment-=repair;
+            events_.push_back("military-paid-maintenance");
+        }
+        // Training requires living assigned personnel, serviceable issued
+        // equipment, real drill ammunition and a paid instructor.
+        const Quantity usable=std::max<Quantity>(0,
+            assigned_equipment(unit,region,p.equipment_good)-
+            state.worn_equipment);
+        const Quantity drill=std::min({
+            p.daily_drill_limit,static_cast<Quantity>(active_strength(unit)),
+            usable,phase_d_material_available(unit,region,"ammunition"),
+            p.drill_fee>0?static_cast<Quantity>(funds/p.drill_fee):Quantity{0}});
+        if(drill>0) {
+            const Money cost=phaseb::mul_checked(drill,p.drill_fee);
+            pay(treasury,p.service_provider,cost);
+            consume(unit,region,"ammunition",drill);
+            const auto remaining=(1'000'000-state.proficiency_ppm)/5'000;
+            state.proficiency_ppm+=static_cast<std::int32_t>(
+                std::min<Quantity>(drill,remaining)*5'000);
+            state.worn_equipment=std::min(
+                assigned_equipment(unit,region,p.equipment_good),
+                phaseb::add_checked(state.worn_equipment,drill/10));
+            events_.push_back("military-real-paid-drill");
+        }
+    }
+    // Stage10 AFTER the day's battles: enlist/demobilize only actual POP.
+    // The reserve pool remains civilian-employed and is never duplicated.
+    void peacetime_military_staff(const std::string& unit) {
+        require_stage({10});
+        const auto& p=peacetime_military_programs_.at(unit);
+        const auto& deployment=army_deployments_.at(unit);
+        const auto region=deployment.region;
+        if(sovereignty_.at(region)!=p.country)return;
+        People quota=p.daily_enlist_limit;
+        if(active_strength(unit)>p.standing_target) {
+            People excess=std::min(quota,active_strength(unit)-p.standing_target);
+            std::vector<Id> members;
+            for(const auto& [id,n]:units_.at(unit))
+                if(n>0)members.push_back(id);
+            for(const auto id:members) {
+                if(excess<=0)break;
+                const People n=unit_slice_strength(unit,id);
+                if(n<=0)continue;
+                const People leaving=std::min(n,excess);
+                demobilize(unit,id,leaving);
+                excess-=leaving;
+                quota-=leaving;
+                events_.push_back("military-peacetime-demobilization");
+            }
+        }
+        const auto authorized=p2_rule(p.country,p.country,
+            P2ClauseKind::conscription_authorized).value_or(
+                conscription_enabled_?1:0)!=0;
+        if(!authorized||quota<=0)return;
+        const auto eligible=[&](Id id,phaseb::Service service) {
+            if(!people_.has_slice(id))return false;
+            const auto& row=people_.slice(id);
+            const auto& d=people_.demographic(row.key.demographic);
+            const auto age=people_.age_months_slice(id);
+            return row.count>0&&d.region==region&&
+                d.service==service&&d.citizenship=="citizen"&&
+                age>=18*12&&age<60*12;
+        };
+        const auto snapshot_ids=[&]() {
+            std::vector<Id> ids;
+            for(const auto& [id,row]:people_.slices()) {
+                (void)row;
+                ids.push_back(id);
+            }
+            return ids;
+        };
+        People needed=std::max<People>(
+            0,p.standing_target-active_strength(unit));
+        for(const auto service:{phaseb::Service::reserve,
+                                phaseb::Service::civilian}) {
+            if(needed<=0||quota<=0)break;
+            for(const auto id:snapshot_ids()) {
+                if(needed<=0||quota<=0)break;
+                if(!eligible(id,service))continue;
+                const auto& row=people_.slice(id);
+                const auto& econ=people_.economic(row.key.economic);
+                const auto model=p2_selected_law(p.country,"army_model");
+                if(model&&*model=="peasant_levies"&&
+                   econ.profession!="peasant"&&
+                   econ.livelihood!="subsistence")continue;
+                People recruited=std::min({needed,quota,row.count});
+                if(model) {
+                    const auto rate=politics::catalogue().modifier(
+                        *model,"state_conscription_rate_add");
+                    if(rate&&rate->value_ppm>0&&!rate->boolean)
+                        recruited=std::min(recruited,p4_scaled(
+                            row.count,std::clamp<std::int64_t>(
+                                rate->value_ppm,0,1'000'000),1'000'000));
+                }
+                if(recruited<=0)continue;
+                mobilize(id,recruited,unit);
+                needed-=recruited;quota-=recruited;
+                events_.push_back("military-peacetime-enlistment");
+            }
+        }
+        if(quota<=0)return;
+        // One regional reserve pool is shared by all formations of a nation.
+        People regional_target=0;
+        for(const auto& [other,policy]:peacetime_military_programs_) {
+            (void)other;
+            if(policy.country==p.country&&
+               army_deployments_.at(policy.unit).region==region)
+                regional_target=std::max(
+                    regional_target,policy.regional_reserve_target);
+        }
+        People reserve_needed=std::max<People>(
+            0,regional_target-military_regional_reserves(p.country,region));
+        if(reserve_needed<=0)return;
+        for(const auto id:snapshot_ids()) {
+            if(reserve_needed<=0||quota<=0)break;
+            if(!eligible(id,phaseb::Service::civilian))continue;
+            const auto row=people_.slice(id);
+            const People n=std::min({reserve_needed,quota,row.count});
+            const People employed=std::min(n,people_.employed(id));
+            auto d=people_.demographic(row.key.demographic);
+            d.service=phaseb::Service::reserve;
+            const Id reserve_demo=people_.demographic_profile(d);
+            people_.transfer(id,n,reserve_demo,row.key.economic,
+                row.key.household,phaseb::EventKind::enlistment,
+                employed,"real-regional-reserve-enrolment");
+            reserve_needed-=n;quota-=n;
+            events_.push_back("military-peacetime-reserve-enrolment");
+        }
     }
     void seed_unit(std::string unit) {
         ensure(stage_ == -1 && commit_id_ == 0 && !unit.empty() && !units_.contains(unit), "bad unit");
@@ -3380,6 +3713,14 @@ public:
             resources_.assert_goods_available({unit,region,"ammunition"},loss.ammunition,
                                               stock(unit,region,"ammunition"));
         if (loss.ammunition) goods_.consume({unit, region, "ammunition"}, loss.ammunition);
+        if(const auto policy=peacetime_military_programs_.find(unit);
+           policy!=peacetime_military_programs_.end()&&loss.ammunition>0) {
+            auto& status=peacetime_military_states_[unit];
+            const Quantity issued=assigned_equipment(
+                unit,region,policy->second.equipment_good);
+            status.worn_equipment=std::min(issued,phaseb::add_checked(
+                status.worn_equipment,loss.ammunition/10));
+        }
         const auto before = people_.events().size();
         people_.battle_losses(source, loss.killed, loss.acute, loss.long_term,
                               loss.pow, loss.missing);
@@ -4529,6 +4870,36 @@ public:
                    governments_.contains(deploy.country)&&
                    sovereignty_.contains(deploy.region),
                    "orphaned real national army deployment");
+        ensure(peacetime_military_programs_.size()<=100'000&&
+               peacetime_military_states_.size()<=100'000,
+               "too many military programme records");
+        for(const auto& [unit,p]:peacetime_military_programs_) {
+            ensure(unit==p.unit&&army_deployments_.contains(unit)&&
+                   army_deployments_.at(unit).country==p.country&&
+                   static_cast<unsigned>(p.branch)<=2&&
+                   static_cast<unsigned>(p.doctrine)<=3&&
+                   !p.equipment_good.empty()&&
+                   p.equipment_good!="ammunition"&&
+                   p.equipment_good!="spare_parts"&&
+                   p.standing_target>=0&&p.regional_reserve_target>=0&&
+                   p.daily_enlist_limit>=0&&p.equipment_target>=0&&
+                   p.ammunition_target>=0&&p.spare_parts_target>=0&&
+                   p.daily_procurement_limit>=0&&
+                   p.daily_drill_limit>=0&&p.daily_repair_limit>=0&&
+                   p.daily_budget>=0&&p.treasury_cash_reserve>=0&&
+                   p.drill_fee>=0&&p.repair_fee>=0&&
+                   (p.daily_drill_limit==0||p.drill_fee>0)&&
+                   (p.daily_repair_limit==0||p.repair_fee>0)&&
+                   ((p.daily_drill_limit==0&&p.daily_repair_limit==0)||
+                    actors_.contains(p.service_provider)),
+                   "invalid persistent peacetime military programme");
+        }
+        for(const auto& [unit,state]:peacetime_military_states_)
+            ensure(peacetime_military_programs_.contains(unit)&&
+                   state.proficiency_ppm>=0&&
+                   state.proficiency_ppm<=1'000'000&&
+                   state.worn_equipment>=0,
+                   "invalid military training and wear state");
         ensure(money_.balanced(), "unbalanced financial ledger");
         for(const auto& [currency,l]:foreign_ledgers_){
             ensure(l.balanced(),"unbalanced foreign currency ledger");
@@ -4597,6 +4968,8 @@ private:
     std::set<std::string> processed_commands_;
     std::map<std::string, std::map<Id, People>> units_;
     std::map<std::string,ArmyDeployment> army_deployments_;
+    std::map<std::string,PeacetimeMilitaryProgram> peacetime_military_programs_;
+    std::map<std::string,PeacetimeMilitaryState> peacetime_military_states_;
     std::uint64_t next_typed_id_{1};
     std::map<std::pair<EntityKind,std::string>,TypedEntityId> typed_entities_;
     std::map<std::uint64_t,EntityKind> typed_active_ids_;
