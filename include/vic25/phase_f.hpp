@@ -154,8 +154,8 @@ inline std::optional<daily::Command> plan_next_hop(
 }
 // Supplies are acquired from state-owned physical arsenals (the existing
 // sovereign treasury wallet), not created when a military unit is underarmed.
-// Direct verified transport links only: if the army is not connected, remain
-// out of ammunition until a real service exists. The resulting shipment uses
+// Local arsenal issue requires no transport edge; remote shipments require
+// verified direct links. The resulting shipment uses
 // the exact same dated World cargo command and C/G reservations as civilian F.
 struct ArmySupplyIssue {
     std::string arsenal,unit,region;
@@ -182,6 +182,7 @@ inline ArmySupplyPlan plan_army_supply(
     }
     ArmySupplyPlan planned;
     for(const auto& [unit,deployment]:c.army_deployments()) {
+        if(c.p5_guerrilla_is_insurgent_unit(unit))continue;
         const auto& country=deployment.country;
         if(!belligerents.contains(country)||!c.has_country_treasury(country)||
            !geography.regions.contains(deployment.region))continue;
