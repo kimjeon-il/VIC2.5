@@ -2367,7 +2367,7 @@ public:
                 const auto& c=gh.phase_c();
                 for(const auto& [id,crisis]:d.crises) {
                     if(crisis.status!=phasegh::CrisisStatus::active||
-                       crisis.effective_month>=c.month() ||
+                       crisis.effective_month>c.month() ||
                        !c.has_government(crisis.claimant)||
                        !c.has_government(crisis.respondent))
                         continue;
