@@ -10,8 +10,8 @@ industry = (root / "tests/test_phase_d_industry.cpp").read_text(encoding="utf-8"
 # Couple the source-lock predicate to the actual schema version and
 # preserved fields. Earlier guards were still pinned to obsolete v0.6
 # even when main was already on v0.7, blocking unrelated CI entirely.
-magic = re.search(r'VIC25_PHASED_SNAPSHOT_(\\d+)', snapshot)
-contract = re.search(r'phase-d-cpp/0\\.(\\d+)', snapshot)
+magic = re.search(r'VIC25_PHASED_SNAPSHOT_(\d+)', snapshot)
+contract = re.search(r'phase-d-cpp/0\.(\d+)', snapshot)
 version_consistent = (
     magic is not None
     and contract is not None
