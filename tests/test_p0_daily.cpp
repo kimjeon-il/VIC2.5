@@ -1457,14 +1457,18 @@ static void automatic_naval_air_and_real_blockade() {
                  "verified sea lane and real landing berths did not carry an army");
     const auto hull_a=c(game).commissioned_naval_hulls().at("HULL_A").current_hp;
     const auto air_ammo=c(game).stock("AIR_A","RA","ammunition");
-    game.advance_day(); // first full day with an existing declared war
-    require_test(c(game).commissioned_naval_hulls().at("HULL_A").current_hp<
-                    hull_a&&
+    // Both services fight immediately after the lawful Stage9 declaration.
+    require_test(hull_a<20&&
                  c(game).commissioned_naval_hulls().at("HULL_B").current_hp<20,
                  "opposed real fleets did not exchange physical hull damage");
-    require_test(c(game).stock("AIR_A","RA","ammunition")<air_ammo&&
-                 c(game).stock("AIR_B","RB","fuel")<6,
+    require_test(air_ammo<6&&c(game).stock("AIR_B","RB","fuel")<6,
                  "real aircraft failed to consume fuel and ordnance");
+    game.advance_day();
+    // The defender expended its documented ammunition on declaration day.
+    // It must not reengage using fictional gunfire next day.
+    require_test(c(game).commissioned_naval_hulls().at("HULL_A").current_hp==
+                    hull_a,
+                 "depleted fleet inflicted unsupported subsequent ship damage");
     bool blockaded=false;
     phasegh::World::Plan next;
     next[1].push_back([&blockaded](phasegh::Stage& s) {
