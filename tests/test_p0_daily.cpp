@@ -1169,6 +1169,120 @@ static void p1_autocracy_uses_real_institution_and_rejects_false_votes() {
                  "P1 no-legislature regime fabricated electoral authority");
 }
 
+static void peacetime_military_actual_resources_reserves_and_replay() {
+    phasegh::World gh(24000);
+    auto& e=gh.seed_geography();
+    e.seed_province(1,"R","A");
+    e.seed_unit(11,"A","A-ROOT");
+    e.seed_assignment(1,11);
+    auto& core=e.seed_core().seed_core();
+    core.seed_actor("A",1000);
+    core.seed_actor("SELLER",0);
+    core.seed_actor("INSTRUCTOR",0);
+    core.seed_government("A","HEAD_A","PM_A",5,3);
+    core.seed_unit("LINE");
+    core.seed_army_deployment("LINE","A","R");
+    core.seed_market("R","musket",3,1,10);
+    core.seed_market("R","ammunition",2,1,10);
+    core.seed_market("R","spare_parts",2,1,10);
+    core.seed_stock("SELLER","R","musket",8);
+    core.seed_stock("SELLER","R","ammunition",40);
+    core.seed_stock("SELLER","R","spare_parts",5);
+    const auto serving=people(gh,"R",4,"soldier",phaseb::Service::active);
+    (void)people(gh,"R",2,"reserve",phaseb::Service::reserve);
+    (void)people(gh,"R",4,"worker",phaseb::Service::civilian);
+    core.seed_active("LINE",serving);
+    phasec::PeacetimeMilitaryProgram program;
+    program.unit="LINE";
+    program.country="A";
+    program.equipment_good="musket";
+    program.service_provider="INSTRUCTOR";
+    program.doctrine=phasec::MilitaryDoctrine::defensive;
+    program.standing_target=5;
+    program.regional_reserve_target=2;
+    program.daily_enlist_limit=2;
+    program.equipment_target=6;
+    program.ammunition_target=20;
+    program.spare_parts_target=2;
+    program.daily_procurement_limit=40;
+    program.daily_drill_limit=4;
+    program.daily_repair_limit=1;
+    program.daily_budget=200;
+    program.drill_fee=1;
+    program.repair_fee=2;
+    core.set_peacetime_military_program(program);
+    const auto opening_population=core.people().population();
+    p0::DailyGame game(daily::World::adopt(std::move(gh),71));
+    game.advance_day();
+    const auto& state=c(game);
+    require_test(state.active_strength("LINE")==5&&
+                 state.military_regional_reserves("A","R")==2&&
+                 state.people().population()==opening_population,
+                 "military AI duplicated or failed to transfer real POP");
+    require_test(state.assigned_equipment("LINE","R","musket")==6&&
+                 state.stock("LINE","R","musket")==6&&
+                 state.stock("LINE","R","ammunition")==16,
+                 "peacetime programme did not physically buy, issue and drill");
+    require_test(state.cash("A")<1000&&state.cash("SELLER")>0&&
+                 state.cash("INSTRUCTOR")>0&&
+                 state.peacetime_military_state("LINE").proficiency_ppm==20'000,
+                 "military real treasury payment or training evidence missing");
+    require_test(state.military_readiness("LINE","R").equipped_supported==5,
+                 "military readiness ignores real period-appropriate arms");
+    auto snapshot=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame restored(daily::SnapshotCodec::decode(snapshot));
+    for(int i=0;i<3;++i) {
+        game.advance_day();
+        restored.advance_day();
+    }
+    require_test(daily::SnapshotCodec::encode(game.world())==
+                 daily::SnapshotCodec::encode(restored.world()),
+                 "peacetime doctrine/stock/training state lost across save");
+}
+
+static void peacetime_military_unfunded_and_nonland_are_bounded() {
+    phasegh::World gh(24000);
+    auto& e=gh.seed_geography();
+    e.seed_province(1,"R","A");
+    e.seed_unit(11,"A","A-ROOT");
+    e.seed_assignment(1,11);
+    auto& core=e.seed_core().seed_core();
+    core.seed_actor("A",0);
+    core.seed_actor("SELLER",0);
+    core.seed_actor("INSTRUCTOR",0);
+    core.seed_government("A","HEAD_A","PM_A",5,3);
+    core.seed_unit("NAVAL");
+    core.seed_army_deployment("NAVAL","A","R");
+    core.seed_market("R","warship",5,1,10);
+    core.seed_stock("SELLER","R","warship",2);
+    const auto crew=people(gh,"R",2,"sailor",phaseb::Service::active);
+    core.seed_active("NAVAL",crew);
+    phasec::PeacetimeMilitaryProgram program;
+    program.unit="NAVAL";
+    program.country="A";
+    program.branch=phasec::MilitaryServiceBranch::navy;
+    program.equipment_good="warship";
+    program.service_provider="INSTRUCTOR";
+    program.standing_target=2;
+    program.equipment_target=2;
+    program.daily_procurement_limit=2;
+    program.daily_drill_limit=1;
+    program.drill_fee=1;
+    program.daily_budget=100;
+    core.set_peacetime_military_program(program);
+    p0::DailyGame game(daily::World::adopt(std::move(gh),72));
+    game.advance_day();
+    require_test(c(game).stock("SELLER","R","warship")==2&&
+                 c(game).stock("NAVAL","R","warship")==0&&
+                 c(game).peacetime_military_state("NAVAL").proficiency_ppm==0&&
+                 c(game).cash("A")==0,
+                 "unfunded military policy invented money, warships or drills");
+    require_test(c(game).military_service_branch("NAVAL")==
+                     phasec::MilitaryServiceBranch::navy&&
+                 !c(game).military_readiness("NAVAL","R").combat_capable(),
+                 "naval formation incorrectly entered the land battle engine");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -1177,6 +1291,8 @@ int main(){
         daily_price_not_replayed_at_month_close();
         low_unit_price_still_changes_across_months();
         daily_battle_consumes_actual_ammo_and_pop();
+        peacetime_military_actual_resources_reserves_and_replay();
+        peacetime_military_unfunded_and_nonland_are_bounded();
         additional_active_cohorts_do_not_block_combat();
         duplicate_pop_demand_is_rejected();
         multiple_households_do_not_inflate_one_sellers_stock();
@@ -1194,7 +1310,7 @@ int main(){
         autonomous_f_congestion_uses_actual_alternate_edge();
         autonomous_daily_bank_debt_service_and_liquidity_floor();
         native_cg_credit_service_keeps_trade_facility_in_sync();
-        std::cout<<"P0 daily grand strategy: 22 bounded integration scenarios PASS\n";
+        std::cout<<"P0 daily grand strategy: bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P0 DAILY TEST FAILED: "<<e.what()<<"\n";

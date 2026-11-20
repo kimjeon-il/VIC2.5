@@ -34,7 +34,7 @@
     "docs/phase-c/politics/C-P5_UNREST_REBELLION_CIVIL_WAR.md": "8e6b87e08bb6765aa7b97c9b6efdd6b4242beb97",
     "docs/phase-c/politics/examples/election_three_seats.json": "aa69e04bc7b0cad66cbdd2d0cebc4c003e544692",
     "docs/phase-c/politics/examples/law_effective_next_month.json": "840d673258c654ffee58cd8d92f389475b2baad6",
-    "docs/phase-c/military/README.md": "9bf78f907a0b7cc5f9a19555232cc6f70f042b92",
+    "docs/phase-c/military/README.md": "2f8401a7bf1a1108aac2296b94a1017c8bd4a660",
     "docs/phase-c/military/MILITARY_ADRS.md": "2aeb519ab0d8b99fd905bde76124f189bfc24eeb",
     "docs/phase-c/military/MILITARY_ACCEPTANCE_TESTS.md": "c576691f3e39a63c8271a417785f7e92e45a916f",
     "docs/phase-c/integration/README.md": "870e7dce32d1fde48795546073d668ffc3450014",
@@ -75,7 +75,7 @@
     "CMakeLists.txt"
   ],
   "runtime_status": "PARTIAL_IMPLEMENTATION_WITH_SYNTHETIC_INTEGRATION_ACCEPTANCE",
-  "source_lock_revision": "d4-source-lock/1.4",
+  "source_lock_revision": "d4-source-lock/1.5",
   "source_lock_history": [
     {
       "date": "2026-11-05",
@@ -121,6 +121,17 @@
       "time_contract": "daily::World 12-stage/1-day",
       "authoritative_adrs": [
         "docs/phase-c/military/MILITARY_DAILY_P0_2026-11-20.md"
+      ]
+    },
+    {
+      "date": "2026-11-20",
+      "change": "Peacetime P1 military program registered in the canonical military README: actual POP enlistment/reserve status, in-region real-market armament, paid instruction, wear and maintenance, derived readiness, optional persistent C state and non-ground service separation. Design acceptance counts unchanged; bounded synthetic tests added without declaring full M1-M5 historical implementation.",
+      "modified": [
+        "docs/phase-c/military/README.md"
+      ],
+      "time_contract": "daily::World 12-stage/1-day",
+      "authoritative_adrs": [
+        "docs/phase-c/military/MILITARY_PEACETIME_P1_2026-11-20.md"
       ]
     }
   ]
