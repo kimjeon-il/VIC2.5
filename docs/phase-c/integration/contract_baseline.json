@@ -34,8 +34,8 @@
     "docs/phase-c/politics/C-P5_UNREST_REBELLION_CIVIL_WAR.md": "8e6b87e08bb6765aa7b97c9b6efdd6b4242beb97",
     "docs/phase-c/politics/examples/election_three_seats.json": "aa69e04bc7b0cad66cbdd2d0cebc4c003e544692",
     "docs/phase-c/politics/examples/law_effective_next_month.json": "840d673258c654ffee58cd8d92f389475b2baad6",
-    "docs/phase-c/military/README.md": "57ba9282910cf9edba586b4597e6446a1f229da8",
-    "docs/phase-c/military/MILITARY_ADRS.md": "85df3d44ef52f4e099cba0b83597e82c75f28f9d",
+    "docs/phase-c/military/README.md": "9bf78f907a0b7cc5f9a19555232cc6f70f042b92",
+    "docs/phase-c/military/MILITARY_ADRS.md": "2aeb519ab0d8b99fd905bde76124f189bfc24eeb",
     "docs/phase-c/military/MILITARY_ACCEPTANCE_TESTS.md": "c576691f3e39a63c8271a417785f7e92e45a916f",
     "docs/phase-c/integration/README.md": "870e7dce32d1fde48795546073d668ffc3450014",
     "docs/phase-c/integration/D4-3_INVARIANTS.md": "ea92028db6f7b6846d25ed43875402afeac4763c",
@@ -75,7 +75,7 @@
     "CMakeLists.txt"
   ],
   "runtime_status": "PARTIAL_IMPLEMENTATION_WITH_SYNTHETIC_INTEGRATION_ACCEPTANCE",
-  "source_lock_revision": "d4-source-lock/1.3",
+  "source_lock_revision": "d4-source-lock/1.4",
   "source_lock_history": [
     {
       "date": "2026-11-05",
@@ -109,6 +109,18 @@
         "docs/phase-c/politics/C-P3_POP_INTEREST_GROUPS_MOVEMENTS.md",
         "docs/phase-c/politics/C-P4_PARTIES_ELECTIONS_GOVERNMENT_FORMATION.md",
         "docs/phase-c/politics/C-P5_UNREST_REBELLION_CIVIL_WAR.md"
+      ]
+    },
+    {
+      "date": "2026-11-20",
+      "change": "Military M1-M5 monthly design remains a historical source contract, while the current P0 daily military execution contract supersedes its timing. The canonical military README and ADR Git blobs were re-locked; CM-ADR numbering, military acceptance matrices, population/stock source-of-truth and snapshot schema are unchanged. This does not certify full historical military runtime acceptance.",
+      "modified": [
+        "docs/phase-c/military/README.md",
+        "docs/phase-c/military/MILITARY_ADRS.md"
+      ],
+      "time_contract": "daily::World 12-stage/1-day",
+      "authoritative_adrs": [
+        "docs/phase-c/military/MILITARY_DAILY_P0_2026-11-20.md"
       ]
     }
   ]
