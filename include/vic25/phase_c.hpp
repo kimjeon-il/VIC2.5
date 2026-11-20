@@ -1888,6 +1888,8 @@ public:
     [[nodiscard]] Money reparations_outstanding(const std::string& id) const {
         return reparations_.at(id).remaining;
     }
+    [[nodiscard]] const std::map<std::string,Reparation>&
+            recognized_reparations()const{return reparations_;}
     Id migrate_with_explicit_property_allocation(
         Id source,People count,const std::string& destination_region,Id destination_household,
         const std::string& old_owner,const std::string& new_owner,
