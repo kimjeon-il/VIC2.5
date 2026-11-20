@@ -43,6 +43,7 @@ static void quote_requires_real_supply_and_verified_route() {
     c.seed_actor("OWNER",80);
     c.seed_actor("SELLER",100);
     c.seed_actor("CARRIER",50);
+    c.seed_government("STATE","HEAD","PM",5,3);
     c.seed_market("R","steel",20,1,60,20);
     c.seed_market("R","iron",2,1,10);
     c.seed_market("R","coal",2,1,10);
@@ -91,6 +92,7 @@ static void collateralized_autonomous_new_factory() {
     auto& c=d.seed_core();
     c.seed_actor("STATE",0);c.seed_actor("OWNER",1);
     c.seed_actor("BUILDER",100);c.seed_actor("SUPPLIER",10);
+    c.seed_government("STATE","HEAD","PM",5,3);
     c.seed_market("R","grain",2,1,10);
     c.seed_market("R","groceries",20,1,60,10);
     c.seed_market("R","steel",5,1,20);
@@ -158,6 +160,7 @@ static void selects_best_compatible_factory_recipe() {
     auto& d=geo.seed_core();
     auto& c=d.seed_core();
     c.seed_actor("STATE",0);c.seed_actor("OWNER",150);
+    c.seed_government("STATE","HEAD","PM",5,3);
     c.seed_market("R","groceries",30,1,100,10);
     c.seed_market("R","grain",2,1,10);
     c.seed_market("R","meat",20,1,50);
