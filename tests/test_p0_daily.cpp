@@ -1283,6 +1283,144 @@ static void peacetime_military_unfunded_and_nonland_are_bounded() {
                  "naval formation incorrectly entered the land battle engine");
 }
 
+// P2/P3 integration: claims, war, fronts, fleet and aviation all operate
+// through the same actual C/E/H day engine; no separate synthetic war ledger.
+static p0::DailyGame autonomous_war_fixture(bool combined_arms) {
+    phasegh::World gh(24000); // Gregorian 2000-01-01
+    auto& e=gh.seed_geography();
+    e.seed_province(1,"RA","A");
+    e.seed_province(2,"RB","B");
+    e.seed_border(1,2);
+    e.seed_unit(11,"A","A-ROOT");
+    e.seed_unit(22,"B","B-ROOT");
+    e.seed_assignment(1,11);
+    e.seed_assignment(2,22);
+    if(combined_arms) {
+        e.seed_coast(1,7);
+        e.seed_coast(2,7);
+        e.seed_geographic_link("SEA-DIRECT",2,1,"sea");
+    }
+    auto& core=e.seed_core().seed_core();
+    core.seed_actor("A",1000);
+    core.seed_actor("B",1000);
+    core.seed_actor("CARRIER",0);
+    core.seed_government("A","HEAD_A","PM_A",5,3);
+    core.seed_government("B","HEAD_B","PM_B",5,3);
+    core.seed_unit("LAND_A");
+    core.seed_unit("LAND_B");
+    core.seed_army_deployment("LAND_A","A","RA");
+    core.seed_army_deployment("LAND_B","B","RB");
+    core.seed_stock("LAND_A","RA","ammunition",12);
+    core.seed_stock("LAND_B","RB","ammunition",12);
+    core.seed_active("LAND_A",
+        people(gh,"RA",12,"soldier",phaseb::Service::active));
+    core.seed_active("LAND_B",
+        people(gh,"RB",12,"soldier",phaseb::Service::active));
+    if(combined_arms) {
+        for(const auto& [unit,country,region]:std::vector<
+             std::tuple<std::string,std::string,std::string>>{
+             {"NAVY_A","A","RA"},{"NAVY_B","B","RB"},
+             {"AIR_A","A","RA"},{"AIR_B","B","RB"}}) {
+            core.seed_unit(unit);
+            core.seed_army_deployment(unit,country,region);
+            const bool navy=unit.starts_with("NAVY");
+            const People crew=navy?4:2;
+            core.seed_active(unit,people(gh,region,crew,
+                navy?"sailor":"pilot",phaseb::Service::active));
+            phasec::PeacetimeMilitaryProgram policy;
+            policy.unit=unit;
+            policy.country=country;
+            policy.branch=navy?
+                phasec::MilitaryServiceBranch::navy:
+                phasec::MilitaryServiceBranch::air;
+            policy.equipment_good=navy?"warship":"aircraft";
+            policy.standing_target=crew;
+            core.set_peacetime_military_program(policy);
+            core.seed_stock(unit,region,"ammunition",navy?
+                (country=="A"?8:2):6);
+            core.seed_stock(unit,region,"fuel",navy?5:6);
+            if(navy)
+                core.p1_register_ship(phasec::P1NavalHull{
+                    "HULL_"+country,unit,"test-warship","fixture",
+                    100,20,20,crew,true});
+            else core.seed_stock(unit,region,"aircraft",2);
+        }
+        phasegh::TransportEdge sea;
+        sea.id="SEA_FROM_B";sea.carrier="CARRIER";
+        sea.from=2;sea.to=1;
+        sea.monthly_capacity=100;
+        sea.transit_days=1;
+        sea.mode="sea";
+        sea.evidence_id="fixture-observed-direct-sea";
+        sea.valid_from_month=24000;
+        sea.valid_through_month=24010;
+        gh.seed_transport_edge(sea);
+    }
+    p0::Policies config;
+    config.allow_autonomous_army_resupply=false;
+    config.allow_autonomous_peacetime_military_ai=false;
+    config.allow_autonomous_war_peace=false;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),309),config);
+    phasegh::World::Plan claim;
+    claim[9].push_back([](phasegh::Stage& s) {
+        s.geography().queue_claim("P2:CLAIM",2,"A",true);
+    });
+    if(combined_arms)
+        claim[7].push_back([](phasegh::Stage& s) {
+            s.phase_c().assign_equipment("AIR_A","RA","aircraft",2);
+            s.phase_c().assign_equipment("AIR_B","RB","aircraft",2);
+        });
+    game.advance_day(claim);
+    while(game.world().date()<daily::Date{2000,2,1})
+        game.advance_day();
+    phasegh::World::Plan crisis;
+    crisis[9].push_back([](phasegh::Stage& s) {
+        s.open_crisis("P2:CRISIS",2,"A","B","PM_A");
+    });
+    game.advance_day(crisis);
+    while(game.world().date()<daily::Date{2000,3,1})
+        game.advance_day();
+    game.advance_day(); // actual armed crisis automatically becomes war
+    return game;
+}
+static void automatic_frontline_uses_adjacent_real_troops() {
+    auto game=autonomous_war_fixture(false);
+    require_test(game.world().engine().diplomacy().wars.contains(
+                    "WAR:P2:CRISIS"),
+                 "adjacent real armies did not initiate legal war");
+    require_test(c(game).army_deployments().at("LAND_A").region=="RB",
+                 "autonomous attacker failed to cross a real enemy front");
+    require_test(c(game).army_deployments().at("LAND_B").region=="RB",
+                 "defender should hold its real garrison, not swap positions");
+    require_test(c(game).stock("LAND_A","RB","ammunition")<12 &&
+                 c(game).stock("LAND_B","RB","ammunition")<12,
+                 "automatic multi-army front never consumed real ammunition");
+    require_test(c(game).sovereignty("RB")=="B",
+                 "combat improperly created immediate sovereign annexation");
+}
+static void automatic_naval_air_and_real_blockade() {
+    auto game=autonomous_war_fixture(true);
+    const auto hull_a=c(game).commissioned_naval_hulls().at("HULL_A").current_hp;
+    const auto air_ammo=c(game).stock("AIR_A","RA","ammunition");
+    game.advance_day(); // first full day with an existing declared war
+    require_test(c(game).commissioned_naval_hulls().at("HULL_A").current_hp<
+                    hull_a&&
+                 c(game).commissioned_naval_hulls().at("HULL_B").current_hp<20,
+                 "opposed real fleets did not exchange physical hull damage");
+    require_test(c(game).stock("AIR_A","RA","ammunition")<air_ammo&&
+                 c(game).stock("AIR_B","RB","fuel")<6,
+                 "real aircraft failed to consume fuel and ordnance");
+    bool blockaded=false;
+    phasegh::World::Plan next;
+    next[1].push_back([&blockaded](phasegh::Stage& s) {
+        blockaded=s.naval_blockaded_edge(
+            s.commerce().transport_edges.at("SEA_FROM_B"));
+    });
+    game.advance_day(next);
+    require_test(blockaded,
+                 "naval superiority did not restrict a documented sea route");
+}
+
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
@@ -1293,6 +1431,8 @@ int main(){
         daily_battle_consumes_actual_ammo_and_pop();
         peacetime_military_actual_resources_reserves_and_replay();
         peacetime_military_unfunded_and_nonland_are_bounded();
+        automatic_frontline_uses_adjacent_real_troops();
+        automatic_naval_air_and_real_blockade();
         additional_active_cohorts_do_not_block_combat();
         duplicate_pop_demand_is_rejected();
         multiple_households_do_not_inflate_one_sellers_stock();
