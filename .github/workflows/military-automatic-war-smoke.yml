@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - work/military-automatic-operations-p2-p3-20261120
+      - work/merge-unreflected-military-industry-20261120
+      - main
   workflow_dispatch:
 
 jobs:
@@ -19,3 +21,15 @@ jobs:
         run: g++ -std=c++20 -O0 -g0 -Iinclude tests/test_p0_daily.cpp -o /tmp/vic25-military-smoke
       - name: Exercise P0 P1 P2 P3 daily scenarios
         run: /tmp/vic25-military-smoke
+      - name: Compile and run real building production and siting
+        run: |
+          g++ -std=c++20 -O0 -g0 -Iinclude tests/test_phase_d_buildings.cpp -o /tmp/vic25-building-smoke
+          /tmp/vic25-building-smoke
+      - name: Compile and run Phase D building snapshot
+        run: |
+          g++ -std=c++20 -O0 -g0 -Iinclude tests/test_phase_d_snapshot.cpp -o /tmp/vic25-building-snapshot-smoke
+          /tmp/vic25-building-snapshot-smoke
+      - name: Compile and run P2 autonomous enterprise investment
+        run: |
+          g++ -std=c++20 -O0 -g0 -Iinclude tests/test_p2_enterprise_ai.cpp -o /tmp/vic25-enterprise-smoke
+          /tmp/vic25-enterprise-smoke
