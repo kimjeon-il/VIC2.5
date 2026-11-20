@@ -852,6 +852,14 @@ inline void fight(phasec::IntegratedWorld& c,const Engagement& e,
     // retain other active cohorts after an earlier day's injuries or splits.
     if(a<=0||b<=0||c.unit_slice_strength(e.attacker,e.attacker_slice)!=a||
        c.unit_slice_strength(e.defender,e.defender_slice)!=b)return;
+    const auto fit=[](const phasec::IntegratedWorld& core,Id slice){
+        const auto& dem=core.people().demographic(
+            core.people().slice(slice).key.demographic);
+        const auto& health=core.people().health(dem.health);
+        return !health.ill&&!health.temporary_injury&&
+               !health.long_term_impairment;
+    };
+    if(!fit(c,e.attacker_slice)||!fit(c,e.defender_slice))return;
     const auto ready_a=c.military_readiness(e.attacker,e.region,a);
     const auto ready_b=c.military_readiness(e.defender,e.region,b);
     if(!ready_a.combat_capable()||!ready_b.combat_capable())return;

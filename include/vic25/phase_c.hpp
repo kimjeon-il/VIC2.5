@@ -581,6 +581,17 @@ public:
         ensure(units_.contains(unit)&&sovereignty_.contains(region)&&
                personnel_ceiling>=0,"invalid unit readiness request");
         const People assigned=std::min(active_strength(unit),personnel_ceiling);
+        People healthy=0;
+        for(const auto& [slice,count]:units_.at(unit)) {
+            if(!people_.has_slice(slice)||count<=0)continue;
+            const auto& demographic=people_.demographic(
+                people_.slice(slice).key.demographic);
+            const auto& health=people_.health(demographic.health);
+            if(health.ill||health.temporary_injury||
+               health.long_term_impairment)continue;
+            healthy=phaseb::add_checked(healthy,count);
+        }
+        healthy=std::min(healthy,personnel_ceiling);
         const auto deployed=army_deployments_.find(unit);
         if(deployed!=army_deployments_.end()&&deployed->second.region!=region)
             return {assigned,0,0,0,0};
@@ -590,7 +601,7 @@ public:
                 assigned_equipment(unit,region,"rifle"),
                 assigned_equipment(unit,region,"musket")),
                 assigned_equipment(unit,region,"small_arms"));
-        const People supplied=std::min<People>(assigned,ammunition);
+        const People supplied=std::min<People>(healthy,ammunition);
         MilitaryReadiness result;
         result.assigned_people=assigned;
         result.ammunition_supported=supplied;

@@ -16,9 +16,15 @@ using Quantity=vic25::Quantity;
 using People=phaseb::People;
 using Id=phaseb::Id;
 inline Id first_active(const phasec::IntegratedWorld& c,const std::string& unit) {
-    for(const auto& [id,n]:c.unit_slices(unit))
-        if(n>0&&c.people().has_slice(id)&&
-           c.people().slice(id).count==n)return id;
+    for(const auto& [id,n]:c.unit_slices(unit)) {
+        if(n<=0||!c.people().has_slice(id)||
+           c.people().slice(id).count!=n)continue;
+        const auto& demo=c.people().demographic(
+            c.people().slice(id).key.demographic);
+        const auto& health=c.people().health(demo.health);
+        if(!health.ill&&!health.temporary_injury&&
+           !health.long_term_impairment)return id;
+    }
     return 0;
 }
 inline bool same_sea(const phasee::SpatialState& geo,
