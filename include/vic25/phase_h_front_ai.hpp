@@ -150,6 +150,10 @@ inline std::vector<March> choices(phasegh::Stage& gh) {
                 const auto& destination=next->second.region;
                 const bool offensive=c.military_control(destination)==opponent;
                 const People hostile=military(opponent,destination);
+                // Do not swap opposing formations across the same border
+                // on one tick. The defender holds a manned defensive line
+                // unless the opposite position is actually vacant.
+                if(offensive&&country==war.defender&&hostile>0)continue;
                 // No independent tactical player order; the AI weighs
                 // observed strength, real issued arms and learned doctrine.
                 if(offensive&&hostile>phaseb::mul_checked(
