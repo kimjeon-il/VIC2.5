@@ -170,9 +170,13 @@ struct MilitaryReadiness {
         const bool doctrine_matches=
             (doctrine==MilitaryDoctrine::offensive&&attacking)||
             (doctrine==MilitaryDoctrine::defensive&&!attacking);
-        const People doctrine_bonus=doctrine_matches?
+        const People doctrine_base=doctrine_matches?
             equipped_supported/10:
             (doctrine==MilitaryDoctrine::maneuver?equipped_supported/20:0);
+        // A change of doctrine without accumulated training is not a
+        // costless combat bonus or an instantaneous tactical skill.
+        const People doctrine_bonus=phaseb::mul_checked(
+            doctrine_base,training_ppm)/1'000'000;
         return phaseb::add_checked(
             phaseb::add_checked(baseline,proficiency),doctrine_bonus);
     }
