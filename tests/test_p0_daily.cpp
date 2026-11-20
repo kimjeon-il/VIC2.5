@@ -1290,15 +1290,19 @@ static p0::DailyGame autonomous_war_fixture(bool combined_arms) {
     auto& e=gh.seed_geography();
     e.seed_province(1,"RA","A");
     e.seed_province(2,"RB","B");
+    if(combined_arms)e.seed_province(3,"RC","B");
     e.seed_border(1,2);
     e.seed_unit(11,"A","A-ROOT");
     e.seed_unit(22,"B","B-ROOT");
     e.seed_assignment(1,11);
     e.seed_assignment(2,22);
     if(combined_arms) {
+        e.seed_assignment(3,22);
         e.seed_coast(1,7);
         e.seed_coast(2,7);
+        e.seed_coast(3,7);
         e.seed_geographic_link("SEA-DIRECT",2,1,"sea");
+        e.seed_geographic_link("SEA-LANDING",1,3,"sea");
     }
     auto& core=e.seed_core().seed_core();
     core.seed_actor("A",1000);
@@ -1345,6 +1349,7 @@ static p0::DailyGame autonomous_war_fixture(bool combined_arms) {
                     100,20,20,crew,true});
             else core.seed_stock(unit,region,"aircraft",2);
         }
+        core.seed_stock("NAVY_A","RA","landing_berth",12);
         phasegh::TransportEdge sea;
         sea.id="SEA_FROM_B";sea.carrier="CARRIER";
         sea.from=2;sea.to=1;
@@ -1355,6 +1360,11 @@ static p0::DailyGame autonomous_war_fixture(bool combined_arms) {
         sea.valid_from_month=24000;
         sea.valid_through_month=24010;
         gh.seed_transport_edge(sea);
+        phasegh::TransportEdge lift=sea;
+        lift.id="SEA_LANDING";
+        lift.from=1;lift.to=3;
+        lift.evidence_id="fixture-verified-amphibious-lift";
+        gh.seed_transport_edge(lift);
     }
     p0::Policies config;
     config.allow_autonomous_army_resupply=false;
@@ -1365,11 +1375,16 @@ static p0::DailyGame autonomous_war_fixture(bool combined_arms) {
     claim[9].push_back([](phasegh::Stage& s) {
         s.geography().queue_claim("P2:CLAIM",2,"A",true);
     });
-    if(combined_arms)
+    if(combined_arms) {
+        claim[9].push_back([](phasegh::Stage& s){
+            s.geography().queue_claim("P3:LANDING-CLAIM",3,"A",true);
+        });
         claim[7].push_back([](phasegh::Stage& s) {
             s.phase_c().assign_equipment("AIR_A","RA","aircraft",2);
             s.phase_c().assign_equipment("AIR_B","RB","aircraft",2);
+            s.phase_c().assign_equipment("NAVY_A","RA","landing_berth",12);
         });
+    }
     game.advance_day(claim);
     while(game.world().date()<daily::Date{2000,2,1})
         game.advance_day();
@@ -1436,6 +1451,10 @@ static void automatic_peace_repatriates_and_pays_actual_debt() {
 }
 static void automatic_naval_air_and_real_blockade() {
     auto game=autonomous_war_fixture(true);
+    require_test(c(game).army_deployments().at("LAND_A").region=="RC"&&
+                 c(game).sovereignty("RC")=="B"&&
+                 c(game).stock("LAND_A","RC","ammunition")>0,
+                 "verified sea lane and real landing berths did not carry an army");
     const auto hull_a=c(game).commissioned_naval_hulls().at("HULL_A").current_hp;
     const auto air_ammo=c(game).stock("AIR_A","RA","ammunition");
     game.advance_day(); // first full day with an existing declared war
