@@ -34,6 +34,9 @@ static void quote_requires_real_supply_and_verified_route() {
     e.seed_province(1,"R","STATE");
     e.seed_province(2,"B","STATE");
     e.seed_border(1,2);
+    e.seed_unit(11,"STATE","STATE-ROOT");
+    e.seed_assignment(1,11);
+    e.seed_assignment(2,11);
     auto& d=e.seed_core();
     auto& c=d.seed_core();
     c.seed_actor("STATE",0);
@@ -82,6 +85,8 @@ static void collateralized_autonomous_new_factory() {
     phasegh::World gh{24000};
     auto& e=gh.seed_geography();
     e.seed_province(1,"R","STATE");
+    e.seed_unit(11,"STATE","STATE-ROOT");
+    e.seed_assignment(1,11);
     auto& d=e.seed_core();
     auto& c=d.seed_core();
     c.seed_actor("STATE",0);c.seed_actor("OWNER",1);
@@ -146,8 +151,11 @@ static void collateralized_autonomous_new_factory() {
 }
 static void selects_best_compatible_factory_recipe() {
     phasegh::World gh{24000};
-    gh.seed_geography().seed_province(1,"R","STATE");
-    auto& d=gh.seed_geography().seed_core();
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","STATE");
+    geo.seed_unit(11,"STATE","STATE-ROOT");
+    geo.seed_assignment(1,11);
+    auto& d=geo.seed_core();
     auto& c=d.seed_core();
     c.seed_actor("STATE",0);c.seed_actor("OWNER",150);
     c.seed_market("R","groceries",30,1,100,10);
