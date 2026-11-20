@@ -775,9 +775,9 @@ public:
             const Money cost=phaseb::mul_checked(drill,p.drill_fee);
             pay(treasury,p.service_provider,cost);
             consume(unit,region,"ammunition",drill);
-            const auto remaining=(1'000'000-state.proficiency_ppm)/5'000;
-            state.proficiency_ppm+=static_cast<std::int32_t>(
-                std::min<Quantity>(drill,remaining)*5'000);
+            const auto remaining=1'000'000-state.proficiency_ppm;
+            state.proficiency_ppm+=static_cast<std::int32_t>(std::min<Quantity>(
+                remaining,std::min<Quantity>(drill,200)*5'000));
             state.worn_equipment=std::min(
                 assigned_equipment(unit,region,p.equipment_good),
                 phaseb::add_checked(state.worn_equipment,drill/10));
@@ -796,6 +796,9 @@ public:
         const auto region=deployment.region;
         if(sovereignty_.at(region)!=p.country)return;
         People quota=p.daily_enlist_limit;
+        if(quota<=0)return;
+        if(active_strength(unit)==p.standing_target&&
+           p.regional_reserve_target==0)return;
         if(active_strength(unit)>p.standing_target) {
             People excess=std::min(quota,active_strength(unit)-p.standing_target);
             std::vector<Id> members;
@@ -862,7 +865,7 @@ public:
                 events_.push_back("military-peacetime-enlistment");
             }
         }
-        if(quota<=0)return;
+        if(quota<=0||p.regional_reserve_target==0)return;
         // One regional reserve pool is shared by all formations of a nation.
         People regional_target=0;
         for(const auto& [other,policy]:peacetime_military_programs_) {
