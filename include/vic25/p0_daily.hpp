@@ -818,13 +818,11 @@ inline Quantity available_production(const phased::Stage& d,
 }
 
 inline phasec::CombatLoss tactical_losses(People victim,
-                          Quantity enemy_ammo,Quantity enemy_rifles,
+                          People enemy_combat_capacity,
                           std::int64_t terrain_ppm,bool victim_attacking) {
-    const Quantity force=phaseb::add_checked(enemy_ammo,
-                             std::min(enemy_ammo,enemy_rifles));
-    // Deliberately bounded tactical proxy, not an invented full warfare AI.
-    Quantity impact=force/5;
-    if(impact==0&&force>0)impact=1;
+    // Bounded P0 damage proxy; the C readiness query owns force inputs.
+    Quantity impact=enemy_combat_capacity/5;
+    if(impact==0&&enemy_combat_capacity>0)impact=1;
     const auto terrain=static_cast<Quantity>(terrain_ppm);
     impact=victim_attacking ?
            (impact/1'000'000)*terrain+
@@ -846,13 +844,15 @@ inline void fight(phasec::IntegratedWorld& c,const Engagement& e) {
     // retain other active cohorts after an earlier day's injuries or splits.
     if(a<=0||b<=0||c.unit_slice_strength(e.attacker,e.attacker_slice)!=a||
        c.unit_slice_strength(e.defender,e.defender_slice)!=b)return;
-    const Quantity ammo_a=std::min<Quantity>(a,c.stock(e.attacker,e.region,"ammunition"));
-    const Quantity ammo_b=std::min<Quantity>(b,c.stock(e.defender,e.region,"ammunition"));
-    if(ammo_a<=0||ammo_b<=0)return;
-    const auto rifle_a=c.assigned_equipment(e.attacker,e.region,"rifle");
-    const auto rifle_b=c.assigned_equipment(e.defender,e.region,"rifle");
-    auto al=tactical_losses(a,ammo_b,rifle_b,e.defender_terrain_ppm,true);
-    auto bl=tactical_losses(b,ammo_a,rifle_a,e.defender_terrain_ppm,false);
+    const auto ready_a=c.military_readiness(e.attacker,e.region,a);
+    const auto ready_b=c.military_readiness(e.defender,e.region,b);
+    if(!ready_a.combat_capable()||!ready_b.combat_capable())return;
+    const Quantity ammo_a=ready_a.ammunition_supported;
+    const Quantity ammo_b=ready_b.ammunition_supported;
+    auto al=tactical_losses(a,ready_b.combat_capacity(),
+                            e.defender_terrain_ppm,true);
+    auto bl=tactical_losses(b,ready_a.combat_capacity(),
+                            e.defender_terrain_ppm,false);
     // Apply IG traits to REAL, already-armed battle casualties. The
     // original C battle() remains the sole military casualty/population
     // authority. No troops, ammunition, or phantom engagements are minted.
@@ -2429,8 +2429,7 @@ public:
                     for(const auto& [unit,deployment]:c.army_deployments()) {
                         if(deployment.region!=front||used.contains(unit)||
                            c.p5_guerrilla_is_insurgent_unit(unit)||
-                           c.active_strength(unit)<=0||
-                           c.stock(unit,front,"ammunition")<=0)continue;
+                           !c.military_readiness(unit,front).combat_capable())continue;
                         if(deployment.country==war.attacker&&attacker.empty())
                             attacker=unit;
                         else if(deployment.country==war.defender&&defender.empty())
@@ -2880,37 +2879,8 @@ public:
         plan[8].push_back([today=world_.day_index()](phasegh::Stage& gh) {
             gh.phase_c().phase_time_close_empty_bankrupt_estates(today);
         });
-        // A stocked national arsenal in the exact same province-region as
-        // its deployed unit can issue ammunition without a fictional shipping
-        // trip. Transfer only physical C inventory, never free army supply.
-        if(decisions.allow_autonomous_army_resupply)
-            plan[7].push_back([](phasegh::Stage& gh) {
-                auto& c=gh.phase_c();
-                std::set<std::string> at_war;
-                for(const auto& [id,war]:gh.diplomacy().wars) {
-                    (void)id;
-                    if(war.active&&!war.armistice) {
-                        at_war.insert(war.attacker);
-                        at_war.insert(war.defender);
-                    }
-                }
-                for(const auto& [unit,d]:c.army_deployments()) {
-                    if(c.p5_guerrilla_is_insurgent_unit(unit)||
-                       !at_war.contains(d.country)||
-                       !c.has_country_treasury(d.country))continue;
-                    const auto& treasury=c.country_treasury(d.country);
-                    if(treasury==unit)continue;
-                    const Quantity desired=c.active_strength(unit);
-                    const Quantity existing=c.stock(unit,d.region,"ammunition");
-                    if(desired<=existing)continue;
-                    const Quantity free=c.phase_d_material_available(
-                        treasury,d.region,"ammunition");
-                    const Quantity issued=std::min(desired-existing,free);
-                    if(issued>0)
-                        c.phase_g_transfer_goods(
-                            treasury,unit,d.region,"ammunition",issued);
-                }
-            });
+        // Army supply is planned once after civilian freight quotations:
+        // no independent late-stage scan of the same arsenal stock.
         // Closing market observations is a daily accounting operation,
         // independent of whether a scenario supplied explicit household buyers.
         plan[11].push_back([ordinal=world_.day_index()](phasegh::Stage& gh){
@@ -2930,10 +2900,16 @@ public:
             if(auto job=phasef::plan_next_hop(world_,lane,freight_plan))
                 jobs.push_back(std::move(*job));
         if(decisions.allow_autonomous_army_resupply) {
-            auto supplies=phasef::plan_direct_army_supply(world_,freight_plan);
+            auto supplies=phasef::plan_army_supply(world_,freight_plan);
+            for(const auto& issue:supplies.local)
+                plan[7].push_back([issue](phasegh::Stage& gh) {
+                    gh.phase_c().phase_g_transfer_goods(
+                        issue.arsenal,issue.unit,issue.region,
+                        "ammunition",issue.amount);
+                });
             jobs.insert(jobs.end(),
-                        std::make_move_iterator(supplies.begin()),
-                        std::make_move_iterator(supplies.end()));
+                        std::make_move_iterator(supplies.cargo.begin()),
+                        std::make_move_iterator(supplies.cargo.end()));
         }
         if(jobs.empty())return world_.advance_day(plan);
         daily::World staged=world_;

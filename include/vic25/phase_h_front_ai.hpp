@@ -102,17 +102,17 @@ inline std::vector<March> choices(phasegh::Stage& gh) {
                 for(const auto& [unit,d]:c.army_deployments()) {
                     if(d.region!=front||c.active_strength(unit)<=0)
                         continue;
+                    const auto ready=c.military_readiness(unit,front);
                     if(d.country==country)
-                        own=phaseb::add_checked(own,c.active_strength(unit));
+                        own=phaseb::add_checked(own,ready.combat_capacity());
                     else if(d.country==war.attacker||
                             d.country==war.defender)
-                        enemy=phaseb::add_checked(enemy,c.active_strength(unit));
+                        enemy=phaseb::add_checked(enemy,ready.combat_capacity());
                 }
                 const auto routes=routes_to_front(geo,c,front,country);
                 for(const auto& [unit,d]:c.army_deployments()) {
                     if(d.country!=country||d.region==front||
-                       c.active_strength(unit)<=0||
-                       c.stock(unit,d.region,"ammunition")<=0||
+                       !c.military_readiness(unit,d.region).combat_capable()||
                        !geo.regions.contains(d.region))continue;
                     const auto origin=geo.regions.at(d.region);
                     auto next=routes.find(origin);
@@ -168,10 +168,12 @@ inline void occupy_decisive_fronts(phasegh::Stage& gh) {
                 if(d.region!=front||c.active_strength(unit)<=0)continue;
                 if(d.country==war.attacker) {
                     attacker=true;
-                    if(c.stock(unit,front,"ammunition")>0)armed_attacker=true;
+                    if(c.military_readiness(unit,front).combat_capable())
+                        armed_attacker=true;
                 } else if(d.country==war.defender) {
                     defender=true;
-                    if(c.stock(unit,front,"ammunition")>0)armed_defender=true;
+                    if(c.military_readiness(unit,front).combat_capable())
+                        armed_defender=true;
                 } else neutral=true;
             }
             // Out-of-ammo enemy soldiers are still physically present.

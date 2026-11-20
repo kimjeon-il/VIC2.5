@@ -157,7 +157,15 @@ inline std::optional<daily::Command> plan_next_hop(
 // Direct verified transport links only: if the army is not connected, remain
 // out of ammunition until a real service exists. The resulting shipment uses
 // the exact same dated World cargo command and C/G reservations as civilian F.
-inline std::vector<daily::Command> plan_direct_army_supply(
+struct ArmySupplyIssue {
+    std::string arsenal,unit,region;
+    Quantity amount{};
+};
+struct ArmySupplyPlan {
+    std::vector<ArmySupplyIssue> local;
+    std::vector<daily::Command> cargo;
+};
+inline ArmySupplyPlan plan_army_supply(
         const daily::World& world,DayPlanningReservations& provisional) {
     const auto& gh=world.engine();
     const auto& c=gh.base().core().core();
@@ -172,15 +180,16 @@ inline std::vector<daily::Command> plan_direct_army_supply(
         belligerents.insert(war.attacker);
         belligerents.insert(war.defender);
     }
-    std::vector<daily::Command> orders;
+    ArmySupplyPlan planned;
     for(const auto& [unit,deployment]:c.army_deployments()) {
         const auto& country=deployment.country;
         if(!belligerents.contains(country)||!c.has_country_treasury(country)||
            !geography.regions.contains(deployment.region))continue;
         const auto& arsenal=c.country_treasury(country);
-        const Quantity desired=c.active_strength(unit);
+        const auto readiness=c.military_readiness(unit,deployment.region);
+        const Quantity desired=readiness.assigned_people;
         if(desired<=0)continue;
-        const Quantity current_ammo=c.stock(unit,deployment.region,"ammunition");
+        const Quantity current_ammo=readiness.ammunition;
         Quantity in_transit=0;
         for(const auto& [shipment_id,cargo]:world.cargo()) {
             (void)shipment_id;
@@ -194,6 +203,25 @@ inline std::vector<daily::Command> plan_direct_army_supply(
             current_ammo,in_transit);
         if(already_supplied>=desired)continue;
         Quantity lacking=desired-already_supplied;
+        // Same-region depot issue and remote shipment share one day-local
+        // reservation and cannot spend the same ammunition twice.
+        if(arsenal!=unit) {
+            const auto key=std::make_tuple(
+                arsenal,deployment.region,std::string("ammunition"));
+            const Quantity present=c.stock(
+                arsenal,deployment.region,"ammunition");
+            const Quantity reserved=provisional.goods[key];
+            if(present>reserved) {
+                const Quantity amount=std::min(lacking,present-reserved);
+                if(amount>0) {
+                    provisional.goods[key]=phaseb::add_checked(reserved,amount);
+                    planned.local.push_back(
+                        {arsenal,unit,deployment.region,amount});
+                    lacking-=amount;
+                }
+            }
+        }
+        if(lacking<=0)continue;
         const auto destination=geography.regions.at(deployment.region);
         const std::string id="F:ARMY:"+unit+":"+std::to_string(world.day_index());
         for(const auto& [stock_key,real_qty]:c.physical_inventory()) {
@@ -246,7 +274,7 @@ inline std::vector<daily::Command> plan_direct_army_supply(
             provisional.cash[arsenal]=phaseb::add_checked(
                 provisional.cash[arsenal],freight);
             daily::Command command;
-            command.id=id+":"+std::to_string(orders.size());
+            command.id=id+":"+std::to_string(planned.cargo.size());
             command.kind=daily::Kind::cargo_dispatch;
             command.from=arsenal;
             command.to=unit;
@@ -257,10 +285,10 @@ inline std::vector<daily::Command> plan_direct_army_supply(
             command.amount=qty;
             command.unit_price=best->transit_days;
             command.auxiliary=0; // no unverified loss model
-            orders.push_back(std::move(command));
+            planned.cargo.push_back(std::move(command));
             lacking-=qty;
         }
     }
-    return orders;
+    return planned;
 }
 } // namespace vic25::phasef

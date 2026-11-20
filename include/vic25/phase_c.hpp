@@ -130,6 +130,18 @@ struct CombatLoss {
     People killed{}, acute{}, long_term{}, pow{}, missing{};
     Quantity ammunition{};
 };
+// Read-only preparedness from the canonical personnel and material ledgers.
+// No new monthly battle state or independently writable military strength.
+struct MilitaryReadiness {
+    People assigned_people{},ammunition_supported{},equipped_supported{};
+    Quantity ammunition{},issued_small_arms{};
+    [[nodiscard]] bool combat_capable()const {
+        return ammunition_supported>0;
+    }
+    [[nodiscard]] People combat_capacity()const {
+        return phaseb::add_checked(ammunition_supported,equipped_supported);
+    }
+};
 struct AdvanceReport {
     std::int64_t starting_month{};
     std::int64_t finished_month{};
@@ -520,6 +532,28 @@ public:
                                                const std::string& good) const {
         auto it=equipment_assignment_.find({unit,region,good});
         return it==equipment_assignment_.end()?0:it->second;
+    }
+    // The one derived day-native combat readiness query. A participation
+    // limit prevents a single engaged POP slice using its entire formation's
+    // ammunition or equipment as its own firepower.
+    [[nodiscard]] MilitaryReadiness military_readiness(
+            const std::string& unit,const std::string& region,
+            People personnel_ceiling=std::numeric_limits<People>::max())const {
+        ensure(units_.contains(unit)&&sovereignty_.contains(region)&&
+               personnel_ceiling>=0,"invalid unit readiness request");
+        const People assigned=std::min(active_strength(unit),personnel_ceiling);
+        const auto deployed=army_deployments_.find(unit);
+        if(deployed!=army_deployments_.end()&&deployed->second.region!=region)
+            return {assigned,0,0,0,0};
+        const Quantity ammunition=stock(unit,region,"ammunition");
+        const Quantity arms=phaseb::add_checked(
+            phaseb::add_checked(
+                assigned_equipment(unit,region,"rifle"),
+                assigned_equipment(unit,region,"musket")),
+                assigned_equipment(unit,region,"small_arms"));
+        const People supplied=std::min<People>(assigned,ammunition);
+        const People equipped=std::min<People>(supplied,arms);
+        return {assigned,supplied,equipped,ammunition,arms};
     }
     void seed_unit(std::string unit) {
         ensure(stage_ == -1 && commit_id_ == 0 && !unit.empty() && !units_.contains(unit), "bad unit");
@@ -3326,6 +3360,8 @@ public:
         units_[unit][active] = phaseb::add_checked(units_[unit][active], n);
         events_.push_back("mobilization");
     }
+    // Physical POP/stock casualty writer for both daily engagements and
+    // old regression fixtures; never a second monthly battle resolver.
     void battle(const std::string& unit, Id source, const std::string& region,
                 CombatLoss loss) {
         require_stage({10});

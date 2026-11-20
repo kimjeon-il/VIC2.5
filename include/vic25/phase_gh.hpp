@@ -1170,8 +1170,8 @@ public:
         for(const auto& [unit,deployment]:phase_c().army_deployments()) {
             if(deployment.region!=front||
                phase_c().p5_guerrilla_is_insurgent_unit(unit)||
-               phase_c().active_strength(unit)<=0||
-               phase_c().stock(unit,front,"ammunition")<=0)continue;
+               !phase_c().military_readiness(unit,front).combat_capable())
+                continue;
             if(deployment.country==claimant)claimant_ready=true;
             if(deployment.country==crisis.respondent)respondent_ready=true;
         }

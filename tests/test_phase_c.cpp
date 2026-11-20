@@ -531,6 +531,12 @@ int main() {
             row.key.demographic,row.key.economic,row.key.household,60,7878);
         f.w.seed_active("V",other);
         f.w.seed_stock("U","R","rifle",70);
+        f.w.seed_stock("U","R","musket",10);
+        const auto bare=f.w.military_readiness("U","R");
+        verify(bare.assigned_people==100&&
+               bare.ammunition_supported==100&&
+               bare.equipped_supported==0&&bare.combat_capacity()==100,
+               "initial readiness fabricated equipped men");
         verify(f.w.formation_strength("DIV")==160,"double counted formation");
         IntegratedWorld::Plan duplicate;
         duplicate[7].push_back([](auto& w){
@@ -540,12 +546,20 @@ int main() {
         verify(rejected([&]{f.w.advance(duplicate);}),"equipment duplicate accepted");
         verify(f.w.commit_id()==0,"failed allocation leaked");
         IntegratedWorld::Plan real;
-        real[7].push_back([](auto& w){w.assign_equipment("U","R","rifle",70);});
+        real[7].push_back([](auto& w){
+            w.assign_equipment("U","R","rifle",70);
+            w.assign_equipment("U","R","musket",10);
+        });
         f.w.advance(real);
+        const auto after=f.w.military_readiness("U","R");
+        const auto no_ammo=f.w.military_readiness("V","R");
         verify(f.w.assigned_equipment("U","R","rifle")==70&&
                f.w.assigned_equipment("V","R","rifle")==0&&
-               f.w.formation_strength("DIV")==160,
-               "real formation/equipment invalid");
+               f.w.formation_strength("DIV")==160&&
+               after.equipped_supported==80&&
+               after.combat_capacity()==180&&
+               !no_ammo.combat_capable(),
+               "real formation/equipment/readiness invalid");
     });
     test.run(29, []{
         F f;IntegratedWorld::Plan p;
