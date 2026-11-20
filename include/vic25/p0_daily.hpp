@@ -2903,9 +2903,16 @@ public:
             auto supplies=phasef::plan_army_supply(world_,freight_plan);
             for(const auto& issue:supplies.local)
                 plan[7].push_back([issue](phasegh::Stage& gh) {
-                    gh.phase_c().phase_g_transfer_goods(
-                        issue.arsenal,issue.unit,issue.region,
-                        "ammunition",issue.amount);
+                    auto& c=gh.phase_c();
+                    // Civilian purchases or other stage reservations can
+                    // reduce stock after the initial day-planning snapshot.
+                    const Quantity available=c.phase_d_material_available(
+                        issue.arsenal,issue.region,"ammunition");
+                    const Quantity issued=std::min(issue.amount,available);
+                    if(issued>0)
+                        c.phase_g_transfer_goods(
+                            issue.arsenal,issue.unit,issue.region,
+                            "ammunition",issued);
                 });
             jobs.insert(jobs.end(),
                         std::make_move_iterator(supplies.cargo.begin()),
