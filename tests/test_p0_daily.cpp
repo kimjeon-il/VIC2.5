@@ -1451,6 +1451,15 @@ static void automatic_peace_repatriates_and_pays_actual_debt() {
 }
 static void automatic_naval_air_and_real_blockade() {
     auto game=autonomous_war_fixture(true);
+    std::cerr<<"LAND DEBUG pos="<<c(game).army_deployments().at("LAND_A").region
+             <<" ammo_RC="<<c(game).stock("LAND_A","RC","ammunition")
+             <<" landing_berth="<<c(game).assigned_equipment("NAVY_A","RA","landing_berth")
+             <<" navy_fuel="<<c(game).stock("NAVY_A","RA","fuel")
+             <<" navy_ammo="<<c(game).stock("NAVY_A","RA","ammunition")
+             <<" claim_RC="<<(game.world().engine().base().spatial().claims.contains(3))
+             <<" searoutes="<<game.world().engine().commerce().transport_edges.size()
+             <<" hullHP="<<c(game).commissioned_naval_hulls().at("HULL_A").current_hp
+             <<std::endl;
     require_test(c(game).army_deployments().at("LAND_A").region=="RC"&&
                  c(game).sovereignty("RC")=="B"&&
                  c(game).stock("LAND_A","RC","ammunition")>0,
