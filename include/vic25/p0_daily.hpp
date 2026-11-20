@@ -2424,41 +2424,67 @@ public:
             }
             plan[10].push_back([manual_forces](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
+                struct Participant {
+                    std::string unit,country;
+                    Id slice{};
+                    People readiness{};
+                };
+                std::map<std::string,std::vector<Participant>> stationed;
+                for(const auto& [unit,d]:c.army_deployments()) {
+                    if(manual_forces.contains(unit)||
+                       c.military_service_branch(unit)!=
+                           phasec::MilitaryServiceBranch::army||
+                       c.p5_guerrilla_is_insurgent_unit(unit)||
+                       !c.military_readiness(unit,d.region).combat_capable())
+                        continue;
+                    Id active{};
+                    for(const auto& [slice,count]:c.unit_slices(unit)) {
+                        if(count>0&&c.people().has_slice(slice)&&
+                           c.people().slice(slice).count==count) {
+                            active=slice;break;
+                        }
+                    }
+                    if(!active)continue;
+                    stationed[d.region].push_back({
+                        unit,d.country,active,
+                        c.military_readiness(unit,d.region).combat_capacity()});
+                }
                 std::set<std::string> used=manual_forces;
-                for(const auto& [id,war]:gh.diplomacy().wars) {
+                for(const auto& [war_id,war]:gh.diplomacy().wars) {
                     if(!war.active||war.armistice)continue;
                     for(const auto& front:gh.war_front_regions(war)) {
-                    std::string attacker,defender;
-                    for(const auto& [unit,deployment]:c.army_deployments()) {
-                        if(deployment.region!=front||used.contains(unit)||
-                           c.military_service_branch(unit)!=
-                               phasec::MilitaryServiceBranch::army||
-                           c.p5_guerrilla_is_insurgent_unit(unit)||
-                           !c.military_readiness(unit,front).combat_capable())continue;
-                        if(deployment.country==war.attacker&&attacker.empty())
-                            attacker=unit;
-                        else if(deployment.country==war.defender&&defender.empty())
-                            defender=unit;
-                    }
-                    if(attacker.empty()||defender.empty())continue;
-                    const auto first_active=[&](const std::string& unit)->Id {
-                        for(const auto& [slice,count]:c.unit_slices(unit))
-                            if(c.people().has_slice(slice)&&
-                               c.people().slice(slice).count==count&&count>0)
-                                return slice;
-                        return 0;
-                    };
-                    const Id a=first_active(attacker);
-                    const Id b=first_active(defender);
-                    if(!a||!b)continue;
-                    const auto ammo_before=c.stock(attacker,front,"ammunition");
-                    const Engagement engagement{attacker,defender,front,a,b,
-                                                1'000'000};
-                    fight(c,engagement);
-                    if(c.stock(attacker,front,"ammunition")<ammo_before)
-                        gh.record_actual_war_engagement(id);
-                    used.insert(attacker);
-                    used.insert(defender);
+                        const auto here=stationed.find(front);
+                        if(here==stationed.end())continue;
+                        std::vector<Participant> attack,defend;
+                        for(const auto& participant:here->second) {
+                            if(used.contains(participant.unit))continue;
+                            if(participant.country==war.attacker)
+                                attack.push_back(participant);
+                            if(participant.country==war.defender)
+                                defend.push_back(participant);
+                        }
+                        const auto order=[](const auto& a,const auto& b){
+                            return std::tuple{-a.readiness,a.unit}<
+                                   std::tuple{-b.readiness,b.unit};
+                        };
+                        std::sort(attack.begin(),attack.end(),order);
+                        std::sort(defend.begin(),defend.end(),order);
+                        // Multiple independent real units can fight on the
+                        // same front. Each unit joins at most one engagement
+                        // per day; no battle or ammunition is duplicated.
+                        const auto pairs=std::min(attack.size(),defend.size());
+                        for(std::size_t i=0;i<pairs;++i) {
+                            const auto& a=attack[i];
+                            const auto& b=defend[i];
+                            const Quantity before=c.stock(
+                                a.unit,front,"ammunition");
+                            fight(c,Engagement{a.unit,b.unit,front,
+                                               a.slice,b.slice,1'000'000});
+                            if(c.stock(a.unit,front,"ammunition")<before)
+                                gh.record_actual_war_engagement(war_id);
+                            used.insert(a.unit);
+                            used.insert(b.unit);
+                        }
                     }
                 }
             });
