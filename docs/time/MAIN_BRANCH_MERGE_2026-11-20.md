@@ -26,3 +26,9 @@ GitHub Actions `VIC2.5 focused automatic war smoke`: P0 일간 군사·전쟁, 5
 ## 병합 방식
 
 `work/merge-unreflected-military-industry-20261120`을 군사 최신 브랜치에서 분기하여 산업 브랜치의 실행 로직/문서/테스트를 3-way 이식한다. 최종 통합 커밋에 산업 최신 HEAD `d32fa5bdd627837fe27a73851810248352bd0db0`을 **둘째 Git 부모**로 기록해 역사상 양 계열을 병합하고, 검증 완료 후 main을 fast-forward 한다. 이전 main의 저장소 역사 재작성은 하지 않는다.
+
+## 병합 직후 CI 정비
+
+- Windows/Linux 통합 CI 정적 감사의 `modern snapshot schema` 조건이 Phase D 0.6의 스냅샷 토큰에 고정되어 있었다. 통합 전 main도 Phase D 0.7이어서 이 정적 검사를 통과할 수 없는 상태였다.
+- 현행 0.8 스냅샷을 포함해 앞으로는 `VIC25_PHASED_SNAPSHOT_N`과 `phase-d-cpp/0.N`의 번호 일치, 버전 0.7 이상, 자원 유량/생물량/생산이력 및 운영 소모품의 실제 직렬화 보존을 검사한다. 런타임 장부나 이전 포맷 호환 실행을 새로 추가하지 않는다.
+- 통합 P0 군사, 건물 운영, Phase D 저장·복원, 기업 자율 투자 GCC 검증 및 Phase C 디자인 해시 감사는 [GitHub Actions 실행 44754791586](https://github.com/kimjeon-il/VIC2.5/actions/runs/44754791586)에서 모두 통과했다.
