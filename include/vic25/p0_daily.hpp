@@ -2712,21 +2712,7 @@ public:
             plan[10].push_back([](phasegh::Stage& gh) {
                 frontai::occupy_decisive_fronts(gh);
             });
-        if(decisions.allow_autonomous_peacetime_military_ai)
-            plan[10].push_back([](phasegh::Stage& gh) {
-                auto& c=gh.phase_c();
-                std::set<std::string> mobilized_at_war;
-                for(const auto& [id,war]:gh.diplomacy().wars) {
-                    (void)id;
-                    if(war.active&&!war.armistice) {
-                        mobilized_at_war.insert(war.attacker);
-                        mobilized_at_war.insert(war.defender);
-                    }
-                }
-                for(const auto& [unit,policy]:c.peacetime_military_programs())
-                    if(!mobilized_at_war.contains(policy.country))
-                        c.peacetime_military_staff(unit);
-            });
+        
         // Aggregate all policy categories under a single national cash
         // envelope. Real health providers are funded from existing treasury
         // deposits, actual medicines, and staffed operating facilities.
@@ -2928,6 +2914,23 @@ public:
         for(std::size_t i=0;i<plan.size();++i)
             plan[i].insert(plan[i].end(),
                 additional_today[i].begin(),additional_today[i].end());
+        // Person transfers are LAST in Stage10, after explicit and automatic
+        // combat, so new reservists/regulars cannot fight retroactively.
+        if(decisions.allow_autonomous_peacetime_military_ai)
+            plan[10].push_back([](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::set<std::string> at_war;
+                for(const auto& [id,war]:gh.diplomacy().wars) {
+                    (void)id;
+                    if(war.active&&!war.armistice) {
+                        at_war.insert(war.attacker);
+                        at_war.insert(war.defender);
+                    }
+                }
+                for(const auto& [unit,policy]:c.peacetime_military_programs())
+                    if(!at_war.contains(policy.country))
+                        c.peacetime_military_staff(unit);
+            });
         // Build one provisional stock/cash/edge allocation for all civilian
         // and military freight. Avoid copying an enormous 30k-province
         // world on days with no new transport orders.
