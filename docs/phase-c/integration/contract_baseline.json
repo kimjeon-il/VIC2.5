@@ -24,7 +24,7 @@
     "docs/phase-c/economy/README.md": "bfb90326d09bd217a678bd2a3333176479e6e907",
     "docs/phase-c/economy/ECONOMIC_ADRS.md": "3d9a7633b5f4856a2d42c205e7c4da9c4d15f843",
     "docs/phase-c/economy/ECONOMIC_ACCEPTANCE_TESTS.md": "57c4906d384d6e670c0c5bca52e4f2e634d6b141",
-    "docs/phase-c/politics/README.md": "d7f5a811c8c3b6e79b1936cdc1958628d7c9e092",
+    "docs/phase-c/politics/README.md": "02d39b617f67e3cadd803b556fcc9f90cde807fc",
     "docs/phase-c/politics/POLITICAL_ADRS.md": "a7b01ead2009e80a9098326c93d948c9dba8f74f",
     "docs/phase-c/politics/POLITICAL_ACCEPTANCE_TESTS.md": "8dc5d810df370287a84780746c09638dd56386d5",
     "docs/phase-c/politics/C-P1_STATE_GOVERNMENT_INSTITUTIONS.md": "46efb799f9ca0442f870ac336ce42a6f35e38198",
@@ -75,7 +75,7 @@
     "CMakeLists.txt"
   ],
   "runtime_status": "PARTIAL_IMPLEMENTATION_WITH_SYNTHETIC_INTEGRATION_ACCEPTANCE",
-  "source_lock_revision": "d4-source-lock/1.5",
+  "source_lock_revision": "d4-source-lock/1.6",
   "source_lock_history": [
     {
       "date": "2026-11-05",
@@ -133,6 +133,16 @@
       "authoritative_adrs": [
         "docs/phase-c/military/MILITARY_PEACETIME_P1_2026-11-20.md"
       ]
+    },
+    {
+      "date": "2026-11-20",
+      "change": "Canonical political-design index was already changed in main by previously integrated politics work. Re-synchronize the single stale document Git blob without changing the politics 1.0 schema, numbered D4/CP/CM test contracts, or executable politics sources. P2 industry and P0-P3 military integration preserves the latest daily gameplay and legal ledgers.",
+      "modified": [
+        "docs/phase-c/politics/README.md"
+      ],
+      "contract_identity": "unchanged",
+      "old_git_blob": "d7f5a811c8c3b6e79b1936cdc1958628d7c9e092",
+      "new_git_blob": "02d39b617f67e3cadd803b556fcc9f90cde807fc"
     }
   ]
 }
