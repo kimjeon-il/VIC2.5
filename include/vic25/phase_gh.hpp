@@ -1143,6 +1143,24 @@ public:
                (owner==war.attacker&&claimants.contains(war.defender)))
                 real_fronts.insert(region);
         }
+        // Frontlines emerge from CURRENT opposed military control across
+        // genuine E land borders, including reversals and occupied land.
+        // No second war-front territory registry is written or serialized.
+        for(const auto& [id,province]:geo.provinces) {
+            (void)id;
+            const auto& holder=c.military_control(province.region);
+            if(holder!=war.attacker&&holder!=war.defender)continue;
+            const auto& opposite=holder==war.attacker?
+                                 war.defender:war.attacker;
+            for(const auto neighbor:province.neighbors) {
+                const auto next=geo.provinces.find(neighbor);
+                if(next==geo.provinces.end())continue;
+                if(c.military_control(next->second.region)!=opposite)
+                    continue;
+                real_fronts.insert(province.region);
+                real_fronts.insert(next->second.region);
+            }
+        }
         return {real_fronts.begin(),real_fronts.end()};
     }
 
@@ -1167,8 +1185,15 @@ public:
         if(!geographical.provinces.contains(crisis.province))return false;
         const auto& front=geographical.provinces.at(crisis.province).region;
         bool claimant_ready=false,respondent_ready=false;
+        // Co-located opposing armies are not required to declare an
+        // international war. Both sides may be on adjacent real provinces.
+        std::set<std::string> mobilization_area{front};
+        for(const auto neighbor:geographical.provinces.at(crisis.province).neighbors)
+            if(geographical.provinces.contains(neighbor))
+                mobilization_area.insert(
+                    geographical.provinces.at(neighbor).region);
         for(const auto& [unit,deployment]:phase_c().army_deployments()) {
-            if(deployment.region!=front||
+            if(!mobilization_area.contains(deployment.region)||
                phase_c().military_service_branch(unit)!=
                    phasec::MilitaryServiceBranch::army||
                phase_c().p5_guerrilla_is_insurgent_unit(unit)||
@@ -1202,20 +1227,27 @@ public:
                 (deployment.country==war.attacker||
                  deployment.country==war.defender) &&
                 c.active_strength(unit)>0&&
+                c.military_service_branch(unit)==
+                    phasec::MilitaryServiceBranch::army&&
                 !c.p5_guerrilla_is_insurgent_unit(unit),
                 "H_ERR_UNAUTHORIZED_ARMY_WAR_MARCH");
-        const auto claimed_fronts=war_front_regions(war);
-        // A foreign territory can be entered only at a disputed province
-        // established by one of the belligerents' original E claims.
-        // Rear-area travel stays inside real friendly military control.
-        require(std::find(claimed_fronts.begin(),claimed_fronts.end(),
-                          destination)!=claimed_fronts.end()||
-                c.military_control(destination)==deployment.country,
+        const auto opponent=deployment.country==war.attacker?
+                            war.defender:war.attacker;
+        const auto& control=c.military_control(destination);
+        const auto& title=c.sovereignty(destination);
+        // The adjacent destination must be controlled by one belligerent.
+        // Never cross neutral land without a separate actual access treaty.
+        require(control==deployment.country||
+                (control==opponent&&
+                 (title==opponent||title==deployment.country)),
                 "H_ERR_UNLAWFUL_FOREIGN_MILITARY_MOVE");
         const auto ammunition=std::min<Quantity>(
             c.active_strength(unit),
             c.stock(unit,deployment.region,"ammunition"));
-        require(ammunition>0,"H_ERR_ARMY_UNSUPPLIED_MARCH");
+        // A disarmed army may retreat into friendly land, but cannot
+        // execute an offensive march into the enemy's position.
+        require(ammunition>0||control==deployment.country,
+                "H_ERR_ARMY_UNSUPPLIED_ATTACK");
         spatial_.march_unit_adjacent(unit,destination,ammunition);
     }
     void record_actual_war_engagement(const std::string& id) {
