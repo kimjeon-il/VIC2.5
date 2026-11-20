@@ -1380,23 +1380,10 @@ static p0::DailyGame autonomous_war_fixture(bool combined_arms) {
     game.advance_day(crisis);
     while(game.world().date()<daily::Date{2000,3,1})
         game.advance_day();
-    game.advance_day(); // first effective crisis tick
-    for(int i=0;i<40&&!game.world().engine().diplomacy().wars.contains(
-            "WAR:P2:CRISIS");++i)
-        game.advance_day(); // legal effective-day transitions
-    if(!game.world().engine().diplomacy().wars.contains("WAR:P2:CRISIS")) {
-        const auto& diplomacy=game.world().engine().diplomacy();
-        const auto& cr=diplomacy.crises.at("P2:CRISIS");
-        const auto& now=c(game);
-        std::cerr<<"WAR DEBUG status="<<static_cast<int>(cr.status)
-                 <<" effective="<<cr.effective_month
-                 <<" month="<<now.month()
-                 <<" armyA="<<now.active_strength("LAND_A")
-                 <<" ammoA="<<now.stock("LAND_A","RA","ammunition")
-                 <<" armyB="<<now.active_strength("LAND_B")
-                 <<" ammoB="<<now.stock("LAND_B","RB","ammunition")
-                 <<std::endl;
-    }
+    game.advance_day(); // legal crisis starts a war on its effective day
+    require_test(game.world().engine().diplomacy().wars.contains(
+                     "WAR:P2:CRISIS"),
+                 "armed adjacent crisis missed its lawful first effective day");
     return game;
 }
 static void automatic_frontline_uses_adjacent_real_troops() {
@@ -1413,6 +1400,39 @@ static void automatic_frontline_uses_adjacent_real_troops() {
                  "automatic multi-army front never consumed real ammunition");
     require_test(c(game).sovereignty("RB")=="B",
                  "combat improperly created immediate sovereign annexation");
+}
+static void automatic_peace_repatriates_and_pays_actual_debt() {
+    auto completed=autonomous_war_fixture(false);
+    p0::Policies opts;
+    opts.allow_autonomous_army_resupply=false;
+    opts.allow_autonomous_peacetime_military_ai=false;
+    opts.allow_autonomous_naval_air_ai=false;
+    opts.allow_autonomous_war_peace=true;
+    p0::DailyGame game(
+        daily::SnapshotCodec::decode(
+            daily::SnapshotCodec::encode(completed.world())),opts);
+    for(int i=0;i<210&&
+        game.world().engine().diplomacy().wars.at(
+            "WAR:P2:CRISIS").ended_day<0;++i)
+        game.advance_day();
+    const auto& w=game.world().engine().diplomacy().wars.at(
+        "WAR:P2:CRISIS");
+    require_test(w.ended_day>=0&&!w.active,
+                 "actual inactivity did not negotiate an effective peace");
+    require_test(c(game).army_deployments().at("LAND_A").region=="RA" &&
+                 c(game).sovereignty("RB")=="B",
+                 "peace did not repatriate troops or forged annexation");
+    const phasec::Money before=c(game).cash("B");
+    phasegh::World::Plan reparations;
+    reparations[9].push_back([](phasegh::Stage& gh) {
+        gh.link_reparation_treaty("P3:REAL-DEBT","B","A",100,"PM_B");
+    });
+    game.advance_day(reparations);
+    for(int i=0;i<45;++i)game.advance_day();
+    require_test(c(game).reparations_outstanding("P3:REAL-DEBT")<100 &&
+                 c(game).cash("B")<before &&
+                 c(game).cash("A")>1000,
+                 "recognized reparations did not settle from actual treasury");
 }
 static void automatic_naval_air_and_real_blockade() {
     auto game=autonomous_war_fixture(true);
@@ -1449,6 +1469,7 @@ int main(){
         peacetime_military_unfunded_and_nonland_are_bounded();
         automatic_frontline_uses_adjacent_real_troops();
         automatic_naval_air_and_real_blockade();
+        automatic_peace_repatriates_and_pays_actual_debt();
         additional_active_cohorts_do_not_block_combat();
         duplicate_pop_demand_is_rejected();
         multiple_households_do_not_inflate_one_sellers_stock();
