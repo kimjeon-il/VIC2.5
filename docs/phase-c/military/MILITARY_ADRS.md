@@ -4,7 +4,7 @@
 - 상태: **구형 월간 군사 ADR 보존 / 현행 일간 P0 실행 계약 우선**
 
 > **2026-11-20 전환:** 이 문서의 월간 단계·차월 전투 규칙은 옛 설계 기록이다. 실제 게임은 `daily::World::advance_day`에서 매일 12단계로 군사 사건을 처리하며 월말 전투/보급을 다시 계산하지 않는다. [일간 P0 실행 정본](MILITARY_DAILY_P0_2026-11-20.md) 참조.
-- 상위: [POP-D0~D3](../../pop/README.md)·[C-D0](../C-D0_COMMON_CONTRACT.md)·[C-E1~E5](../economy/README.md). 인구·금융·재고 단일 원본과 월간 12단계 계약이 충돌 시 우선한다.
+- 상위: [POP-D0~D3](../../pop/README.md)·[C-D0](../C-D0_COMMON_CONTRACT.md)·[C-E1~E5](../economy/README.md). 인구·금융·재고 단일 원본은 유지하며, 실행 단계의 시간 규약은 일간 12단계가 우선한다.
 
 ## 확정 ADR
 
