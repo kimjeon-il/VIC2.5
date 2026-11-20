@@ -2487,11 +2487,20 @@ public:
         auto flown_air=std::make_shared<std::set<std::string>>();
         auto landed_armies=std::make_shared<std::set<std::string>>();
         if(decisions.allow_autonomous_naval_air_ai &&
-           std::any_of(world_.engine().diplomacy().wars.begin(),
-                       world_.engine().diplomacy().wars.end(),
-                       [](const auto& pair) {
-                           return pair.second.active&&!pair.second.armistice;
-                       }))
+           (std::any_of(world_.engine().diplomacy().wars.begin(),
+                        world_.engine().diplomacy().wars.end(),
+                        [](const auto& pair) {
+                            return pair.second.active&&!pair.second.armistice;
+                        }) ||
+            (decisions.allow_endogenous_crisis_wars &&
+             std::any_of(world_.engine().diplomacy().crises.begin(),
+                         world_.engine().diplomacy().crises.end(),
+                         [month=game_c.month()](const auto& pair) {
+                             const auto& crisis=pair.second;
+                             return crisis.effective_month<=month &&
+                                 (crisis.status==phasegh::CrisisStatus::active||
+                                  crisis.status==phasegh::CrisisStatus::scheduled);
+                         }))))
             plan[10].push_back([flown_air,landed_armies]
                               (phasegh::Stage& gh) {
                 theaterai::resolve_naval_engagements(gh);
