@@ -2944,11 +2944,10 @@ public:
                         row.key.demographic);
                     if(d.service!=phaseb::Service::reserve||
                        d.citizenship!="citizen")continue;
-                    for(const auto& scope:military_scopes)
-                        if(scope.second==d.region) {
-                            reserve_counts[scope]=phaseb::add_checked(
-                                reserve_counts[scope],row.count);
-                        }
+                    const Scope scope{c.sovereignty(d.region),d.region};
+                    if(military_scopes.contains(scope))
+                        reserve_counts[scope]=phaseb::add_checked(
+                            reserve_counts[scope],row.count);
                 }
                 for(const auto& [unit,policy]:c.peacetime_military_programs()) {
                     if(at_war.contains(policy.country)||
