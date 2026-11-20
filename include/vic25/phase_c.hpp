@@ -793,16 +793,20 @@ public:
     }
     // Stage10 AFTER the day's battles: enlist/demobilize only actual POP.
     // The reserve pool remains civilian-employed and is never duplicated.
-    void peacetime_military_staff(const std::string& unit) {
+    [[nodiscard]] People peacetime_military_staff(
+            const std::string& unit,People regional_reserves_hint=-1) {
         require_stage({10});
         const auto& p=peacetime_military_programs_.at(unit);
         const auto& deployment=army_deployments_.at(unit);
         const auto region=deployment.region;
-        if(sovereignty_.at(region)!=p.country)return;
+        if(sovereignty_.at(region)!=p.country)return regional_reserves_hint;
         People quota=p.daily_enlist_limit;
-        if(quota<=0)return;
+        if(quota<=0)return regional_reserves_hint;
         if(active_strength(unit)==p.standing_target&&
-           p.regional_reserve_target==0)return;
+           p.regional_reserve_target==0)return regional_reserves_hint;
+        People regional_reserves=regional_reserves_hint>=0?
+            regional_reserves_hint:
+            military_regional_reserves(p.country,region);
         if(active_strength(unit)>p.standing_target) {
             People excess=std::min(quota,active_strength(unit)-p.standing_target);
             std::vector<Id> members;
@@ -814,6 +818,8 @@ public:
                 if(n<=0)continue;
                 const People leaving=std::min(n,excess);
                 demobilize(unit,id,leaving);
+                regional_reserves=phaseb::add_checked(
+                    regional_reserves,leaving);
                 excess-=leaving;
                 quota-=leaving;
                 events_.push_back("military-peacetime-demobilization");
@@ -822,7 +828,7 @@ public:
         const auto authorized=p2_rule(p.country,p.country,
             P2ClauseKind::conscription_authorized).value_or(
                 conscription_enabled_?1:0)!=0;
-        if(!authorized||quota<=0)return;
+        if(!authorized||quota<=0)return regional_reserves;
         const auto eligible=[&](Id id,phaseb::Service service) {
             if(!people_.has_slice(id))return false;
             const auto& row=people_.slice(id);
@@ -865,11 +871,13 @@ public:
                 }
                 if(recruited<=0)continue;
                 mobilize(id,recruited,unit);
+                if(service==phaseb::Service::reserve)
+                    regional_reserves-=recruited;
                 needed-=recruited;quota-=recruited;
                 events_.push_back("military-peacetime-enlistment");
             }
         }
-        if(quota<=0||p.regional_reserve_target==0)return;
+        if(quota<=0||p.regional_reserve_target==0)return regional_reserves;
         // One regional reserve pool is shared by all formations of a nation.
         People regional_target=0;
         for(const auto& [other,policy]:peacetime_military_programs_) {
@@ -880,8 +888,8 @@ public:
                     regional_target,policy.regional_reserve_target);
         }
         People reserve_needed=std::max<People>(
-            0,regional_target-military_regional_reserves(p.country,region));
-        if(reserve_needed<=0)return;
+            0,regional_target-regional_reserves);
+        if(reserve_needed<=0)return regional_reserves;
         for(const auto id:snapshot_ids()) {
             if(reserve_needed<=0||quota<=0)break;
             if(!eligible(id,phaseb::Service::civilian))continue;
@@ -895,8 +903,10 @@ public:
                 row.key.household,phaseb::EventKind::enlistment,
                 employed,"real-regional-reserve-enrolment");
             reserve_needed-=n;quota-=n;
+            regional_reserves=phaseb::add_checked(regional_reserves,n);
             events_.push_back("military-peacetime-reserve-enrolment");
         }
+        return regional_reserves;
     }
     void seed_unit(std::string unit) {
         ensure(stage_ == -1 && commit_id_ == 0 && !unit.empty() && !units_.contains(unit), "bad unit");
