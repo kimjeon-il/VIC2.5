@@ -1330,8 +1330,13 @@ public:
             if(war.ended_day>=0)continue;
             bool ceasefire=false,peace=false;
             for(const auto& [treaty_id,t]:diplomacy_.treaties) {
-                (void)treaty_id;
                 if(!t.active)continue;
+                // Automated settlements are scoped to the war that caused
+                // them. An old peace treaty cannot close a distinct later war.
+                if(treaty_id.starts_with("AUTO:PEACE:")&&
+                   treaty_id!="AUTO:PEACE:"+war.id)continue;
+                if(treaty_id.starts_with("AUTO:CEASEFIRE:")&&
+                   treaty_id!="AUTO:CEASEFIRE:"+war.id)continue;
                 for(const auto& clause:t.clauses) {
                     if(clause.effective>phase_c().month()||
                        (clause.expires>=0&&clause.expires<phase_c().month()))
