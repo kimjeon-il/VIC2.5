@@ -1169,6 +1169,8 @@ public:
         bool claimant_ready=false,respondent_ready=false;
         for(const auto& [unit,deployment]:phase_c().army_deployments()) {
             if(deployment.region!=front||
+               phase_c().military_service_branch(unit)!=
+                   phasec::MilitaryServiceBranch::army||
                phase_c().p5_guerrilla_is_insurgent_unit(unit)||
                !phase_c().military_readiness(unit,front).combat_capable())
                 continue;

@@ -338,6 +338,9 @@ struct Policies {
     phasec::IntegratedWorld::BankCreditRule bank_credit_rule{};
     std::vector<phasegh::MerchantOffice> merchant_offices;
     std::vector<IndustryOpportunity> industry_opportunities;
+    // Per-country military programmes are persistent Phase C strategic policy.
+    // P0 only executes lawful procurement/training/personnel orders each day.
+    bool allow_autonomous_peacetime_military_ai{true};
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -849,9 +852,9 @@ inline void fight(phasec::IntegratedWorld& c,const Engagement& e) {
     if(!ready_a.combat_capable()||!ready_b.combat_capable())return;
     const Quantity ammo_a=ready_a.ammunition_supported;
     const Quantity ammo_b=ready_b.ammunition_supported;
-    auto al=tactical_losses(a,ready_b.combat_capacity(),
+    auto al=tactical_losses(a,ready_b.combat_capacity(false),
                             e.defender_terrain_ppm,true);
-    auto bl=tactical_losses(b,ready_a.combat_capacity(),
+    auto bl=tactical_losses(b,ready_a.combat_capacity(true),
                             e.defender_terrain_ppm,false);
     // Apply IG traits to REAL, already-armed battle casualties. The
     // original C battle() remains the sole military casualty/population
@@ -2428,6 +2431,8 @@ public:
                     std::string attacker,defender;
                     for(const auto& [unit,deployment]:c.army_deployments()) {
                         if(deployment.region!=front||used.contains(unit)||
+                           c.military_service_branch(unit)!=
+                               phasec::MilitaryServiceBranch::army||
                            c.p5_guerrilla_is_insurgent_unit(unit)||
                            !c.military_readiness(unit,front).combat_capable())continue;
                         if(deployment.country==war.attacker&&attacker.empty())
@@ -2707,6 +2712,21 @@ public:
             plan[10].push_back([](phasegh::Stage& gh) {
                 frontai::occupy_decisive_fronts(gh);
             });
+        if(decisions.allow_autonomous_peacetime_military_ai)
+            plan[10].push_back([](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::set<std::string> mobilized_at_war;
+                for(const auto& [id,war]:gh.diplomacy().wars) {
+                    (void)id;
+                    if(war.active&&!war.armistice) {
+                        mobilized_at_war.insert(war.attacker);
+                        mobilized_at_war.insert(war.defender);
+                    }
+                }
+                for(const auto& [unit,policy]:c.peacetime_military_programs())
+                    if(!mobilized_at_war.contains(policy.country))
+                        c.peacetime_military_staff(unit);
+            });
         // Aggregate all policy categories under a single national cash
         // envelope. Real health providers are funded from existing treasury
         // deposits, actual medicines, and staffed operating facilities.
@@ -2879,6 +2899,23 @@ public:
         plan[8].push_back([today=world_.day_index()](phasegh::Stage& gh) {
             gh.phase_c().phase_time_close_empty_bankrupt_estates(today);
         });
+        // The strategic program sets targets; day-native AI owns all
+        // actual procurement, armaments, paid drills and maintenance.
+        if(decisions.allow_autonomous_peacetime_military_ai)
+            plan[7].push_back([](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::set<std::string> at_war;
+                for(const auto& [id,war]:gh.diplomacy().wars) {
+                    (void)id;
+                    if(war.active&&!war.armistice) {
+                        at_war.insert(war.attacker);
+                        at_war.insert(war.defender);
+                    }
+                }
+                for(const auto& [unit,policy]:c.peacetime_military_programs())
+                    if(!at_war.contains(policy.country))
+                        c.peacetime_military_support(unit);
+            });
         // Army supply is planned once after civilian freight quotations:
         // no independent late-stage scan of the same arsenal stock.
         // Closing market observations is a daily accounting operation,

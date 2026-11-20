@@ -100,7 +100,9 @@ inline std::vector<March> choices(phasegh::Stage& gh) {
             for(const auto& country:{war.attacker,war.defender}) {
                 phaseb::People own=0,enemy=0;
                 for(const auto& [unit,d]:c.army_deployments()) {
-                    if(d.region!=front||c.active_strength(unit)<=0)
+                    if(d.region!=front||c.active_strength(unit)<=0||
+                       c.military_service_branch(unit)!=
+                           phasec::MilitaryServiceBranch::army)
                         continue;
                     const auto ready=c.military_readiness(unit,front);
                     if(d.country==country)
@@ -111,7 +113,9 @@ inline std::vector<March> choices(phasegh::Stage& gh) {
                 }
                 const auto routes=routes_to_front(geo,c,front,country);
                 for(const auto& [unit,d]:c.army_deployments()) {
-                    if(d.country!=country||d.region==front||
+                    if(c.military_service_branch(unit)!=
+                           phasec::MilitaryServiceBranch::army||
+                       d.country!=country||d.region==front||
                        !c.military_readiness(unit,d.region).combat_capable()||
                        !geo.regions.contains(d.region))continue;
                     const auto origin=geo.regions.at(d.region);
@@ -165,7 +169,9 @@ inline void occupy_decisive_fronts(phasegh::Stage& gh) {
             bool attacker=false,defender=false,neutral=false;
             bool armed_attacker=false,armed_defender=false;
             for(const auto& [unit,d]:c.army_deployments()) {
-                if(d.region!=front||c.active_strength(unit)<=0)continue;
+                if(d.region!=front||c.active_strength(unit)<=0||
+                   c.military_service_branch(unit)!=
+                       phasec::MilitaryServiceBranch::army)continue;
                 if(d.country==war.attacker) {
                     attacker=true;
                     if(c.military_readiness(unit,front).combat_capable())

@@ -782,6 +782,9 @@ public:
                 assigned_equipment(unit,region,p.equipment_good),
                 phaseb::add_checked(state.worn_equipment,drill/10));
             events_.push_back("military-real-paid-drill");
+        } else if(state.proficiency_ppm>0) {
+            // Repeated peacetime neglect slowly degrades prepared capability.
+            state.proficiency_ppm=std::max(0,state.proficiency_ppm-100);
         }
     }
     // Stage10 AFTER the day's battles: enlist/demobilize only actual POP.
