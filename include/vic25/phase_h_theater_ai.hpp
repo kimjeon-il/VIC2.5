@@ -5,6 +5,7 @@
 #include "vic25/phase_gh.hpp"
 #include <algorithm>
 #include <map>
+#include <queue>
 #include <set>
 #include <string>
 #include <tuple>
@@ -291,5 +292,67 @@ inline std::set<std::string> conduct_verified_landings(phasegh::Stage& gh) {
         }
     }
     return used_armies;
+}
+// Postwar troop repatriation: one real adjacent friendly-controlled land
+// step per day. The shortest path is rebuilt from E's current geometry and
+// C's sovereign/occupied regions, not a second troop-position ledger.
+inline void withdraw_after_peace(phasegh::Stage& gh) {
+    auto& c=gh.phase_c();
+    const auto& geo=gh.geography().spatial();
+    std::set<std::string> fighting_countries;
+    for(const auto& [id,war]:gh.diplomacy().wars) {
+        (void)id;
+        if(war.active&&!war.armistice) {
+            fighting_countries.insert(war.attacker);
+            fighting_countries.insert(war.defender);
+        }
+    }
+    std::set<std::string> returning_countries;
+    for(const auto& [unit,d]:c.army_deployments()) {
+        if(c.military_service_branch(unit)!=
+               phasec::MilitaryServiceBranch::army||
+           fighting_countries.contains(d.country)||
+           !geo.regions.contains(d.region)||c.active_strength(unit)<=0)
+            continue;
+        if(c.sovereignty(d.region)!=d.country&&
+           c.military_control(d.region)==d.country)
+            returning_countries.insert(d.country);
+    }
+    for(const auto& country:returning_countries) {
+        std::map<phasee::Id,phasee::Id> route;
+        std::queue<phasee::Id> pending;
+        for(const auto& [id,province]:geo.provinces)
+            if(c.sovereignty(province.region)==country&&
+               c.military_control(province.region)==country) {
+                route.emplace(id,id);
+                pending.push(id);
+            }
+        while(!pending.empty()) {
+            const auto current=pending.front();pending.pop();
+            for(const auto neighbor:geo.provinces.at(current).neighbors) {
+                if(route.contains(neighbor)||
+                   !geo.provinces.contains(neighbor))continue;
+                const auto& next=geo.provinces.at(neighbor).region;
+                if(c.military_control(next)!=country)continue;
+                route.emplace(neighbor,current);
+                pending.push(neighbor);
+            }
+        }
+        for(const auto& [unit,d]:c.army_deployments()) {
+            if(d.country!=country||
+               c.military_service_branch(unit)!=
+                   phasec::MilitaryServiceBranch::army||
+               c.sovereignty(d.region)==country||
+               c.active_strength(unit)<=0)continue;
+            const auto origin=geo.regions.at(d.region);
+            const auto next=route.find(origin);
+            if(next==route.end()||next->second==origin)continue;
+            const auto& region=geo.provinces.at(next->second).region;
+            const Quantity ammunition=std::min<Quantity>(
+                c.active_strength(unit),
+                c.stock(unit,d.region,"ammunition"));
+            gh.geography().march_unit_adjacent(unit,region,ammunition);
+        }
+    }
 }
 } // namespace vic25::theaterai
