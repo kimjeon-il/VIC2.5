@@ -2927,9 +2927,37 @@ public:
                         at_war.insert(war.defender);
                     }
                 }
+                using Scope=std::pair<std::string,std::string>;
+                std::set<Scope> military_scopes;
                 for(const auto& [unit,policy]:c.peacetime_military_programs())
-                    if(!at_war.contains(policy.country))
-                        c.peacetime_military_staff(unit);
+                    if(!at_war.contains(policy.country)&&
+                       policy.daily_enlist_limit>0)
+                        military_scopes.insert({
+                            policy.country,c.army_deployments().at(unit).region});
+                if(military_scopes.empty())return;
+                // Derive reserve totals once per active military day, not
+                // once for every regiment in a million-POP world.
+                std::map<Scope,People> reserve_counts;
+                for(const auto& [slice_id,row]:c.people().slices()) {
+                    (void)slice_id;
+                    const auto& d=c.people().demographic(
+                        row.key.demographic);
+                    if(d.service!=phaseb::Service::reserve||
+                       d.citizenship!="citizen")continue;
+                    for(const auto& scope:military_scopes)
+                        if(scope.second==d.region) {
+                            reserve_counts[scope]=phaseb::add_checked(
+                                reserve_counts[scope],row.count);
+                        }
+                }
+                for(const auto& [unit,policy]:c.peacetime_military_programs()) {
+                    if(at_war.contains(policy.country)||
+                       policy.daily_enlist_limit<=0)continue;
+                    const Scope scope{policy.country,
+                        c.army_deployments().at(unit).region};
+                    reserve_counts[scope]=c.peacetime_military_staff(
+                        unit,reserve_counts[scope]);
+                }
             });
         // Build one provisional stock/cash/edge allocation for all civilian
         // and military freight. Avoid copying an enormous 30k-province
