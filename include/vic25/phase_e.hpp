@@ -541,6 +541,71 @@ public:
                 "ED0_ERR_INVALID_PROVINCE");
         spatial_.provinces.at(p).coastal_seas.insert(sea);
     }
+
+    // P1 site eligibility uses the real Phase E province/coast/link registry,
+    // and the existing Phase C OwnershipLedger for separately supplied land
+    // or extraction-use rights. No automatic geography, title or jobs.
+    void require_building_location(Id province_id,const std::string& owner,
+                                   const std::string& archetype_id,
+                                   const std::string& title_asset="") const {
+        require(spatial_.provinces.contains(province_id),
+                "BUILDING_NO_REAL_PROVINCE");
+        const auto* p=building::profile(archetype_id);
+        require(p!=nullptr,"BUILDING_NO_OPERATION_PROFILE");
+        const auto& province=spatial_.provinces.at(province_id);
+        require(core_.core().has_actor(owner),"BUILDING_UNKNOWN_OWNER");
+        if(p->siting==building::Siting::coastal)
+            require(!province.coastal_seas.empty(),
+                    "BUILDING_REQUIRES_RECORDED_COAST");
+        if(p->siting==building::Siting::rail_node) {
+            bool rail_found=false;
+            for(const auto& [link_id,link]:spatial_.geographic_links) {
+                (void)link_id;
+                if(link.mode=="rail" &&
+                   (link.from==province_id || link.to==province_id))
+                    rail_found=true;
+            }
+            require(rail_found,"BUILDING_REQUIRES_ACTUAL_RAIL_LINK");
+        }
+        // Title assets must be explicitly registered by the scenario. This
+        // verifies possession of a real ownership entry, not soil fertility
+        // or a historical ore discovery.
+        if(p->siting==building::Siting::cropland ||
+           p->siting==building::Siting::pasture ||
+           p->siting==building::Siting::woodland ||
+           p->siting==building::Siting::mineral ||
+           p->siting==building::Siting::oil_site) {
+            const bool land=p->siting==building::Siting::cropland ||
+                            p->siting==building::Siting::pasture ||
+                            p->siting==building::Siting::woodland;
+            require((land ? title_asset.starts_with("land:") :
+                            title_asset.starts_with("mining_right:")) &&
+                    core_.core().shares(title_asset,owner)>0,
+                    "BUILDING_REQUIRES_EXISTING_SITE_RIGHT");
+        }
+    }
+    void seed_building_in_province(const std::string& site,
+                                  const std::string& owner,Id province_id,
+                                  Quantity rated_monthly_capacity,
+                                  const std::string& archetype_id,
+                                  const std::string& title_asset="") {
+        require(core_.commit_id()==0,"BUILDING_SEED_AFTER_START");
+        require_building_location(province_id,owner,archetype_id,title_asset);
+        core_.seed_building_facility(site,owner,
+             spatial_.provinces.at(province_id).region,
+             rated_monthly_capacity,archetype_id);
+    }
+    void seed_building_construction_in_province(phased::ConstructionProject plan,
+                                  Id province_id,const std::string& archetype_id,
+                                  const std::string& title_asset="") {
+        require(core_.commit_id()==0,"BUILDING_SEED_AFTER_START");
+        require_building_location(province_id,plan.client,archetype_id,title_asset);
+        const auto& province=spatial_.provinces.at(province_id);
+        require(plan.region==province.region,
+                "BUILDING_CONSTRUCTION_REGION_MISMATCH");
+        core_.seed_building_construction(std::move(plan),archetype_id);
+    }
+
     void seed_unit(Id id,std::string country,std::string name,Id parent=0) {
         require(core_.commit_id()==0&&id>0&&!spatial_.units.contains(id)&&
                 !country.empty()&&!name.empty()&&

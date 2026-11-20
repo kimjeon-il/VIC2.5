@@ -78,6 +78,7 @@ template<class A,class X>void resource_site(A& a,X& x){
     F(standing_biomass);F(renewal_per_month);F(carrying_capacity);
     F(workers_per_unit);F(site_service_per_unit);
     F(decline_ppm_active_month);F(decline_remainder);F(renewable);
+    vec(a,x.operational_inputs_per_unit,[](auto& ar,auto& value){input(ar,value);});
 #undef F
 }
 template<class A,class X>void production_run(A& a,X& x){
@@ -157,8 +158,8 @@ template<class A,class X> void state(A& a,X& d) {
 } // namespace detail
 
 struct SnapshotCodec {
-    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_7";
-    static constexpr const char* contract_version="phase-d-cpp/0.7";
+    static constexpr const char* magic="VIC25_PHASED_SNAPSHOT_8";
+    static constexpr const char* contract_version="phase-d-cpp/0.8";
     static std::string encode(const World& w) {
         w.validate();
         const auto core_payload=phasec::SnapshotCodec::encode(w.core_);
