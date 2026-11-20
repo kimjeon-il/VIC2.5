@@ -1,0 +1,20 @@
+name: VIC2.5 focused automatic war smoke
+
+on:
+  push:
+    branches:
+      - work/military-automatic-operations-p2-p3-20261120
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check existing Phase C contract baseline
+        run: python3 scripts/verify_phase_c_baseline.py
+      - name: Compile P0 daily military scenarios (preinstalled compiler)
+        run: g++ -std=c++20 -O0 -g0 -Iinclude tests/test_p0_daily.cpp -o /tmp/vic25-military-smoke
+      - name: Exercise P0 P1 P2 P3 daily scenarios
+        run: /tmp/vic25-military-smoke
