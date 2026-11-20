@@ -72,19 +72,27 @@ inline std::vector<March> choices(phasegh::Stage& gh) {
             };
             std::map<phasee::Id,Route> routes;
             std::queue<phasee::Id> pending;
-            // Enemy-controlled border tiles are natural offensive targets.
-            // Friendly border tiles are included for defensive reinforcement.
-            for(const bool enemy_first:{true,false})
-                for(const auto& front:fronts) {
-                    if(!geo.regions.contains(front))continue;
-                    const auto control=c.military_control(front);
-                    if((control==opponent)!=enemy_first||
-                       control!=opponent&&control!=country)continue;
+            // Prefer enemy-held border provinces. Use own lines only if
+            // no opponent-controlled frontier is reachable in this theater.
+            bool hostile_roots=false;
+            for(const auto& front:fronts)
+                if(geo.regions.contains(front)&&
+                   c.military_control(front)==opponent) {
                     const auto province=geo.regions.at(front);
-                    if(routes.contains(province))continue;
-                    routes.emplace(province,Route{province,0,front});
-                    pending.push(province);
+                    if(routes.emplace(province,
+                             Route{province,0,front}).second)
+                        pending.push(province);
+                    hostile_roots=true;
                 }
+            if(!hostile_roots)
+                for(const auto& front:fronts)
+                    if(geo.regions.contains(front)&&
+                       c.military_control(front)==country) {
+                        const auto province=geo.regions.at(front);
+                        if(routes.emplace(province,
+                                 Route{province,0,front}).second)
+                            pending.push(province);
+                    }
             while(!pending.empty()) {
                 const auto node=pending.front();pending.pop();
                 for(const auto neighbor:geo.provinces.at(node).neighbors) {
