@@ -299,12 +299,15 @@ inline std::set<std::string> conduct_verified_landings(phasegh::Stage& gh) {
 inline void withdraw_after_peace(phasegh::Stage& gh) {
     auto& c=gh.phase_c();
     const auto& geo=gh.geography().spatial();
-    std::set<std::string> fighting_countries;
+    std::set<std::string> fighting_countries,return_from_war;
     for(const auto& [id,war]:gh.diplomacy().wars) {
         (void)id;
         if(war.active&&!war.armistice) {
             fighting_countries.insert(war.attacker);
             fighting_countries.insert(war.defender);
+        } else if(war.armistice||war.ended_day>=0) {
+            return_from_war.insert(war.attacker);
+            return_from_war.insert(war.defender);
         }
     }
     std::set<std::string> returning_countries;
@@ -312,10 +315,10 @@ inline void withdraw_after_peace(phasegh::Stage& gh) {
         if(c.military_service_branch(unit)!=
                phasec::MilitaryServiceBranch::army||
            fighting_countries.contains(d.country)||
+           !return_from_war.contains(d.country)||
            !geo.regions.contains(d.region)||c.active_strength(unit)<=0)
             continue;
-        if(c.sovereignty(d.region)!=d.country&&
-           c.military_control(d.region)==d.country)
+        if(c.sovereignty(d.region)!=d.country)
             returning_countries.insert(d.country);
     }
     for(const auto& country:returning_countries) {
@@ -346,8 +349,23 @@ inline void withdraw_after_peace(phasegh::Stage& gh) {
                c.active_strength(unit)<=0)continue;
             const auto origin=geo.regions.at(d.region);
             const auto next=route.find(origin);
-            if(next==route.end()||next->second==origin)continue;
-            const auto& region=geo.provinces.at(next->second).region;
+            phasee::Id destination=0;
+            if(next!=route.end()&&next->second!=origin)
+                destination=next->second;
+            else if(next==route.end()) {
+                // A retreating foreign garrison may start on an opposing
+                // control tile, provided it can immediately enter a real
+                // adjacent friendly-controlled path back to its own land.
+                for(const auto neighbor:geo.provinces.at(origin).neighbors)
+                    if(route.contains(neighbor)&&
+                       geo.provinces.contains(neighbor)&&
+                       c.military_control(
+                           geo.provinces.at(neighbor).region)==country) {
+                        destination=neighbor;break;
+                    }
+            }
+            if(destination==0)continue;
+            const auto& region=geo.provinces.at(destination).region;
             const Quantity ammunition=std::min<Quantity>(
                 c.active_strength(unit),
                 c.stock(unit,d.region,"ammunition"));
