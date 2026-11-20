@@ -1324,7 +1324,7 @@ static p0::DailyGame autonomous_war_fixture(bool combined_arms) {
             core.seed_unit(unit);
             core.seed_army_deployment(unit,country,region);
             const bool navy=unit.starts_with("NAVY");
-            const People crew=navy?4:2;
+            const phaseb::People crew=navy?4:2;
             core.seed_active(unit,people(gh,region,crew,
                 navy?"sailor":"pilot",phaseb::Service::active));
             phasec::PeacetimeMilitaryProgram policy;
