@@ -446,6 +446,138 @@ static void exact_professions_weight_actual_group_members() {
     run("","","peasant",100);
 }
 
+static void residual_occupation_laws_reweight_live_affiliations() {
+    struct Row {
+        const char* country;
+        const char* domain;
+        const char* choice;
+        const char* profession;
+        People weighted;
+        const char* amendment{};
+    };
+    const Row rows[]={
+        {"A","army_model","law_peasant_levies","aristocrat",125},
+        {"A","army_model","law_revolutionary_guard","soldier",125},
+        {"A","bureaucracy","law_hereditary_bureaucrats","aristocrat",125},
+        {"AUS","bureaucracy","law_crownland_diets","aristocrat",110},
+        {"A","bureaucracy","law_military_bureaucrats","bureaucrat",125},
+        {"RUS","church_and_state","law_caesaropapism","bureaucrat",150},
+        {"A","distribution_of_power","law_autocracy","aristocrat",150},
+        {"JAP","distribution_of_power","law_bakufu","aristocrat",125},
+        {"JAP","distribution_of_power","law_bakufu","soldier",125},
+        {"AUS","distribution_of_power","law_neo_absolutism","bureaucrat",150},
+        {"A","distribution_of_power","law_oligarchy","aristocrat",150},
+        {"WAL","distribution_of_power","law_organic_regulation","shopkeeper",150},
+        {"A","distribution_of_power","law_elder_council","aristocrat",150},
+        {"A","governance_principles","law_monarchy","aristocrat",125},
+        {"BIC","governance_principles","law_colonial_administration","bureaucrat",200},
+        {"JAP","internal_security","law_shinsengumi","shopkeeper",110},
+        {"A","economic_system","law_command_economy","bureaucrat",125},
+        {"A","land_reform","law_expanded_latifundias","aristocrat",140},
+        {"A","land_reform","law_expanded_latifundias","peasant",60},
+        {"A","land_reform","law_peasant_proprietorship","farmer",115},
+        {"A","land_reform","law_commercialized_agriculture","capitalist",110,
+            "amendment_vertically_integrated_agriculture"},
+        {"A","land_reform","law_commercialized_agriculture","peasant",90,
+            "amendment_vertically_integrated_agriculture"},
+        {"A","citizenship","law_ethnostate","academic",85,"amendment_degenerate_art"},
+        {"A","church_and_state","law_total_separation","clergyman",90,
+            "amendment_state_anti_clericalism"},
+        {"A","education_system","law_public_schools","clergyman",110,
+            "amendment_church_organised_schools"},
+        {"A","education_system","law_public_schools","academic",110,
+            "amendment_secular_school_system"},
+        {"JAP","internal_security","law_secret_police","shopkeeper",110,
+            "amendment_reformed_shinsengumi"},
+        {"FRA","distribution_of_power","law_wealth_voting","capitalist",115,
+            "amendment_200_franc_suffrage"},
+    };
+    enum class Scope { recognized, custom, local, wrong_parent, other_country };
+    const auto run=[](const Row& row,Scope scope) {
+        const std::string domestic=row.country,foreign="REMOTE";
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"HOME",domestic);geo.seed_unit(1,domestic,"DISTRICT_A");
+        geo.seed_province(2,"AWAY",foreign);geo.seed_unit(2,foreign,"DISTRICT_B");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& core=geo.seed_core().seed_core();
+        core.seed_actor("EMP",1000);
+        core.seed_interest_group("Role");core.seed_interest_group("Peer");
+        for(const auto& country:{domestic,foreign}) {
+            core.seed_actor(country,55);
+            core.seed_government(country,"HEAD","PM",5,3);
+            core.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:law"});
+            for(const auto* group:{"Role","Peer"})
+                core.p3_seed_group({country,group,"","","",P3GroupType::custom,0,0});
+        }
+        const auto sovereign=scope==Scope::other_country?foreign:domestic;
+        P2BaseLaw rule{"FOUNDATION",sovereign,row.domain,"national",row.choice,"fixture:law"};
+        if(scope==Scope::custom||scope==Scope::local)rule.domain="custom_profession";
+        if(scope==Scope::local) {rule.scope="HOME";rule.tier=P2NormTier::local_ordinance;}
+        if(scope==Scope::wrong_parent) {
+            rule.domain="migration";rule.base_choice="law_no_migration_controls";
+        }
+        core.p2_seed_base(rule);
+        if(row.amendment)core.p2_seed_amendment({row.amendment,"FOUNDATION",
+            "fixture:law","",{{"association",sovereign,P2ClauseKind::political_association_allowed,1}}});
+        auto& pop=core.seed_population();
+        std::vector<std::pair<phaseb::Id,std::string>> joining;
+        phaseb::Id unaffiliated{};
+        for(const auto* region:{"HOME","AWAY"}) {
+            const auto h=pop.household_profile({region,"mixed","shared",100});
+            for(const auto* role:{"Role","Peer","None"}) {
+                if(std::string_view(region)=="AWAY"&&std::string_view(role)=="None")continue;
+                const auto prof=std::string_view(role)=="Peer"?"worker":row.profession;
+                const auto d=pop.demographic_profile({region,23640,phaseb::Sex::male,
+                    role,"faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+                const auto e=pop.economic_profile({region,prof,"wage","employee",pop.default_education()});
+                const auto id=pop.seed_population(d,e,h,100);
+                pop.hire(id,1,"EMP",prof,1,{});
+                if(std::string_view(role)=="None")unaffiliated=id;
+                else joining.emplace_back(id,role);
+            }
+        }
+        auto world=daily::World::adopt(std::move(gh),317);
+        phasegh::World::Plan plan;
+        plan[9].push_back([joining](phasegh::Stage& stage) {
+            for(const auto& [id,group]:joining)stage.phase_c().join_interest_group(id,group,100);
+        });
+        world.advance_day(plan);
+        const auto& live=c(world);
+        const auto verify=[&](const std::string& nation,People strength) {
+            const auto affected=live.p3_group_view(nation,"Role");
+            const auto peer=live.p3_group_view(nation,"Peer");
+            const auto share=[strength](People weight){return (weight*1'000'000/(strength+100))*9/10;};
+            need(affected.members==100&&peer.members==100&&
+                 affected.clout_ppm==share(strength)&&peer.clout_ppm==share(100),
+                 "exact occupational clout omitted or awarded to the wrong nation/group");
+        };
+        verify(domestic,scope==Scope::recognized?row.weighted:100);
+        verify(foreign,scope==Scope::other_country?row.weighted:100);
+        need(live.people().population()==500&&live.people().employed(unaffiliated)==1&&
+             live.cash("EMP")==1000&&live.cash(domestic)==55&&live.cash(foreign)==55,
+             "occupational clout changed actual workforce, members, or cash");
+        for(const auto& [id,group]:joining) {
+            (void)group;
+            need(live.people().employed(id)==1,"occupational clout recreated employment");
+        }
+    };
+    for(const auto& row:rows) {
+        try {
+            run(row,Scope::recognized);
+        } catch(const std::exception& e) {
+            throw std::runtime_error(std::string(row.amendment?row.amendment:row.choice)+
+                " / "+row.profession+": "+e.what());
+        }
+    }
+    for(const auto scope:{Scope::custom,Scope::local,Scope::other_country}) {
+        run(rows[0],scope);
+        run(rows[20],scope);
+    }
+    run(rows[20],Scope::wrong_parent);
+}
+
 static void funded_institutions_weight_only_their_typed_group_members() {
     enum class Site { valid, absent, unfunded, unstaffed, shared, foreign, police };
     const auto run=[](const std::string& domain,const std::string& choice,
@@ -562,12 +694,13 @@ int main() {
     try {
         real_pop_attitudes_and_national_clout();
         exact_professions_weight_actual_group_members();
+        residual_occupation_laws_reweight_live_affiliations();
         funded_institutions_weight_only_their_typed_group_members();
         shinsengumi_changes_movement_risk_without_altering_pop();
         actual_next_day_strike_and_no_double_participants();
         armed_conflict_requires_real_deployments_and_verified_control();
         legal_concession_resolves_without_armed_conflict();
-        std::cout<<"P3/P5 politics: seven real-ledger integration scenarios PASS\n";
+        std::cout<<"P3/P5 politics: eight real-ledger integration scenarios PASS\n";
         return 0;
     } catch(const std::exception& error) {
         std::cerr<<"P3/P5 POLITICS FAILED: "<<error.what()<<"\n";

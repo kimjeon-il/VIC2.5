@@ -76,6 +76,19 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
             if(!effect->boolean)return effect->value_ppm/1'000'000;
         return 0;
     };
+    constexpr const char* heritage_exact="country_acceptance_shared_heritage_trait_add";
+    constexpr const char* heritage_family="country_acceptance_shared_heritage_trait_group_add";
+    constexpr const char* heritage_neither="country_acceptance_no_shared_heritage_trait_add";
+    const auto racialized_subjecthood=[&](const char* key) {
+        return p2_active_national_enactment_points(
+            country,"amendment_racialized_subjecthood",key)/1'000'000;
+    };
+    const auto exact_heritage_change=racialized_subjecthood(heritage_exact);
+    const auto family_heritage_change=racialized_subjecthood(heritage_family);
+    const auto unrelated_heritage_change=phaseb::add_checked(
+        racialized_subjecthood(heritage_neither),
+        p2_active_national_enactment_points(
+            country,"amendment_homestead_acts",heritage_neither)/1'000'000);
     const auto score_for=[&](const P2CultureTraits& primary)->std::int64_t {
         if(evidence.culture==primary.culture)
             return culture_modifier(primary_key);
@@ -91,11 +104,14 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
             return culture_modifier(direct?exact:
                                    related?family:neither);
         };
-        points+=match(shared(evidence.heritages,primary.heritages),
-                      shared(evidence.heritage_groups,primary.heritage_groups),
-             "country_acceptance_shared_heritage_trait_add",
-             "country_acceptance_shared_heritage_trait_group_add",
-             "country_acceptance_no_shared_heritage_trait_add");
+        // Compare all traits against one primary at a time. An exact
+        // heritage match cannot also receive its family/no-match modifier.
+        if(shared(evidence.heritages,primary.heritages))
+            points+=culture_modifier(heritage_exact)+exact_heritage_change;
+        else if(shared(evidence.heritage_groups,primary.heritage_groups))
+            points+=culture_modifier(heritage_family)+family_heritage_change;
+        else
+            points+=culture_modifier(heritage_neither)+unrelated_heritage_change;
         points+=match(shared(evidence.languages,primary.languages),
                       shared(evidence.language_groups,primary.language_groups),
              "country_acceptance_shared_language_trait_add",
@@ -128,34 +144,50 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
             p2_catalog_raw_modifier("law_no_colonial_affairs",
                                     "country_acceptance_homeland_add"))));
     }
-    if(const auto religion_law=p2_selected_law(country,"church_and_state")) {
-        // The four branch values are authored direct church-law rows,
-        // not general national modifiers or copied citizenship defaults.
-        const auto canonical=p2_catalog_canonical_choice(*religion_law);
-        const auto religious_points=[&](std::string_view key) {
-            return static_cast<std::int64_t>(std::llround(
-                p2_catalog_raw_modifier(canonical,key)));
-        };
-        if(national->second.state_religions.contains(pop.religion))
-            score+=religious_points("country_acceptance_state_religion_add");
-        else {
-            const auto it=p2_religions_.find(pop.religion);
-            if(it!=p2_religions_.end()) {
-                bool religious_trait=false,religious_family=false;
-                for(const auto& id:national->second.state_religions) {
-                    const auto& primary=p2_religions_.at(id);
-                    for(const auto& t:it->second.traits)
-                        if(primary.traits.contains(t))religious_trait=true;
-                    for(const auto& t:it->second.trait_groups)
-                        if(primary.trait_groups.contains(t))religious_family=true;
-                }
-                const auto key=religious_trait?
-                    "country_acceptance_shared_religious_trait_add":
-                    religious_family?
-                    "country_acceptance_shared_religious_trait_group_add":
-                    "country_acceptance_no_shared_religious_trait_add";
-                score+=religious_points(key);
+    const auto religion_law=p2_selected_law(country,"church_and_state");
+    constexpr auto religion_border_amendment="amendment_migration_religious_restrictions";
+    const bool active_restrictions=[&] {
+        if(!p2_active_amendments_.contains(religion_border_amendment))return false;
+        const auto& amendment=p2_amendments_.at(religion_border_amendment);
+        const auto& parent=p2_laws_.at(amendment.law_id);
+        if(parent.country!=country||parent.tier==P2NormTier::local_ordinance||
+           (!parent.scope.empty()&&parent.scope!="national")||
+           politics::bare_group(parent.domain)!="migration"||
+           !politics::catalogue().has("migration",parent.base_choice)||
+           !p2_is_active_base(amendment.law_id))return false;
+        const auto* source=p2_catalog_amendment(religion_border_amendment);
+        return source&&p2_catalog_amendment_applies(
+            *source,politics::bare_law(parent.base_choice))&&
+            (source->possible_country_tags.empty()||
+             p2_catalog_list_contains(source->possible_country_tags,country));
+    }();
+    if(religion_law||active_restrictions) {
+        const auto listed=national->second.state_religions.contains(pop.religion);
+        std::string_view branch;
+        if(listed)branch="country_acceptance_state_religion_add";
+        else if(const auto it=p2_religions_.find(pop.religion);it!=p2_religions_.end()) {
+            bool religious_trait=false,religious_family=false;
+            for(const auto& id:national->second.state_religions) {
+                const auto& primary=p2_religions_.at(id);
+                for(const auto& t:it->second.traits)
+                    if(primary.traits.contains(t))religious_trait=true;
+                for(const auto& t:it->second.trait_groups)
+                    if(primary.trait_groups.contains(t))religious_family=true;
             }
+            branch=religious_trait?"country_acceptance_shared_religious_trait_add":
+                religious_family?"country_acceptance_shared_religious_trait_group_add":
+                                 "country_acceptance_no_shared_religious_trait_add";
+        }
+        // Unknown faith remains unclassified, and the amendment has no
+        // listed-state-faith row. Add at most one non-state branch before
+        // the existing final score clamp; no entry rate or border-law veto.
+        if(!branch.empty()) {
+            if(religion_law)
+                score+=static_cast<std::int64_t>(std::llround(p2_catalog_raw_modifier(
+                    p2_catalog_canonical_choice(*religion_law),branch)));
+            if(active_restrictions&&!listed)
+                score+=static_cast<std::int64_t>(std::llround(
+                    p2_catalog_raw_modifier(religion_border_amendment,branch)));
         }
     }
     // These canonically named additions target exact verified culture IDs.

@@ -254,10 +254,30 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     check(sovereign_interest==5&&chiefs_aid==1,
           "scoped sovereign interest and welfare evidence missing");
 
+    const std::map<std::string_view,std::int64_t> residual_incoherence{
+        {"law_bakufu",500'000},{"law_neo_absolutism",500'000},
+        {"law_technocracy",-100'000},{"law_oligarchy",-100'000},
+        {"law_organic_regulation",-100'000},{"law_landed_voting",200'000},
+        {"law_wealth_voting",200'000},{"law_census_voting",100'000},
+        {"law_labour_suffrage",100'000},{"law_single_party_state",-250'000},
+        {"law_colonial_administration",200'000},{"law_presidential_republic",200'000},
+        {"law_theocracy",100'000},{"law_council_republic",-100'000},
+        {"law_social_monarchy",-100'000}};
+    std::set<std::string_view> residual_incoherence_proven;
     std::size_t legitimacy_base=0,legitimacy_incoherence=0;
     for(const auto& entry:audit) {
         if(!entry.source.key.starts_with("country_legitimacy_") ||
            entry.status!=CanonicalLawRowStatus::verified_row)continue;
+        if(entry.behavior_test=="test_politics_catalog::residual_national_choices_adjust_real_coalition_incoherence") {
+            const auto expected=residual_incoherence.find(entry.source.source_id);
+            check(entry.source.key=="country_legitimacy_ideological_incoherence_mult"&&
+                  !entry.source.boolean&&!entry.source.institution&&!entry.source.sponsor&&
+                  entry.executor=="IntegratedWorld::p1_legitimacy"&&
+                  expected!=residual_incoherence.end()&&expected->second==entry.normalized_value&&
+                  residual_incoherence_proven.insert(entry.source.source_id).second,
+                  "incoherence proof leaked to base legitimacy or non-constitutional scope");
+            continue;
+        }
         check(!entry.source.boolean && !entry.source.institution && !entry.source.sponsor &&
               entry.executor=="IntegratedWorld::p1_legitimacy" &&
               entry.behavior_test=="test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy",
@@ -268,7 +288,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
               entry.source.key=="country_legitimacy_ideological_incoherence_mult",
               "legitimacy proof leaked to an unverified modifier");
     }
-    check(legitimacy_base==6 && legitimacy_incoherence==4,
+    check(legitimacy_base==6 && legitimacy_incoherence==4 &&
+          residual_incoherence_proven.size()==residual_incoherence.size(),
           "verified national legitimacy rows missing");
 
     check(std::count_if(audit.begin(),audit.end(),[](const auto& entry) {
@@ -356,8 +377,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==379,
-          "expected all exact witnesses including scoped school and health commitments");
+    check(canonical_law_row_evidence().size()==436,
+          "expected all exact sources including remaining coalition incoherence evidence");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
         "state_shopkeepers_investment_pool_efficiency_mult",
@@ -1193,6 +1214,82 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     check(exact_school_costs==8&&exact_health_costs==2,
           "expected eight school and two health commitments, not service cash");
 
+    constexpr std::string_view paid_transfer_fixture=
+        "test_phase_d_technology::enacted_recipient_laws_change_actual_paid_technology_diffusion";
+    constexpr std::string_view heritage_amendment_fixture=
+        "test_politics_identity::national_heritage_amendments_change_real_pop_wages";
+    constexpr std::string_view religion_amendment_fixture=
+        "test_politics_identity::religious_migration_amendment_changes_acceptance_not_border_law";
+    std::size_t paid_transfers=0,production_transfer=0,heritage_amendments=0,religion_amendments=0;
+    for(const auto& row:audit) {
+        const auto fixture=row.behavior_test;
+        if(fixture!=paid_transfer_fixture&&fixture!=heritage_amendment_fixture&&
+           fixture!=religion_amendment_fixture)continue;
+        check(row.status==CanonicalLawRowStatus::verified_row&&!row.source.boolean&&
+              !row.source.institution&&!row.source.sponsor,
+              "paid transfer or a qualified amendment inherited a different effect scope");
+        if(fixture==paid_transfer_fixture) {
+            const bool producer=row.source.key=="country_production_tech_spread_mult";
+            check((row.source.key=="country_tech_spread_mult"||
+                   (producer&&row.source.source_id=="law_industry_banned"))&&
+                  row.executor=="phased::Stage::review_contact (paid recipient instruction and understood knowledge)",
+                  "technology transfer witness leaked to original research or licensing");
+            ++paid_transfers;
+            if(producer)++production_transfer;
+        } else if(fixture==heritage_amendment_fixture) {
+            check(row.source.key.find("heritage")!=std::string_view::npos&&
+                  (row.source.source_id=="amendment_racialized_subjecthood"||
+                   row.source.source_id=="amendment_homestead_acts"),
+                  "heritage amendment witness leaked to a direct citizenship or another trait");
+            ++heritage_amendments;
+        } else {
+            check(row.source.source_id=="amendment_migration_religious_restrictions"&&
+                  row.source.key.find("religious_trait")!=std::string_view::npos&&
+                  row.normalized_value==-5'000'000,
+                  "religious amendment witness leaked to a distinct admission law or unknown faith");
+            ++religion_amendments;
+        }
+    }
+    check(paid_transfers==7&&production_transfer==1&&heritage_amendments==4&&religion_amendments==3,
+          "expected exact paid technology, heritage and faith amendment evidence");
+
+    constexpr std::string_view residual_occupation_fixture=
+        "test_p3_p5_politics::residual_occupation_laws_reweight_live_affiliations";
+    const std::map<std::string_view,int> expected_occupation_rows{
+        {"country_aristocrats_pol_str_mult",9},{"country_bureaucrats_pol_str_mult",5},
+        {"country_shopkeepers_pol_str_mult",3},{"country_academics_pol_str_mult",2},
+        {"country_capitalists_pol_str_mult",2},{"country_clergymen_pol_str_mult",2},
+        {"country_peasants_pol_str_mult",2},{"country_soldiers_pol_str_mult",2},
+        {"country_farmers_pol_str_mult",1}};
+    std::map<std::string_view,int> witnessed_occupation_rows;
+    std::size_t occupation_base=0,occupation_amendment=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=residual_occupation_fixture)continue;
+        check(row.status==CanonicalLawRowStatus::verified_row&&!row.source.boolean&&
+              !row.source.institution&&!row.source.sponsor&&
+              expected_occupation_rows.contains(row.source.key)&&
+              row.executor=="IntegratedWorld::p3_group_view (employed POP and verified occupation affiliation)",
+              "occupation evidence leaked to an unqualified occupation or broad interest group");
+        ++witnessed_occupation_rows[row.source.key];
+        if(row.source.source_id.starts_with("law_"))++occupation_base;
+        if(row.source.source_id.starts_with("amendment_"))++occupation_amendment;
+        auto unsupported=row.source;
+        unsupported.key="country_officers_pol_str_mult";
+        check(classify_canonical_law_row(unsupported,canonical_law_row_evidence()).behavior_test!=
+                residual_occupation_fixture,"physical worker evidence must not cover absent officer identity");
+    }
+    check(witnessed_occupation_rows==expected_occupation_rows&&occupation_base==20&&occupation_amendment==8,
+          "expected all 28 actual employed POP affiliation conditions");
+
+    std::size_t held_home_affairs_costs=0;
+    for(const auto& row:audit) {
+        if(row.source.key!="country_institution_cost_institution_home_affairs_mult")continue;
+        check(row.status==CanonicalLawRowStatus::no_recorded_path&&row.behavior_test.empty(),
+              "ordinary policing cannot witness or claim the true Home Affairs cost owner");
+        ++held_home_affairs_costs;
+    }
+    check(held_home_affairs_costs==2,"preserve both authored Home Affairs costs for their real owner");
+
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.
     const std::array<CanonicalLawRowEvidence,3> mixed{{
@@ -1349,10 +1446,10 @@ static void no_new_fictional_leader_or_dynamic_ideology() {
               "A","WORKERS",{"fictional_unknown_ideology"});}),
           "unknown political ideology accepted");
 }
-static void enacted_national_laws_change_only_calculated_legitimacy() {
-    const auto run=[](const std::string& power,const std::string& government,
+static void run_national_legitimacy_case(const std::string& power,const std::string& government,
                       const std::string& amendment,bool conflict,bool local_parent,
-                      int flat,int penalty,bool outsiders=false) {
+                      int flat,int penalty,bool outsiders=false,
+                      bool local_lookalike=false) {
         phasegh::World gh{24000};
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"VIENNA","AUS");
@@ -1361,9 +1458,12 @@ static void enacted_national_laws_change_only_calculated_legitimacy() {
         auto& c=geo.seed_core().seed_core();
         c.seed_actor("AUS",500);
         c.seed_government("AUS","HEAD","PRIME",5,3);
+        const bool legislature=government=="law_council_republic"||
+                               government=="law_social_monarchy";
         c.seed_p1_constitution("AUS",{
             P1GovernancePrinciple::monarchy,P1PowerDistribution::autocracy,
-            P1LegislatureKind::none,"fixture:constitution"});
+            legislature?P1LegislatureKind::unicameral:
+                        P1LegislatureKind::none,"fixture:constitution"});
         for(const auto* group:{"WORKERS","BUSINESS"})c.seed_interest_group(group);
         c.seed_p1_coalition("AUS",{conflict?
             std::vector<std::string>{"WORKERS","BUSINESS"}:
@@ -1386,7 +1486,10 @@ static void enacted_national_laws_change_only_calculated_legitimacy() {
             c.p2_seed_base(entry);
         };
         law("ECONOMY","economic_system","law_cooperative_ownership");
-        if(!power.empty())law("POWER","distribution_of_power",power);
+        if(power=="law_neo_absolutism")
+            law("PREREQUISITE","governance_principles","law_monarchy");
+        if(!power.empty())law("POWER",local_lookalike?"regional_rules":"distribution_of_power",
+                              power,local_lookalike);
         if(!government.empty())law("GOVERNMENT","governance_principles",government);
         if(local_parent)law("LOCAL","regional_rules","civic_rule",true);
         if(!amendment.empty())
@@ -1415,7 +1518,7 @@ static void enacted_national_laws_change_only_calculated_legitimacy() {
         const auto view=live.p1_legitimacy("AUS");
         if(!(view.observed_groups&&(outsiders?view.group_support==0:view.group_support>0)&&
               !view.observed_election&&view.electoral_support==50&&
-              view.legal_compatibility==100&&live.government("AUS").quorum==0)) {
+              view.legal_compatibility==(legislature?50:100)&&live.government("AUS").quorum==(legislature?3:0))) {
             std::cerr<<"support="<<view.group_support<<", groups="<<view.observed_groups
                      <<", election="<<view.observed_election<<", seats="
                      <<view.electoral_support<<", legal="<<view.legal_compatibility
@@ -1429,11 +1532,21 @@ static void enacted_national_laws_change_only_calculated_legitimacy() {
               "fixture did not record actual opposing stances");
         const int baseline=(50*view.group_support+30*view.electoral_support+
                             20*view.legal_compatibility)/100;
-        check(view.ideological_incompatibility==penalty&&
-              view.score==std::clamp(baseline+flat-penalty,0,100),
-              "adopted law did not adjust actual cabinet legitimacy in the correct units");
+        if(view.ideological_incompatibility!=penalty||
+           view.score!=std::clamp(baseline+flat-penalty,0,100))
+            throw std::runtime_error("wrong coalition penalty for "+power+"/"+government+
+                ": expected "+std::to_string(penalty)+", got "+
+                std::to_string(view.ideological_incompatibility));
         check(live.people().population()==100&&live.cash("AUS")==500,
               "legitimacy calculation created a fictional POP or treasury change");
+}
+
+static void enacted_national_laws_change_only_calculated_legitimacy() {
+    const auto run=[](const std::string& power,const std::string& government,
+                      const std::string& amendment,bool conflict,bool local_parent,
+                      int flat,int penalty,bool outsiders=false) {
+        run_national_legitimacy_case(power,government,amendment,conflict,
+            local_parent,flat,penalty,outsiders);
     };
     run("","","",true,false,0,20);
     run("law_autocracy","","",true,false,0,30);
@@ -1454,6 +1567,34 @@ static void enacted_national_laws_change_only_calculated_legitimacy() {
         true,false,-5,32,true); // negative result clamps to zero
 }
 
+
+static void residual_national_choices_adjust_real_coalition_incoherence() {
+    const std::pair<const char*,int> power[]={
+        {"law_bakufu",30},{"law_neo_absolutism",32},
+        {"law_technocracy",18},{"law_oligarchy",18},
+        {"law_organic_regulation",18},{"law_landed_voting",24},
+        {"law_wealth_voting",24},{"law_census_voting",22},
+        {"law_single_party_state",15},{"law_labour_suffrage",22},
+    };
+    const std::pair<const char*,int> principles[]={
+        {"law_colonial_administration",24},{"law_presidential_republic",24},
+        {"law_theocracy",22},{"law_council_republic",18},
+        {"law_social_monarchy",18},
+    };
+    for(const auto& [id,points]:power) {
+        run_national_legitimacy_case(id,"","",true,false,0,points);
+        run_national_legitimacy_case(id,"","",false,false,0,0);
+        // The already-verified Monarchy prerequisite remains active even
+        // when a local Neo-Absolutism label contributes nothing of its own.
+        const int local_points=std::string_view(id)=="law_neo_absolutism"?22:20;
+        run_national_legitimacy_case(id,"","",true,false,0,local_points,false,true);
+    }
+    for(const auto& [id,points]:principles) {
+        run_national_legitimacy_case("",id,"",true,false,0,points);
+        run_national_legitimacy_case("",id,"",false,false,0,0);
+    }
+}
+
 int main() {
     try {
         trait_only_hostility_does_not_claim_law_coverage();
@@ -1462,6 +1603,7 @@ int main() {
         legal_policies_and_override_priority();
         observed_clout_ideology_and_legitimacy();
         enacted_national_laws_change_only_calculated_legitimacy();
+        residual_national_choices_adjust_real_coalition_incoherence();
         source_law_incompatibilities_are_symmetric_and_real();
         no_new_fictional_leader_or_dynamic_ideology();
         std::cout<<"VIC2.5 POLITICAL LAWS IDEOLOGIES GROUPS PASS\n";

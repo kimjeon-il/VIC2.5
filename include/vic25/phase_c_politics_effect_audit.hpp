@@ -77,7 +77,6 @@ inline const std::map<std::string,std::string>& wired_law_effects() {
         {"state_bureaucracy_population_base_cost_factor_mult","phasec::IntegratedWorld::p1_bureaucracy"},
         {"country_institution_cost_institution_health_system_mult","phasec::IntegratedWorld::p1_bureaucracy"},
         {"country_institution_cost_institution_schools_mult","phasec::IntegratedWorld::p1_bureaucracy"},
-        {"country_institution_cost_institution_home_affairs_mult","phasec::IntegratedWorld::p1_bureaucracy"},
         {"country_institution_cost_institution_social_security_mult","phasec::IntegratedWorld::p1_bureaucracy"},
         {"country_military_tech_research_speed_mult","p0_daily::research"},
         {"country_production_tech_research_speed_mult","p0_daily::research"},

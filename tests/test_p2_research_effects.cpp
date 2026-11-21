@@ -39,6 +39,7 @@ int main() {
     economy.legal_basis="fixture:economy";
     core.p2_seed_base(std::move(economy));
     // Only existing industry recipes confer the production-technology tag.
+    core.seed_production_facility("SITE","A","REGION",1);
     phased::IndustryRecipe recipe;
     recipe.id="RECIPE";recipe.site="SITE";recipe.tech_id="STEEL";
     domain.recipes.emplace("RECIPE",recipe);

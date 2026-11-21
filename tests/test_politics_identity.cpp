@@ -352,6 +352,169 @@ static void exact_church_laws_change_real_religious_acceptance() {
     run("freedom_of_conscience",{55,50,40,35,35},Scope::national,false,true);
 }
 
+static void religious_migration_amendment_changes_acceptance_not_border_law() {
+    using Scores=std::array<int,5>;
+    enum class Scenario { dated, open, no_church, source_only, wrong_parent, local };
+    const auto run=[](Scenario mode) {
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"HOME","A");geo.seed_unit(1,"A","ORIGIN");
+        geo.seed_province(2,"DEST","B");geo.seed_unit(2,"B","DESTINATION");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& industry=geo.seed_core();
+        industry.seed_technology({"rationalism",{},false});
+        industry.seed_knowledge("B","rationalism",phased::KnowledgeLevel::usable);
+        auto& c=industry.seed_core();
+        const bool open=mode==Scenario::open||mode==Scenario::no_church;
+        for(const char* country:{"A","B"}) {
+            c.seed_actor(country,100);c.seed_government(country,"HEAD","PRIME",5,3);
+            c.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,
+                "fixture:constitution"});
+            law(c,country,"citizenship","subjecthood");
+            law(c,country,"migration",std::string_view(country)=="A"||open?
+                "no_migration_controls":"migration_controls");
+        }
+        if(mode!=Scenario::no_church)law(c,"B","church_and_state",
+            mode==Scenario::wrong_parent?"state_religion":"freedom_of_conscience");
+        std::string parent=mode==Scenario::source_only?"A:migration":"B:migration";
+        if(mode==Scenario::wrong_parent)parent="B:church_and_state";
+        if(mode==Scenario::local) {
+            P2BaseLaw custom;
+            custom.id="LOCAL";custom.country="B";custom.domain="custom_border";
+            custom.scope="DEST";custom.tier=P2NormTier::local_ordinance;
+            custom.base_choice="local_border";custom.legal_basis="fixture:local";
+            c.p2_seed_base(custom);
+            parent="LOCAL";
+        }
+        const bool from_only=mode==Scenario::source_only;
+        P2Amendment amendment;
+        amendment.id="amendment_migration_religious_restrictions";
+        amendment.law_id=parent;amendment.legal_basis="fixture:religious_restrictions";
+        // Nonconflicting synthetic clause carries the tested native source ID;
+        // it does not add a migration ban or change a vote.
+        amendment.clauses.push_back({"AMENDMENT-CLAUSE",from_only?"A":"B",
+                                      P2ClauseKind::political_association_allowed,1});
+        if(mode!=Scenario::dated)c.p2_seed_amendment(amendment);
+        c.p2_seed_culture({"primary",{"heritage"},{"heritage-family"},{"language"},
+                           {"language-family"},{},{}});
+        c.p2_seed_culture({"migrant",{"heritage"},{"heritage-family"},{"other-language"},
+                           {"language-family"},{},{}});
+        c.p2_seed_culture({"independent",{"other-heritage"},{},{"other-language"},{},{},{}});
+        c.p2_seed_religion({"REF",{"common-trait"},{"common-family"}});
+        c.p2_seed_religion({"TRAIT",{"common-trait"},{"common-family"}});
+        c.p2_seed_religion({"FAMILY",{"other-trait"},{"common-family"}});
+        c.p2_seed_religion({"UNRELATED",{"other-trait"},{"other-family"}});
+        for(const char* country:{"A","B"})
+            c.p2_seed_national_identity({country,{"primary"},{"REF"}});
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"HOME","shared","shared",50'000});
+        const auto destination=pop.household_profile({"DEST","shared","shared",0});
+        const auto e=pop.economic_profile({"HOME","worker","wage","employee",
+                                            pop.default_education()});
+        constexpr std::array faiths{"REF","TRAIT","FAMILY","UNRELATED","UNKNOWN"};
+        std::array<Id,faiths.size()> slices{};
+        const auto seed=[&](const char* culture,const char* faith) {
+            const auto d=pop.demographic_profile({"HOME",23640,phaseb::Sex::male,
+                culture,faith,"citizen","free",pop.default_health(),phaseb::Service::civilian});
+            return pop.seed_population(d,e,h,100'000);
+        };
+        for(std::size_t i=0;i<faiths.size();++i)slices[i]=seed("migrant",faiths[i]);
+        const auto upper=seed("primary","TRAIT");
+        const auto lower=seed("independent","UNRELATED");
+        phaseb::DemographyRules rules;
+        rules.fertility_ppm=rules.infant_death_ppm=rules.child_death_ppm=0;
+        rules.adult_death_ppm=rules.senior_death_ppm=rules.very_old_death_ppm=0;
+        rules.illness_incidence_ppm=rules.accident_ppm=0;
+        rules.primary_access_ppm=rules.secondary_access_ppm=rules.tertiary_access_ppm=0;
+        rules.adult_literacy_access_ppm=rules.training_ppm=0;
+        rules.migration_ppm=310'000;rules.destination_by_region["HOME"]="DEST";
+        c.enable_demography(rules);
+        auto world=daily::World::adopt(std::move(gh),19);
+        constexpr Scores normal{55,50,40,35,35}, restricted{55,45,35,30,35};
+        const auto scores=[&](const Scores& expected) {
+            const auto& core=view(world);
+            check(core.p2_selected_law("B","migration")==
+                  (open?"no_migration_controls":"migration_controls"),
+                  "religious acceptance changed the controlling border law");
+            for(std::size_t i=0;i<slices.size();++i) {
+                const auto candidate=core.p2_acceptance("B",slices[i]);
+                if(!candidate||candidate->score!=expected[i]||
+                   core.p2_migration_permitted(slices[i],"DEST")!=(open||expected[i]>=40))
+                    throw std::runtime_error("religious migration amendment mode="+
+                        std::to_string(static_cast<int>(mode))+" faith="+faiths[i]+
+                        " expected="+std::to_string(expected[i])+" actual="+
+                        std::to_string(candidate?candidate->score:-1));
+                const auto origin=core.p2_acceptance("A",slices[i]);
+                check(origin&&origin->score==(from_only&&i>=1&&i<=3?30:35),
+                      "religious migration amendment affected the wrong evaluating country");
+            }
+            const auto upper_score=core.p2_acceptance("B",upper);
+            const auto lower_score=core.p2_acceptance("B",lower);
+            check(upper_score&&upper_score->score==std::clamp(100+expected[1]-35,0,100)&&
+                  lower_score&&lower_score->score==std::max(0,expected[3]-35),
+                  "religious amendment points must precede the existing final score clamp");
+        };
+        const auto observe=[&](const Scores& expected,phasegh::World::Plan plan={}) {
+            const auto opening=view(world).people().events().size();
+            world.advance_day(plan);
+            scores(expected);
+            const auto& people=view(world).people();
+            std::array<People,faiths.size()> arrivals{};
+            for(std::size_t i=opening;i<people.events().size();++i) {
+                const auto& event=people.events()[i];
+                if(event.kind!=phaseb::EventKind::migration)continue;
+                const auto& d=people.demographic(people.slice(event.to).key.demographic);
+                if(d.region!="DEST"||d.culture!="migrant")continue;
+                for(std::size_t j=0;j<faiths.size();++j)
+                    if(d.religion==faiths[j])arrivals[j]+=event.count;
+            }
+            for(std::size_t i=0;i<faiths.size();++i)
+                check((arrivals[i]>0)==(open||expected[i]>=40),
+                      "religious acceptance did not decide real daily arrivals");
+            check(people.population()==700'000,"migration admission lost or created people");
+        };
+        if(mode==Scenario::dated) {
+            scores(normal);
+            const auto day=world.day_index();
+            phasegh::World::Plan enact;
+            enact[9].push_back([day,amendment](phasegh::Stage& stage) {
+                auto& live=stage.phase_c();
+                P2Bill bill;
+                bill.id="RELIGIOUS-RESTRICTIONS";bill.country="B";bill.proposer="PRIME";
+                bill.action=P2BillAction::attach_amendment;bill.effective_day=day+2;
+                bill.legal_basis="fixture:legislation";bill.proposed_amendment=amendment;
+                live.p2_submit_bill(std::move(bill),day);
+                live.p2_approve_bill("RELIGIOUS-RESTRICTIONS",{});
+                live.p2_promulgate_bill("RELIGIOUS-RESTRICTIONS","HEAD",day);
+            });
+            observe(normal,std::move(enact));
+            observe(normal);
+            auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+            observe(restricted);replay.advance_day();
+            const auto saved=daily::SnapshotCodec::encode(world);
+            check(daily::SnapshotCodec::encode(replay)==saved,
+                  "religious acceptance effective date failed save/replay");
+            phasegh::World::Plan denied;
+            denied[10].push_back([id=slices[2],destination](phasegh::Stage& stage) {
+                stage.phase_c().migrate_with_explicit_property_allocation(
+                    id,7,"DEST",destination,"A","B",11,"",0);
+            });
+            check(rejects([&]{world.advance_day(denied);})&&
+                  daily::SnapshotCodec::encode(world)==saved,
+                  "religious family below 40 bypassed the existing atomic border rule");
+        } else observe(mode==Scenario::open?restricted:
+                      mode==Scenario::no_church?Scores{35,30,30,30,35}:
+                      mode==Scenario::wrong_parent?Scores{60,35,25,10,35}:normal);
+    };
+    run(Scenario::dated);
+    run(Scenario::open);
+    run(Scenario::no_church);
+    run(Scenario::source_only);
+    run(Scenario::wrong_parent);
+    run(Scenario::local);
+}
+
 static void physical_migration_and_law_block() {
     Scenario closed("closed_borders");
     auto denied=daily::World::adopt(std::move(closed.gh),19);
@@ -715,6 +878,103 @@ static void institutional_bureaucracy_prices_ongoing_commitments() {
     check(scenario("communal_administration",true,260,
                    "compatible Bourgeois amendment must reduce institution cost")==
           communal,"Bourgeois institution discount changed independent state cost");
+}
+
+static void ordinary_police_do_not_receive_home_affairs_operating_discounts() {
+    const auto run=[](const char* security,bool amend,bool general,int nominal_slots) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");
+        geo.seed_unit(1,"A","ADMIN");
+        geo.seed_assignment(1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",1000);
+        c.seed_actor("OPERATOR",0);
+        c.seed_actor("WORKERS",0);
+        c.seed_government("A","HEAD","PRIME",5,3);
+        c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+        c.p1_set_incorporation("R",true);
+        auto& pop=c.seed_population();
+        const auto hh=pop.household_profile({"R","mixed","shared",25'000});
+        const auto worker=pop.economic_profile({"R","worker","wage","employee",
+                                                 pop.default_education()});
+        const auto dem=pop.demographic_profile({"R",23650,phaseb::Sex::female,
+            "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+        const auto slice=pop.seed_population(dem,worker,hh,1'000'000);
+        pop.hire(slice,10,"OPERATOR","worker",10,{});
+        c.seed_public_institution("POLICE","OPERATOR","R","paper",100,1);
+        c.seed_p1_institution("A","POLICE",P1InstitutionKind::policing,2);
+        law(c,"A","policing","dedicated_police");
+        law(c,"A","internal_security",security);
+        if(general)law(c,"A","bureaucracy","elected_bureaucrats");
+        c.seed_interest_group("WORKERS-IG");
+        c.p3_seed_group({"A","WORKERS-IG","","","",P3GroupType::custom,0,0});
+        c.p3_seed_movement({"MOV","A","fixture:ordinary","reform","R",
+            P3MovementGoal::legal_reform,{"WORKERS-IG"},{},0,0,true});
+        auto world=daily::World::adopt(std::move(gh),42);
+        const auto start=world.day_index();
+        phasegh::World::Plan first;
+        first[5].push_back([](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            live.spend_country_budget("A","OPERATOR",100);
+            live.wages("OPERATOR","WORKERS","A",61,0);
+        });
+        first[9].push_back([&](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            live.p5_perform_action({"POLICE-RESPONSE","MOV","","R","POLICE",
+                P5ActionKind::policing,0,5,0,start});
+            if(!amend)return;
+            P2Bill bill;
+            bill.id="SHINSENGUMI-AMENDMENT";bill.country="A";bill.proposer="PRIME";
+            bill.legal_basis="fixture:secret-police-amendment";bill.effective_day=start+2;
+            bill.action=P2BillAction::attach_amendment;
+            bill.proposed_amendment={"amendment_reformed_shinsengumi","A:internal_security",
+                "fixture:amendment","",{{"association","A",
+                    P2ClauseKind::political_association_allowed,1}}};
+            live.p2_submit_bill(std::move(bill),start);
+            live.p2_approve_bill("SHINSENGUMI-AMENDMENT",{});
+            live.p2_promulgate_bill("SHINSENGUMI-AMENDMENT","HEAD",start);
+        });
+        world.advance_day(first);
+        const auto live=[&]() -> const IntegratedWorld& {
+            return world.engine().base().core().core();
+        };
+        constexpr auto wrong_key="country_institution_cost_institution_home_affairs_mult";
+        const auto verify=[&](int authored_ppm) {
+            const auto v=live().p1_bureaucracy("A");
+            const auto s=live().p1_institution_capacity("POLICE");
+            const auto expected=general?170:200;
+            check(live().p2_modifier_ppm("A",wrong_key)==authored_ppm,
+                  "test must keep the genuine Home Affairs source effective where authored");
+            if(v.institution_cost!=expected)
+                throw std::runtime_error(std::string(security)+(amend?" + enacted amendment":"")+
+                    ": Home Affairs rate changed ordinary police administration: expected "+
+                    std::to_string(expected)+" got "+std::to_string(v.institution_cost));
+            check(v.capacity.committed==v.state_cost+expected&&s.level==2&&
+                  s.employed_staff==10&&s.usable_slots==nominal_slots&&s.cash_backed&&
+                  live().cash("A")==900&&live().cash("OPERATOR")==39&&
+                  live().cash("WORKERS")==61&&live().p5_actions().size()==1,
+                  "scope fix interfered with real funded police, standard costs, or responses");
+        };
+        if(amend) {
+            verify(0);
+            world.advance_day();
+            verify(0);
+            auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+            world.advance_day();replay.advance_day();
+            check(live().p2_amendment_active("amendment_reformed_shinsengumi")&&
+                  daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+                  "the legal Secret Police amendment failed its dated scope or replay");
+            verify(-50'000);
+        } else verify(std::string_view(security)=="third_section"?-250'000:0);
+    };
+    run("national_guard",false,false,10);
+    run("no_home_affairs",false,false,8);
+    run("third_section",false,false,10);
+    run("third_section",false,true,10);
+    run("secret_police",true,false,10);
+    run("secret_police",true,true,10);
 }
 
 static void national_school_and_health_laws_change_legal_administration_cost() {
@@ -1922,8 +2182,124 @@ static void canonical_citizenship_homeland_allows_actual_border_movement() {
     }
 }
 
+static void national_heritage_amendments_change_real_pop_wages() {
+    struct Case {const char* jurisdiction;bool racial,homestead;};
+    for(const auto& scenario:std::array<Case,7>{{
+        {"national",false,false},{"national",true,false},
+        {"national",false,true},{"national",true,true},
+        {"local",true,true},{"wrong",true,true},{"foreign",true,true}}}) {
+        const bool legal=std::string_view(scenario.jurisdiction)=="national";
+        const bool foreign=std::string_view(scenario.jurisdiction)=="foreign";
+        const bool racial=legal&&scenario.racial,homestead=legal&&scenario.homestead;
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"HOME","A");geo.seed_unit(1,"A","DISTRICT");
+        geo.seed_assignment(1,1);
+        if(foreign) {
+            geo.seed_province(2,"FOREIGN","B");geo.seed_unit(2,"B","OTHER");
+            geo.seed_assignment(2,2);
+        }
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",1000);c.seed_actor("EMPLOYER",1000);
+        c.seed_government("A","HEAD","PM",5,3);
+        c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:heritage"});
+        law(c,"A","citizenship","subjecthood");
+        law(c,"A","land_reform","homesteading");
+        std::string racial_parent="A:citizenship",home_parent="A:land_reform";
+        if(std::string_view(scenario.jurisdiction)=="wrong") {
+            law(c,"A","colonization","frontier_colonization");
+            racial_parent=home_parent="A:colonization";
+        } else if(std::string_view(scenario.jurisdiction)=="local") {
+            P2BaseLaw local{"LOCAL-C","A","local_citizenship","HOME",
+                            "law_subjecthood","fixture:local"};
+            local.tier=P2NormTier::local_ordinance;
+            c.p2_seed_base(local);
+            local.id="LOCAL-L";local.domain="local_land";
+            local.base_choice="law_homesteading";
+            c.p2_seed_base(local);
+            racial_parent="LOCAL-C";home_parent="LOCAL-L";
+        }
+        if(foreign) {
+            c.seed_actor("B",1000);
+            c.seed_government("B","HEAD","PM",5,3);
+            c.seed_p1_constitution("B",{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:foreign"});
+            law(c,"B","citizenship","subjecthood");
+            law(c,"B","land_reform","homesteading");
+            racial_parent="B:citizenship";home_parent="B:land_reform";
+            c.seed_public_institution("FOREIGN-PUBLIC","B","FOREIGN","paper",100,1);
+            c.seed_p1_institution("B","FOREIGN-PUBLIC",P1InstitutionKind::administration,1);
+        }
+        c.seed_public_institution("PUBLIC","EMPLOYER","HOME","paper",100,1);
+        c.seed_p1_institution("A","PUBLIC",P1InstitutionKind::administration,1);
+        const auto amend=[&](const char* id,const std::string& parent) {
+            c.p2_seed_amendment({id,parent,"fixture:heritage","",
+                {{id,foreign?"FOREIGN-PUBLIC":"PUBLIC",
+                  P2ClauseKind::public_institution_level,1}}});
+        };
+        if(scenario.racial)amend("amendment_racialized_subjecthood",racial_parent);
+        if(scenario.homestead) {
+            // Different typed provision keeps the shared erroneous parent
+            // scenario legal in the low-level historical state store.
+            c.p2_seed_amendment({"amendment_homestead_acts",home_parent,
+                "fixture:heritage","",{{"association",foreign?"B":"A",
+                P2ClauseKind::political_association_allowed,1}}});
+        }
+        c.p2_seed_culture({"PRIMARY",{"H"},{"HF"},{"L"},{"LF"},{"T"},{}});
+        c.p2_seed_culture({"SECONDARY",{"H2"},{"HF2"},{"L2"},{"LF2"},{"T2"},{}});
+        c.p2_seed_culture({"EXACT",{"H"},{"HF"},{"L"},{"LF"},{"NO"},{}});
+        c.p2_seed_culture({"FAMILY",{"OTHER"},{"HF"},{"L"},{"LF"},{"NO"},{}});
+        c.p2_seed_culture({"NO_MATCH",{"OTHER"},{"OTHER_F"},{"L"},{"LF"},{"NO"},{}});
+        c.p2_seed_culture({"CROSSED",{"H"},{"HF"},{"L2"},{"LF2"},{"NO"},{}});
+        c.p2_seed_national_identity({"A",{"PRIMARY","SECONDARY"},{}});
+        if(foreign)c.p2_seed_national_identity({"B",{"PRIMARY","SECONDARY"},{}});
+        auto& pop=c.seed_population();
+        const auto home=pop.household_profile({"HOME","mixed","shared",100});
+        const auto econ=pop.economic_profile({"HOME","worker","wage","employee",
+                                             pop.default_education()});
+        const auto resident=[&](const char* culture) {
+            const auto dem=pop.demographic_profile({"HOME",23650,phaseb::Sex::male,
+                culture,"UNKNOWN","citizen","free",pop.default_health(),phaseb::Service::civilian});
+            return pop.seed_population(dem,econ,home,10);
+        };
+        const auto primary=resident("PRIMARY"),unknown=resident("UNKNOWN");
+        const std::array<phaseb::Id,4> candidates{
+            resident("EXACT"),resident("FAMILY"),resident("NO_MATCH"),resident("CROSSED")};
+        const std::array<int,4> expect{
+            40+(racial?40:0),35+(racial?30:0),
+            20-(racial?5:0)-(homestead?5:0),20+(racial?40:0)};
+        auto world=daily::World::adopt(std::move(gh),38);
+        phasegh::World::Plan payroll;
+        for(std::size_t i=0;i<candidates.size();++i) {
+            const auto id=candidates[i];
+            const auto score=view(world).p2_acceptance("A",id);
+            check(score&&score->score==expect[i],
+                  "heritage amendment was not applied to the exact eligible POP branch and parent");
+            payroll[2].push_back([id](phasegh::Stage& stage) {
+                stage.phase_c().hire(id,1,"EMPLOYER",100);
+            });
+        }
+        check(view(world).p2_acceptance("A",primary)->score==100&&
+              !view(world).p2_acceptance("A",unknown),
+              "heritage amendment was applied to primary or unsupported culture evidence");
+        if(foreign)
+            check(view(world).p2_acceptance("B",candidates[2])->score==10,
+                  "a foreign national amendment must affect only that evaluating sovereign");
+        world.advance_day(payroll);
+        for(std::size_t i=0;i<candidates.size();++i) {
+            const int score=expect[i];
+            const int wage=score>=80?100:score>=60?90:score>=40?80:score>=20?70:60;
+            const auto job=view(world).people().job(candidates[i]);
+            check(job&&job->wage_per_month==wage,
+                  "adopted heritage amendment missed the real citizenship wage contract");
+        }
+    }
+}
+
 int main(){
     try{
+        ordinary_police_do_not_receive_home_affairs_operating_discounts();
         national_school_and_health_laws_change_legal_administration_cost();
         chiefs_aid_uses_only_effective_welfare_bureaucracy();
         source_ideologies_laws_traits();
@@ -1934,11 +2310,13 @@ int main(){
         acceptance_and_five_tier_rights();
         canonical_citizenship_traits_change_real_pop_rights();
         canonical_citizenship_homeland_allows_actual_border_movement();
+        national_heritage_amendments_change_real_pop_wages();
         physical_migration_and_law_block();
         land_reform_restricts_only_peasant_internal_migration();
         abolition_preserves_real_people_and_membership();
         economic_law_restricts_real_company_ownership();
         exact_church_laws_change_real_religious_acceptance();
+        religious_migration_amendment_changes_acceptance_not_border_law();
         military_peasant_levy_restricts_real_conscripts();
         institutional_bureaucracy_prices_ongoing_commitments();
         effective_workhouse_amendment_reduces_only_welfare_cost(

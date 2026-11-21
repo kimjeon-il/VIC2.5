@@ -290,6 +290,8 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
             phaseb::mul_checked(v.incorporated_population/100'000,10),
             phaseb::mul_checked(v.incorporated_population%100'000,10)/
             100'000);
+        // Ordinary Law Enforcement still has its base and general cost.
+        // The distinct Home Affairs institution is not represented here.
         const char* law_key=nullptr;
         switch(kind) {
             case P1InstitutionKind::healthcare:
@@ -297,9 +299,6 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
                 break;
             case P1InstitutionKind::education:
                 law_key="country_institution_cost_institution_schools_mult";
-                break;
-            case P1InstitutionKind::policing:
-                law_key="country_institution_cost_institution_home_affairs_mult";
                 break;
             case P1InstitutionKind::welfare:
                 law_key="country_institution_cost_institution_social_security_mult";

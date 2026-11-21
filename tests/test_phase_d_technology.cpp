@@ -138,11 +138,105 @@ static void test_commercial_adoption_requires_paid_license(){
          "real site adoption requires correct next-month license and inputs");
     w.validate();
 }
+static void enacted_recipient_laws_change_actual_paid_technology_diffusion(){
+    using namespace vic25::phasec;
+    const auto run=[](const char* group,const char* law,Quantity expected,
+                      bool production=false,bool recipient_company=false,
+                      bool ambiguous=false,bool law_at_source=false,bool forged=false) {
+        World world{5000};
+        auto& c=world.seed_core();
+        c.seed_region("RA","A");c.seed_region("RB","B");
+        c.seed_actor("A",1000);c.seed_actor("B",0);
+        c.seed_actor("FIRM",1000);c.seed_actor("THIRD",1000);
+        for(const auto* nation:{"A","B"}) {
+            c.seed_government(nation,"HEAD","MINISTER",5,3);
+            c.seed_p1_constitution(nation,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture"});
+        }
+        const auto receiver=recipient_company?"FIRM":"A";
+        c.seed_production_facility("MILL",receiver,"RA",10);
+        if(ambiguous)c.seed_production_facility("OTHER","FIRM","RB",10);
+        const std::string source_owner=law_at_source?"B":"A";
+        if(forged) {
+            P2BaseLaw local{"LOCAL","A","ordinary_local_policy","RA",law,"fixture"};
+            local.tier=P2NormTier::local_ordinance;
+            c.p2_seed_base(local);
+            c.p2_seed_base({"CUSTOM","A","unrelated_national_group","national",law,"fixture"});
+        } else if(*law)
+            c.p2_seed_base({"LAW",source_owner,group,"national",law,"fixture"});
+        world.seed_technology({"KNOWN",{},false});
+        world.seed_knowledge("B","KNOWN",KnowledgeLevel::usable);
+        if(production) {
+            IndustryRecipe recipe;
+            recipe.id="REAL-RECIPE";recipe.site="MILL";recipe.tech_id="KNOWN";
+            recipe.inputs={{"ore",1}};recipe.outputs={{"metal",1}};
+            recipe.workers_per_batch=recipe.capacity_per_batch=1;
+            world.seed_recipe(recipe);
+        }
+        world.seed_contact({"CONTACT","B",receiver,"KNOWN",100,0,0,1,2});
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"RB","shared","shared",100});
+        const auto e=pop.economic_profile({"RB","worker","wage","employee",pop.default_education()});
+        const auto d=pop.demographic_profile({"RB",4640,Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),Service::civilian});
+        const auto workers=pop.seed_population(d,e,h,200);
+        const auto instruction=[&](Quantity amount,bool hire,bool review) {
+            World::Plan plan;
+            plan[1].push_back([=](Stage& s){s.plan_contact("CONTACT",amount);});
+            if(hire)plan[2].push_back([=](Stage& s){s.phase_c().hire(workers,200,"B",1);});
+            plan[4].push_back([=](Stage& s){s.instruct_contact("CONTACT",amount);});
+            plan[5].push_back([=](Stage& s){s.pay_contact("CONTACT",amount);});
+            if(review)plan[9].push_back([](Stage& s){s.review_contact("CONTACT");});
+            return plan;
+        };
+        world.advance(instruction(expected-1,true,false));
+        const auto before=vic25::phased::SnapshotCodec::encode(world);
+        World::Plan early;
+        early[9].push_back([](Stage& s){s.review_contact("CONTACT");});
+        need(rejects([&]{world.advance(early);})&&vic25::phased::SnapshotCodec::encode(world)==before,
+             "actual received instruction qualified early or failure lost work/cash");
+        auto unbacked=instruction(1,false,true);
+        unbacked[5].clear();
+        need(rejects([&]{world.advance(unbacked);})&&
+             vic25::phased::SnapshotCodec::encode(world)==before,
+             "unpaid delivered instruction changed the recipient or lost cash");
+        // One further instructional unit must be paid and reviewed, and
+        // delivery becomes effective only at the next month's opening.
+        try {world.advance(instruction(1,false,true));}
+        catch(const std::exception& e) {
+            throw std::runtime_error(std::string("paid recipient law ")+law+": "+e.what());
+        }
+        need(world.contact("CONTACT").paid_instruction==expected&&
+             world.knowledge(receiver,"KNOWN")==KnowledgeLevel::unknown&&
+             world.core().cash(receiver)==1000-2*expected&&world.core().cash("B")==2*expected,
+             "actual taught and paid work did not exactly match legal recipient threshold");
+        auto replay=vic25::phased::SnapshotCodec::decode(vic25::phased::SnapshotCodec::encode(world));
+        world.advance();replay.advance();
+        need(world.knowledge(receiver,"KNOWN")==KnowledgeLevel::understood&&
+             world.knowledge("B","KNOWN")==KnowledgeLevel::usable&&
+             world.knowledge("THIRD","KNOWN")==KnowledgeLevel::unknown&&
+             vic25::phased::SnapshotCodec::encode(world)==vic25::phased::SnapshotCodec::encode(replay),
+             "paid contact skipped knowledge boundaries or next-month replay");
+    };
+    run("free_speech","law_protected_speech",80);
+    run("trade_policy","law_isolationism",118);
+    run("trade_policy","law_canton_system",112,false,true);
+    run("trade_policy","law_sakoku",125);
+    run("free_speech","law_outlawed_dissent",118);
+    run("free_speech","law_censorship",112);
+    run("economic_system","law_industry_banned",134,true);
+    run("economic_system","law_industry_banned",100);
+    run("free_speech","law_protected_speech",100,false,true,true);
+    run("free_speech","law_protected_speech",100,false,false,false,true);
+    run("free_speech","law_protected_speech",100,false,false,false,false,true);
+}
+
 int main(){
     try{
         test_paid_contact_and_licensed_nonautomatic_diffusion();
         test_occupational_training_changes_real_pop_next_month();
         test_commercial_adoption_requires_paid_license();
+        enacted_recipient_laws_change_actual_paid_technology_diffusion();
         std::cout<<"Technology transfer, lawful licensing and POP skill tests PASS\n";
         return 0;
     }catch(const std::exception& e){

@@ -559,25 +559,46 @@ inline Quantity effective_contact_instruction(
         for(const auto& [id,site]:c.facilities()) {
             (void)id;
             if(site.owner!=contact.target)continue;
-            const auto sovereign=c.sovereignty(site.region);
+            std::string sovereign;
+            try { sovereign=c.sovereignty(site.region); }
+            catch(const std::out_of_range&) { return contact.required_instruction; }
             if(country.empty())country=sovereign;
             else if(country!=sovereign)return contact.required_instruction;
         }
     }
     if(country.empty()||!c.has_government(country))
         return contact.required_instruction;
-    double speed=c.p2_catalog_modifier_value(
-        country,"country_tech_spread_mult");
-    const bool production=std::any_of(d.recipes.begin(),d.recipes.end(),
-        [&](const auto& entry){return entry.second.tech_id==contact.tech;});
-    if(production)
-        speed+=c.p2_catalog_modifier_value(
-            country,"country_production_tech_spread_mult");
-    const double multiplier=std::clamp(1.0+speed,0.25,4.0);
-    return static_cast<Quantity>(std::clamp(
-        std::ceil(static_cast<double>(contact.required_instruction)/multiplier),
-        1.0,static_cast<double>(
-            std::numeric_limits<Quantity>::max()/4)));
+    // Only enacted national trade/free-speech choices can adjust this
+    // recipient's actual instruction, not tariffs or original research.
+    constexpr auto spread_key="country_tech_spread_mult";
+    const auto source_ppm=[](const std::string& law,std::string_view key) {
+        return static_cast<std::int64_t>(std::llround(
+            phasec::p2_catalog_raw_modifier(
+                phasec::p2_catalog_canonical_choice(law),key)*1'000'000.0));
+    };
+    std::int64_t speed=0;
+    if(const auto trade=c.p2_selected_law(country,"trade_policy");
+       trade&&(*trade=="isolationism"||*trade=="canton_system"||*trade=="sakoku"))
+        speed=source_ppm(*trade,spread_key);
+    if(const auto speech=c.p2_selected_law(country,"free_speech");
+       speech&&(*speech=="outlawed_dissent"||*speech=="censorship"||
+                 *speech=="protected_speech"))
+        speed=phaseb::add_checked(speed,source_ppm(*speech,spread_key));
+    if(c.p2_selected_law(country,"economic_system")=="industry_banned"&&
+       std::any_of(d.recipes.begin(),d.recipes.end(),[&](const auto& entry){
+           const auto& recipe=entry.second;
+           return recipe.tech_id==contact.tech&&c.facilities().contains(recipe.site);
+       }))
+        speed=phaseb::add_checked(speed,source_ppm(
+            "industry_banned","country_production_tech_spread_mult"));
+    if(speed==0)return contact.required_instruction;
+    constexpr Quantity ppm=1'000'000;
+    constexpr auto limit=std::numeric_limits<Quantity>::max()/4;
+    const auto multiplier=std::clamp<std::int64_t>(ppm+speed,ppm/4,ppm*4);
+    const auto whole=contact.required_instruction/multiplier;
+    if(whole>limit/ppm)return limit;
+    const auto tail=(contact.required_instruction%multiplier*ppm+multiplier-1)/multiplier;
+    return std::clamp(whole*ppm+tail,Quantity{1},limit);
 }
 
 class Stage {
@@ -1356,9 +1377,10 @@ public:
     void plan_contact(const std::string& id,Quantity units){
         must(1);
         auto& contact=d_.contacts.at(id);
-        require(!contact.reviewed&&units>0&&
-                contact.verified_instruction+contact.planned_instruction+units<=
-                    contact.required_instruction,
+        const auto required=effective_contact_instruction(contact,d_,c_);
+        require(!contact.reviewed&&units>0&&contact.verified_instruction<=required&&
+                contact.planned_instruction<=required-contact.verified_instruction&&
+                units<=required-contact.verified_instruction-contact.planned_instruction,
                 "invalid knowledge transfer plan");
         if(contact.tuition_per_work)
             c_.phase_d_reserve_cash(contact.target,"contact:"+id,
@@ -1392,9 +1414,9 @@ public:
     void review_contact(const std::string& id){
         must(9);
         auto& contact=d_.contacts.at(id);
-        require(!contact.reviewed&&contact.verified_instruction>=
-                contact.required_instruction&&
-                contact.paid_instruction>=contact.required_instruction,
+        const auto required=effective_contact_instruction(contact,d_,c_);
+        require(!contact.reviewed&&contact.verified_instruction>=required&&
+                contact.paid_instruction>=required,
                 "knowledge transfer lacks real instruction or legitimate payment");
         contact.reviewed=true;
         d_.promotions[d_.opening_month+1].push_back({
