@@ -1,6 +1,8 @@
 #include "vic25/p0_daily.hpp"
 #include "vic25/daily_snapshot.hpp"
+#include <initializer_list>
 #include <iostream>
+#include <utility>
 #include <iterator>
 #include <stdexcept>
 #include <string>
@@ -110,17 +112,19 @@ struct InvestmentOrderLegalSources {
     std::string country="A",land_reform,amendment;
     bool parents_amendment_in_land_reform{};
 };
+enum class CeilingLaw { national, absent, local, foreign, misleading_national };
 static void check_paid_investment_order(const char* law,const char* profession,bool share,
                       bool foreign,bool resolved,phasec::Money cash,
                       phaseb::People expected,phaseb::People maximum=4,
                       phaseb::People staff=12,phaseb::People material=20,
                       bool public_funds=false,phasec::Money arrears=0,
-                      int false_amendment=0,InvestmentOrderLegalSources sources={}) {
+                      int false_amendment=0,InvestmentOrderLegalSources sources={},
+                      CeilingLaw law_scope=CeilingLaw::national) {
     phasegh::World gh(24000);
     auto& geo=gh.seed_geography();
     geo.seed_province(1,"R",sources.country);geo.seed_unit(11,sources.country,"ROOT");
     geo.seed_assignment(1,11);
-    if(foreign) {
+    if(foreign||law_scope==CeilingLaw::foreign) {
         geo.seed_province(2,"F","B");geo.seed_unit(12,"B","FOREIGN");
         geo.seed_assignment(2,12);
     }
@@ -128,7 +132,8 @@ static void check_paid_investment_order(const char* law,const char* profession,b
     auto& core=industry.seed_core();
     core.seed_actor(sources.country,0);core.seed_actor("FIRM",cash);
     core.seed_actor("BUILDER",0);core.seed_actor("CORP",10);
-    const auto enact=[&](const std::string& country,const char* choice) {
+    const auto enact=[&](const std::string& country,const char* choice,
+                         bool local=false,bool custom=false) {
         core.seed_government(country,"HEAD","PM",5,3);
         core.seed_p1_constitution(country,{phasec::P1GovernancePrinciple::monarchy,
             phasec::P1PowerDistribution::autocracy,
@@ -136,10 +141,22 @@ static void check_paid_investment_order(const char* law,const char* profession,b
         phasec::P2BaseLaw act;
         act.id=country+":economy";act.country=country;
         act.domain="economic_system";act.scope="national";
+        if(!choice)return;
+        if(local||custom)act.domain="custom_economy";
+        if(local) {
+            act.scope="R";
+            act.tier=phasec::P2NormTier::local_ordinance;
+        }
         act.base_choice=choice;act.legal_basis="fixture:economy";
         core.p2_seed_base(act);
     };
-    enact(sources.country,law);
+    enact(sources.country,
+          law_scope==CeilingLaw::absent||law_scope==CeilingLaw::foreign?nullptr:law,
+          law_scope==CeilingLaw::local,law_scope==CeilingLaw::misleading_national);
+    if(law_scope==CeilingLaw::foreign) {
+        core.seed_actor("B",0);
+        enact("B",law);
+    }
     if(!sources.land_reform.empty()) {
         phasec::P2BaseLaw land;
         land.id=sources.country+":land";land.country=sources.country;
@@ -234,6 +251,7 @@ static void check_paid_investment_order(const char* law,const char* profession,b
             std::string("share-backed paid construction order: ")+law+
             " "+profession+" "+sources.country+
             " "+sources.land_reform+" "+sources.amendment+" expected="+std::to_string(expected)+
+            " scope="+std::to_string(static_cast<int>(law_scope))+
             " paid="+std::to_string(work.paid_work)+
             " accepted="+std::to_string(work.accepted_work)+
             " capitalized="+std::to_string(work.capitalized_work)+
@@ -244,11 +262,39 @@ static void check_paid_investment_order(const char* law,const char* profession,b
                               c(game).outstanding_worker_wages("FIRM")==0,
                               "existing earned household wages were not actually settled");
     require_test(c(game).cash("FIRM")==cash-10*expected-arrears&&
+                 c(game).cash("BUILDER")==10*expected&&
                  c(game).cash(household)==100&&c(game).cash("CORP")==10&&
                  c(game).shares("company:FIRM",share?household:"CORP")==100&&
                  c(game).stock("BUILDER","R","steel")==material-expected,
                  "investment efficiency manufactured funds, equity or inputs");
 }
+// D-D0/D-C4 use real project orders, not an allocation of a fixed national queue.
+static void economic_laws_adjust_only_paid_private_order_ceiling() {
+    const auto run=[](const char* law,phaseb::People expected,bool public_funds=false,
+                      CeilingLaw scope=CeilingLaw::national,phasec::Money cash=300,
+                      phaseb::People staff=20,phaseb::People steel=20) {
+        check_paid_investment_order(law,"worker",false,false,true,cash,expected,
+                                   10,staff,steel,public_funds,0,0,{},scope);
+    };
+    run("law_laissez_faire",10,false,CeilingLaw::absent);
+    run("law_laissez_faire",10,false,CeilingLaw::local);
+    run("law_laissez_faire",10,false,CeilingLaw::foreign);
+    run("law_laissez_faire",10,false,CeilingLaw::misleading_national);
+    for(const auto& [law,paid]:std::initializer_list<std::pair<const char*,int>>{
+          {"law_traditionalism",12},{"law_interventionism",15},
+          {"law_agrarianism",15},{"law_industry_banned",15},
+          {"law_extraction_economy",15},{"law_laissez_faire",17},
+          {"law_cooperative_ownership",13},{"law_command_economy",11}}) {
+        run(law,paid);
+        run(law,10,true);
+    }
+    // The policy reserves 10 cash before the project can pay 10 per unit.
+    run("law_laissez_faire",0,false,CeilingLaw::national,19);
+    run("law_laissez_faire",1,false,CeilingLaw::national,29);
+    run("law_laissez_faire",3,false,CeilingLaw::national,300,3);
+    run("law_laissez_faire",2,false,CeilingLaw::national,300,20,2);
+}
+
 static void household_shareholder_efficiency_changes_paid_daily_construction_orders() {
     // Existing private construction allocation first scales 4 to 5 (under
     // Traditionalism) or 6 (under Agrarianism). Isolate the shareholder rows
@@ -1873,6 +1919,7 @@ static void automatic_naval_air_and_real_blockade() {
 int main(){
     try{
         daily_production_trade_ai_investment_replay();
+        economic_laws_adjust_only_paid_private_order_ceiling();
         household_shareholder_efficiency_changes_paid_daily_construction_orders();
         aristocratic_shareholders_inject_only_lawful_monthly_capital();
         canonical_profession_sources_change_real_construction_orders();

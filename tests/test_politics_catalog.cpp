@@ -377,8 +377,24 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==436,
-          "expected all exact sources including remaining coalition incoherence evidence");
+    std::size_t lawful_order_ceiling=0;
+    for(const auto& row:audit) {
+        if(row.source.key!="country_private_construction_allocation_mult")continue;
+        check(row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="p0::DailyGame (VIC2.5 paid private order ceiling)"&&
+              row.behavior_test=="test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"&&
+              !row.source.institution&&!row.source.sponsor&&!row.source.boolean,
+              "paid private order ceiling is not verified for an exact economic law");
+        auto wrong=row.source;
+        wrong.institution=true;
+        check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).status==
+              CanonicalLawRowStatus::no_recorded_path,
+              "private order ceiling evidence leaked to an institution effect");
+        ++lawful_order_ceiling;
+    }
+    check(lawful_order_ceiling==8,"expected exactly eight paid private order ceiling sources");
+    check(canonical_law_row_evidence().size()==444,
+          "expected all exact sources including the eight paid private order ceilings");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
         "state_shopkeepers_investment_pool_efficiency_mult",

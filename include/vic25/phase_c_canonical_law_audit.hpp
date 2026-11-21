@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,436>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,444>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,436> evidence{{
+    static const std::array<CanonicalLawRowEvidence,444> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -1375,7 +1375,31 @@ inline const std::array<CanonicalLawRowEvidence,436>& canonical_law_row_evidence
          "test_politics_catalog::residual_national_choices_adjust_real_coalition_incoherence"},
         {{"law_social_monarchy","country_legitimacy_ideological_incoherence_mult",-0.1,false,false},
          "IntegratedWorld::p1_legitimacy",
-         "test_politics_catalog::residual_national_choices_adjust_real_coalition_incoherence"}
+         "test_politics_catalog::residual_national_choices_adjust_real_coalition_incoherence"},
+        {{"law_traditionalism","country_private_construction_allocation_mult",0.25,false,false},
+         "p0::DailyGame (VIC2.5 paid private order ceiling)",
+         "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"},
+        {{"law_interventionism","country_private_construction_allocation_mult",0.5,false,false},
+         "p0::DailyGame (VIC2.5 paid private order ceiling)",
+         "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"},
+        {{"law_agrarianism","country_private_construction_allocation_mult",0.5,false,false},
+         "p0::DailyGame (VIC2.5 paid private order ceiling)",
+         "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"},
+        {{"law_industry_banned","country_private_construction_allocation_mult",0.5,false,false},
+         "p0::DailyGame (VIC2.5 paid private order ceiling)",
+         "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"},
+        {{"law_extraction_economy","country_private_construction_allocation_mult",0.5,false,false},
+         "p0::DailyGame (VIC2.5 paid private order ceiling)",
+         "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"},
+        {{"law_laissez_faire","country_private_construction_allocation_mult",0.75,false,false},
+         "p0::DailyGame (VIC2.5 paid private order ceiling)",
+         "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"},
+        {{"law_cooperative_ownership","country_private_construction_allocation_mult",0.35,false,false},
+         "p0::DailyGame (VIC2.5 paid private order ceiling)",
+         "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"},
+        {{"law_command_economy","country_private_construction_allocation_mult",0.1,false,false},
+         "p0::DailyGame (VIC2.5 paid private order ceiling)",
+         "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"}
     }};
     return evidence;
 }

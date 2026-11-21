@@ -2807,6 +2807,8 @@ public:
     // with 1,000,000 representing 1.0, including legacy raw unit +100.
     [[nodiscard]] std::int64_t p2_modifier_ppm(
         const std::string& country,const std::string& effect_key)const;
+    [[nodiscard]] std::int64_t p2_private_construction_order_modifier_ppm(
+        const std::string& country)const;
     [[nodiscard]] std::int64_t p2_national_influence_ppm(
         const std::string& country)const;
     [[nodiscard]] double p2_catalog_modifier_value(

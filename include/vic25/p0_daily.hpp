@@ -1690,8 +1690,7 @@ public:
                     p.client!=c.country_treasury(country);
                 if(privately_funded) {
                     const auto effect=phaseb::add_checked(
-                        c.p2_modifier_ppm(
-                            country,"country_private_construction_allocation_mult"),
+                        c.p2_private_construction_order_modifier_ppm(country),
                         c.p3_private_investment_bonus_ppm(country,p.client));
                     const auto rate=std::clamp<std::int64_t>(
                         1'000'000+effect,0,2'000'000);
