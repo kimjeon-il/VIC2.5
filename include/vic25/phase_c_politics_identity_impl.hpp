@@ -36,12 +36,33 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
         return std::nullopt;
     const auto law=p2_selected_law(country,"citizenship");
     if(!law)return std::nullopt;
-    const auto source=politics::catalogue().modifiers.find(*law);
-    // Newly introduced 1.15 nationality laws without verified 1.15
-    // acceptance modifiers are Unsupported, never a fabricated score 0.
-    if(source==politics::catalogue().modifiers.end()||
-       !source->second.contains("country_acceptance_primary_culture_add"))
+    // Use authored 1.15 direct citizenship terms, not the duplicate compact
+    // catalogue or generic projection of unrelated national/local laws.
+    using CulturalTerms=std::map<std::string_view,std::int64_t>;
+    static const auto cultural_sources=[] {
+        std::map<std::string_view,CulturalTerms> sources;
+        for(const auto& row:p2_catalog_115().modifiers) {
+            if(row.boolean||row.institution||row.sponsor||
+               !row.source_id.starts_with("law_")||
+               !row.key.starts_with("country_acceptance_")||
+               row.key=="country_acceptance_not_homeland_add")continue;
+            const auto* entry=p2_catalog_law(row.source_id);
+            if(!entry||entry->group!="citizenship")continue;
+            auto& term=sources[row.source_id][row.key];
+            term=phaseb::add_checked(term,static_cast<std::int64_t>(
+                std::llround(row.value)));
+        }
+        return sources;
+    }();
+    constexpr auto primary_key="country_acceptance_primary_culture_add";
+    const auto source=cultural_sources.find(p2_catalog_canonical_choice(*law));
+    // A missing authored source is Unsupported, never a fabricated score 0.
+    if(source==cultural_sources.end()||!source->second.contains(primary_key))
         return std::nullopt;
+    const auto culture_modifier=[&](std::string_view key)->std::int64_t {
+        const auto term=source->second.find(key);
+        return term==source->second.end()?0:term->second;
+    };
     const auto national=p2_national_identities_.find(country);
     if(national==p2_national_identities_.end())return std::nullopt;
     const auto& pop=people_.demographic(
@@ -57,7 +78,7 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
     };
     const auto score_for=[&](const P2CultureTraits& primary)->std::int64_t {
         if(evidence.culture==primary.culture)
-            return source_modifier(*law,"country_acceptance_primary_culture_add");
+            return culture_modifier(primary_key);
         const auto shared=[](const auto& a,const auto& b) {
             for(const auto& x:a)if(b.contains(x))return true;
             return false;
@@ -67,7 +88,7 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
                              const std::string& exact,
                              const std::string& family,
                              const std::string& neither) {
-            return source_modifier(*law,direct?exact:
+            return culture_modifier(direct?exact:
                                    related?family:neither);
         };
         points+=match(shared(evidence.heritages,primary.heritages),
@@ -81,10 +102,10 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
              "country_acceptance_shared_language_trait_group_add",
              "country_acceptance_no_shared_language_trait_add");
         points+=shared(evidence.traditions,primary.traditions)?
-              source_modifier(*law,"country_acceptance_shared_tradition_trait_add"):
-              source_modifier(*law,"country_acceptance_no_shared_tradition_trait_add");
+              culture_modifier("country_acceptance_shared_tradition_trait_add"):
+              culture_modifier("country_acceptance_no_shared_tradition_trait_add");
         if(evidence.homelands.contains(pop.region))
-            points+=source_modifier(*law,"country_acceptance_homeland_add");
+            points+=culture_modifier("country_acceptance_homeland_add");
         return points;
     };
     bool found=false;
@@ -107,10 +128,16 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
             p2_catalog_raw_modifier("law_no_colonial_affairs",
                                     "country_acceptance_homeland_add"))));
     }
-    if(auto religion_law=p2_selected_law(country,"church_and_state")) {
+    if(const auto religion_law=p2_selected_law(country,"church_and_state")) {
+        // The four branch values are authored direct church-law rows,
+        // not general national modifiers or copied citizenship defaults.
+        const auto canonical=p2_catalog_canonical_choice(*religion_law);
+        const auto religious_points=[&](std::string_view key) {
+            return static_cast<std::int64_t>(std::llround(
+                p2_catalog_raw_modifier(canonical,key)));
+        };
         if(national->second.state_religions.contains(pop.religion))
-            score+=source_modifier(*religion_law,
-                   "country_acceptance_state_religion_add");
+            score+=religious_points("country_acceptance_state_religion_add");
         else {
             const auto it=p2_religions_.find(pop.religion);
             if(it!=p2_religions_.end()) {
@@ -127,7 +154,7 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
                     religious_family?
                     "country_acceptance_shared_religious_trait_group_add":
                     "country_acceptance_no_shared_religious_trait_add";
-                score+=source_modifier(*religion_law,key);
+                score+=religious_points(key);
             }
         }
     }

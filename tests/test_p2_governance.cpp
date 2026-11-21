@@ -364,6 +364,51 @@ static void aliases_share_exactly_one_recognized_national_base_slot() {
          "recognized law replacement rewrote raw data or displaced custom jurisdictions");
 }
 
+static void exact_labour_suffrage_spelling_enacts_same_constitutional_choice() {
+    using namespace vic25::phasec;
+    for(const std::string spelling:{"law_labour_suffrage","law_labor_suffrage"}) {
+        Scenario fixture;
+        auto& opening=fixture.gh.seed_geography().seed_core().seed_core();
+        opening.p2_seed_base({"OPEN","A","distribution_of_power","",
+            "law_universal_suffrage","fixture:opening vote"});
+        auto world=daily::World::adopt(std::move(fixture.gh),411);
+        const auto start=world.day_index();
+        phasegh::World::Plan legislative;
+        legislative[9].push_back([&](phasegh::Stage& stage) {
+            auto& c=stage.phase_c();
+            c.hold_country_election("A",100,0,{{"PARTY_A",100}});
+            auto bill=bill_for("SUFFRAGE",P2BillAction::enact_or_replace_base,start+2);
+            bill.proposed_base={"SUFFRAGE-LAW","A","lawgroup_distribution_of_power",
+                "national",spelling,"fixture:actual legislative approval"};
+            c.p2_submit_bill(std::move(bill),start);
+            c.p2_approve_bill("SUFFRAGE",{"PARTY_A"});
+            c.p2_promulgate_bill("SUFFRAGE","HEAD_A",start);
+        });
+        world.advance_day(legislative);
+        const auto pending=daily::SnapshotCodec::encode(world);
+        auto replay=daily::SnapshotCodec::decode(pending);
+        world.advance_day();replay.advance_day();
+        need(actual(world).p1_constitution("A").power==P1PowerDistribution::universal_vote&&
+             actual(world).p2_is_active_base("OPEN")&&
+             !actual(world).p2_is_active_base("SUFFRAGE-LAW"),
+             "suffrage changed before its lawful effective date");
+        world.advance_day();replay.advance_day();
+        const auto& c=actual(world);
+        need(c.p1_constitution("A").power==P1PowerDistribution::labor_suffrage&&
+             c.p1_constitution("A").legislature==P1LegislatureKind::unicameral&&
+             c.p2_selected_law("A","distribution_of_power")=="labour_suffrage"&&
+             c.p2_laws().at("SUFFRAGE-LAW").base_choice==spelling&&
+             !c.p2_is_active_base("OPEN")&&c.p2_is_active_base("SUFFRAGE-LAW")&&
+             c.country_election("A").seats.at("PARTY_A")==5&&
+             c.p4_contest("A-HOUSE").next_poll_day==day({2004,1,1}),
+             "lawful suffrage alias did not preserve constitutional identity and representation");
+        const auto final=daily::SnapshotCodec::encode(world);
+        need(final==daily::SnapshotCodec::encode(replay)&&
+             final==daily::SnapshotCodec::encode(daily::SnapshotCodec::decode(final)),
+             "effective suffrage failed reproducible pending/final snapshots");
+    }
+}
+
 int main() {
     try{
         exact_day_law_enactment_amendment_and_repeal();
@@ -372,7 +417,8 @@ int main() {
         invalid_amendments_and_illegal_votes_rollback();
         incompatible_statutory_amendments_are_rejected();
         aliases_share_exactly_one_recognized_national_base_slot();
-        std::cout<<"P2 law, amendment and elected-term scenarios: 6 PASS\n";
+        exact_labour_suffrage_spelling_enacts_same_constitutional_choice();
+        std::cout<<"P2 law, amendment and elected-term scenarios: 7 PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P2 GOVERNANCE FAILED: "<<e.what()<<"\n";

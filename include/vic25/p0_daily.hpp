@@ -2044,9 +2044,21 @@ public:
                     else if(research.discipline=="spread")
                         key="country_tech_spread_mult";
                     if(!key.empty()) {
+                        std::int64_t legal=0;
+                        if(research.discipline=="production") {
+                            // The one flat canonical production research law
+                            // must be genuinely enacted in the lab's sovereign
+                            // economy slot, not a name-only scenario overlay.
+                            if(c.p2_selected_law(country,"economic_system")=="industry_banned") {
+                                static const auto industry_banned=static_cast<std::int64_t>(
+                                    std::llround(phasec::p2_catalog_raw_modifier(
+                                        "law_industry_banned",
+                                        "country_production_tech_research_speed_mult")*1'000'000.0));
+                                legal=industry_banned;
+                            }
+                        } else legal=c.p2_modifier_ppm(country,key);
                         const auto bonus=phaseb::add_checked(
-                            c.p2_modifier_ppm(country,key),
-                            c.p3_trait_modifier_ppm(country,key));
+                            legal,c.p3_trait_modifier_ppm(country,key));
                         const auto ppm=std::clamp<std::int64_t>(
                             1'000'000+bonus,0,2'000'000);
                         budget=phaseb::add_checked(

@@ -234,7 +234,7 @@ inline void IntegratedWorld::p2_sync_constitution(
             {"organic_regulation",P1PowerDistribution::organic_regulation},
             {"elder_council",P1PowerDistribution::elder_council},
             {"census_voting",P1PowerDistribution::census_vote},
-            {"labor_suffrage",P1PowerDistribution::labor_suffrage},
+            {"labour_suffrage",P1PowerDistribution::labor_suffrage},
             {"anarchy",P1PowerDistribution::anarchy}
         };
         proposed.power=table.at(id);
@@ -450,6 +450,43 @@ inline std::int64_t IntegratedWorld::p2_modifier_ppm(
     if(auto it=effects.find(effect_key);it!=effects.end())
         return it->second.value_ppm;
     return 0;
+}
+inline std::int64_t IntegratedWorld::p2_national_influence_ppm(
+        const std::string& country)const {
+    const auto recognized_national=[&](const P2BaseLaw& row)
+            -> const P2CatalogLaw* {
+        if(row.country!=country||row.tier==P2NormTier::local_ordinance||
+           (!row.scope.empty()&&row.scope!="national"))return nullptr;
+        const auto* law=p2_catalog_law(row.base_choice);
+        return law&&law->group==politics::bare_group(row.domain)?law:nullptr;
+    };
+    constexpr std::string_view key="country_influence_mult";
+    const auto modifier=[&](std::string_view source) {
+        return static_cast<std::int64_t>(std::llround(
+            p2_catalog_raw_modifier(source,key)*1'000'000.0));
+    };
+    std::int64_t value=0;
+    std::set<std::string_view> counted;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto* law=recognized_national(p2_laws_.at(id));
+        if(!law)continue;
+        if((law->id=="law_sakoku"||law->id=="law_slave_trade"||
+            law->id=="law_legacy_slavery")&&counted.insert(law->id).second)
+            value=phaseb::add_checked(value,modifier(law->id));
+    }
+    constexpr auto amendment_id="amendment_extraterritoriality_rights";
+    if(p2_active_amendments_.contains(amendment_id)) {
+        const auto& amendment=p2_amendments_.at(amendment_id);
+        const auto* parent=recognized_national(p2_laws_.at(amendment.law_id));
+        const auto* source=p2_catalog_amendment(amendment_id);
+        if(parent&&source&&p2_is_active_base(amendment.law_id)&&
+           p2_catalog_amendment_applies(*source,parent->id)&&
+           (source->possible_country_tags.empty()||
+            p2_catalog_list_contains(source->possible_country_tags,country)))
+            value=phaseb::add_checked(value,modifier(amendment_id));
+    }
+    return value;
 }
 inline double IntegratedWorld::p2_catalog_modifier_value(
         const std::string& country,std::string_view key,

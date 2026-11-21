@@ -356,8 +356,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==200,
-          "expected fourteen new exact witnesses beyond 186");
+    check(canonical_law_row_evidence().size()==379,
+          "expected all exact witnesses including scoped school and health commitments");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
         "state_shopkeepers_investment_pool_efficiency_mult",
@@ -457,8 +457,11 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     for(const auto& row:audit) {
         if(row.source.key!="country_acceptance_homeland_add")continue;
         if(row.source.source_id!="law_no_colonial_affairs") {
-            check(row.status!=CanonicalLawRowStatus::verified_row,
-                  "different same-key source inherited the colonial homeland witness");
+            check((row.source.source_id=="law_subjecthood"||
+                   row.source.source_id=="law_official_nationality")&&
+                  row.status==CanonicalLawRowStatus::verified_row&&
+                  row.behavior_test=="test_politics_identity::canonical_citizenship_homeland_allows_actual_border_movement",
+                  "different same-key source must use its distinct citizenship homeland witness");
             ++other_homeland_rows;
             continue;
         }
@@ -979,6 +982,216 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
               "birth-rate proof leaked to labor force participation");
     }
     check(births_proven.size()==4,"expected four exact sovereign birth outcomes");
+
+    const auto check_qualified_path=[&](P2CatalogModifier source,
+                                        std::string_view executor,
+                                        std::string_view fixture,
+                                        std::string_view adjacent_key) {
+        const auto found=std::find_if(audit.begin(),audit.end(),[&](const auto& row) {
+            return same_canonical_law_row(row.source,source);
+        });
+        check(found!=audit.end()&&found->status==CanonicalLawRowStatus::verified_row&&
+              found->executor==executor&&found->behavior_test==fixture,
+              "missing exact funded research or actual ordinary arrival witness");
+        source.key=adjacent_key;
+        check(classify_canonical_law_row(source,canonical_law_row_evidence()).behavior_test!=fixture,
+              "narrow witness leaked to a different research discipline or migration path");
+    };
+    check_qualified_path(
+        {"law_industry_banned","country_production_tech_research_speed_mult",-0.25,false,false},
+        "p0::DailyGame::advance_day (funded production research evidence)",
+        "test_p0_daily::production_research_speed_requires_actual_economic_law",
+        "country_production_tech_spread_mult");
+    check_qualified_path(
+        {"amendment_nativist_labour_market","state_migration_pull_mult",-0.1,false,false},
+        "IntegratedWorld::phase_time_auto_demography (ordinary destination arrivals)",
+        "test_politics_domain::colonial_migration_pull_requires_verified_destination",
+        "state_migration_pull_unincorporated_mult");
+
+    constexpr std::string_view incorporated_admin_fixture=
+        "test_politics_identity::national_base_laws_change_only_incorporated_pop_administration";
+    constexpr std::string_view generation_admin_fixture=
+        "test_politics_identity::national_bureaucracy_amendments_change_only_funded_generation";
+    constexpr std::string_view paid_farming_fixture=
+        "test_phase_d::scoped_agriculture_laws_change_only_actual_paid_batch_output";
+    std::size_t incorporated_admin=0,generation_admin=0,paid_farming=0;
+    for(const auto& row:audit) {
+        const auto fixture=row.behavior_test;
+        if(fixture!=incorporated_admin_fixture&&fixture!=generation_admin_fixture&&
+           fixture!=paid_farming_fixture)continue;
+        check(row.status==CanonicalLawRowStatus::verified_row&&!row.source.boolean&&
+              !row.source.institution&&!row.source.sponsor,
+              "bureaucracy or agriculture evidence lacks the precise flat source scope");
+        auto wrong=row.source;
+        wrong.institution=true;
+        check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).behavior_test!=fixture,
+              "bureaucracy or agriculture evidence leaked to an institutional rate");
+        if(fixture==incorporated_admin_fixture) {
+            ++incorporated_admin;
+            check(row.source.key=="state_bureaucracy_population_base_cost_factor_mult"&&
+                  row.normalized_value==(row.source.source_id=="law_hindu_caste_codified"?
+                                         -150'000:-250'000),
+                  "incorporated population proof changed a generation or general cost term");
+        } else if(fixture==generation_admin_fixture) {
+            ++generation_admin;
+            check(row.source.key=="country_bureaucracy_mult"&&row.normalized_value==-100'000&&
+                  (row.source.source_id=="amendment_cult_of_personality"||
+                   row.source.source_id=="amendment_open_legal_questions"),
+                  "operating generation evidence did not use its individual lawful amendment");
+        } else {
+            ++paid_farming;
+            check((row.source.key=="building_group_bg_agriculture_throughput_add"||
+                   row.source.key=="building_group_bg_plantations_throughput_add"||
+                   row.source.key=="building_group_bg_ranching_throughput_add")&&
+                  row.normalized_value==(row.source.source_id=="amendment_agricultural_communes"?
+                                         50'000:100'000),
+                  "paid agricultural production proof leaked to unincorporated-only output");
+        }
+    }
+    check(incorporated_admin==8&&generation_admin==2&&paid_farming==6,
+          "missing exact incorporated POP, administration generation, or paid agriculture evidence");
+
+    constexpr std::string_view authority_supply_fixture=
+        "test_p2_advanced::canonical_national_authority_funds_dated_regional_decrees";
+    std::size_t witnessed_authority_add=0,witnessed_authority_mult=0;
+    for(const auto& row:audit) {
+        const bool supply_key=row.source.key=="country_authority_add"||
+                              row.source.key=="country_authority_mult";
+        if(!supply_key)continue;
+        check(row.status==CanonicalLawRowStatus::verified_row&&
+              !row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.executor=="IntegratedWorld::p1_authority_capacity (dated national decree supply)"&&
+              row.behavior_test==authority_supply_fixture,
+              "missing enacted canonical authority source proved in real mandate use");
+        if(row.source.key=="country_authority_add")++witnessed_authority_add;
+        else ++witnessed_authority_mult;
+        auto mismatch=row.source;
+        mismatch.key="country_authority_cost_add";
+        check(classify_canonical_law_row(mismatch,canonical_law_row_evidence()).behavior_test
+                  !=authority_supply_fixture,
+              "decree supply evidence must not imply evidence for ongoing commitment costs");
+    }
+    check(witnessed_authority_add==39&&witnessed_authority_mult==10,
+          "expected 49 proved authority supply effects independent of concessions");
+
+    constexpr std::string_view influence_fixture=
+        "test_phase_gh_diplomacy::national_influence_laws_change_real_daily_infamy";
+    const std::map<std::string_view,std::int64_t> influence_sources{
+        {"law_sakoku",-500'000},{"law_slave_trade",-250'000},
+        {"law_legacy_slavery",-100'000},{"amendment_extraterritoriality_rights",-50'000}};
+    std::set<std::string_view> influence_witnesses;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=influence_fixture)continue;
+        const auto expected=influence_sources.find(row.source.source_id);
+        check(expected!=influence_sources.end()&&expected->second==row.normalized_value&&
+              row.source.key=="country_influence_mult"&&!row.source.boolean&&
+              !row.source.institution&&!row.source.sponsor&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="phasegh::Stage::phase_time_infamy_decay (after maintained diplomatic commitments)"&&
+              influence_witnesses.insert(row.source.source_id).second,
+              "influence witness lost the source or actual maintained diplomatic commitment scope");
+        auto wrong=row.source;
+        wrong.key="country_infamy_decay_mult";
+        check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).behavior_test!=influence_fixture,
+              "committed Influence witness leaked into direct Infamy removal");
+    }
+    check(influence_witnesses.size()==4,"expected four actual Influence source proofs");
+
+    constexpr std::string_view ordinary_citizenship_fixture=
+        "test_politics_identity::canonical_citizenship_traits_change_real_pop_rights";
+    constexpr std::string_view citizenship_homeland_fixture=
+        "test_politics_identity::canonical_citizenship_homeland_allows_actual_border_movement";
+    std::map<std::string_view,std::set<std::string_view>> ordinary_citizenship;
+    std::set<std::string_view> citizenship_homeland;
+    for(const auto& row:audit) {
+        const auto fixture=row.behavior_test;
+        if(fixture!=ordinary_citizenship_fixture&&fixture!=citizenship_homeland_fixture)continue;
+        check(row.status==CanonicalLawRowStatus::verified_row&&!row.source.boolean&&
+              !row.source.institution&&!row.source.sponsor&&
+              row.source.key!="country_acceptance_not_homeland_add",
+              "citizenship evidence transferred a specific source to an unsupported scope");
+        if(fixture==citizenship_homeland_fixture) {
+            check(row.source.key=="country_acceptance_homeland_add"&&
+                  row.normalized_value==30'000'000&&
+                  citizenship_homeland.insert(row.source.source_id).second,
+                  "homeland evidence failed the exact direct +30 real-transfer source");
+        } else {
+            check(row.source.key!="country_acceptance_homeland_add"&&
+                  ordinary_citizenship[row.source.source_id].insert(row.source.key).second&&
+                  row.executor==(row.source.source_id=="law_official_nationality"?
+                    "IntegratedWorld::p2_acceptance (Instituted acceptance source, score only)":
+                    "IntegratedWorld::p2_acceptance (Direct citizenship trait effects on POP acceptance)"),
+                  "official nationality score must remain distinct from downstream rights");
+        }
+    }
+    check(ordinary_citizenship.size()==7&&
+          std::all_of(ordinary_citizenship.begin(),ordinary_citizenship.end(),
+              [](const auto& entry){return entry.second.size()==9;})&&
+          citizenship_homeland==std::set<std::string_view>{"law_subjecthood","law_official_nationality"},
+          "exact ordinary citizenship or two actual homeland paths missing");
+
+    constexpr std::string_view church_fixture=
+        "test_politics_identity::exact_church_laws_change_real_religious_acceptance";
+    constexpr std::string_view interest_multiplier_fixture=
+        "test_p0_daily_longrun::sovereign_interest_multipliers_charge_only_lawful_daily_principal";
+    const std::set<std::string_view> exact_faith_keys{
+        "country_acceptance_state_religion_add","country_acceptance_shared_religious_trait_add",
+        "country_acceptance_shared_religious_trait_group_add",
+        "country_acceptance_no_shared_religious_trait_add"};
+    const std::map<std::string_view,std::int64_t> exact_interest{
+        {"law_laissez_faire",-250'000},{"amendment_economic_regeneration_1",-200'000},
+        {"amendment_economic_regeneration_2",-100'000},{"amendment_zaibatsu_oligopoly_1",-200'000},
+        {"amendment_zaibatsu_oligopoly_2",-200'000}};
+    std::map<std::string_view,std::set<std::string_view>> church_witness;
+    std::set<std::string_view> interest_witness;
+    for(const auto& row:audit) {
+        const auto fixture=row.behavior_test;
+        if(fixture!=church_fixture&&fixture!=interest_multiplier_fixture)continue;
+        check(row.status==CanonicalLawRowStatus::verified_row&&!row.source.boolean&&
+              !row.source.institution&&!row.source.sponsor,
+              "faith or interest evidence is not a direct lawful canonical effect");
+        if(fixture==church_fixture) {
+            check(row.source.source_id.starts_with("law_")&&exact_faith_keys.contains(row.source.key)&&
+                  church_witness[row.source.source_id].insert(row.source.key).second&&
+                  row.executor=="IntegratedWorld::p2_acceptance (effective national church law on actual POP)",
+                  "religious acceptance proof leaked into exceptions or citizenship");
+        } else {
+            const auto expected=exact_interest.find(row.source.source_id);
+            check(expected!=exact_interest.end()&&expected->second==row.normalized_value&&
+                  row.source.key=="country_loan_interest_rate_mult"&&interest_witness.insert(row.source.source_id).second&&
+                  row.executor=="IntegratedWorld::phase_time_accrue_and_settle_interest (actual sovereign principal and cash)",
+                  "sovereign interest multiplier proof lost actual principal or a precise signed source");
+            auto wrong=row.source;
+            wrong.key="country_loan_interest_rate_add";
+            check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).behavior_test
+                  !=interest_multiplier_fixture,"relative interest evidence leaked to a flat rate");
+        }
+    }
+    check(church_witness.size()==7&&std::all_of(church_witness.begin(),church_witness.end(),
+              [&](const auto& entry){return entry.second==exact_faith_keys;})&&interest_witness.size()==5,
+          "expected all exact seven-by-four religious and five relative interest witnesses");
+
+    constexpr std::string_view school_health_fixture=
+        "test_politics_identity::national_school_and_health_laws_change_legal_administration_cost";
+    std::size_t exact_school_costs=0,exact_health_costs=0;
+    for(const auto& row:audit) {
+        const bool education=row.source.key=="country_institution_cost_institution_schools_mult";
+        const bool medicine=row.source.key=="country_institution_cost_institution_health_system_mult";
+        if(!education&&!medicine)continue;
+        check(row.status==CanonicalLawRowStatus::verified_row&&!row.source.boolean&&
+              !row.source.institution&&!row.source.sponsor&&
+              row.behavior_test==school_health_fixture&&
+              row.executor=="IntegratedWorld::p1_bureaucracy (lawful registered school or health commitment)",
+              "registered school or health administration source lacks exact legal cost evidence");
+        auto wrong=row.source;
+        wrong.key="country_institution_cost_institution_home_affairs_mult";
+        check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).behavior_test!=school_health_fixture,
+              "registered cost evidence leaked to a distinct kind");
+        if(education)++exact_school_costs;
+        else ++exact_health_costs;
+    }
+    check(exact_school_costs==8&&exact_health_costs==2,
+          "expected eight school and two health commitments, not service cash");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

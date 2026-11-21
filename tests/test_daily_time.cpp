@@ -263,15 +263,82 @@ static void no_op_365_days_does_not_recalculate_monthly() {
           "no daily replication of monthly economic postings");
     check(d.day_commit_id()==365,"world-visible tick is exactly one day");
 }
+static void quiet_days_process_only_due_regional_decree_changes() {
+    using vic25::phasec::P1GovernancePrinciple;
+    using vic25::phasec::P1PowerDistribution;
+    using vic25::phasec::P1LegislatureKind;
+    using vic25::phasec::P1MandateKind;
+    auto baseline=base_world();
+    auto& c=baseline.seed_geography().seed_core().seed_core();
+    c.seed_government("COUNTRY-A","HEAD","PM",5,3);
+    c.seed_p1_constitution("COUNTRY-A",{P1GovernancePrinciple::monarchy,
+        P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+    auto world=World::adopt(std::move(baseline),23);
+    world.advance_day(); // first-of-month native work intentionally runs
+    const auto skip_quiet=[&](World& w) {
+        const auto engine_commit=w.engine().commit_id();
+        const auto calendar_commit=w.day_commit_id();
+        w.advance_day();
+        check(w.engine().commit_id()==engine_commit&&w.day_commit_id()==calendar_commit+1,
+              "an irrelevant quiet day lost the fast path");
+    };
+    skip_quiet(world);
+    const auto adopted=world.day_index();
+    DayPlan schedule;
+    schedule[9].push_back([adopted](vic25::phasegh::Stage& stage) {
+        stage.phase_c().p1_schedule_mandate({"ROAD","COUNTRY-A","R1","fixture:roads",
+            P1MandateKind::decree_road_maintenance},"PM",adopted);
+    });
+    world.advance_day(schedule);
+    const std::string modifier="state_construction_mult";
+    check(ledger(world).p1_active_mandates().empty()&&
+          ledger(world).p1_local_decree_ppm("COUNTRY-A","R1",modifier)==0,
+          "regional decree applied before its effective day");
+
+    auto restored=SnapshotCodec::decode(SnapshotCodec::encode(world));
+    const auto process_due=[&](World& a,World& b) {
+        const auto old_commit=a.engine().commit_id();
+        a.advance_day();b.advance_day();
+        check(a.engine().commit_id()==old_commit+1,
+              "idle fast path skipped a due regional decree change");
+        check(SnapshotCodec::encode(a)==SnapshotCodec::encode(b),
+              "pending regional decree did not replay from its saved date");
+    };
+    process_due(world,restored);
+    const auto& road=ledger(world).p1_active_mandates().at("ROAD");
+    check(road.effective_day==adopted+1&&
+          ledger(world).p1_local_decree_ppm("COUNTRY-A","R1",modifier)==100'000&&
+          ledger(world).p1_authority_capacity("COUNTRY-A").committed==100,
+          "quiet effective day did not activate the real authority-financed decree");
+    skip_quiet(world); // an active decree without a due change is not daily work
+
+    const auto revoked=world.day_index();
+    DayPlan withdrawal;
+    withdrawal[9].push_back([revoked](vic25::phasegh::Stage& stage) {
+        stage.phase_c().p1_schedule_mandate_termination("COUNTRY-A","ROAD","PM",revoked);
+    });
+    world.advance_day(withdrawal);
+    check(ledger(world).p1_active_mandates().contains("ROAD"),
+          "decree withdrawal took effect before its lawful date");
+    restored=SnapshotCodec::decode(SnapshotCodec::encode(world));
+    process_due(world,restored);
+    check(ledger(world).p1_active_mandates().empty()&&
+          ledger(world).p1_local_decree_ppm("COUNTRY-A","R1",modifier)==0&&
+          ledger(world).p1_authority_capacity("COUNTRY-A").committed==0,
+          "quiet dated withdrawal did not release the actual policy and authority");
+    skip_quiet(world);
+}
+
 int main() {
     try {
         calendar_exact();
+        quiet_days_process_only_due_regional_decree_changes();
         daily_real_ledgers_and_month_close();
         daily_rejection_and_atomic_month_rollback();
         exact_legacy_migration();
         save_load_deterministic_replay();
         no_op_365_days_does_not_recalculate_monthly();
-        std::cout<<"DAILY_TIME_V2_REAL_ENGINE: 6 groups PASS\n";
+        std::cout<<"DAILY_TIME_V2_REAL_ENGINE: 7 groups PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"DAILY_TIME_V2 FAIL: "<<e.what()<<"\n";

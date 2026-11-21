@@ -41,6 +41,80 @@ static TreatyClause clause(const std::string& id,ClauseKind kind,
     t.beneficiary=beneficiary;t.good=good;t.amount=amount;
     return t;
 }
+static void national_influence_laws_change_real_daily_infamy() {
+    using namespace vic25::phasec;
+    struct Case { const char* law; const char* group; int generated; int scope; };
+    // scope: 0 = national, 1 = local lookalike, 2 = foreign, 3 = wrong national parent, 4 = custom national domain.
+    const Case cases[]={
+        {"slave_trade","slavery",100,1},
+        {"","",100,0},
+        {"sakoku","trade_policy",50,0},
+        {"slave_trade","slavery",75,0},
+        {"legacy_slavery","slavery",90,0},
+        {"laissez_faire","economic_system",100,0},
+        {"laissez_faire","economic_system",100,4},
+        {"slave_trade","slavery",100,2},
+        {"traditionalism","economic_system",100,3},
+        {"commercialized_agriculture","land_reform",95,0}
+    };
+    for(const auto& row:cases) {
+        auto w=fixture();
+        auto& c=w.seed_geography().seed_core().seed_core();
+        for (const auto* country:{"A","B","C"})
+            c.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,
+                "scenario:influence-constitution"});
+        P1StandingEvidence a;
+        a.country="A";a.source="scenario:standing:A";a.observed_day=0;
+        a.confirmed_rank=P1PowerRank::decentralized_power;a.recognized=false;
+        c.p1_record_standing(a);
+        a.country="B";a.source="scenario:standing:B";
+        a.confirmed_rank=P1PowerRank::insignificant_power;a.recognized=true;
+        c.p1_record_standing(a);
+        if(*row.law) {
+            const std::string country=row.scope==2?"C":"A";
+            const bool local=row.scope==1;
+            P2BaseLaw base{"influence-fixture",country,
+                (local||row.scope==4)?"local_rules":row.group,local?"RA1":"national",
+                row.law,"scenario:influence"};
+            if(local) base.tier=P2NormTier::local_ordinance;
+            c.p2_seed_base(base);
+            if(std::string_view(row.group)=="economic_system"||
+               std::string_view(row.group)=="land_reform")
+                c.p2_seed_amendment({"amendment_extraterritoriality_rights",
+                    base.id,"scenario:influence","",{{"binding",country,
+                        P2ClauseKind::maximum_import_tariff_ppm,1'000'000}}});
+        }
+        World::Plan sign;
+        sign[9].push_back([](Stage& s) {
+            auto d=clause("guarantee",ClauseKind::defense_guarantee,"A","B");
+            s.propose_treaty_package("influence-pact",{"A","B"},{d},"A","PM_A");
+            s.ratify_package_member("influence-pact","B","PM_B");
+        });
+        w.advance(sign);
+        w.advance({});
+        World::Plan event;
+        event[9].push_back([](Stage& s){
+            s.record_infamy("incident","A","scenario:real-diplomatic-incident",1'000'000);
+        });
+        w.advance_daily(event,0,false,1,30);
+        w.advance_daily({},1,false,2,30);
+        w.advance_daily({},2,false,3,30);
+        const auto actual=w.infamy_view("A");
+        const int expected_bonus=(row.generated-50)*5000;
+        const auto expected=1'000'000-2LL*(5'000'000+5LL*expected_bonus)/365;
+        if(actual.value_ppm!=expected)
+            throw std::runtime_error(std::string("wrong committed infamy ") +
+                row.law + " scope "+std::to_string(row.scope)+" expected "+
+                std::to_string(expected)+" actual "+std::to_string(actual.value_ppm));
+        const auto cap=w.diplomatic_capacity("A");
+        verify(cap.influence.complete&&cap.ongoing_pacts==50&&
+            cap.influence.generated==row.generated&&
+            w.diplomacy().treaties.at("influence-pact").active&&
+            actual.last_day==2&&w.infamy_view("B").value_ppm==0,
+            "actual ratified guarantee cost, treaty and dated Infamy stay coherent");
+    }
+}
 static void multilateral_treaty_and_trade_restrictions() {
     auto w=fixture(true);
     World::Plan p;
@@ -304,6 +378,7 @@ static void sakoku_blocks_only_new_claimant_initiation() {
 int main(){
     try{
         sakoku_blocks_only_new_claimant_initiation();
+        national_influence_laws_change_real_daily_infamy();
         multilateral_treaty_and_trade_restrictions();
         territory_and_reparations_are_E_and_C_events();
         organization_voting_veto_membership_change();

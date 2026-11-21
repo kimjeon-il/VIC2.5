@@ -1098,10 +1098,17 @@ public:
         auto bonus=colonial;
         if(!production_group.empty()) {
             const auto country=c_.sovereignty(f.region);
-            if(c_.has_government(country))
+            if(c_.has_government(country)) {
+                const bool sourced_agriculture=
+                    production_group=="building_group_bg_agriculture_throughput_add"||
+                    production_group=="building_group_bg_plantations_throughput_add"||
+                    production_group=="building_group_bg_ranching_throughput_add";
+                const auto legal=sourced_agriculture?
+                    c_.p2_agricultural_throughput_ppm(country,production_group):
+                    c_.p2_modifier_ppm(country,production_group);
                 bonus=phaseb::add_checked(bonus,phaseb::add_checked(
-                    c_.p2_modifier_ppm(country,production_group),
-                    c_.p3_trait_modifier_ppm(country,production_group)));
+                    legal,c_.p3_trait_modifier_ppm(country,production_group)));
+            }
         }
         const auto multiplier=std::clamp<std::int64_t>(
             phaseb::add_checked(1'000'000,bonus),0,2'000'000);

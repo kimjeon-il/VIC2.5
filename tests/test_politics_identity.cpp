@@ -173,6 +173,185 @@ static void acceptance_and_five_tier_rights() {
                 daily::SnapshotCodec::decode(bytes))==bytes,
           "source-qualified cultural identities broke old daily checkpoint");
 }
+static void exact_church_laws_change_real_religious_acceptance() {
+    using Scores=std::array<int,5>;
+    enum class Scope { national, foreign, custom, local };
+    const auto run=[](const std::string& church,Scores points,
+                      Scope scope=Scope::national,bool empty_references=false,
+                      bool dated=false) {
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"SOURCE","A");geo.seed_unit(1,"A","ORIGIN");
+        geo.seed_province(2,"TARGET","B");geo.seed_unit(2,"B","DESTINATION");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& industry=geo.seed_core();
+        auto& c=industry.seed_core();
+        industry.seed_technology({"rationalism",{},false});
+        industry.seed_technology({"empiricism",{"rationalism"},false});
+        for(const char* country:{"A","B"}) {
+            industry.seed_knowledge(country,"rationalism",phased::KnowledgeLevel::usable);
+            industry.seed_knowledge(country,"empiricism",phased::KnowledgeLevel::usable);
+            c.seed_actor(country,100);
+            c.seed_government(country,"HEAD","PRIME",5,3);
+            c.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,
+                "fixture:constitution"});
+            // Millet and People of the Book require a recognized qualifying
+            // governance law, not merely the monarchy executive profile.
+            law(c,country,"governance_principles","monarchy");
+            law(c,country,"citizenship","subjecthood");
+        }
+        law(c,"B","migration","migration_controls");
+        if(!church.empty()&&!dated) {
+            if(scope==Scope::national)law(c,"B","church_and_state",church);
+            else if(scope==Scope::foreign)law(c,"A","church_and_state",church);
+            else {
+                P2BaseLaw lookalike;
+                lookalike.id="NOT-CHURCH";lookalike.country="B";
+                lookalike.domain="custom_faith_policy";lookalike.base_choice="law_"+church;
+                lookalike.scope=scope==Scope::local?"TARGET":"national";
+                lookalike.legal_basis="fixture:noncanonical";
+                if(scope==Scope::local)lookalike.tier=P2NormTier::local_ordinance;
+                c.p2_seed_base(lookalike);
+            }
+        }
+        c.p2_seed_culture({"primary",{"heritage"},{"heritage-family"},{"language"},
+                            {"language-family"},{},{}});
+        // Subjecthood: exact heritage +20 and language family +15 = 35.
+        c.p2_seed_culture({"migrant",{"heritage"},{"heritage-family"},{"other-language"},
+                            {"language-family"},{},{}});
+        c.p2_seed_culture({"independent",{"other-heritage"},{},{"independent-language"},
+                            {},{},{}});
+        c.p2_seed_religion({"REF-1",{"shared-trait"},{"family-1"}});
+        c.p2_seed_religion({"REF-2",{"different-trait"},{"family-2"}});
+        // Direct trait via REF-1, family via REF-2. Count only one branch.
+        c.p2_seed_religion({"TRAIT",{"shared-trait"},{"family-2"}});
+        c.p2_seed_religion({"FAMILY",{"no-direct-trait"},{"family-1","family-2"}});
+        c.p2_seed_religion({"UNRELATED",{"unshared-trait"},{"unshared-family"}});
+        const std::set<std::string> refs=empty_references?
+            std::set<std::string>{}:std::set<std::string>{"REF-1","REF-2"};
+        c.p2_seed_national_identity({"B",{"primary"},refs});
+        c.p2_seed_national_identity({"A",{"primary"},{"REF-1","REF-2"}});
+        auto& pop=c.seed_population();
+        const auto from=pop.household_profile({"SOURCE","shared","shared",50'000});
+        const auto to=pop.household_profile({"TARGET","shared","shared",0});
+        const auto e=pop.economic_profile({"SOURCE","worker","wage","employee",
+                                            pop.default_education()});
+        const auto seed=[&](const char* faith,const char* culture) {
+            const auto d=pop.demographic_profile({"SOURCE",23640,phaseb::Sex::male,
+                culture,faith,"citizen","free",pop.default_health(),phaseb::Service::civilian});
+            return pop.seed_population(d,e,from,100'000);
+        };
+        constexpr std::array faiths{"REF-2","TRAIT","FAMILY","UNRELATED","UNKNOWN"};
+        std::array<Id,faiths.size()> slices{};
+        for(std::size_t i=0;i<faiths.size();++i)slices[i]=seed(faiths[i],"migrant");
+        const auto low=seed("UNRELATED","independent");
+        const auto high=seed("REF-2","primary");
+        phaseb::DemographyRules rules;
+        rules.fertility_ppm=rules.infant_death_ppm=rules.child_death_ppm=0;
+        rules.adult_death_ppm=rules.senior_death_ppm=rules.very_old_death_ppm=0;
+        rules.illness_incidence_ppm=rules.accident_ppm=0;
+        rules.primary_access_ppm=rules.secondary_access_ppm=rules.tertiary_access_ppm=0;
+        rules.adult_literacy_access_ppm=rules.training_ppm=0;
+        rules.migration_ppm=310'000;rules.destination_by_region["SOURCE"]="TARGET";
+        c.enable_demography(rules);
+        auto world=daily::World::adopt(std::move(gh),19);
+        constexpr Scores neutral{35,35,35,35,35};
+        const auto check_scores=[&](const Scores& expected) {
+            const auto& live=view(world);
+            for(std::size_t i=0;i<slices.size();++i) {
+                const auto score=live.p2_acceptance("B",slices[i]);
+                if(!score||score->score!=expected[i]||
+                   live.p2_migration_permitted(slices[i],"TARGET")!=(expected[i]>=40))
+                    throw std::runtime_error("church="+church+" candidate="+faiths[i]+
+                        " expected="+std::to_string(expected[i])+
+                        " observed="+std::to_string(score?score->score:-1));
+                const auto original=live.p2_acceptance("A",slices[i]);
+                constexpr Scores foreign_freedom{55,50,40,35,35};
+                check(original&&original->score==(scope==Scope::foreign?foreign_freedom[i]:35),
+                    "church law was not isolated to the country evaluating the candidate");
+            }
+            const auto low_score=live.p2_acceptance("B",low);
+            const auto high_score=live.p2_acceptance("B",high);
+            check(low_score&&low_score->score==std::max(0,expected[3]-35)&&
+                  high_score&&high_score->score==std::clamp(100+expected[0]-35,0,100),
+                  "religious acceptance failed lower/upper score clamp");
+        };
+        const auto arrival_counts=[&](const Scores& expected,std::size_t opening) {
+            const auto& people=view(world).people();
+            std::array<People,faiths.size()> arrived{};
+            for(std::size_t i=opening;i<people.events().size();++i) {
+                const auto& event=people.events()[i];
+                if(event.kind!=phaseb::EventKind::migration)continue;
+                const auto& d=people.demographic(people.slice(event.to).key.demographic);
+                if(d.region!="TARGET"||d.culture!="migrant")continue;
+                for(std::size_t j=0;j<faiths.size();++j)
+                    if(d.religion==faiths[j])arrived[j]+=event.count;
+            }
+            for(std::size_t i=0;i<faiths.size();++i)
+                check(arrived[i]==(expected[i]>=40?1000:0),
+                      "religious acceptance did not gate actual destination arrivals");
+            check(people.population()==700'000,"church law changed real total headcount");
+        };
+        if(dated) {
+            check_scores(neutral);
+            const auto day=world.day_index();
+            const auto opening=view(world).people().events().size();
+            phasegh::World::Plan submit;
+            submit[9].push_back([day,church](phasegh::Stage& stage) {
+                auto& live=stage.phase_c();
+                P2Bill bill;
+                bill.id="CHURCH-BILL";bill.country="B";bill.proposer="PRIME";
+                bill.legal_basis="fixture:legislation";bill.effective_day=day+2;
+                bill.action=P2BillAction::enact_or_replace_base;
+                bill.proposed_base.id="CHURCH";bill.proposed_base.country="B";
+                bill.proposed_base.domain="church_and_state";bill.proposed_base.scope="national";
+                bill.proposed_base.base_choice="law_"+church;
+                bill.proposed_base.legal_basis="fixture:church";
+                live.p2_submit_bill(std::move(bill),day);
+                live.p2_approve_bill("CHURCH-BILL",{});
+                live.p2_promulgate_bill("CHURCH-BILL","HEAD",day);
+            });
+            world.advance_day(submit);world.advance_day();
+            check_scores(neutral);arrival_counts(neutral,opening);
+            auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+            world.advance_day();replay.advance_day();
+            check_scores(points);arrival_counts(points,opening);
+            check(daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+                  "dated religious acceptance failed deterministic actual migration replay");
+            // The otherwise matched unrelated POP is still at 35: property
+            // and both ledgers roll back if explicit entry is attempted.
+            const auto saved=daily::SnapshotCodec::encode(world);
+            phasegh::World::Plan denied;
+            denied[10].push_back([id=slices[3],to](phasegh::Stage& stage) {
+                stage.phase_c().migrate_with_explicit_property_allocation(
+                    id,7,"TARGET",to,"A","B",11,"",0);
+            });
+            check(rejects([&]{world.advance_day(denied);})&&
+                  daily::SnapshotCodec::encode(world)==saved,
+                  "unrelated religion bypassed lawful explicit border/property rollback");
+        } else {
+            check_scores(points);
+            const auto opening=view(world).people().events().size();
+            world.advance_day();
+            arrival_counts(points,opening);
+        }
+    };
+    run("",{35,35,35,35,35});
+    run("state_religion",{60,35,25,10,35});
+    run("caesaropapism",{60,35,25,10,35});
+    run("millet_system",{60,45,45,10,35});
+    run("people_of_the_book",{60,40,40,10,35});
+    run("freedom_of_conscience",{55,50,40,35,35});
+    run("total_separation",{50,50,50,50,35});
+    run("state_atheism",{50,35,30,25,35});
+    run("state_religion",{10,10,10,10,35},Scope::national,true);
+    run("freedom_of_conscience",{35,35,35,35,35},Scope::foreign);
+    run("freedom_of_conscience",{35,35,35,35,35},Scope::custom);
+    run("freedom_of_conscience",{35,35,35,35,35},Scope::local);
+    run("freedom_of_conscience",{55,50,40,35,35},Scope::national,false,true);
+}
+
 static void physical_migration_and_law_block() {
     Scenario closed("closed_borders");
     auto denied=daily::World::adopt(std::move(closed.gh),19);
@@ -536,6 +715,103 @@ static void institutional_bureaucracy_prices_ongoing_commitments() {
     check(scenario("communal_administration",true,260,
                    "compatible Bourgeois amendment must reduce institution cost")==
           communal,"Bourgeois institution discount changed independent state cost");
+}
+
+static void national_school_and_health_laws_change_legal_administration_cost() {
+    // 0 eligible; 1 local; 2 custom domain; 3 wrong parent; 4 foreign; 5 no school; 6 higher unfunded level.
+    const auto run=[](const char* group,const char* choice,const char* amendment,
+                     int scope,int expected) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");
+        geo.seed_unit(1,"A","ADMIN");
+        geo.seed_assignment(1,1);
+        if(scope==4) {
+            geo.seed_province(2,"S","B");
+            geo.seed_unit(2,"B","B-ADMIN");
+            geo.seed_assignment(2,2);
+        }
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",0);
+        c.seed_actor("SERVICES",1000);
+        if(scope==4) {
+            c.seed_actor("B",1000);
+            c.seed_government("B","B-HEAD","B-PRIME",5,3);
+            c.seed_p1_constitution("B",{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,
+                "scenario:cost"});
+        }
+        c.seed_government("A","HEAD","PRIME",5,3);
+        c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,
+            "scenario:law"});
+        c.p1_set_incorporation("R",true);
+        auto& pop=c.seed_population();
+        const auto hh=pop.household_profile({"R","mixed","shared",25'000});
+        const auto worker=pop.economic_profile({
+            "R","worker","wage","employee",pop.default_education()});
+        const auto dem=pop.demographic_profile({
+            "R",23650,phaseb::Sex::female,"culture","faith","citizen",
+            "free",pop.default_health(),phaseb::Service::civilian});
+        const auto slice=pop.seed_population(dem,worker,hh,1'000'000);
+        pop.hire(slice,10,"SERVICES","worker",10,{});
+        if(scope!=5) {
+            c.seed_public_institution("SCHOOL","SERVICES","R","paper",100,1);
+            c.seed_p1_institution("A","SCHOOL",P1InstitutionKind::education,2);
+            c.seed_actor("UNFUNDED",0);
+            c.seed_public_institution("SECOND","UNFUNDED","R","paper",100,1);
+            c.seed_p1_institution("A","SECOND",P1InstitutionKind::education,scope==6?3:1);
+        }
+        c.seed_public_institution("POLICE","SERVICES","R","paper",100,1);
+        c.seed_p1_institution("A","POLICE",P1InstitutionKind::policing,1);
+        c.seed_public_institution("CLINIC","SERVICES","R","food",100,1);
+        c.seed_p1_institution("A","CLINIC",P1InstitutionKind::healthcare,1);
+        P2BaseLaw base{"cost-fixture",scope==4?"B":"A",scope==1||scope==2?"local_costs":group,
+            scope==1?"R":"national",choice,"scenario:cost"};
+        if(scope==1)base.tier=P2NormTier::local_ordinance;
+        c.p2_seed_base(base);
+        if(*amendment)c.p2_seed_amendment({amendment,base.id,"scenario:cost","",
+            {{"existing-rule","A",P2ClauseKind::political_association_allowed,1}}});
+        auto world=daily::World::adopt(std::move(gh),42);
+        const auto& live=world.engine().base().core().core();
+        const auto v=live.p1_bureaucracy("A");
+        const auto clinic=live.p1_institution_capacity("CLINIC");
+        if(v.institution_cost!=expected)
+            throw std::runtime_error(std::string("incorrect committed institution cost: ")+
+                choice+" "+amendment+" scope "+std::to_string(scope)+" expected "+
+                std::to_string(expected)+" got "+std::to_string(v.institution_cost));
+        check(v.capacity.committed==v.state_cost+expected&&clinic.level==1&&
+              clinic.employed_staff==10&&clinic.cash_backed&&
+              live.cash("SERVICES")==1000&&live.cash("A")==0,
+              "law affected unrelated obligations, service staff or real cash");
+        if(scope!=5) {
+            const auto school=live.p1_institution_capacity("SCHOOL");
+            const auto second=live.p1_institution_capacity("SECOND");
+            check(school.level==2&&school.employed_staff==10&&school.cash_backed&&
+                  second.level==(scope==6?3:1)&&second.employed_staff==0&&!second.cash_backed&&
+                  live.cash("UNFUNDED")==0,
+                  "cost uses max legal level, not summed delivery or payer cash");
+        }
+    };
+    constexpr auto school="education_system",health="health_system";
+    run(school,"religious_schools","",1,400);
+    run(health,"charitable_health_system","",2,400);
+    run(school,"religious_schools","",0,360);
+    run(school,"private_schools","",0,320);
+    run(health,"charitable_health_system","",0,380);
+    run(health,"private_health_insurance","",0,360);
+    run("childrens_rights","compulsory_primary_school","amendment_ragged_schools",0,380);
+    run(school,"public_schools","amendment_co_ed_schools",0,380);
+    run(school,"public_schools","amendment_single_sex_education",0,420);
+    run(school,"public_schools","amendment_provided_school_supplies",0,410);
+    run(school,"public_schools","amendment_unfunded_school_supplies",0,390);
+    run(school,"public_schools","amendment_secular_school_system",0,420);
+    run(school,"public_schools","amendment_secular_school_system",2,400);
+    run(school,"private_schools","amendment_unfunded_school_supplies",3,320);
+    run(school,"private_schools","",4,400);
+    run(school,"religious_schools","",5,200);
+    run(school,"religious_schools","",6,440);
+    run(school,"religious_schools","amendment_provided_school_supplies",0,370);
 }
 
 enum class BlasphemyParent { valid, local, custom_national, incompatible };
@@ -1309,17 +1585,360 @@ static void land_reform_restricts_only_peasant_internal_migration() {
     run("tenant_farmers",false,false,"closed_borders");
 }
 
+
+static daily::World population_bureaucracy_fixture(
+        const std::string& group,const std::string& selected,
+        const std::string& authority="national",
+        const std::string& amendment="",bool preexisting=false) {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"CORE","A");
+    geo.seed_province(2,"DEPENDENCY","A");
+    geo.seed_province(3,"FOREIGN","B");
+    geo.seed_unit(1,"A","HOME");
+    geo.seed_unit(2,"B","OTHER");
+    geo.seed_assignment(1,1);
+    geo.seed_assignment(2,1);
+    geo.seed_assignment(3,2);
+    auto& c=geo.seed_core().seed_core();
+    for(const auto* nation:{"A","B"}) {
+        c.seed_actor(nation,1000);
+        c.seed_government(nation,"HEAD","PRIME",5,3);
+        c.seed_p1_constitution(nation,{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,
+            "test:legitimate-office"});
+    }
+    c.seed_actor("OFFICE",1000);
+    c.p1_set_incorporation("CORE",true);
+    c.p1_set_incorporation("DEPENDENCY",false);
+    c.p1_set_incorporation("FOREIGN",true);
+    auto& pop=c.seed_population();
+    for(const auto* region:{"CORE","DEPENDENCY","FOREIGN"}) {
+        const auto h=pop.household_profile({region,"mixed","shared",25'000});
+        const auto e=pop.economic_profile({region,"worker","wage","employee",
+                                          pop.default_education()});
+        const auto d=pop.demographic_profile({region,23650,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto slice=pop.seed_population(d,e,h,3'000'000);
+        if(std::string_view(region)=="CORE")
+            pop.hire(slice,10,"OFFICE","worker",10,{});
+    }
+    c.seed_public_institution("ADMIN","OFFICE","CORE","paper",100,1);
+    c.seed_p1_institution("A","ADMIN",P1InstitutionKind::administration,1);
+    c.seed_production_facility("ADMIN_BUILDING","OFFICE","CORE",1);
+    c.p1_register_office({"ADMIN","ADMIN_BUILDING",P1OfficeMethod::simple,1,10});
+    if(authority=="foreign"&&preexisting) {
+        c.seed_public_institution("FOREIGN-ADMIN","B","FOREIGN","paper",100,1);
+        c.seed_p1_institution("B","FOREIGN-ADMIN",P1InstitutionKind::administration,1);
+    }
+    if(!selected.empty()) {
+        P2BaseLaw entry;
+        entry.id="FOUNDATION";entry.country=authority=="foreign"?"B":"A";
+        entry.domain=authority=="custom"||authority=="local"?
+            "custom_bureaucracy":"lawgroup_"+group;
+        entry.scope=authority=="local"?"CORE":"";
+        entry.base_choice="law_"+selected;
+        entry.legal_basis="test:bureaucracy-source";
+        if(authority=="local")entry.tier=P2NormTier::local_ordinance;
+        c.p2_seed_base(entry);
+        if(preexisting)
+            c.p2_seed_amendment({amendment,"FOUNDATION","test:bureaucracy-source","",
+                {{"level",authority=="foreign"?"FOREIGN-ADMIN":"ADMIN",
+                  P2ClauseKind::public_institution_level,1}}});
+    }
+    return daily::World::adopt(std::move(gh),42);
+}
+
+static void national_base_laws_change_only_incorporated_pop_administration() {
+    const auto view=[](const daily::World& world) {
+        return world.engine().base().core().core().p1_bureaucracy("A");
+    };
+    const auto verify=[&](const std::string& group,const std::string& choice,
+                          const std::string& authority,int expected) {
+        const auto world=population_bureaucracy_fixture(group,choice,authority);
+        const auto effect=view(world);
+        check(effect.state_cost==expected&&effect.capacity.committed==expected,
+              "state administration population cost accepted an ineligible legal source");
+        check(effect.incorporated_population==3'000'000&&
+              effect.incorporated_regions==1&&
+              effect.capacity.generated==110&&effect.capacity.complete&&
+              effect.office_output==10&&effect.institution_cost==0&&
+              effect.nationalized_cost==0&&effect.commander_cost==0,
+              "state population rate touched base office output or another commitment");
+        check((expected>110)==(effect.capacity.shortage_ppm>0)&&
+              effect.tax_waste_ppm==effect.capacity.shortage_ppm,
+              "actual administrative balance does not reflect reduced population cost");
+    };
+    struct Row {const char* group;const char* choice;int expected;};
+    for(const Row& row:std::array<Row,8>{{
+            {"bureaucracy","hereditary_bureaucrats",100},
+            {"bureaucracy","crownland_diets",100},
+            {"bureaucracy","military_bureaucrats",100},
+            {"bureaucracy","communal_administration",100},
+            {"caste_hegemony","hindu_caste_enforced",100},
+            {"caste_hegemony","hindu_caste_codified",112},
+            {"taxation","consumption_based_taxation",100},
+            {"economic_system","traditionalism",100}}}) {
+        verify(row.group,row.choice,"national",row.expected);
+        verify(row.group,row.choice,"local",130);
+        verify(row.group,row.choice,"custom",130);
+        verify(row.group,row.choice,"foreign",130);
+    }
+}
+
+static void national_bureaucracy_amendments_change_only_funded_generation() {
+    const auto verify=[](const daily::World& world,int generated) {
+        const auto& core=world.engine().base().core().core();
+        const auto effect=core.p1_bureaucracy("A");
+        check(effect.capacity.generated==generated,
+              "bureaucracy generation accepted an ineligible or pending amendment");
+        check(effect.state_cost==130&&effect.capacity.committed==130&&
+              effect.capacity.complete&&effect.office_output==10&&
+              effect.institution_cost==0&&effect.nationalized_cost==0&&
+              effect.commander_cost==0&&effect.tax_waste_ppm>0&&core.cash("OFFICE")==1000,
+              "national generation rate touched costs, physical output, or funds");
+        return effect.tax_waste_ppm;
+    };
+    const auto enact=[&](const std::string& group,const std::string& choice,
+                         const std::string& amendment) {
+        auto world=population_bureaucracy_fixture(group,choice);
+        const auto start=world.day_index();
+        const auto baseline=verify(world,110);
+        phasegh::World::Plan due;
+        due[9].push_back([&](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            P2Bill bill;
+            bill.id="BUREAUCRACY-AMENDMENT";
+            bill.country="A";bill.proposer="PRIME";bill.legal_basis="test:bureaucracy-source";
+            bill.action=P2BillAction::attach_amendment;
+            bill.effective_day=start+2;
+            bill.proposed_amendment={amendment,"FOUNDATION","test:bureaucracy-source","",
+                {{"level","ADMIN",P2ClauseKind::public_institution_level,1}}};
+            live.p2_submit_bill(std::move(bill),start);
+            live.p2_approve_bill("BUREAUCRACY-AMENDMENT",{});
+            live.p2_promulgate_bill("BUREAUCRACY-AMENDMENT","HEAD",start);
+        });
+        world.advance_day(due);
+        check(verify(world,110)==baseline,"promulgation changed the bureaucracy balance early");
+        world.advance_day();
+        check(verify(world,110)==baseline,"pending bureaucracy law changed the balance early");
+        const auto saved=daily::SnapshotCodec::encode(world);
+        auto replay=daily::SnapshotCodec::decode(saved);
+        world.advance_day();
+        replay.advance_day();
+        check(world.engine().base().core().core().p2_amendment_active(amendment)&&
+              verify(world,99)>baseline&&verify(replay,99)>baseline&&
+              daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+              "effective bureaucracy generation did not increase actual shortage deterministically");
+    };
+    const std::string cult="amendment_cult_of_personality";
+    const std::string open="amendment_open_legal_questions";
+    enact("distribution_of_power","autocracy",cult);
+    enact("land_reform","commercialized_agriculture",open);
+    for(const auto* jurisdiction:{"local","custom","foreign"}) {
+        verify(population_bureaucracy_fixture("distribution_of_power","autocracy",
+                                             jurisdiction,cult,true),110);
+        verify(population_bureaucracy_fixture("land_reform","commercialized_agriculture",
+                                             jurisdiction,open,true),110);
+    }
+    verify(population_bureaucracy_fixture("bureaucracy","appointed_bureaucrats",
+                                         "national",cult,true),110);
+    verify(population_bureaucracy_fixture("economic_system","laissez_faire",
+                                         "national",open,true),110);
+}
+
+static void canonical_citizenship_traits_change_real_pop_rights() {
+    struct Source {
+        const char* law;
+        int primary;
+        std::array<int,3> heritage,language;
+        int tradition;
+        std::array<int,5> wage;
+        std::array<bool,5> vote;
+    };
+    // Independent expectations. Unrelated/exact/family are separate authored
+    // branches; a positive shared trait never stacks with its own family.
+    const Source sources[]={
+        {"subjecthood",100,{0,20,15},{0,20,15},25,
+            {60,70,80,90,100},{false,false,true,true,true}},
+        {"ethnostate",100,{-10,20,10},{0,15,5},10,
+            {50,60,75,85,125},{false,false,false,true,true}},
+        {"national_supremacy",100,{-10,40,20},{-5,30,15},15,
+            {60,70,80,90,120},{false,false,true,true,true}},
+        {"racial_segregation",100,{-20,60,50},{-5,30,15},20,
+            {70,80,90,105,115},{false,false,true,true,true}},
+        {"cultural_exclusion",100,{10,60,50},{10,50,25},25,
+            {70,80,90,100,105},{false,true,true,true,true}},
+        {"multicultural",100,{20,60,50},{20,50,30},10,
+            {80,90,95,100,100},{true,true,true,true,true}},
+        {"official_nationality",50,{10,10,10},{5,10,5},25,
+            {100,100,100,100,100},{true,true,true,true,true}},
+    };
+    for(const auto& source:sources) {
+        const bool official=std::string_view(source.law)=="official_nationality";
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"HOME","A");
+        geo.seed_unit(1,"A","DISTRICT");
+        geo.seed_assignment(1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",1000);
+        c.seed_actor("EMPLOYER",1000);
+        c.seed_government("A","HEAD","PM",5,3);
+        c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:citizenship"});
+        law(c,"A","citizenship",source.law);
+        law(c,"A","church_and_state","state_religion");
+        P2BaseLaw local{"LOCAL","A","local_nationality","HOME",
+            "law_multicultural","fixture:local"};
+        local.tier=P2NormTier::local_ordinance;
+        c.p2_seed_base(local);
+        c.p2_seed_base({"CUSTOM","A","custom_nationality","national",
+                        "law_racial_segregation","fixture:custom"});
+        c.p2_seed_culture({"PRIMARY",{"H"},{"HF"},{"L"},{"LF"},{"T"},{}});
+        c.p2_seed_religion({"STATE",{"F"},{"FF"}});
+        c.p2_seed_religion({"UNRELATED",{"U"},{"UF"}});
+        c.p2_seed_national_identity({"A",{"PRIMARY"},{"STATE"}});
+        auto& pop=c.seed_population();
+        const auto home=pop.household_profile({"HOME","mixed","shared",100});
+        const auto economy=pop.economic_profile({"HOME","worker","wage","employee",
+                                                pop.default_education()});
+        struct Case {phaseb::Id id; int score;};
+        std::vector<Case> cases;
+        const auto make_pop=[&](const std::string& culture,
+                                const std::string& faith,int points) {
+            const auto dem=pop.demographic_profile({"HOME",23650,phaseb::Sex::male,
+                culture,faith,"citizen","free",pop.default_health(),phaseb::Service::civilian});
+            cases.push_back({pop.seed_population(dem,economy,home,10),
+                             std::clamp(points,0,100)});
+        };
+        for(const auto& [faith,score]:std::array<std::pair<const char*,int>,3>{{
+                {"STATE",25},{"UNSOURCED",0},{"UNRELATED",-25}}})
+            make_pop("PRIMARY",faith,source.primary+score);
+        for(int h=0;h<3;++h)for(int l=0;l<3;++l)for(int t=0;t<2;++t) {
+            const auto name="POP"+std::to_string(h)+std::to_string(l)+std::to_string(t);
+            c.p2_seed_culture({name,{h==1?"H":"OTHER_H"},{h?"HF":"OTHER_HF"},
+                {l==1?"L":"OTHER_L"},{l?"LF":"OTHER_LF"},
+                {t?"T":"OTHER_T"},{}});
+            for(const auto& [faith,score]:std::array<std::pair<const char*,int>,3>{{
+                    {"STATE",25},{"UNSOURCED",0},{"UNRELATED",-25}}})
+                make_pop(name,faith,source.heritage[h]+source.language[l]+t*source.tradition+score);
+        }
+        auto world=daily::World::adopt(std::move(gh),37);
+        phasegh::World::Plan jobs;
+        const auto old_population=view(world).people().population();
+        const auto tier=[](int n){return n>=80?4:n>=60?3:n>=40?2:n>=20?1:0;};
+        for(const auto [id,score]:cases) {
+            const auto actual=view(world).p2_acceptance("A",id);
+            const auto rights=view(world).p2_acceptance_effect("A",id);
+            if(!actual||actual->score!=score||
+               static_cast<int>(actual->level)!=tier(score))
+                throw std::runtime_error(std::string(source.law)+
+                    ": wrong acceptance from verified live POP trait combination");
+            check(rights.has_value()!=official&&
+                  view(world).p2_citizenship_vote_allowed("A",id)==source.vote[tier(score)],
+                  "citizenship POP tier has wrong votes or invented an undocumented rights tier");
+            jobs[2].push_back([id](phasegh::Stage& stage) {
+                stage.phase_c().hire(id,1,"EMPLOYER",100);
+            });
+        }
+        world.advance_day(jobs);
+        check(view(world).people().population()==old_population,
+              "citizenship contracts created or destroyed people");
+        for(const auto [id,score]:cases) {
+            const auto hired=view(world).people().job(id);
+            check(hired&&hired->wage_per_month==source.wage[tier(score)],
+                  "real new wage contract missed the matching citizenship acceptance tier");
+        }
+    }
+}
+
+static void canonical_citizenship_homeland_allows_actual_border_movement() {
+    for(const auto* choice:{"subjecthood","official_nationality"}) {
+        const bool official=std::string_view(choice)=="official_nationality";
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"TARGET","A");
+        geo.seed_province(2,"HOMELAND","B");
+        geo.seed_province(3,"ELSEWHERE","B");
+        geo.seed_unit(1,"A","DESTINATION");geo.seed_unit(2,"B","ORIGIN");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);geo.seed_assignment(3,2);
+        auto& c=geo.seed_core().seed_core();
+        for(const auto* country:{"A","B"}) {
+            c.seed_actor(country,100);
+            c.seed_government(country,"HEAD","PM",5,3);
+            c.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,
+                "fixture:citizenship-homeland"});
+        }
+        law(c,"A","citizenship",choice);
+        law(c,"A","migration","migration_controls");
+        law(c,"B","migration","no_migration_controls");
+        c.p2_seed_culture({"PRIMARY",{"H"},{"HF"},{"L"},{"LF"},{"T"},{}});
+        c.p2_seed_culture({"MIGRANT",{"OTHER_H"},{"OTHER_HF"},
+            {"OTHER_L"},{"LF"},{"OTHER_T"},{"HOMELAND"}});
+        c.p2_seed_national_identity({"A",{"PRIMARY"},{}});
+        auto& pop=c.seed_population();
+        const auto destination=pop.household_profile({"TARGET","mixed","shared",100});
+        const auto seed=[&](const std::string& region) {
+            const auto home=pop.household_profile({region,"mixed","shared",100});
+            const auto economy=pop.economic_profile({region,"worker","wage","employee",
+                                                    pop.default_education()});
+            const auto pop_dem=pop.demographic_profile({region,23650,phaseb::Sex::male,
+                "MIGRANT","UNKNOWN","citizen","free",pop.default_health(),
+                phaseb::Service::civilian});
+            return pop.seed_population(pop_dem,economy,home,10);
+        };
+        const auto homeland=seed("HOMELAND"),elsewhere=seed("ELSEWHERE");
+        auto world=daily::World::adopt(std::move(gh),37);
+        check(view(world).p2_acceptance("A",homeland)->score==45&&
+              view(world).p2_acceptance("A",elsewhere)->score==15&&
+              !view(world).p2_acceptance("B",homeland)&&
+              view(world).p2_acceptance_effect("A",homeland).has_value()!=official,
+              "citizenship homeland bonus not specific to the verified POP origin and evaluating nation");
+        const auto attempt=[&](phaseb::Id id) {
+            phasegh::World::Plan movement;
+            movement[10].push_back([=](phasegh::Stage& stage) {
+                stage.phase_c().migrate_with_explicit_property_allocation(
+                    id,4,"TARGET",destination,"B","A",20,"",0);
+            });
+            world.advance_day(movement);
+        };
+        const auto old=daily::SnapshotCodec::encode(world);
+        check(rejects([&]{attempt(elsewhere);})&&daily::SnapshotCodec::encode(world)==old,
+              "non-homeland origin wrongly crossed the controlled border or mutated the checkpoint");
+        attempt(homeland);
+        People arrived=0;
+        const auto& residents=view(world).people();
+        for(const auto& [id,p]:residents.slices()) {
+            (void)id;
+            const auto& d=residents.demographic(p.key.demographic);
+            if(d.region=="TARGET"&&d.culture=="MIGRANT")arrived+=p.count;
+        }
+        check(arrived==4&&residents.population()==20&&
+              view(world).cash("A")==120&&view(world).cash("B")==80,
+              "verified homeland rights did not enable actual POP and property transfer");
+    }
+}
+
 int main(){
     try{
+        national_school_and_health_laws_change_legal_administration_cost();
         chiefs_aid_uses_only_effective_welfare_bureaucracy();
         source_ideologies_laws_traits();
+        national_base_laws_change_only_incorporated_pop_administration();
+        national_bureaucracy_amendments_change_only_funded_generation();
         no_colonial_affairs_adds_only_verified_homeland_acceptance();
         canonical_named_acceptance_changes_only_verified_pop_and_country();
         acceptance_and_five_tier_rights();
+        canonical_citizenship_traits_change_real_pop_rights();
+        canonical_citizenship_homeland_allows_actual_border_movement();
         physical_migration_and_law_block();
         land_reform_restricts_only_peasant_internal_migration();
         abolition_preserves_real_people_and_membership();
         economic_law_restricts_real_company_ownership();
+        exact_church_laws_change_real_religious_acceptance();
         military_peasant_levy_restricts_real_conscripts();
         institutional_bureaucracy_prices_ongoing_commitments();
         effective_workhouse_amendment_reduces_only_welfare_cost(

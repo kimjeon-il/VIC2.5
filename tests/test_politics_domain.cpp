@@ -144,9 +144,12 @@ static void enacted_law_changes_only_its_own_real_daily_schooling() {
           "lawful day-native school demographics did not save and replay");
 }
 static void colonial_migration_pull_requires_verified_destination() {
-    const auto run=[](const std::string& colonization,bool on_destination,
+    enum class Scope { national, wrong_parent, local, source_only };
+    std::string failures;
+    const auto run=[&](const std::string& colonization,bool on_destination,
                       int incorporation,bool closed,bool homestead,bool nativist,
-                      phaseb::People expected) {
+                      phaseb::People expected,Scope scope=Scope::national,
+                      bool controlled=false,bool intelligentsia=false) {
         phasegh::World gh{24000};
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"SOURCE","A");
@@ -166,7 +169,7 @@ static void colonial_migration_pull_requires_verified_destination() {
         c.p1_set_incorporation("SOURCE",false);
         if(incorporation>=0)c.p1_set_incorporation("TARGET",incorporation>0);
         const auto law=[&](const std::string& country,const std::string& group,
-                           const std::string& choice) {
+                           const std::string& choice,const std::string& local="") {
             P2BaseLaw entry;
             entry.id=country+":"+group;entry.country=country;
             entry.domain=group;entry.scope="national";
@@ -175,19 +178,41 @@ static void colonial_migration_pull_requires_verified_destination() {
             return entry.id;
         };
         const auto amendment=[&](const std::string& id,const std::string& parent,
-                                 const std::string& clause) {
+                                 const std::string& clause,
+                                 const std::string& country="B") {
             c.p2_seed_amendment({id,parent,"fixture:amendment","",
-                {{clause,"B",P2ClauseKind::political_association_allowed,1}}});
+                {{clause,country,P2ClauseKind::political_association_allowed,1}}});
         };
         const auto border=law("B","migration",closed?"closed_borders":
-                                                   "no_migration_controls");
-        if(!colonization.empty())
-            law(on_destination?"B":"A","colonization",colonization);
-        if(homestead) {
-            const auto land=law("B","land_reform","homesteading");
-            amendment("amendment_homestead_acts",land,"homestead-clause");
+                              controlled?"migration_controls":"no_migration_controls");
+        if(controlled) {
+            c.p2_seed_culture({"culture",{"heritage"},{},{"language"},{},{},{}});
+            c.p2_seed_national_identity({"B",{"culture"},{}});
+            law("B","citizenship","multicultural");
         }
-        if(nativist)amendment("amendment_nativist_labour_market",border,"labor-clause");
+        if(!colonization.empty())
+            law(on_destination?"B":"A",
+                (!homestead&&!nativist&&scope!=Scope::national)?
+                    "custom_colonization":"colonization",colonization,
+                scope==Scope::local?"TARGET":"");
+        const auto local_parent=[&] {
+            return law("B","custom_rules","fixture_local","TARGET");
+        };
+        if(homestead) {
+            const auto land=scope==Scope::local?local_parent():
+                scope==Scope::wrong_parent?law("B","land_reform","peasant_proprietorship"):
+                scope==Scope::source_only?law("A","land_reform","homesteading"):
+                law("B","land_reform","homesteading");
+            amendment("amendment_homestead_acts",land,"homestead-clause",
+                      scope==Scope::source_only?"A":"B");
+        }
+        if(nativist) {
+            const auto parent=scope==Scope::local?local_parent():
+                scope==Scope::wrong_parent?law("B","land_reform","homesteading"):
+                scope==Scope::source_only?law("A","migration","no_migration_controls"):border;
+            amendment("amendment_nativist_labour_market",parent,"labor-clause",
+                      scope==Scope::source_only?"A":"B");
+        }
         auto& pop=c.seed_population();
         const auto h=pop.household_profile({"SOURCE","shared","shared",25'000});
         const auto e=pop.economic_profile({"SOURCE","worker","wage","employee",
@@ -196,21 +221,64 @@ static void colonial_migration_pull_requires_verified_destination() {
             "culture","faith","citizen","free",pop.default_health(),
             phaseb::Service::civilian});
         pop.seed_population(d,e,h,100'000);
+        phaseb::Id target_member{};
+        if(intelligentsia) {
+            auto target=pop.demographic(d);target.region="TARGET";
+            auto occupation=pop.economic(e);occupation.region="TARGET";
+            auto household=pop.household(h);household.region="TARGET";
+            target_member=pop.seed_population(pop.demographic_profile(target),
+                pop.economic_profile(occupation),pop.household_profile(household),100);
+            law("B","custom_brief","open");
+            c.seed_interest_group("SCHOLARS");
+            c.p3_seed_group({"B","SCHOLARS","","custom_brief","law_open",
+                             P3GroupType::intelligentsia,500'000,0});
+            c.p3_set_ideologies("B","SCHOLARS",{"militarist"});
+        }
         auto rules=isolated();
         rules.migration_ppm=310'000; // exactly 1% on January 1
         rules.destination_by_region["SOURCE"]="TARGET";
         c.enable_demography(rules);
         auto world=daily::World::adopt(std::move(gh),9);
-        world.advance_day();
+        const auto opening=world.engine().base().core().core().people().events().size();
+        phasegh::World::Plan plan;
+        if(target_member)plan[9].push_back([target_member](phasegh::Stage& stage) {
+            stage.phase_c().join_interest_group(target_member,"SCHOLARS",100);
+        });
+        world.advance_day(plan);
         const auto& people=world.engine().base().core().core().people();
-        phaseb::People moved=0;
+        phaseb::People moved=0,target_population=0;
+        for(std::size_t i=opening;i<people.events().size();++i) {
+            const auto& event=people.events()[i];
+            if(event.kind==phaseb::EventKind::migration&&
+               people.demographic(people.slice(event.to).key.demographic).region=="TARGET")
+                moved+=event.count;
+        }
         for(const auto& [id,row]:people.slices()) {
             (void)id;
-            if(people.demographic(row.key.demographic).region=="TARGET")moved+=row.count;
+            if(people.demographic(row.key.demographic).region=="TARGET")
+                target_population+=row.count;
         }
-        check(moved==expected && people.population()==100'000,
-              "colonial migration pull changed the wrong destination or real POP count");
+        if(moved!=expected||target_population!=expected+(intelligentsia?100:0)||
+           people.population()!=100'000+(intelligentsia?100:0))
+            failures+="\nactual migration scope="+std::to_string(static_cast<int>(scope))+
+                " colonization="+colonization+" nativist="+std::to_string(nativist)+
+                " homestead="+std::to_string(homestead)+
+                " arrivals="+std::to_string(moved)+" expected="+std::to_string(expected);
     };
+    run("",true,0,false,false,true,1000,Scope::wrong_parent);
+    run("",true,0,false,false,true,1000,Scope::local);
+    run("",true,0,false,false,true,1000,Scope::source_only);
+    run("",true,0,false,false,true,900);
+    run("",true,1,false,false,true,900,Scope::national,true);
+    run("",true,-1,false,false,true,900);
+    run("",true,0,true,false,false,0);
+    run("",true,0,false,false,false,1150,Scope::national,false,true);
+    run("",true,0,false,false,true,1050,Scope::national,false,true);
+    run("frontier_colonization",true,0,false,false,false,1000,Scope::wrong_parent);
+    run("colonial_resettlement",true,0,false,false,false,1000,Scope::local);
+    run("",true,0,false,true,false,1000,Scope::wrong_parent);
+    run("",true,0,false,true,false,1000,Scope::local);
+    run("",true,0,false,true,false,1000,Scope::source_only);
     run("frontier_colonization",true,0,false,false,false,1500);
     run("colonial_resettlement",true,0,false,false,false,1500);
     run("frontier_colonization",true,1,false,false,false,1000);
@@ -221,6 +289,7 @@ static void colonial_migration_pull_requires_verified_destination() {
     run("",true,0,false,true,false,1250);
     run("frontier_colonization",true,0,false,true,false,1750);
     run("frontier_colonization",true,0,false,false,true,1400);
+    if(!failures.empty())throw std::runtime_error(failures);
 
 }
 

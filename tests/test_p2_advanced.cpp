@@ -1235,8 +1235,340 @@ static void national_base_group_strength_requires_genuine_law_slot() {
     check_law("USA","slavery","legacy_slavery",IG::landowners,250'000);
 }
 
+static void custom_authority_law_never_pays_for_real_decree() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(1,"A","AA");
+    geo.seed_assignment(1,1);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_actor("A",100);
+    c.seed_government("A","HEAD","PM",5,3);
+    c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+        P1PowerDistribution::autocracy,P1LegislatureKind::unicameral,"constitution:authority"});
+    P1StandingEvidence unpopular{"A","observed:head"};
+    unpopular.observed_head="HEAD";unpopular.head_popularity=-30;
+    unpopular.head_popularity_observed=true;unpopular.observed_day=0;
+    c.p1_record_standing(unpopular);
+    c.p2_seed_base({"CUSTOM","A","fictional_custom_decrees","national",
+                    "law_outlawed_dissent","fixture:custom"});
+    auto world=daily::World::adopt(std::move(gh),31);
+    const auto before=daily::SnapshotCodec::encode(world);
+    const auto today=world.day_index();
+    phasegh::World::Plan policy;
+    policy[9].push_back([today](phasegh::Stage& stage) {
+        stage.phase_c().p1_schedule_mandate({"ROAD","A","R","fixture:authority",
+            P1MandateKind::decree_road_maintenance},"PM",today);
+    });
+    bool rejected=false;
+    try { world.advance_day(policy); }
+    catch(const std::invalid_argument& e) {
+        rejected=std::string(e.what()).find(
+            "insufficient continuing Authority generation")!=std::string::npos;
+    }
+    ok(rejected&&daily::SnapshotCodec::encode(world)==before,
+       "wrong-domain canonical authority lookalike paid for an actual dated decree");
+}
+
+static void canonical_national_authority_funds_dated_regional_decrees() {
+    struct Source {
+        const char* country;
+        const char* domain;
+        const char* parent;
+        const char* amendment;
+        int parent_add,parent_mult,delta_add,delta_mult;
+    };
+    // Expected outputs are fixed independently of runtime source lookup.
+    const Source sources[]={
+        {"A","church_and_state","law_state_religion","",0,0,200,0},
+        {"RUS","church_and_state","law_caesaropapism","",0,0,200,0},
+        {"TUR","church_and_state","law_millet_system","",0,0,200,0},
+        {"EGY","church_and_state","law_people_of_the_book","",0,0,200,0},
+        {"USA","church_and_state","law_freedom_of_conscience","",0,0,100,0},
+        {"RUS","church_and_state","law_state_atheism","",0,0,200,0},
+        {"A","citizenship","law_subjecthood","",0,0,100,0},
+        {"RUS","citizenship","law_official_nationality","",0,0,100,0},
+        {"A","citizenship","law_ethnostate","",0,0,200,0},
+        {"A","citizenship","law_national_supremacy","",0,0,150,0},
+        {"A","citizenship","law_racial_segregation","",0,0,100,0},
+        {"A","citizenship","law_cultural_exclusion","",0,0,50,0},
+        {"A","distribution_of_power","law_autocracy","",0,0,200,0},
+        {"JAP","distribution_of_power","law_bakufu","",0,0,200,0},
+        {"AUS","distribution_of_power","law_neo_absolutism","",0,0,250,0},
+        {"A","distribution_of_power","law_technocracy","",0,0,100,0},
+        {"A","distribution_of_power","law_oligarchy","",0,0,100,0},
+        {"WAL","distribution_of_power","law_organic_regulation","",0,0,100,0},
+        {"A","distribution_of_power","law_elder_council","",0,0,200,0},
+        {"A","distribution_of_power","law_landed_voting","",0,0,100,0},
+        {"A","distribution_of_power","law_wealth_voting","",0,0,100,0},
+        {"A","distribution_of_power","law_census_voting","",0,0,50,0},
+        {"A","distribution_of_power","law_anarchy","",0,0,0,-500000},
+        {"A","distribution_of_power","law_single_party_state","",0,0,250,0},
+        {"A","distribution_of_power","law_labour_suffrage","",0,0,100,0},
+        {"A","governance_principles","law_chiefdom","",0,0,100,0},
+        {"A","governance_principles","law_monarchy","",0,0,200,0},
+        {"BIC","governance_principles","law_colonial_administration","",0,0,100,0},
+        {"A","governance_principles","law_presidential_republic","",0,0,100,0},
+        {"PAP","governance_principles","law_theocracy","",0,0,200,0},
+        {"ITA","governance_principles","law_corporate_state","",0,0,100,0},
+        {"POR","governance_principles","law_social_monarchy","",0,0,100,0},
+        {"A","economic_system","law_command_economy","",0,0,0,250000},
+        {"AUS","distribution_of_power","law_autocracy","amendment_geheime_staatskonferenz_metternich",200,0,0,-100000},
+        {"AUS","distribution_of_power","law_autocracy","amendment_geheime_staatskonferenz_kolowrat",200,0,0,-200000},
+        {"A","distribution_of_power","law_autocracy","amendment_cult_of_personality",200,0,0,100000},
+        {"PAP","governance_principles","law_theocracy","amendment_draconian_blasphemy_laws",200,0,50,0},
+        {"A","distribution_of_power","law_census_voting","amendment_voting_age_18",50,0,-25,0},
+        {"A","distribution_of_power","law_census_voting","amendment_voting_age_21",50,0,25,0},
+        {"A","distribution_of_power","law_census_voting","amendment_voting_age_25",50,0,50,0},
+        {"FRA","distribution_of_power","law_wealth_voting","amendment_200_franc_suffrage",100,0,50,0},
+        {"AUS","distribution_of_power","law_autocracy","amendment_geheime_staatskonferenz",200,0,0,-250000},
+        {"A","distribution_of_power","law_oligarchy","amendment_electoral_clientelism",100,0,0,100000},
+        {"A","trade_policy","law_isolationism","",0,0,0,500000},
+        {"CHI","trade_policy","law_canton_system","",0,0,0,250000},
+        {"JAP","trade_policy","law_sakoku","",0,0,0,250000},
+        {"A","free_speech","law_outlawed_dissent","",0,0,200,0},
+        {"A","free_speech","law_censorship","",0,0,100,0},
+        {"A","free_speech","law_right_of_assembly","",0,0,50,0},
+    };
+    constexpr int popularity=65;
+    const auto region=[](int i) { return "R"+std::to_string(i); };
+    const auto seed=[&](const std::string& country,int opinion,
+                        P1GovernancePrinciple governance,bool assembly=false) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        for(int i=0;i<6;++i)geo.seed_province(i+1,region(i),country);
+        geo.seed_unit(1,country,"AA");
+        for(int i=0;i<6;++i)geo.seed_assignment(i+1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor(country,100);
+        c.seed_government(country,"HEAD","PM",5,3);
+        c.seed_p1_constitution(country,{governance,
+            P1PowerDistribution::autocracy,
+            assembly?P1LegislatureKind::unicameral:P1LegislatureKind::none,
+            "constitution:authority"});
+        P1StandingEvidence observed{country,"observed:head"};
+        observed.observed_head="HEAD";observed.head_popularity=opinion;
+        observed.head_popularity_observed=true;observed.observed_day=0;
+        c.p1_record_standing(observed);
+        // A populated world is explicitly demographically active. The
+        // idle-calendar predicate is tested separately from authority.
+        auto& pop=c.seed_population();
+        const auto household=pop.household_profile({"R0","family","shared",100});
+        const auto economy=pop.economic_profile({"R0","worker","wage","employee",
+                                                  pop.default_education()});
+        const auto demography=pop.demographic_profile({"R0",23640,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+        pop.seed_population(demography,economy,household,100);
+        c.enable_demography(phaseb::DemographyRules{});
+        return gh;
+    };
+    const auto policy_at=[&](const std::string& country,int first,int limit,
+                             std::int64_t today) {
+        phasegh::World::Plan plan;
+        for(int i=first;i<limit;++i) {
+            const auto target=region(i);
+            plan[9].push_back([=](phasegh::Stage& stage) {
+                stage.phase_c().p1_schedule_mandate({"ROAD:"+target,country,
+                    target,"fixture:authority",P1MandateKind::decree_road_maintenance},
+                    "PM",today);
+            });
+        }
+        return plan;
+    };
+    const auto reject_next=[&](daily::World& world,const std::string& country,int index) {
+        const auto checkpoint=daily::SnapshotCodec::encode(world);
+        bool rejected=false;
+        try { world.advance_day(policy_at(country,index,index+1,world.day_index())); }
+        catch(const std::invalid_argument& e) {
+            rejected=std::string(e.what()).find(
+                "insufficient continuing Authority generation")!=std::string::npos;
+        }
+        ok(rejected&&daily::SnapshotCodec::encode(world)==checkpoint,
+           "unfunded dated decree passed or mutated the committed checkpoint");
+    };
+    for(const auto& row:sources) {
+        try {
+            const std::string country=row.country;
+            const auto governance=std::string_view(row.parent)=="law_anarchy"?
+                P1GovernancePrinciple::council_republic:P1GovernancePrinciple::monarchy;
+            const bool assembly=governance==P1GovernancePrinciple::council_republic||
+                std::string_view(row.parent)=="law_social_monarchy";
+            auto gh=seed(country,popularity,governance,assembly);
+            auto& c=gh.seed_geography().seed_core().seed_core();
+            c.p2_seed_base({"LAW",country,row.domain,"national",row.parent,"fixture:opening"});
+            if(*row.amendment)
+                c.p2_seed_amendment({row.amendment,"LAW","fixture:opening","",
+                    {rule("association",country,P2ClauseKind::political_association_allowed,1)}});
+            auto world=daily::World::adopt(std::move(gh),31);
+            const auto expected=(100+popularity+row.parent_add+row.delta_add)*
+                (1'000'000+row.parent_mult+row.delta_mult)/1'000'000;
+            const int affordable=expected/100;
+            world.advance_day(policy_at(country,0,affordable,world.day_index()));
+            ok(ledger(world).p1_active_mandates().empty(),
+               "decree operated on the scheduling date rather than effective date");
+            reject_next(world,country,affordable); // also counts pending reservations
+            world.advance_day();
+            const auto flow=ledger(world).p1_authority_capacity(country);
+            const auto active=ledger(world).p1_active_mandates().size();
+            if(flow.generated!=expected||flow.committed!=100*affordable||
+               flow.balance!=expected-100*affordable||
+               active!=static_cast<unsigned>(affordable))
+                throw std::runtime_error("decrees did not use exact authority: expected "+
+                    std::to_string(expected)+", got "+std::to_string(flow.generated)+
+                    "; reserved "+std::to_string(flow.committed)+
+                    "; active "+std::to_string(active));
+            for(int i=0;i<affordable;++i)
+                ok(ledger(world).p1_local_decree_ppm(
+                    country,region(i),"state_construction_mult")==100'000,
+                    "funded decree did not supply the existing regional construction benefit");
+        } catch(const std::exception& e) {
+            throw std::runtime_error(std::string(*row.amendment?row.amendment:row.parent)+
+                                     ": "+e.what());
+        }
+    }
+
+    // Bad tags and incompatible parents can exist in the migration-friendly
+    // store, but cannot add or remove enough authority to change real orders.
+    {
+        auto invalid=seed("A",-25,P1GovernancePrinciple::monarchy);
+        auto& base=invalid.seed_geography().seed_core().seed_core();
+        base.p2_seed_base({"WRONG","A","migration","national",
+                          "law_no_migration_controls","fixture:wrong-parent"});
+        base.p2_seed_amendment({"amendment_draconian_blasphemy_laws","WRONG",
+            "fixture:invalid","",
+            {rule("association","A",P2ClauseKind::political_association_allowed,1)}});
+        auto world=daily::World::adopt(std::move(invalid),31);
+        reject_next(world,"A",0);
+    }
+    {
+        auto invalid=seed("A",0,P1GovernancePrinciple::monarchy);
+        auto& base=invalid.seed_geography().seed_core().seed_core();
+        base.p2_seed_base({"POWER","A","distribution_of_power","national",
+                          "law_autocracy","fixture:power"});
+        base.p2_seed_amendment({"amendment_geheime_staatskonferenz","POWER",
+            "fixture:invalid-tag","",
+            {rule("association","A",P2ClauseKind::political_association_allowed,1)}});
+        auto world=daily::World::adopt(std::move(invalid),31);
+        world.advance_day(policy_at("A",0,3,world.day_index()));
+        world.advance_day();
+        ok(ledger(world).p1_authority_capacity("A").generated==300&&
+           ledger(world).p1_active_mandates().size()==3,
+           "foreign-only amendment blocked a lawful domestic decree");
+    }
+    {
+        auto invalid=seed("A",-25,P1GovernancePrinciple::monarchy);
+        auto& geo=invalid.seed_geography();
+        geo.seed_province(7,"FOREIGN","B");
+        geo.seed_unit(2,"B","BB");geo.seed_assignment(7,2);
+        auto& base=geo.seed_core().seed_core();
+        base.seed_actor("B",0);
+        base.seed_government("B","HEAD","PM",5,3);
+        base.seed_p1_constitution("B",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"constitution:foreign"});
+        base.p2_seed_base({"FOREIGN","B","free_speech","national",
+                           "law_outlawed_dissent","fixture:foreign"});
+        P2BaseLaw local{"LOCAL","A","custom_local_speech","R0",
+                        "law_outlawed_dissent","fixture:local"};
+        local.tier=P2NormTier::local_ordinance;
+        base.p2_seed_base(local);
+        auto world=daily::World::adopt(std::move(invalid),31);
+        reject_next(world,"A",0);
+        ok(ledger(world).p1_authority_capacity("B").generated==300,
+           "the lawful foreign sovereign's supply was unexpectedly erased");
+    }
+
+    {
+        auto trait=seed("A",-25,P1GovernancePrinciple::monarchy);
+        auto& base=trait.seed_geography().seed_core().seed_core();
+        base.p2_seed_base({"ECON","A","economic_system","national",
+                           "law_command_economy","fixture:economy"});
+        base.p2_seed_base({"WORSHIP","A","religious_observance","national",
+                           "protected","fixture:issue"});
+        base.seed_interest_group("DEVOUT");
+        base.p3_seed_group({"A","DEVOUT","","religious_observance","protected",
+                           P3GroupType::devout,500'000,0});
+        base.p3_set_ideologies("A","DEVOUT",{"militarist"});
+        auto& pop=base.seed_population();
+        const auto household=pop.household_profile({"R0","family","shared",100});
+        const auto economic=pop.economic_profile({"R0","worker","wage","employee",
+                                                   pop.default_education()});
+        const auto demographic=pop.demographic_profile({"R0",23640,phaseb::Sex::female,
+            "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+        const auto resident=pop.seed_population(demographic,economic,household,100);
+        auto world=daily::World::adopt(std::move(trait),31);
+        reject_next(world,"A",0); // 75 base * 1.25 = 93, without members
+        auto plan=policy_at("A",0,1,world.day_index());
+        plan[9].insert(plan[9].begin(),[resident](phasegh::Stage& stage) {
+            stage.phase_c().join_interest_group(resident,"DEVOUT",100);
+        });
+        world.advance_day(plan);
+        world.advance_day();
+        ok(ledger(world).p1_authority_capacity("A").generated==101&&
+           ledger(world).p1_active_mandates().size()==1,
+           "the existing Devout trait no longer stacks independently with lawful authority");
+    }
+
+    // A real promulgated national amendment is not an opening grant:
+    // its extra capacity may be committed only on/after the recorded day.
+    auto gh=seed("A",-40,P1GovernancePrinciple::monarchy);
+    auto& c=gh.seed_geography().seed_core().seed_core();
+    c.p2_seed_base({"LAW","A","church_and_state","national",
+                    "law_state_religion","fixture:religion"});
+    auto world=daily::World::adopt(std::move(gh),31);
+    const auto start=world.day_index();
+    auto attach=policy_at("A",0,2,start);
+    attach[9].push_back([&](phasegh::Stage& stage) {
+        auto& live=stage.phase_c();
+        P2Bill bill;
+        bill.id="ATTACH";bill.country="A";bill.proposer="PM";
+        bill.legal_basis="fixture:dated";bill.effective_day=start+2;
+        bill.action=P2BillAction::attach_amendment;
+        bill.proposed_amendment={"amendment_draconian_blasphemy_laws","LAW",
+            "fixture:dated","",
+            {rule("association","A",P2ClauseKind::political_association_allowed,1)}};
+        live.p2_submit_bill(std::move(bill),start);
+        live.p2_approve_bill("ATTACH",{});
+        live.p2_promulgate_bill("ATTACH","HEAD",start);
+    });
+    world.advance_day(attach);
+    reject_next(world,"A",2);
+    world.advance_day();
+    ok(ledger(world).p1_authority_capacity("A").generated==260&&
+       ledger(world).p1_active_mandates().size()==2,
+       "pending amendment should not fund the third decree");
+    world.advance_day(policy_at("A",2,3,world.day_index()));
+    ok(ledger(world).p2_amendment_active("amendment_draconian_blasphemy_laws"),
+       "dated amendment was not enacted at the actual input boundary");
+    world.advance_day();
+    ok(ledger(world).p1_authority_capacity("A").committed==300&&
+       ledger(world).p1_local_decree_ppm("A","R2","state_construction_mult")==100'000,
+       "the effective +50 authority did not fund the real third decree");
+    const auto repeal_day=world.day_index();
+    phasegh::World::Plan repeal;
+    repeal[9].push_back([&](phasegh::Stage& stage) {
+        auto& live=stage.phase_c();
+        P2Bill bill;
+        bill.id="REPEAL";bill.country="A";bill.proposer="PM";
+        bill.legal_basis="fixture:repeal";bill.effective_day=repeal_day+1;
+        bill.action=P2BillAction::repeal_amendment;
+        bill.target_id="amendment_draconian_blasphemy_laws";
+        live.p2_submit_bill(std::move(bill),repeal_day);
+        live.p2_approve_bill("REPEAL",{});
+        live.p2_promulgate_bill("REPEAL","HEAD",repeal_day);
+    });
+    world.advance_day(repeal);
+    world.advance_day();
+    const auto reduced=ledger(world).p1_authority_capacity("A");
+    ok(!ledger(world).p2_amendment_active("amendment_draconian_blasphemy_laws")&&
+       reduced.generated==260&&reduced.committed==300&&reduced.balance==-40,
+       "effective repeal did not remove just the law's actual capacity");
+    reject_next(world,"A",3);
+}
+
 int main(){
     try{
+        custom_authority_law_never_pays_for_real_decree();
+        canonical_national_authority_funds_dated_regional_decrees();
         actual_upper_house_personal_terms_and_replay();
         negotiation_and_two_chamber_approval();
         real_economic_and_military_law_rejections();
@@ -1248,7 +1580,7 @@ int main(){
         political_concessions_commit_real_national_authority();
         direct_named_amendment_strength_changes_actual_clout();
         national_base_group_strength_requires_genuine_law_slot();
-        std::cout<<"P2 advanced politics: eleven focused scenarios PASS\n";
+        std::cout<<"P2 advanced politics: thirteen focused scenarios PASS\n";
         return 0;
     }catch(const std::exception& ex){
         std::cerr<<"P2 ADVANCED POLITICS FAILED: "<<ex.what()<<"\n";

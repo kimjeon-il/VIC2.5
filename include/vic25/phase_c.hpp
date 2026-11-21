@@ -1437,6 +1437,39 @@ public:
     // Only directly authored national effects used by the commissioned
     // compensation / acquisition grievance path. Unrelated custom legal
     // slots cannot impersonate an economic-system or a compatible parent.
+    [[nodiscard]] std::int64_t p2_agricultural_throughput_ppm(
+            const std::string& country,std::string_view key)const {
+        constexpr std::string_view agriculture="building_group_bg_agriculture_throughput_add";
+        constexpr std::string_view plantations="building_group_bg_plantations_throughput_add";
+        constexpr std::string_view ranching="building_group_bg_ranching_throughput_add";
+        ensure(key==agriculture||key==plantations||key==ranching,
+               "P2 invalid agricultural throughput key");
+        if(!governments_.contains(country))return 0;
+        const auto raw=[&](std::string_view source) {
+            return static_cast<std::int64_t>(std::llround(
+                p2_catalog_raw_modifier(source,key)*1'000'000.0));
+        };
+        std::int64_t legal=0;
+        if(key!=ranching)
+            if(const auto law=p2_selected_law(country,"economic_system");
+               law&&(*law=="industry_banned"||*law=="extraction_economy"))
+                legal=raw(p2_catalog_canonical_choice(*law));
+        constexpr const char* communes="amendment_agricultural_communes";
+        if(key==plantations||!p2_active_amendments_.contains(communes))return legal;
+        const auto& amendment=p2_amendments_.at(communes);
+        const auto& parent=p2_laws_.at(amendment.law_id);
+        if(parent.country!=country||parent.tier==P2NormTier::local_ordinance||
+           (!parent.scope.empty()&&parent.scope!="national")||
+           politics::bare_group(parent.domain)!="distribution_of_power"||
+           p2_catalog_canonical_choice(parent.base_choice)!="law_anarchy"||
+           !p2_is_active_base(amendment.law_id))return legal;
+        const auto* src=p2_catalog_amendment(communes);
+        if(!src||!p2_catalog_amendment_applies(*src,parent.base_choice)||
+           (!src->possible_country_tags.empty()&&
+            !p2_catalog_list_contains(src->possible_country_tags,country)))return legal;
+        return phaseb::add_checked(legal,raw(communes));
+    }
+
     [[nodiscard]] std::int64_t p2_factory_nationalization_ppm(
             const std::string& country,std::string_view key)const {
         const auto raw=[&](std::string_view id) {
@@ -2643,6 +2676,9 @@ public:
     void p1_schedule_mandate_termination(
         const std::string&,const std::string&,const std::string&,
         std::int64_t);
+    [[nodiscard]] bool has_due_p1_mandates(std::int64_t day)const {
+        return p1_pending_mandates_.contains(day);
+    }
     void phase_time_apply_p1_mandates(std::int64_t);
     [[nodiscard]] const std::map<std::string,P1Mandate>&
         p1_active_mandates()const{return p1_active_mandates_;}
@@ -2771,6 +2807,8 @@ public:
     // with 1,000,000 representing 1.0, including legacy raw unit +100.
     [[nodiscard]] std::int64_t p2_modifier_ppm(
         const std::string& country,const std::string& effect_key)const;
+    [[nodiscard]] std::int64_t p2_national_influence_ppm(
+        const std::string& country)const;
     [[nodiscard]] double p2_catalog_modifier_value(
         const std::string& country,std::string_view key,
         int institution_level=0)const;
@@ -3071,13 +3109,15 @@ public:
         // modifiers) changes only the interest due on an existing country's
         // actual financial loan. No rate is assumed for a private company
         // without explicit country/jurisdiction evidence.
-        std::map<std::string,Money> sovereign_flat_points;
+        std::map<std::string,Money> sovereign_flat_points,sovereign_relative;
+        constexpr auto relative_key="country_loan_interest_rate_mult";
         for(const auto& amendment_id:p2_active_amendments_) {
-            // Read the specific flat catalogue row, never the generic
-            // country aggregation that can also contain local ordinances.
+            // Only the qualified source can change a sovereign loan rate;
+            // generic country aggregation also contains local ordinances.
             const auto points=p2_catalog_raw_modifier(
                 amendment_id,"country_loan_interest_rate_add");
-            if(points==0)continue;
+            const auto relative=p2_catalog_raw_modifier(amendment_id,relative_key);
+            if(points==0&&relative==0)continue;
             const auto& amendment=p2_amendments_.at(amendment_id);
             const auto& parent=p2_laws_.at(amendment.law_id);
             if(parent.tier==P2NormTier::local_ordinance||
@@ -3086,18 +3126,31 @@ public:
                !politics::catalogue().has(parent.domain,parent.base_choice))continue;
             const auto* source=p2_catalog_amendment(amendment_id);
             if(!source||!p2_catalog_amendment_applies(*source,parent.base_choice))continue;
-            auto& total=sovereign_flat_points[parent.country];
-            total=phaseb::add_checked(total,static_cast<Money>(
-                std::llround(points*1'000'000.0)));
+            if(points!=0) {
+                auto& total=sovereign_flat_points[parent.country];
+                total=phaseb::add_checked(total,static_cast<Money>(
+                    std::llround(points*1'000'000.0)));
+            }
+            if(relative!=0&&politics::bare_group(parent.domain)=="economic_system"&&
+               (source->possible_country_tags.empty()||
+                p2_catalog_list_contains(source->possible_country_tags,parent.country))) {
+                auto& total=sovereign_relative[parent.country];
+                total=phaseb::add_checked(total,static_cast<Money>(
+                    std::llround(relative*1'000'000.0)));
+            }
         }
         std::map<std::string,Money> sovereign_rates;
         if(!p3_groups_.empty()||!p2_active_base_.empty())
             for(const auto& [country,gov]:governments_) {
                 (void)gov;
                 if(!has_country_treasury(country))continue;
+                const auto amendment_rate=sovereign_relative.find(country);
+                Money legal=amendment_rate==sovereign_relative.end()?0:amendment_rate->second;
+                if(p2_selected_law(country,"economic_system")=="laissez_faire")
+                    legal=phaseb::add_checked(legal,static_cast<Money>(std::llround(
+                        p2_catalog_raw_modifier("law_laissez_faire",relative_key)*1'000'000.0)));
                 const auto bonus=phaseb::add_checked(
-                    p2_modifier_ppm(country,"country_loan_interest_rate_mult"),
-                    p3_trait_modifier_ppm(country,"country_loan_interest_rate_mult"));
+                    legal,p3_trait_modifier_ppm(country,relative_key));
                 const auto ppm=std::clamp<std::int64_t>(
                     1'000'000+bonus,0,2'000'000);
                 // Like other P1/P2 rates, flat points change the base
@@ -4103,6 +4156,42 @@ public:
         require_stage({10});
         if(!demography_enabled_)return;
         const auto before=people_.events().size();
+        // Attraction consumes exact national legal sources in the receiving
+        // country. Do not accept generic custom/local overlays by source ID.
+        const auto active_attraction_amendment=[&](
+                const std::string& country,const char* id,const char* group,
+                const char* key)->std::int64_t {
+            if(!p2_active_amendments_.contains(id))return 0;
+            const auto& amendment=p2_amendments_.at(id);
+            const auto& parent=p2_laws_.at(amendment.law_id);
+            if(parent.country!=country||parent.tier==P2NormTier::local_ordinance||
+               (!parent.scope.empty()&&parent.scope!="national")||
+               politics::bare_group(parent.domain)!=group||
+               !politics::catalogue().has(group,parent.base_choice)||
+               !p2_is_active_base(amendment.law_id))return 0;
+            const auto* source=p2_catalog_amendment(id);
+            if(!source||!p2_catalog_amendment_applies(
+                    *source,politics::bare_law(parent.base_choice))||
+               (!source->possible_country_tags.empty()&&
+                !p2_catalog_list_contains(source->possible_country_tags,country)))return 0;
+            return static_cast<std::int64_t>(std::llround(
+                p2_catalog_raw_modifier(id,key)*1'000'000.0));
+        };
+        constexpr auto flat_migration_key="state_migration_pull_mult";
+        constexpr auto unincorporated_migration_key=
+            "state_migration_pull_unincorporated_mult";
+        const auto unincorporated_attraction=[&](const std::string& country) {
+            std::int64_t colonization=0;
+            if(const auto choice=p2_selected_law(country,"colonization");
+               choice=="frontier_colonization"||choice=="colonial_resettlement")
+                colonization=static_cast<std::int64_t>(std::llround(
+                    p2_catalog_raw_modifier(p2_catalog_canonical_choice(*choice),
+                        unincorporated_migration_key)*1'000'000.0));
+            // Internal Colonization's separate per-institution row is not flat.
+            return phaseb::add_checked(colonization,active_attraction_amendment(
+                country,"amendment_homestead_acts","land_reform",
+                unincorporated_migration_key));
+        };
         // Preserve the single Phase B POP registry. Country-scoped legal
         // modifiers and activated interest-group traits are applied as
         // *rates*, not as extra births, students, jobs or migrants.
@@ -4243,9 +4332,12 @@ public:
                 rates.emplace(country,PoliticalRates{
                     effect("state_birth_rate_mult"),
                     effect(school_key),
-                    effect("state_migration_pull_mult"),
+                    phaseb::add_checked(
+                        active_attraction_amendment(country,
+                            "amendment_nativist_labour_market","migration",flat_migration_key),
+                        p3_trait_modifier_ppm(country,flat_migration_key)),
                     flat_mortality_ppm(country),healthcare,school_institution,
-                    p2_modifier_ppm(country,"state_migration_pull_unincorporated_mult"),
+                    unincorporated_attraction(country),
                     peasant_school_ppm.contains(country)?peasant_school_ppm.at(country):0,
                     occupation_mortality,
                     education!=std::optional<std::string>("no_schools")});

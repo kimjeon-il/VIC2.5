@@ -134,12 +134,20 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
     // Base administrative cost per incorporated POP is law-sensitive.
     // The flat state overhead is unchanged; hereditary/local bureaucracy
     // and other enacted policy modifiers affect only population base cost.
+    constexpr auto population_cost_key=
+        "state_bureaucracy_population_base_cost_factor_mult";
+    std::int64_t legal_population_cost=0;
+    // The eight direct rows belong to these recognized national slots.
+    // A local or custom lookalike cannot change every incorporated POP's cost.
+    for(const auto* group:{"bureaucracy","caste_hegemony","taxation","economic_system"})
+        if(const auto selected=p2_selected_law(country,group))
+            legal_population_cost=phaseb::add_checked(
+                legal_population_cost,static_cast<std::int64_t>(std::llround(
+                    p2_catalog_raw_modifier(p2_catalog_canonical_choice(*selected),
+                                            population_cost_key)*1'000'000.0)));
     const auto population_cost_factor=std::clamp<std::int64_t>(
         phaseb::add_checked(1'000'000,phaseb::add_checked(
-            p2_modifier_ppm(country,
-                "state_bureaucracy_population_base_cost_factor_mult"),
-            p3_trait_modifier_ppm(country,
-                "state_bureaucracy_population_base_cost_factor_mult"))),
+            legal_population_cost,p3_trait_modifier_ppm(country,population_cost_key))),
         0,5'000'000);
     for(const auto& [region,owner]:sovereignty_) {
         if(owner!=country)continue;
@@ -260,6 +268,23 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
             break; // Only one recognized active national bureaucracy slot.
         }
     }
+    // Specific school and health rates are scoped to actual national laws.
+    // The link level above is the recurring administration commitment even
+    // when a site's independent service delivery is unfunded or unstaffed.
+    const auto service_base_cost_ppm=[&](const char* group,const char* key) {
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(law.country!=country||law.tier==P2NormTier::local_ordinance||
+               (!law.scope.empty()&&law.scope!="national")||
+               politics::bare_group(law.domain)!=group||
+               !politics::catalogue().has(law.domain,law.base_choice))continue;
+            return static_cast<std::int64_t>(std::llround(
+                p2_catalog_raw_modifier(
+                    p2_catalog_canonical_choice(law.base_choice),key)*1'000'000.0));
+        }
+        return std::int64_t{0};
+    };
     for(const auto& [kind,level]:institutions) {
         const auto rate=phaseb::add_checked(
             phaseb::mul_checked(v.incorporated_population/100'000,10),
@@ -286,13 +311,32 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
             // Welfare's two workhouse discounts have exact national
             // poor-law parents. Generic same-ID attachments cannot reduce
             // real operating commitments; leave other cost paths intact.
-            const auto legal_specific=kind==P1InstitutionKind::welfare?
-                phaseb::add_checked(
-                    p2_active_national_enactment_points(country,
-                        "amendment_religious_workhouses",law_key),
-                    p2_active_national_enactment_points(country,
-                        "amendment_workhouse_regulations",law_key)):
-                (law_key?p2_modifier_ppm(country,law_key):0);
+            std::int64_t legal_specific=0;
+            switch(kind) {
+                case P1InstitutionKind::healthcare:
+                    legal_specific=service_base_cost_ppm("health_system",law_key);
+                    break;
+                case P1InstitutionKind::education:
+                    legal_specific=service_base_cost_ppm("education_system",law_key);
+                    for(const auto* id:{"amendment_ragged_schools",
+                            "amendment_co_ed_schools","amendment_single_sex_education",
+                            "amendment_provided_school_supplies",
+                            "amendment_unfunded_school_supplies",
+                            "amendment_secular_school_system"})
+                        legal_specific=phaseb::add_checked(legal_specific,
+                            p2_active_national_enactment_points(country,id,law_key));
+                    break;
+                case P1InstitutionKind::welfare:
+                    legal_specific=phaseb::add_checked(
+                        p2_active_national_enactment_points(country,
+                            "amendment_religious_workhouses",law_key),
+                        p2_active_national_enactment_points(country,
+                            "amendment_workhouse_regulations",law_key));
+                    break;
+                default:
+                    if(law_key)legal_specific=p2_modifier_ppm(country,law_key);
+                    break;
+            }
             const auto specific=law_key?phaseb::add_checked(
                 legal_specific,p3_trait_modifier_ppm(country,law_key)):0;
             // VIC2.5 adds same-cost percentage points before its existing
@@ -379,10 +423,17 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
     }
     const auto base=std::max<std::int64_t>(0,phaseb::add_checked(
         100,phaseb::add_checked(v.office_output,legal/1'000'000)));
+    constexpr auto generation_key="country_bureaucracy_mult";
+    // The flat generation penalty is attached to each amendment's active,
+    // compatible national parent, not merely its catalogue identifier.
+    const auto legal_generation=phaseb::add_checked(
+        p2_active_national_enactment_points(country,"amendment_cult_of_personality",
+                                           generation_key),
+        p2_active_national_enactment_points(country,"amendment_open_legal_questions",
+                                           generation_key));
     const auto pct=std::clamp<std::int64_t>(
         1'000'000+phaseb::add_checked(
-            p2_modifier_ppm(country,"country_bureaucracy_mult"),
-            p3_trait_modifier_ppm(country,"country_bureaucracy_mult")),
+            legal_generation,p3_trait_modifier_ppm(country,generation_key)),
         0,5'000'000);
     const auto generated=phaseb::mul_checked(base,pct)/1'000'000;
     const auto committed=phaseb::add_checked(

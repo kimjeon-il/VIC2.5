@@ -6,7 +6,53 @@ namespace vic25::phasec {
 inline P1FlowCapacity IntegratedWorld::p1_authority_capacity(
         const std::string& country)const {
     ensure(governments_.contains(country),"P1 authority requires sovereign government");
-    const auto legal=p2_modifier_ppm(country,"country_authority_add");
+    // Only direct canonical supply effects in the effective national slot
+    // authorize new mandates. Generic projection accepts local and custom
+    // records with the same choice, and preserves them for other consumers.
+    struct LegalSupply { std::int64_t add{},mult{}; };
+    static const auto supply_by_source=[] {
+        std::map<std::string_view,LegalSupply> sources;
+        for(const auto& row:p2_catalog_115().modifiers) {
+            if(row.boolean||row.institution||row.sponsor)continue;
+            if(row.key!="country_authority_add"&&row.key!="country_authority_mult")continue;
+            auto& entry=sources[row.source_id];
+            auto& value=row.key=="country_authority_add"?entry.add:entry.mult;
+            value=phaseb::add_checked(value,static_cast<std::int64_t>(
+                std::llround(row.value*1'000'000.0)));
+        }
+        return sources;
+    }();
+    const auto is_national=[&](const P2BaseLaw& law) {
+        return law.country==country&&law.tier!=P2NormTier::local_ordinance&&
+            (law.scope.empty()||law.scope=="national")&&
+            politics::catalogue().has(law.domain,law.base_choice);
+    };
+    LegalSupply legal;
+    const auto collect=[&](const LegalSupply& supply) {
+        legal.add=phaseb::add_checked(legal.add,supply.add);
+        legal.mult=phaseb::add_checked(legal.mult,supply.mult);
+    };
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country!=country)continue;
+        const auto found=supply_by_source.find(
+            p2_catalog_canonical_choice(politics::bare_law(law.base_choice)));
+        if(found!=supply_by_source.end()&&is_national(law))
+            collect(found->second);
+    }
+    for(const auto& id:p2_active_amendments_) {
+        const auto found=supply_by_source.find(id);
+        if(found==supply_by_source.end())continue;
+        const auto& amendment=p2_amendments_.at(id);
+        const auto& parent=p2_laws_.at(amendment.law_id);
+        const auto* source=p2_catalog_amendment(id);
+        if(!is_national(parent)||!p2_is_active_base(amendment.law_id)||
+           !source||!p2_catalog_amendment_applies(*source,parent.base_choice)||
+           (!source->possible_country_tags.empty()&&
+            !p2_catalog_list_contains(source->possible_country_tags,country)))continue;
+        collect(found->second);
+    }
     std::int64_t popularity=0;
     if(const auto source=p1_standing_.find(country);
        source!=p1_standing_.end()&&
@@ -16,11 +62,11 @@ inline P1FlowCapacity IntegratedWorld::p1_authority_capacity(
         popularity=source->second.head_popularity;
     const auto base=std::max<std::int64_t>(0,
         phaseb::add_checked(
-            phaseb::add_checked(p1power::capacity_base,legal/1'000'000),
+            phaseb::add_checked(p1power::capacity_base,legal.add/1'000'000),
             popularity));
     const auto multiplier=std::clamp<std::int64_t>(
         1'000'000+phaseb::add_checked(
-            p2_modifier_ppm(country,"country_authority_mult"),
+            legal.mult,
             p3_trait_modifier_ppm(country,"country_authority_mult")),
         0,5'000'000);
     const auto generated=phaseb::mul_checked(base,multiplier)/1'000'000;

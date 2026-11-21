@@ -351,6 +351,7 @@ public:
            !engine_.base().core().core().has_active_sovereign_bonds()&&
            !engine_.has_autonomous_daily_trade()&&
            !engine_.base().core().core().has_due_p1_government(day_)&&
+           !engine_.base().core().core().has_due_p1_mandates(day_)&&
            !engine_.base().core().core().p4_has_due_amendment(day_)&&
            !engine_.base().core().core().p2_has_due(day_)&&
            !engine_.base().core().core().p2_has_review_due(day_)&&

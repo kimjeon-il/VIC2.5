@@ -22,7 +22,7 @@ inline DiplomaticCapacityView World::diplomatic_capacity(
         phaseb::add_checked(out.rank_bonus,out.legal_bonus)));
     const auto multiplier=std::clamp<std::int64_t>(
         phaseb::add_checked(1'000'000,phaseb::add_checked(
-            c.p2_modifier_ppm(country,"country_influence_mult"),
+            c.p2_national_influence_ppm(country),
             c.p3_trait_modifier_ppm(country,"country_influence_mult"))),
         0,5'000'000);
     const auto generated=phaseb::mul_checked(gross,multiplier)/1'000'000;

@@ -349,6 +349,92 @@ static void test_funded_research_and_knowledge_lag() {
           "research evidence and effective knowledge");
     w.validate();
 }
+static void scoped_agriculture_laws_change_only_actual_paid_batch_output() {
+    enum class Legal { industry, extraction, communes, wrong_parent, fake_local,
+                       fake_national, foreign, none };
+    const auto run=[](Legal law,const char* sector,Quantity output,bool daily,bool trait=false) {
+        using namespace vic25::phasec;
+        World w{24000};seed_actor_set(w);
+        auto& setup=w.seed_core();setup.seed_region("X","B");
+        for(const auto* country:{"A","B"}) {
+            setup.seed_actor(country,0);
+            setup.seed_government(country,"HEAD","PRIME",5,3);
+            const bool commons=std::string_view(country)=="A"&&law==Legal::communes;
+            setup.seed_p1_constitution(country,{
+                commons?P1GovernancePrinciple::council_republic:P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,
+                commons?P1LegislatureKind::unicameral:P1LegislatureKind::none,
+                "test:constitution"});
+        }
+        if(law==Legal::communes||law==Legal::wrong_parent) {
+            setup.p2_seed_base({"ACTIVE","A","distribution_of_power","national",
+                law==Legal::communes?"law_anarchy":"law_autocracy","test:national"});
+            setup.p2_seed_amendment({"amendment_agricultural_communes","ACTIVE","test:amendment",
+                "",{{"lawful-association","A",P2ClauseKind::political_association_allowed,1}}});
+        } else if(law!=Legal::none) {
+            const bool fake=law==Legal::fake_local||law==Legal::fake_national;
+            P2BaseLaw source{"ACTIVE",law==Legal::foreign?"B":"A",
+                fake?"custom_farm_economy":"economic_system",
+                law==Legal::fake_local?"R":"national",
+                law==Legal::extraction?"law_extraction_economy":"law_industry_banned","test:economy"};
+            if(law==Legal::fake_local)source.tier=P2NormTier::local_ordinance;
+            setup.p2_seed_base(source);
+        }
+        const auto actual_worker=people(w,"R",20);
+        setup.seed_population().hire(actual_worker,20,"FACTORY","worker",1,{});
+        setup.seed_production_facility("OLD_MILL","FACTORY","R",620);
+        setup.seed_stock("FACTORY","R","ore",30);
+        auto r=recipe();r.outputs={{"bars",5}};r.industry_class=sector;
+        w.seed_industry_class({sector,"","actual test class"});
+        w.seed_recipe(r);
+        if(trait) {
+            setup.seed_interest_group("RURAL");
+            setup.p3_seed_group({"A","RURAL","","","",P3GroupType::rural_folk,0,0});
+            setup.p3_set_ideologies("A","RURAL",{"luddite"});
+            World::Plan join;
+            join[9].push_back([actual_worker](Stage& stage) {
+                stage.phase_c().join_interest_group(actual_worker,"RURAL",20);
+            });
+            w.advance_daily(join,false,false,1,31);
+            check(w.core().p3_trait_modifier_ppm("A","building_group_bg_agriculture_throughput_add")==100'000,
+                  "fixture lacked actual active Rural Folk trait");
+        }
+        World::Plan operation;
+        operation[4].push_back([daily,trait](Stage& stage) {
+            if(daily)stage.manufacture_daily("RECIPE",20,trait?2:1,31);
+            else stage.manufacture("RECIPE",20);
+        });
+        operation[5].push_back([](Stage& stage) {
+            stage.phase_c().wages("FACTORY","MARKET","GOV",20,0);
+        });
+        if(daily)w.advance_daily(operation,!trait,false,trait?2:1,31);
+        else w.advance(operation);
+        const std::string why="actual batch output ignored legal scope (case "+
+            std::to_string(static_cast<int>(law))+", "+sector+")";
+        check(w.core().stock("FACTORY","R","bars")==output,why.c_str());
+        check(w.core().stock("FACTORY","R","ore")==10&&w.core().cash("FACTORY")==0&&
+              w.core().cash("MARKET")==20&&w.core().cash("GOV")==100&&
+              w.core().people().employed(actual_worker)==20&&
+              w.state().actual_production_runs.size()==1&&
+              w.state().actual_production_runs[0].batches==20,
+              "throughput changed issued inputs, actual wages, workers or counted batches");
+    };
+    run(Legal::industry,"agriculture",110,true);
+    run(Legal::industry,"plantations",110,false);
+    run(Legal::extraction,"agriculture",110,false);
+    run(Legal::extraction,"plantations",110,true);
+    run(Legal::communes,"agriculture",105,true);
+    run(Legal::communes,"ranching",105,false);
+    run(Legal::communes,"plantations",100,false);
+    run(Legal::industry,"agriculture",120,true,true);
+    run(Legal::industry,"ranching",100,false);
+    run(Legal::fake_local,"agriculture",100,true);
+    run(Legal::fake_national,"plantations",100,false);
+    run(Legal::foreign,"agriculture",100,true);
+    run(Legal::wrong_parent,"ranching",100,false);
+    run(Legal::none,"agriculture",100,false);
+}
+
 static void test_industry_real_inputs_and_capacity() {
     World w{3000};seed_actor_set(w);
     auto id=people(w,"R",2);
@@ -540,6 +626,7 @@ int main() {
         run("construction_WIP",test_construction_accepted_wip_next_month);
         run("funded_research",test_funded_research_and_knowledge_lag);
         run("industry",test_industry_real_inputs_and_capacity);
+        run("scoped_agriculture",scoped_agriculture_laws_change_only_actual_paid_batch_output);
         run("adoption",test_adoption_not_national_bonus);
         run("industry_to_construction",test_cross_domain_ore_to_construction);
         run("labor_rollback",test_research_vs_industry_worker_conflict_rollback);
@@ -548,7 +635,7 @@ int main() {
         run("retrofit_reject",test_unsupported_retrofit_is_rejected);
         run("energy_reject",test_unsupported_nonstorable_dispatch_rejected);
         run("deterministic_replay",test_repeated_world_deterministic);
-        std::cout<<"Phase D bounded integration: 11 scenario cases PASS. "
+        std::cout<<"Phase D bounded integration: 12 scenario cases PASS. "
                     "This is not the D-V 72/279 acceptance suite.\n";
         return 0;
     } catch(const std::exception& e) {
