@@ -260,6 +260,110 @@ static void incompatible_statutory_amendments_are_rejected(){
          "P2 mutually exclusive compromises must not coexist");
 }
 
+static phasegh::World law_slot_fixture() {
+    phasegh::World gh{24000};
+    auto& geography=gh.seed_geography();
+    geography.seed_province(1,"RA","A");
+    geography.seed_province(2,"RB","A");
+    geography.seed_unit(1,"A","A");
+    geography.seed_assignment(1,1);
+    geography.seed_assignment(2,1);
+    auto& c=geography.seed_core().seed_core();
+    c.seed_actor("A",100);
+    c.seed_government("A","HEAD","PM",5,3);
+    c.seed_p1_constitution("A",{phasec::P1GovernancePrinciple::monarchy,
+        phasec::P1PowerDistribution::autocracy,phasec::P1LegislatureKind::none,
+        "fixture:lawful-executive"});
+    c.p2_seed_base({"old-welfare","A","welfare","","law_poor_laws","fixture:law"});
+    c.p2_seed_amendment({"old-welfare-amendment","old-welfare","fixture:amendment","",
+        {clause("association","A",phasec::P2ClauseKind::political_association_allowed,1)}});
+    c.p2_seed_base({"custom-bare","A","municipal_custom","national",
+                    "old-custom","fixture:custom"});
+    c.p2_seed_base({"custom-qualified","A","lawgroup_municipal_custom","",
+                    "another-custom","fixture:custom"});
+    c.p2_seed_base({"custom-empty","A","municipal_custom","",
+                    "third-custom","fixture:custom"});
+    c.p2_seed_base({"ordinance-a","A","municipal_custom","RA",
+        "law-of-RA","fixture:ordinance",phasec::P2NormTier::local_ordinance});
+    c.p2_seed_base({"ordinance-b","A","municipal_custom","RB",
+        "law-of-RB","fixture:ordinance",phasec::P2NormTier::local_ordinance});
+    return gh;
+}
+static void aliases_share_exactly_one_recognized_national_base_slot() {
+    {
+        auto duplicate=law_slot_fixture();
+        auto& c=duplicate.seed_geography().seed_core().seed_core();
+        bool blocked=false;
+        try {
+            c.p2_seed_base({"duplicate-welfare","A","lawgroup_welfare","national",
+                "law_no_social_security","fixture:duplicate"});
+        } catch(const std::invalid_argument&) {blocked=true;}
+        need(blocked&&!c.p2_laws().contains("duplicate-welfare"),
+             "alias duplicate seed occupied the same recognized national slot");
+    }
+    auto world=daily::World::adopt(law_slot_fixture(),29);
+    const auto initial=daily::SnapshotCodec::encode(world);
+    world=daily::SnapshotCodec::decode(initial);
+    need(daily::SnapshotCodec::encode(world)==initial &&
+         actual(world).p2_laws().at("old-welfare").domain=="welfare" &&
+         actual(world).p2_laws().at("old-welfare").scope.empty(),
+         "raw national law display fields or wire state changed without enactment");
+    const auto start=world.day_index();
+    const auto bill=[&](const std::string& id,const std::string& domain,
+                        const std::string& scope) {
+        phasec::P2Bill proposed;
+        proposed.id=id;proposed.country="A";proposed.proposer="PM";
+        proposed.legal_basis="fixture:replace";proposed.effective_day=start+2;
+        proposed.proposed_base={id+"-law","A",domain,scope,
+            "law_no_social_security","fixture:replace"};
+        return proposed;
+    };
+    phasegh::World::Plan enact;
+    enact[9].push_back([&](phasegh::Stage& gh) {
+        auto& c=gh.phase_c();
+        c.p2_submit_bill(bill("change","lawgroup_welfare","national"),start);
+        c.p2_approve_bill("change",{});
+        c.p2_promulgate_bill("change","HEAD",start);
+    });
+    world.advance_day(enact);
+    const auto pending=daily::SnapshotCodec::encode(world);
+    phasegh::World::Plan competing;
+    competing[9].push_back([&](phasegh::Stage& gh) {
+        gh.phase_c().p2_submit_bill(bill("competing","welfare",""),start+1);
+    });
+    bool rejected=false;
+    try { world.advance_day(competing); }
+    catch(const std::invalid_argument& e) {
+        rejected=std::string(e.what()).find("simultaneous replacement")!=std::string::npos;
+    }
+    need(rejected&&daily::SnapshotCodec::encode(world)==pending,
+         "alias and implicit national scope bypassed pending replacement exclusion");
+    auto replay=daily::SnapshotCodec::decode(pending);
+    world.advance_day();replay.advance_day();
+    need(actual(world).p2_is_active_base("old-welfare") &&
+         actual(world).p2_amendment_active("old-welfare-amendment"),
+         "replacement altered law effects before its exact effective date");
+    world.advance_day();replay.advance_day();
+    const auto& c=actual(world);
+    need(!c.p2_is_active_base("old-welfare") &&
+         !c.p2_amendment_active("old-welfare-amendment") &&
+         c.p2_laws().contains("old-welfare") &&
+         c.p2_is_active_base("change-law") &&
+         c.p2_selected_law("A","welfare")==
+             std::optional<std::string>("no_social_security") &&
+         c.p2_selected_law("A","lawgroup_welfare")==
+             std::optional<std::string>("no_social_security"),
+         "law alias replacement retained an old active parent or amendment");
+    need(c.p2_laws().at("change-law").domain=="lawgroup_welfare" &&
+         c.p2_laws().at("change-law").scope=="national" &&
+         c.p2_is_active_base("custom-bare") &&
+         c.p2_is_active_base("custom-qualified") &&
+         c.p2_is_active_base("custom-empty") &&
+         c.p2_is_active_base("ordinance-a") && c.p2_is_active_base("ordinance-b")&&
+         daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+         "recognized law replacement rewrote raw data or displaced custom jurisdictions");
+}
+
 int main() {
     try{
         exact_day_law_enactment_amendment_and_repeal();
@@ -267,7 +371,8 @@ int main() {
         constitutional_transition_explicitly_changes_incumbent_term();
         invalid_amendments_and_illegal_votes_rollback();
         incompatible_statutory_amendments_are_rejected();
-        std::cout<<"P2 law, amendment and elected-term scenarios: 5 PASS\n";
+        aliases_share_exactly_one_recognized_national_base_slot();
+        std::cout<<"P2 law, amendment and elected-term scenarios: 6 PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"P2 GOVERNANCE FAILED: "<<e.what()<<"\n";

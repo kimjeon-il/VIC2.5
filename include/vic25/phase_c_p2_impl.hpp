@@ -246,11 +246,28 @@ inline void IntegratedWorld::p2_sync_constitution(
     events_.push_back("p2-constitutional-law-effective:"+id);
 }
 
+inline IntegratedWorld::P2BaseSlot IntegratedWorld::p2_semantic_base_slot(
+        const P2BaseLaw& law) {
+    // Canonicalize only the meaning of a recognized national slot, not the
+    // authored strings, legacy custom groups, or the serialized raw index.
+    if(law.tier!=P2NormTier::local_ordinance&&
+       (law.scope.empty()||law.scope=="national")&&
+       politics::catalogue().has_group(law.domain))
+        return {law.country,politics::bare_group(law.domain),"national"};
+    return {law.country,law.domain,law.scope};
+}
+
 inline void IntegratedWorld::p2_seed_base(P2BaseLaw law) {
     ensure(stage_==-1&&commit_id_==0,"P2 law must seed before simulation");
     p2_validate_base(law);
     const auto slot=std::make_tuple(law.country,law.domain,law.scope);
-    ensure(!p2_laws_.contains(law.id)&&!p2_active_base_.contains(slot),
+    const auto semantic_slot=p2_semantic_base_slot(law);
+    ensure(!p2_laws_.contains(law.id)&&
+           std::none_of(p2_active_base_.begin(),p2_active_base_.end(),
+               [&](const auto& entry) {
+                   return p2_semantic_base_slot(p2_laws_.at(entry.second))==
+                          semantic_slot;
+               }),
            "P2 mutually exclusive base law already exists in this slot");
     const auto id=law.id;
     p2_laws_.emplace(id,std::move(law));
@@ -721,17 +738,13 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
         ensure(bill.proposed_base.country==bill.country&&
                !p2_laws_.contains(bill.proposed_base.id),
                "P2 replacement law must belong to one real sovereign");
+        const auto semantic_slot=p2_semantic_base_slot(bill.proposed_base);
         for(const auto& [id,previous]:p2_bills_) {
             (void)id;
             ensure((previous.status==P2BillStatus::effective||
                      previous.status==P2BillStatus::rejected)||
                    previous.action!=P2BillAction::enact_or_replace_base||
-                   std::make_tuple(previous.proposed_base.country,
-                                   previous.proposed_base.domain,
-                                   previous.proposed_base.scope)!=
-                       std::make_tuple(bill.proposed_base.country,
-                                       bill.proposed_base.domain,
-                                       bill.proposed_base.scope),
+                   p2_semantic_base_slot(previous.proposed_base)!=semantic_slot,
                    "P2 simultaneous replacement bills for one legal slot");
         }
     } else {
@@ -885,7 +898,12 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
             // Check again at the effective day inside the atomic transaction.
             p2_validate_base(next);
             const auto slot=std::make_tuple(next.country,next.domain,next.scope);
-            const auto old=p2_active_base_.find(slot);
+            const auto semantic_slot=p2_semantic_base_slot(next);
+            const auto old=std::find_if(p2_active_base_.begin(),p2_active_base_.end(),
+                [&](const auto& entry) {
+                    return p2_semantic_base_slot(p2_laws_.at(entry.second))==
+                           semantic_slot;
+                });
             if(old!=p2_active_base_.end()) {
                 const auto& previous=p2_laws_.at(old->second);
                 for(const auto& clause:previous.clauses) {
@@ -908,6 +926,7 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
                         it=p2_active_amendments_.erase(it);
                     else ++it;
                 }
+                p2_active_base_.erase(old); // remove the actual raw alias key
             }
             ensure(!p2_laws_.contains(next.id),
                    "P2 law version/identifier collision");

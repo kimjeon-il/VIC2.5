@@ -4807,12 +4807,16 @@ public:
             ensure(id==law.id,"P2 broken base law identity");
             p2_validate_base(law);
         }
+        std::set<P2BaseSlot> active_p2_slots;
         for(const auto& [slot,law_id]:p2_active_base_) {
             ensure(p2_laws_.contains(law_id)&&
                    std::make_tuple(p2_laws_.at(law_id).country,
                                    p2_laws_.at(law_id).domain,
                                    p2_laws_.at(law_id).scope)==slot,
                    "P2 broken unique active base law");
+            ensure(active_p2_slots.insert(
+                       p2_semantic_base_slot(p2_laws_.at(law_id))).second,
+                   "P2 ambiguous aliased active base law slots");
         }
         for(const auto& [id,amendment]:p2_amendments_) {
             ensure(id==amendment.id&&p2_laws_.contains(amendment.law_id),
@@ -4828,6 +4832,7 @@ public:
         for(const auto& id:p2_active_amendments_)
             ensure(p2_amendments_.contains(id),
                    "P2 amendment active without saved legal record");
+        std::set<P2BaseSlot> pending_p2_slots;
         for(const auto& [id,bill]:p2_bills_) {
             ensure(id==bill.id&&governments_.contains(bill.country)&&
                    bill.introduced_day>=0&&
@@ -4842,6 +4847,12 @@ public:
                    static_cast<unsigned>(bill.status)<=
                      static_cast<unsigned>(P2BillStatus::rejected),
                    "P2 corrupt legislative bill");
+            if(bill.action==P2BillAction::enact_or_replace_base&&
+               bill.status!=P2BillStatus::rejected&&
+               bill.status!=P2BillStatus::effective)
+                ensure(pending_p2_slots.insert(
+                           p2_semantic_base_slot(bill.proposed_base)).second,
+                       "P2 ambiguous aliased pending replacement bills");
             if(bill.status==P2BillStatus::promulgated)
                 ensure(p2_due_.contains(bill.effective_day)&&
                        p2_due_.at(bill.effective_day).contains(id)&&
@@ -5358,6 +5369,8 @@ private:
     static bool p2_valid_clause(const P2Clause&);
     void p2_validate_clauses(
         const std::string&,const std::vector<P2Clause>&)const;
+    using P2BaseSlot=std::tuple<std::string,std::string,std::string>;
+    static P2BaseSlot p2_semantic_base_slot(const P2BaseLaw&);
     void p2_validate_base(const P2BaseLaw&)const;
     void p2_check_amendment(const P2Amendment&)const;
     void p2_sync_country_rules(
