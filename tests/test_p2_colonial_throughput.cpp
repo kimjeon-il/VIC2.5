@@ -10,7 +10,8 @@ using namespace vic25::phasec;
 
 static Quantity manufacture_under_colonial_law(
         const std::string& industry, const std::string& archetype,
-        const std::string& law, int incorporation, Quantity base_output) {
+        const std::string& law, int incorporation, Quantity base_output,
+        const std::string& jurisdiction="national") {
     phased::World world{24000};
     auto& c=world.seed_core();
     c.seed_region("R","A");
@@ -25,6 +26,21 @@ static Quantity manufacture_under_colonial_law(
         P2BaseLaw rule;
         rule.id="COLONIZATION";rule.country="A";rule.domain="colonization";
         rule.scope="national";rule.base_choice=law;rule.legal_basis="fixture:colonization";
+        if(jurisdiction=="foreign") {
+            c.seed_actor("B",0);
+            c.seed_region("R_B","B");
+            c.seed_government("B","HEAD_B","PM_B",5,3);
+            c.seed_p1_constitution("B",{
+                P1GovernancePrinciple::monarchy,P1PowerDistribution::autocracy,
+                P1LegislatureKind::none,"fixture:foreign_constitution"});
+            rule.country="B";
+        }
+        if(jurisdiction=="custom"||jurisdiction=="local")
+            rule.domain="custom_colonization";
+        if(jurisdiction=="local") {
+            rule.tier=P2NormTier::local_ordinance;
+            rule.scope="R";
+        }
         c.p2_seed_base(rule);
     }
     if(incorporation>=0)c.p1_set_incorporation("R",incorporation>0);
@@ -76,6 +92,11 @@ static void colonial_exploitation_affects_only_verified_unincorporated_recipes()
                                          "law_colonial_resettlement",0,10)==10);
     for(const auto* sector:{"plantations","rubber","logging","mining"})
         assert(manufacture_under_colonial_law(sector,"",exploitation,0,10)==12);
+    for(const auto* scope:{"foreign","custom","local"}) {
+        assert(manufacture_under_colonial_law("MANU",factory,exploitation,0,10,scope)==10);
+        for(const auto* sector:{"plantations","rubber","logging","mining"})
+            assert(manufacture_under_colonial_law(sector,"",exploitation,0,10,scope)==10);
+    }
     for(const auto* sector:{"agriculture","AGRI","FORE","EXTR","extraction"})
         assert(manufacture_under_colonial_law(sector,"",exploitation,0,10)==10);
     assert(manufacture_under_colonial_law("manufacturing","",exploitation,0,1)==1);

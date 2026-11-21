@@ -375,7 +375,7 @@ static void military_peasant_levy_restricts_real_conscripts() {
 }
 
 static void effective_workhouse_amendment_reduces_only_welfare_cost(
-        const std::string& amendment_id) {
+        const std::string& amendment_id,int invalid_scope=0) {
     phasegh::World gh(24000);
     auto& geo=gh.seed_geography();
     geo.seed_province(1,"R","A");
@@ -406,10 +406,29 @@ static void effective_workhouse_amendment_reduces_only_welfare_cost(
         law(c,"A","health_system","charitable_health_system");
     else
         law(c,"A","labor_rights","regulatory_bodies");
+    if(invalid_scope) {
+        auto parent=amendment_id=="amendment_religious_workhouses"?
+            std::string("A:health_system"):std::string("A:labor_rights");
+        if(invalid_scope==2) {
+            P2BaseLaw local{"LOCAL","A","custom_welfare_rule","R",
+                "law_poor_laws","fixture:non-national ordinance"};
+            local.tier=P2NormTier::local_ordinance;
+            c.p2_seed_base(local);
+            parent="LOCAL";
+        }
+        c.p2_seed_amendment({amendment_id,parent,"fixture:incorrect source","",
+            {{"configured-level","WELFARE",P2ClauseKind::public_institution_level,2}}});
+    }
     auto world=daily::World::adopt(std::move(gh),42);
     const auto state=[&]() -> const IntegratedWorld& {
         return world.engine().base().core().core();
     };
+    if(invalid_scope) {
+        check(state().p2_amendment_active(amendment_id)&&
+              state().p1_bureaucracy("A").institution_cost==30,
+              "active non-welfare or local workhouse lookalike altered real institution cost");
+        return;
+    }
     check(state().p1_bureaucracy("A").institution_cost==30,
           "base welfare (20) and police (10) must be charged normally");
     phasegh::World::Plan enact;
@@ -519,10 +538,13 @@ static void institutional_bureaucracy_prices_ongoing_commitments() {
           communal,"Bourgeois institution discount changed independent state cost");
 }
 
+enum class BlasphemyParent { valid, local, custom_national, incompatible };
+
 static daily::World mortality_fixture(
         const std::string& health_law,int legal_level,bool funded,
         bool staffed,bool blasphemy=false,bool empty_scope=false,
-        bool staff_outside_clinic=false) {
+        bool staff_outside_clinic=false,
+        BlasphemyParent parent=BlasphemyParent::valid) {
     phasegh::World gh(24000);
     auto& geo=gh.seed_geography();
     const std::vector<std::string> regions={"CLINIC","CORE","DEPENDENCY","UNKNOWN"};
@@ -568,10 +590,22 @@ static daily::World mortality_fixture(
                 "scenario:budget","",{{"approved-health-level","HEALTH",
                     P2ClauseKind::public_institution_level,legal_level}}});
     }
-    if(blasphemy)
+    if(blasphemy) {
+        std::string parent_id="A:church_and_state";
+        if(parent==BlasphemyParent::local||parent==BlasphemyParent::custom_national) {
+            const bool local=parent==BlasphemyParent::local;
+            P2BaseLaw misleading{"INVALID_PARENT","A","custom_public_order",
+                local?"CLINIC":"national","law_state_religion","scenario:law"};
+            if(local)misleading.tier=P2NormTier::local_ordinance;
+            c.p2_seed_base(std::move(misleading));
+            parent_id="INVALID_PARENT";
+        } else if(parent==BlasphemyParent::incompatible) {
+            parent_id="A:health_system";
+        }
         c.p2_seed_amendment({"amendment_draconian_blasphemy_laws",
-            "A:church_and_state","scenario:law","",{{"civil-law","A",
+            parent_id,"scenario:law","",{{"civil-law","A",
                 P2ClauseKind::political_association_allowed,1}}});
+    }
     phaseb::DemographyRules rates;
     rates.fertility_ppm=0;
     rates.adult_death_ppm=310'000; // January: exactly 10,000 ppm/day.
@@ -695,6 +729,19 @@ static void effective_health_institution_and_flat_law_change_daily_mortality() {
     check(residents(nonlocal_staff,"CORE")==99'000 &&
           residents(nonlocal_staff,"CLINIC")==99'000,
           "a clinic without local effective staff certified national healthcare");
+
+    for(const auto parent:{BlasphemyParent::local,BlasphemyParent::custom_national,
+                           BlasphemyParent::incompatible}) {
+        auto invalid=mortality_fixture("no_health_system",-1,false,false,
+                                        true,false,false,parent);
+        check(invalid.engine().base().core().core().p2_amendment_active(
+                  "amendment_draconian_blasphemy_laws"),
+              "fixture did not retain a permissively recorded amendment");
+        invalid.advance_day();
+        check(residents(invalid,"CORE")==99'000&&
+              residents(invalid,"UNKNOWN")==99'000,
+              "invalid national parent incorrectly altered actual flat mortality");
+    }
 
     auto world=mortality_fixture("",-1,false,false);
     const auto start=world.day_index();
@@ -1279,6 +1326,9 @@ int main(){
             "amendment_religious_workhouses");
         effective_workhouse_amendment_reduces_only_welfare_cost(
             "amendment_workhouse_regulations");
+        for(const char* id:{"amendment_religious_workhouses","amendment_workhouse_regulations"})
+            for(const int invalid_scope:{1,2})
+                effective_workhouse_amendment_reduces_only_welfare_cost(id,invalid_scope);
         effective_health_institution_and_flat_law_change_daily_mortality();
         childrens_rights_changes_only_exact_profession_mortality();
         enacted_education_changes_real_daily_schooling();

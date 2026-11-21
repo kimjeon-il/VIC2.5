@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,186>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,200>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,186> evidence{{
+    static const std::array<CanonicalLawRowEvidence,200> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -625,7 +625,49 @@ inline const std::array<CanonicalLawRowEvidence,186>& canonical_law_row_evidence
          "test_p1_cabinet_reform_lock::austrian_amendment_blocks_voluntary_cabinet_reformation"},
         {{"amendment_geheime_staatskonferenz_kolowrat","country_block_government_reform_bool",1,true,false},
          "IntegratedWorld::schedule_p1_cabinet_daily (dated voluntary cabinet reform)",
-         "test_p1_cabinet_reform_lock::austrian_amendment_blocks_voluntary_cabinet_reformation"}
+         "test_p1_cabinet_reform_lock::austrian_amendment_blocks_voluntary_cabinet_reformation"},
+        {{"law_charitable_health_system","state_mortality_mult",-0.03,false,true},
+         "IntegratedWorld::phase_time_auto_demography (operating health institution level)",
+         "test_politics_identity::effective_health_institution_and_flat_law_change_daily_mortality"},
+        {{"law_public_health_insurance","state_mortality_mult",-0.05,false,true},
+         "IntegratedWorld::phase_time_auto_demography (operating health institution level)",
+         "test_politics_identity::effective_health_institution_and_flat_law_change_daily_mortality"},
+        {{"amendment_draconian_blasphemy_laws","state_mortality_mult",0.02,false,false},
+         "IntegratedWorld::phase_time_auto_demography (effective national flat mortality)",
+         "test_politics_identity::effective_health_institution_and_flat_law_change_daily_mortality"},
+        {{"amendment_religious_workhouses","country_institution_cost_institution_social_security_mult",-0.1,false,false},
+         "IntegratedWorld::p1_bureaucracy (operating welfare institutions only)",
+         "test_politics_identity::effective_workhouse_amendment_reduces_only_welfare_cost"},
+        {{"amendment_workhouse_regulations","country_institution_cost_institution_social_security_mult",-0.1,false,false},
+         "IntegratedWorld::p1_bureaucracy (operating welfare institutions only)",
+         "test_politics_identity::effective_workhouse_amendment_reduces_only_welfare_cost"},
+        {{"law_colonial_exploitation","building_group_bg_manufacturing_unincorporated_throughput_add",-0.1,false,false},
+         "phased::Stage::manufacture (paid typed colonial production batch)",
+         "test_p2_colonial_throughput::colonial_exploitation_affects_only_verified_unincorporated_recipes"},
+        {{"law_colonial_exploitation","building_group_bg_plantations_unincorporated_throughput_add",0.2,false,false},
+         "phased::Stage::manufacture (paid typed colonial production batch)",
+         "test_p2_colonial_throughput::colonial_exploitation_affects_only_verified_unincorporated_recipes"},
+        {{"law_colonial_exploitation","building_group_bg_rubber_unincorporated_throughput_add",0.2,false,false},
+         "phased::Stage::manufacture (paid typed colonial production batch)",
+         "test_p2_colonial_throughput::colonial_exploitation_affects_only_verified_unincorporated_recipes"},
+        {{"law_colonial_exploitation","building_group_bg_logging_unincorporated_throughput_add",0.2,false,false},
+         "phased::Stage::manufacture (paid typed colonial production batch)",
+         "test_p2_colonial_throughput::colonial_exploitation_affects_only_verified_unincorporated_recipes"},
+        {{"law_colonial_exploitation","building_group_bg_mining_unincorporated_throughput_add",0.2,false,false},
+         "phased::Stage::manufacture (paid typed colonial production batch)",
+         "test_p2_colonial_throughput::colonial_exploitation_affects_only_verified_unincorporated_recipes"},
+        {{"law_no_womens_rights","state_birth_rate_mult",0.05,false,false},
+         "IntegratedWorld::phase_time_auto_demography (sovereign rights actual births)",
+         "test_daily_native::national_womens_rights_change_only_real_daily_births"},
+        {{"law_women_in_the_fields","state_birth_rate_mult",-0.1,false,false},
+         "IntegratedWorld::phase_time_auto_demography (sovereign rights actual births)",
+         "test_daily_native::national_womens_rights_change_only_real_daily_births"},
+        {{"law_women_in_the_workplace","state_birth_rate_mult",-0.05,false,false},
+         "IntegratedWorld::phase_time_auto_demography (sovereign rights actual births)",
+         "test_daily_native::national_womens_rights_change_only_real_daily_births"},
+        {{"law_womens_suffrage","state_birth_rate_mult",-0.05,false,false},
+         "IntegratedWorld::phase_time_auto_demography (sovereign rights actual births)",
+         "test_daily_native::national_womens_rights_change_only_real_daily_births"}
     }};
     return evidence;
 }

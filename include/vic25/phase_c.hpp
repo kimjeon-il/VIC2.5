@@ -4167,6 +4167,26 @@ public:
             return static_cast<std::int64_t>(std::llround(delta*1'000'000.0));
         };
         constexpr const char* mortality_key="state_mortality_mult";
+        const auto flat_mortality_ppm=[&](const std::string& country)->std::int64_t {
+            // There is one flat canonical mortality source. Old scenario
+            // overlays may record its ID without a compatible national law.
+            constexpr const char* amendment_id="amendment_draconian_blasphemy_laws";
+            if(!p2_active_amendments_.contains(amendment_id))return 0;
+            const auto& amendment=p2_amendments_.at(amendment_id);
+            const auto& parent=p2_laws_.at(amendment.law_id);
+            if(parent.country!=country||parent.tier==P2NormTier::local_ordinance||
+               (!parent.scope.empty()&&parent.scope!="national")||
+               !p2_is_active_base(amendment.law_id))return 0;
+            const auto* law=p2_catalog_law(parent.base_choice);
+            const auto* source=p2_catalog_amendment(amendment_id);
+            if(!law||law->group!=politics::bare_group(parent.domain)||
+               !source||!p2_catalog_amendment_applies(*source,law->id)||
+               (!source->possible_country_tags.empty()&&
+                !p2_catalog_list_contains(source->possible_country_tags,country)))return 0;
+            static const auto flat=static_cast<std::int64_t>(std::llround(
+                p2_catalog_raw_modifier(amendment_id,mortality_key)*1'000'000.0));
+            return flat;
+        };
         constexpr const char* school_key="state_education_access_add";
         // The profession-specific rows are flat national base-law effects.
         // They do not depend on projected school facilities or incorporation.
@@ -4191,9 +4211,18 @@ public:
             for(const auto& [country,government]:governments_) {
                 (void)government;
                 const auto effect=[&](const std::string& key) {
+                    std::int64_t statutory=0;
+                    if(key=="state_birth_rate_mult") {
+                        // The authored birth rows are direct national rights
+                        // choices. A custom law using the same choice text
+                        // is not part of the recognized rights group.
+                        if(const auto rights=p2_selected_law(country,"rights_of_women"))
+                            statutory=static_cast<std::int64_t>(std::llround(
+                                p2_catalog_raw_modifier(
+                                    p2_catalog_canonical_choice(*rights),key)*1'000'000.0));
+                    } else statutory=p2_modifier_ppm(country,key);
                     return phaseb::add_checked(
-                        p2_modifier_ppm(country,key),
-                        p3_trait_modifier_ppm(country,key));
+                        statutory,p3_trait_modifier_ppm(country,key));
                 };
                 const auto education=p2_selected_law(
                     country,"education_system");
@@ -4215,7 +4244,7 @@ public:
                     effect("state_birth_rate_mult"),
                     effect(school_key),
                     effect("state_migration_pull_mult"),
-                    p2_modifier_ppm(country,mortality_key),healthcare,school_institution,
+                    flat_mortality_ppm(country),healthcare,school_institution,
                     p2_modifier_ppm(country,"state_migration_pull_unincorporated_mult"),
                     peasant_school_ppm.contains(country)?peasant_school_ppm.at(country):0,
                     occupation_mortality,

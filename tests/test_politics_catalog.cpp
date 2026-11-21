@@ -356,8 +356,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==186,
-          "expected 183 preserved witnesses and three exact cabinet lock rows");
+    check(canonical_law_row_evidence().size()==200,
+          "expected fourteen new exact witnesses beyond 186");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
         "state_shopkeepers_investment_pool_efficiency_mult",
@@ -897,6 +897,88 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
         "amendment_geheime_staatskonferenz","amendment_geheime_staatskonferenz_metternich",
         "amendment_geheime_staatskonferenz_kolowrat"},
         "expected all exact Austrian cabinet locks");
+
+    const auto check_identity_witness=[&](const P2CatalogModifier& source,
+                                          std::string_view fixture,
+                                          std::string_view executor) {
+        const auto found=std::find_if(audit.begin(),audit.end(),[&](const auto& row) {
+            return same_canonical_law_row(row.source,source);
+        });
+        check(found!=audit.end()&&found->status==CanonicalLawRowStatus::verified_row&&
+              found->behavior_test==fixture&&found->executor==executor,
+              "missing exact health mortality or welfare operation witness");
+        auto wrong=source;
+        wrong.institution=!source.institution;
+        check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).behavior_test!=fixture,
+              "health or welfare proof leaked across institutional and flat qualifiers");
+        wrong=source;
+        wrong.sponsor=true;
+        check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).behavior_test!=fixture,
+              "health or welfare proof leaked into sponsor-only effects");
+    };
+    constexpr std::string_view health_fixture=
+        "test_politics_identity::effective_health_institution_and_flat_law_change_daily_mortality";
+    for(const auto& source:std::array<P2CatalogModifier,2>{{
+        {"law_charitable_health_system","state_mortality_mult",-0.03,false,true},
+        {"law_public_health_insurance","state_mortality_mult",-0.05,false,true}}})
+        check_identity_witness(source,health_fixture,
+            "IntegratedWorld::phase_time_auto_demography (operating health institution level)");
+    check_identity_witness(
+        {"amendment_draconian_blasphemy_laws","state_mortality_mult",0.02,false,false},
+        health_fixture,"IntegratedWorld::phase_time_auto_demography (effective national flat mortality)");
+    for(const auto* source:{"amendment_religious_workhouses","amendment_workhouse_regulations"})
+        check_identity_witness(
+            {source,"country_institution_cost_institution_social_security_mult",-0.1,false,false},
+            "test_politics_identity::effective_workhouse_amendment_reduces_only_welfare_cost",
+            "IntegratedWorld::p1_bureaucracy (operating welfare institutions only)");
+
+    constexpr std::string_view colonial_fixture=
+        "test_p2_colonial_throughput::colonial_exploitation_affects_only_verified_unincorporated_recipes";
+    std::set<std::string_view> colonial_proof;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=colonial_fixture)continue;
+        check(row.source.source_id=="law_colonial_exploitation"&&
+              !row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="phased::Stage::manufacture (paid typed colonial production batch)"&&
+              row.normalized_value==(row.source.key=="building_group_bg_manufacturing_unincorporated_throughput_add"?
+                                     -100'000:200'000)&&colonial_proof.insert(row.source.key).second,
+              "colonial production proof is not an exact differentiated real-output row");
+        auto wrong=row.source;
+        wrong.key="building_unincorporated_throughput_add";
+        check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).behavior_test!=colonial_fixture,
+              "typed colonial production proof leaked to generic outsourced or raw extraction effects");
+    }
+    check(colonial_proof==std::set<std::string_view>{
+        "building_group_bg_manufacturing_unincorporated_throughput_add",
+        "building_group_bg_plantations_unincorporated_throughput_add",
+        "building_group_bg_rubber_unincorporated_throughput_add",
+        "building_group_bg_logging_unincorporated_throughput_add",
+        "building_group_bg_mining_unincorporated_throughput_add"},
+        "expected precisely five typed colonial production witnesses");
+
+    constexpr std::string_view birth_fixture=
+        "test_daily_native::national_womens_rights_change_only_real_daily_births";
+    const std::map<std::string_view,std::int64_t> birth_rates{
+        {"law_no_womens_rights",50'000},{"law_women_in_the_fields",-100'000},
+        {"law_women_in_the_workplace",-50'000},{"law_womens_suffrage",-50'000}};
+    std::set<std::string_view> births_proven;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=birth_fixture)continue;
+        const auto expected=birth_rates.find(row.source.source_id);
+        check(expected!=birth_rates.end()&&expected->second==row.normalized_value&&
+              row.source.key=="state_birth_rate_mult"&&!row.source.boolean&&
+              !row.source.institution&&!row.source.sponsor&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="IntegratedWorld::phase_time_auto_demography (sovereign rights actual births)"&&
+              births_proven.insert(row.source.source_id).second,
+              "national women's rights witness lost the exact flat birth-rate source or magnitude");
+        auto wrong=row.source;
+        wrong.key="state_working_adult_ratio_add";
+        check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).behavior_test!=birth_fixture,
+              "birth-rate proof leaked to labor force participation");
+    }
+    check(births_proven.size()==4,"expected four exact sovereign birth outcomes");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

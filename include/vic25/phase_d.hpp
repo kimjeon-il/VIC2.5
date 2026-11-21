@@ -477,10 +477,16 @@ inline std::int64_t law_unincorporated_recipe_throughput_ppm(
     const auto& facility=c.facility(recipe.site);
     if(c.p1_region_incorporated(facility.region).value_or(true))return 0;
     const auto& country=c.sovereignty(facility.region);
-    if(!c.has_government(country))return 0;
-    const auto lookup=[&](std::string_view sector) {
-        return c.p2_modifier_ppm(country,"building_group_bg_"+
-            std::string(sector)+"_unincorporated_throughput_add");
+    if(!c.has_government(country)||
+       c.p2_selected_law(country,"colonization")!="colonial_exploitation")
+        return 0;
+    // Only the sovereign's selected colonization law can supply these
+    // five sector rates. Same-name custom or local rules are not that law.
+    const auto lookup=[](std::string_view sector) {
+        return static_cast<std::int64_t>(std::llround(
+            phasec::p2_catalog_raw_modifier("law_colonial_exploitation",
+                "building_group_bg_"+std::string(sector)+
+                "_unincorporated_throughput_add")*1'000'000.0));
     };
     std::string current=recipe.industry_class;
     for(int depth=0;depth<12&&!current.empty();++depth) {

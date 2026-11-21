@@ -460,6 +460,142 @@ static void autonomous_pop_is_day_native_not_monthly_replayed() {
 }
 
 
+static void national_womens_rights_change_only_real_daily_births() {
+    using namespace vic25;
+    using namespace vic25::phasec;
+    const auto run=[](const std::string& choice,People births,int bad_scope=0,
+                      bool pending=false,bool devout=false) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"RA","A");geo.seed_unit(1,"A","HOME");
+        geo.seed_province(2,"RB","B");geo.seed_unit(2,"B","FOREIGN");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& core=geo.seed_core().seed_core();
+        const auto base=[&](const std::string& country,const std::string& group,
+                            const std::string& selected,const std::string& scope="national") {
+            P2BaseLaw law;
+            law.id=country+":"+group;law.country=country;law.domain=group;
+            law.scope=scope;law.base_choice=selected;law.legal_basis="fixture:enacted";
+            if(scope!="national")law.tier=P2NormTier::local_ordinance;
+            core.p2_seed_base(law);
+        };
+        for(const char* country:{"A","B"}) {
+            core.seed_actor(country,0);core.seed_government(country,"HEAD","PRIME",5,3);
+            core.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+        }
+        base("B","rights_of_women","law_no_womens_rights");
+        if(bad_scope)base("A","scenario_local_rules","no_womens_rights",
+                         bad_scope==1?"RA":"national");
+        else if(!choice.empty()&&!pending)base("A","lawgroup_rights_of_women",choice);
+        auto& pop=core.seed_population();
+        const auto mothers=[&](const char* region) {
+            const auto home=pop.household_profile({region,"family","shared",100'000});
+            const auto econ=pop.economic_profile({region,"farmer","work","employee",
+                                                 pop.default_education()});
+            const auto dem=pop.demographic_profile({region,23640,phaseb::Sex::female,
+                "culture","faith","citizen","free",pop.default_health(),Service::civilian});
+            return pop.seed_population(dem,econ,home,100'000);
+        };
+        const auto home_mothers=mothers("RA");
+        const auto foreign_mothers=mothers("RB");
+        if(devout) {
+            // Real members and a satisfied inherited issue preference activate
+            // the existing Devout trait independently of rights legislation.
+            base("A","religious_observance","protected");
+            core.seed_interest_group("DEVOUT");
+            core.p3_seed_group({"A","DEVOUT","","religious_observance","protected",
+                               P3GroupType::devout,500'000,0});
+            core.p3_set_ideologies("A","DEVOUT",{"militarist"});
+        }
+        phaseb::DemographyRules rules;
+        rules.fertility_ppm=310'000;
+        rules.infant_death_ppm=rules.child_death_ppm=rules.adult_death_ppm=0;
+        rules.senior_death_ppm=rules.very_old_death_ppm=0;
+        rules.illness_incidence_ppm=rules.accident_ppm=rules.migration_ppm=0;
+        rules.primary_access_ppm=rules.secondary_access_ppm=rules.tertiary_access_ppm=0;
+        rules.training_ppm=rules.adult_literacy_access_ppm=0;
+        core.enable_demography(rules);
+        auto world=World::adopt(std::move(gh),19);
+        const auto daily_births=[&](People home,phasegh::World::Plan plan={}) {
+            const auto& before=ledger(world).people();
+            const auto opening=before.events().size();
+            const auto old_population=before.population();
+            const auto home_age=before.age_months_slice(home_mothers);
+            const auto foreign_age=before.age_months_slice(foreign_mothers);
+            world.advance_day(plan);
+            const auto& after=ledger(world).people();
+            People native_born=0,foreign_born=0;
+            for(std::size_t i=opening;i<after.events().size();++i) {
+                const auto& event=after.events()[i];
+                need(event.kind==phaseb::EventKind::birth,
+                     "fertility test unexpectedly changed another POP trajectory");
+                const auto& baby=after.slice(event.to);
+                const auto& d=after.demographic(baby.key.demographic);
+                const auto& e=after.economic(baby.key.economic);
+                need(e.profession=="not_assigned"&&e.labor_class=="ineligible"&&
+                     e.education==after.default_education()&&d.service==Service::civilian,
+                     "birth modifier created employable, educated or recruitable newborns");
+                if(d.region=="RA")native_born+=event.count;
+                if(d.region=="RB")foreign_born+=event.count;
+            }
+            if(native_born!=home||foreign_born!=1050||
+               after.population()!=old_population+home+1050)
+                throw std::runtime_error("daily law births "+choice+
+                    " scope="+std::to_string(bad_scope)+
+                    " expected="+std::to_string(home)+
+                    " native="+std::to_string(native_born)+
+                    " foreign="+std::to_string(foreign_born));
+            need(after.slice(home_mothers).count==100'000&&
+                 after.slice(foreign_mothers).count==100'000&&after.jobs().empty()&&
+                 after.age_months_slice(home_mothers)==home_age&&
+                 after.age_months_slice(foreign_mothers)==foreign_age,
+                 "fertility changed existing adults, schooling or employment");
+        };
+        if(pending) {
+            const auto start=world.day_index();
+            phasegh::World::Plan plan;
+            plan[9].push_back([&](phasegh::Stage& stage) {
+                auto& live=stage.phase_c();
+                P2Bill bill;
+                bill.id="RIGHTS:ACT";bill.country="A";bill.proposer="PRIME";
+                bill.legal_basis="fixture:enactment";bill.effective_day=start+2;
+                bill.action=P2BillAction::enact_or_replace_base;
+                bill.proposed_base.id="RIGHTS";bill.proposed_base.country="A";
+                bill.proposed_base.domain="rights_of_women";bill.proposed_base.scope="national";
+                bill.proposed_base.base_choice=choice;bill.proposed_base.legal_basis="fixture:rights";
+                live.p2_submit_bill(std::move(bill),start);
+                live.p2_approve_bill("RIGHTS:ACT",{});
+                live.p2_promulgate_bill("RIGHTS:ACT","HEAD",start);
+            });
+            daily_births(1000,std::move(plan));
+            daily_births(1000);
+            auto resumed=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+            daily_births(births);
+            resumed.advance_day();
+            need(daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(resumed),
+                 "effective rights law births failed native save / replay");
+        } else if(devout) {
+            phasegh::World::Plan members;
+            members[9].push_back([home_mothers](phasegh::Stage& step) {
+                step.phase_c().join_interest_group(home_mothers,"DEVOUT",100);
+            });
+            daily_births(births,std::move(members));
+        } else daily_births(births);
+    };
+    run("",1000,1); // Local noncanonical lookalike.
+    run("",1000,2); // National custom-domain lookalike.
+    run("",1000);
+    run("law_women_own_property",1000);
+    run("law_no_womens_rights",1050);
+    run("law_women_in_the_fields",900);
+    run("law_women_in_the_workplace",950);
+    run("law_womens_suffrage",950);
+    run("law_women_in_the_fields",900,0,true);
+    run("",1030,0,false,true);
+    run("law_no_womens_rights",1080,0,false,true);
+}
+
 static void autonomous_daily_trade_budget_and_month_close() {
     Fixture f;
     auto& c=f.gh.seed_geography().seed_core().seed_core();
@@ -581,6 +717,7 @@ int main(){
         daily_diplomacy_changes_real_trade_tariff();
         real_freight_insurance_and_dated_delivery();
         autonomous_pop_is_day_native_not_monthly_replayed();
+        national_womens_rights_change_only_real_daily_births();
         conversion_only_epidemic_and_consumption();
         conversion_only_daily_tariff_and_authority();
         conversion_legacy_11_safe_migration();

@@ -283,9 +283,18 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
         }
         auto cost=phaseb::mul_checked(rate,level);
         if(law_key||general_institution_cost_ppm!=0) {
+            // Welfare's two workhouse discounts have exact national
+            // poor-law parents. Generic same-ID attachments cannot reduce
+            // real operating commitments; leave other cost paths intact.
+            const auto legal_specific=kind==P1InstitutionKind::welfare?
+                phaseb::add_checked(
+                    p2_active_national_enactment_points(country,
+                        "amendment_religious_workhouses",law_key),
+                    p2_active_national_enactment_points(country,
+                        "amendment_workhouse_regulations",law_key)):
+                (law_key?p2_modifier_ppm(country,law_key):0);
             const auto specific=law_key?phaseb::add_checked(
-                p2_modifier_ppm(country,law_key),
-                p3_trait_modifier_ppm(country,law_key)):0;
+                legal_specific,p3_trait_modifier_ppm(country,law_key)):0;
             // VIC2.5 adds same-cost percentage points before its existing
             // clamp and integer rounding, not sequential rounded discounts.
             const auto factor=std::clamp<std::int64_t>(
