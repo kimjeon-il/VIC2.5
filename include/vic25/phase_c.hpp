@@ -1589,7 +1589,7 @@ public:
     // slices. Unknown corporate/foreign investors have no guessed profession
     // bonus and no fabricated investment cash.
     [[nodiscard]] double p2_real_investment_pool_efficiency(
-            const std::string& company)const {
+            const std::string& company,const std::string& country)const {
         const auto asset="company:"+company;
         if(!tracked_assets_.contains(asset))return 0.0;
         const auto holdings=ownership_.holders(asset);
@@ -1612,6 +1612,36 @@ public:
             eligible_shares+=static_cast<long double>(shares);
         }
         if(eligible_shares<=0)return 0.0;
+        // Use only direct canonical laws for these quotes. Generic P2
+        // overlays may retain scenario/local laws and unattested amendment
+        // IDs, which cannot amend private investment orders by name alone.
+        const auto national_source=[&](const P2BaseLaw& law)
+                ->const P2CatalogLaw* {
+            if(law.country!=country||law.tier==P2NormTier::local_ordinance||
+               (!law.scope.empty()&&law.scope!="national"))return nullptr;
+            const auto* source=p2_catalog_law(politics::bare_law(law.base_choice));
+            return source&&source->group==politics::bare_group(law.domain)?
+                source:nullptr;
+        };
+        std::vector<std::string_view> enacted;
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            if(const auto* source=national_source(p2_laws_.at(id)))
+                enacted.push_back(source->id);
+        }
+        for(const auto& id:p2_active_amendments_) {
+            const auto& amendment=p2_amendments_.at(id);
+            const auto* parent=national_source(p2_laws_.at(amendment.law_id));
+            if(!parent||!p2_is_active_base(amendment.law_id))continue;
+            const auto* source=p2_catalog_amendment(id);
+            if(!source||!p2_catalog_amendment_applies(*source,parent->id)||
+               (!source->possible_country_tags.empty()&&
+                !p2_catalog_list_contains(source->possible_country_tags,country)))
+                continue;
+            enacted.push_back(source->id);
+        }
+        if(enacted.empty())return 0.0;
+        std::map<std::string,double> profession_rates;
         for(const auto& [id,pop]:people_.slices()) {
             if(pop.count<=0)continue;
             const auto holding=holdings.find(
@@ -1630,14 +1660,21 @@ public:
                profession!="aristocrats"&&profession!="shopkeepers"&&
                profession!="bureaucrats"&&profession!="clergymen")continue;
             const auto& demo=people_.demographic(pop.key.demographic);
+            const auto owner=sovereignty_.find(demo.region);
+            if(owner==sovereignty_.end()||owner->second!=country)continue;
             const auto total=members.at(pop.key.household);
             if(total<=0)continue;
-            const auto mod=p2_region_modifier_value(demo.region,
-                "state_"+profession+"_investment_pool_efficiency_mult");
+            // One direct-source aggregation per verified profession/quote.
+            const auto [rate,first]=profession_rates.try_emplace(profession,0.0);
+            if(first) {
+                const auto key="state_"+profession+"_investment_pool_efficiency_mult";
+                for(const auto source:enacted)
+                    rate->second+=p2_catalog_raw_modifier(source,key);
+            }
             weighted_shares+=static_cast<long double>(holding->second)*
                 static_cast<long double>(pop.count)/
                 static_cast<long double>(total)*
-                static_cast<long double>(mod);
+                static_cast<long double>(rate->second);
         }
         return std::clamp(
             static_cast<double>(weighted_shares/eligible_shares),

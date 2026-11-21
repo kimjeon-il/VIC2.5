@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,148>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,150>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,148> evidence{{
+    static const std::array<CanonicalLawRowEvidence,150> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -482,6 +482,12 @@ inline const std::array<CanonicalLawRowEvidence,148>& canonical_law_row_evidence
         {{"law_laissez_faire","country_disable_nationalization_bool",1,true,false},
          "Phase D commissioned-factory nationalization (legal title and cash journals only)",
          "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"law_traditionalism","state_farmers_investment_pool_efficiency_mult",-0.5,false,false},
+         "p0::DailyGame::advance_day (private paid construction order quota)",
+         "test_p0_daily::household_shareholder_efficiency_changes_paid_daily_construction_orders"},
+        {{"law_agrarianism","state_farmers_investment_pool_efficiency_mult",0.5,false,false},
+         "p0::DailyGame::advance_day (private paid construction order quota)",
+         "test_p0_daily::household_shareholder_efficiency_changes_paid_daily_construction_orders"},
         {{"law_traditionalism","building_nationalization_cost_mult",1,false,false},
          "Phase D commissioned-factory compensation (modeled statutory cash price)",
          "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},

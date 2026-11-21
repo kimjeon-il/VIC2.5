@@ -6,6 +6,7 @@
 #include "vic25/day_budget.hpp"
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <iterator>
@@ -1644,10 +1645,16 @@ public:
                         firm,due-finance.available_cash,rule);
                 }
             });
+        // Only private construction orders use household investment efficiency.
+        // Share titles and effective regional laws are unchanged by planning
+        // another order in this Stage1, so reuse the owner/jurisdiction quote.
+        auto investment_rates=std::make_shared<
+            std::map<std::pair<std::string,std::string>,std::int64_t>>();
         for(const auto& investment:decisions.investments) {
             auto work=std::make_shared<Quantity>(0);
             const bool generated=autonomous_projects.contains(investment.construction_project);
-            plan[1].push_back([investment,work,generated,date,dim,today=world_.day_index(),
+            plan[1].push_back([investment,work,generated,date,dim,investment_rates,
+                today=world_.day_index(),
                 collateral_credit=decisions.allow_collateralized_enterprise_credit]
                 (phasegh::Stage& gh){
                 const auto& domain=gh.phase_d().state();
@@ -1714,6 +1721,37 @@ public:
                             phaseb::mul_checked(work_budget/1'000'000,decree),
                             phaseb::mul_checked(work_budget%1'000'000,decree)/
                                 1'000'000));
+                if(privately_funded&&work_budget>0) {
+                    const auto [rate,new_rate]=investment_rates->try_emplace(
+                        {p.client,country},1'000'000);
+                    if(new_rate)
+                        rate->second+=static_cast<std::int64_t>(std::llround(
+                            c.p2_real_investment_pool_efficiency(p.client,country)*
+                            1'000'000.0));
+                    // The new uplift may not reserve extra construction cash
+                    // before existing creditors or workers. Neutral/negative
+                    // rates leave the underlying payment rules untouched.
+                    if(rate->second!=1'000'000&&
+                       (rate->second<1'000'000||
+                        (!c.firm_bankrupt(p.client)&&
+                         c.outstanding_worker_wages(p.client)==0))) {
+                        // Difference of two cumulative daily quotas, using
+                        // only today's rate (no backlog or retroactive credit).
+                        // The fractional term repeats every million days at
+                        // most; bounded remainders fit checked int64 arithmetic.
+                        constexpr std::int64_t ppm=1'000'000;
+                        const auto tail=phaseb::mul_checked(
+                            work_budget%ppm,rate->second);
+                        const auto fraction=tail%ppm;
+                        const auto day=today%ppm;
+                        const auto extra=
+                            phaseb::mul_checked(fraction,day+1)/ppm-
+                            phaseb::mul_checked(fraction,day)/ppm;
+                        work_budget=phaseb::add_checked(
+                            phaseb::mul_checked(work_budget/ppm,rate->second),
+                            phaseb::add_checked(tail/ppm,extra));
+                    }
+                }
                 const auto trait=phaseb::add_checked(
                     c.p3_trait_modifier_ppm(
                         country,"state_construction_mult"),

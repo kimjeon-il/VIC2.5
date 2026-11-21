@@ -356,8 +356,41 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==148,
-          "expected 129 preserved witnesses and two peasant-only draft rows");
+    check(canonical_law_row_evidence().size()==150,
+          "expected only two newly witnessed private construction order rows");
+    std::size_t shareholder_effects=0,unwitnessed_efficiencies=0;
+    for(const auto& row:audit) {
+        if(!row.source.key.ends_with("_investment_pool_efficiency_mult"))continue;
+        const bool farmer=row.source.key=="state_farmers_investment_pool_efficiency_mult";
+        const bool traditional=row.source.source_id=="law_traditionalism";
+        const bool agrarian=row.source.source_id=="law_agrarianism";
+        if(!farmer||(!traditional&&!agrarian)) {
+            check(row.status!=CanonicalLawRowStatus::verified_row&&row.behavior_test.empty(),
+                  "other investor occupations or laws inherited the farmer order witness");
+            ++unwitnessed_efficiencies;
+            continue;
+        }
+        check(row.source.value==(traditional?-0.5:0.5)&&
+              row.normalized_value==(traditional?-500'000:500'000)&&
+              !row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="p0::DailyGame::advance_day (private paid construction order quota)"&&
+              row.behavior_test=="test_p0_daily::household_shareholder_efficiency_changes_paid_daily_construction_orders",
+              "farmer efficiency witness lost exact sign, qualification, or paid-order owner");
+        auto qualifier=row.source;
+        qualifier.institution=true;
+        check(classify_canonical_law_row(qualifier,canonical_law_row_evidence()).status!=
+                  CanonicalLawRowStatus::verified_row,
+              "flat farmer efficiency proof leaked to an institutional row");
+        qualifier.institution=false;
+        qualifier.sponsor=true;
+        check(classify_canonical_law_row(qualifier,canonical_law_row_evidence()).status!=
+                  CanonicalLawRowStatus::verified_row,
+              "flat farmer efficiency proof leaked to a sponsor row");
+        ++shareholder_effects;
+    }
+    check(shareholder_effects==2&&unwitnessed_efficiencies>0,
+          "expected exactly two witnessed farmer order sources and visible unverified others");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
         if(row.source.key=="state_peasants_mass_migration_disallowed_bool") {
