@@ -1203,6 +1203,8 @@ public:
              const std::string& term,Money amount);
     void create_trade_contract(TradeContract c);
     void offer_trade_credit(CreditFacility credit);
+    [[nodiscard]] bool trade_credit_collateral_available(
+        const std::string& id,Quantity keep_free=0);
     void draw_trade_credit(const std::string& id, Money amount);
     void repay_trade_credit(const std::string& id, Money amount);
     void insure_cargo(CargoInsurance policy);
@@ -1581,11 +1583,12 @@ public:
                         }
                         stage.reconcile_war_treaties();
                     }
+                    // Existing drawn liens precede new Stage1 resource plans.
+                    if(n==1)stage.reserve_collateral();
                     for(const auto& fn:tasks[static_cast<std::size_t>(n)])
                         fn(stage);
                     if(day_of_month>0){
                         if(n==1){
-                            stage.reserve_collateral();
                             stage.plan_contracts();
                             stage.plan_autonomous_trade();
                             stage.plan_market_discovery();
@@ -1790,12 +1793,12 @@ public:
                         stage.advance_legal_state();
                         stage.register_arrived_losses();
                     }
+                    if(n==1)stage.reserve_collateral();
                     for(const auto& callback:plan[static_cast<std::size_t>(n)])
                         callback(stage);
                     // Standalone legacy monthly API still runs its own
                     // isolated monthly simulation; native day never calls it.
                     if(n==1){
-                        stage.reserve_collateral();
                         stage.plan_contracts();
                         stage.plan_autonomous_trade();
                     }

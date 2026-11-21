@@ -130,17 +130,33 @@ inline void Stage::reserve_collateral() {
            line.pledge_good,"G-COLLATERAL:"+id,line.pledged_goods);
     }
 }
+inline bool Stage::trade_credit_collateral_available(
+        const std::string& id,Quantity keep_free) {
+    at(1);
+    const auto& line=trade_.credit.at(id);
+    const auto free=phase_c().phase_d_material_available(
+        line.borrower,line.pledge_region,line.pledge_good);
+    // Opening drawn lines and first draws already reserve their full
+    // pledged lots. An extension of the same line does not pledge it again.
+    const Quantity additional=line.drawn==0?line.pledged_goods:0;
+    return keep_free>=0&&free>=additional&&free-additional>=keep_free;
+}
 inline void Stage::draw_trade_credit(const std::string& id,Money amount) {
     at(1);
     auto& line=trade_.credit.at(id);
     require(line.active&&line.effective<=phase_c().month()&&amount>0&&
             line.drawn<=line.limit && amount<=line.limit-line.drawn,
             "G_ERR_CREDIT_LIMIT");
-    const auto actual_stock=phase_c().stock(line.borrower,line.pledge_region,
-                                             line.pledge_good);
-    require(actual_stock>=line.pledged_goods,"G_ERR_MISSING_COLLATERAL");
-    // C owns both the BANK loan asset and the matched borrower deposit/debt.
-    phase_c().lend(line.borrower,amount);
+    require(trade_credit_collateral_available(id),"G_ERR_MISSING_COLLATERAL");
+    require(!phase_c().bank_insolvent(),"bank insolvent or borrower invalid");
+    // Commit the existing inventory ticket before posting C's real loan and
+    // deposit. A different draw or production plan sees only free stock.
+    auto& c=phase_c();
+    if(line.drawn==0)
+        c.phase_g_lend_with_new_collateral(line.borrower,line.pledge_region,
+            line.pledge_good,id,line.pledged_goods,amount);
+    else
+        c.lend(line.borrower,amount);
     line.drawn=phaseb::add_checked(line.drawn,amount);
     ++trade_.revision;
 }

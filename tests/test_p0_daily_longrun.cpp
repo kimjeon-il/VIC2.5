@@ -1,6 +1,7 @@
 #include "vic25/p0_daily.hpp"
 #include "vic25/daily_snapshot.hpp"
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -882,12 +883,205 @@ static void late_sale_cash_pays_earned_wages_before_bank_service() {
         throw std::runtime_error("late-sale cash bypassed unpaid earned wages: "+failures);
 }
 
+static void collateral_cannot_be_reused_after_actual_inventory_shrinks() {
+    using namespace phasec;
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(1,"A","ROOT");
+    geo.seed_assignment(1,1);
+    auto& d=geo.seed_core();
+    auto& opening=d.seed_core();
+    opening.seed_actor("FIRM",0);
+    opening.seed_actor("CLIENT",100);
+    opening.seed_market("R","steel",10,10,10);
+    opening.seed_market("R","widgets",10,10,10);
+    opening.seed_stock("FIRM","R","steel",10);
+    auto& pop=opening.seed_population();
+    const auto hh=pop.household_profile({"R","mixed","shared",5});
+    const auto econ=pop.economic_profile({"R","worker","wage","employee",
+        pop.default_education()});
+    const auto demo=pop.demographic_profile({"R",24000-300,
+        phaseb::Sex::female,"culture","faith","citizen","free",
+        pop.default_health(),phaseb::Service::civilian});
+    const auto worker=pop.seed_population(demo,econ,hh,5,1);
+    pop.hire(worker,1,"FIRM","worker",310,{});
+    phased::ConstructionProject project;
+    project.id="PLEDGED-STEEL"; project.client="CLIENT"; project.contractor="FIRM";
+    project.region="R"; project.material_good="steel"; project.target_site="NEW";
+    project.work_required=1; project.material_per_work=1; project.workers_per_work=1;
+    project.cash_price_per_work=10; project.target_capacity=1;
+    d.seed_construction(project);
+    phasegh::World::Plan offers;
+    offers[9].push_back([](phasegh::Stage& stage) {
+        for(const auto* id:{"LINE-A","LINE-B"}) {
+            phasegh::CreditFacility line;
+            line.id=id; line.borrower="FIRM"; line.pledge_region="R";
+            line.pledge_good="steel"; line.pledged_goods=5; line.limit=40;
+            stage.offer_trade_credit(line);
+        }
+    });
+    gh.advance(offers);
+    phasegh::World::Plan consumed;
+    consumed[7].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().consume("FIRM","R","steel",5);
+    });
+    gh.advance(consumed);
+    check(gh.base().core().core().stock("FIRM","R","steel")==5&&
+          gh.trade_credit("LINE-A").drawn==0&&gh.trade_credit("LINE-B").drawn==0,
+          "actual intervening use may reduce stock while both lines are undrawn");
+
+    p0::Policies policy;
+    policy.daily_food_units_per_person=0;
+    policy.allow_endogenous_investment_credit=false;
+    policy.allow_endogenous_debt_repayment=false;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),320),policy);
+    Money first=-1, extension=-1;
+    const auto core=[](const p0::DailyGame& g)->const IntegratedWorld& {
+        return g.world().engine().base().core().core();
+    };
+    phasegh::World::Plan auto_credit;
+    auto_credit[1].push_back([&](phasegh::Stage& stage) {
+        first=enterprise_ai::draw_documented_credit(stage,"FIRM",30);
+        extension=enterprise_ai::draw_documented_credit(stage,"FIRM",20);
+    });
+    try {game.advance_day(auto_credit);}
+    catch(const std::exception& e) {
+        throw std::runtime_error(std::string("autonomous collateral day rolled back: ")+e.what());
+    }
+    check(first==30&&extension==10&&
+          game.world().engine().trade_credit("LINE-A").drawn==40&&
+          game.world().engine().trade_credit("LINE-B").drawn==0&&
+          core(game).cash("FIRM")==40&&core(game).outstanding_loan("FIRM")==40&&
+          core(game).financial().balance("BANK:loan")==40&&
+          core(game).stock("FIRM","R","steel")==5&&core(game).financial().balanced(),
+          "one actual collateral lot funds only one facility, including its same-line extension");
+    const auto committed=daily::SnapshotCodec::encode(game.world());
+
+    phasegh::World::Plan invalid;
+    invalid[1].push_back([](phasegh::Stage& stage) {
+        stage.draw_trade_credit("LINE-B",10);
+    });
+    bool rejected=false;
+    try {game.advance_day(invalid);}
+    catch(const std::exception&) {rejected=true;}
+    check(rejected&&daily::SnapshotCodec::encode(game.world())==committed,
+          "explicit invalid draw must leave both cash and G utilization unchanged");
+
+    p0::DailyGame independently_caught(daily::SnapshotCodec::decode(committed),policy);
+    phasegh::World::Plan caught;
+    caught[1].push_back([](phasegh::Stage& stage) {
+        bool blocked=false;
+        try {stage.draw_trade_credit("LINE-B",10);}
+        catch(const std::invalid_argument& error) {
+            blocked=std::string_view(error.what())=="G_ERR_MISSING_COLLATERAL";
+        }
+        check(blocked&&stage.commerce().credit.at("LINE-B").drawn==0&&
+              stage.phase_c().outstanding_loan("FIRM")==40&&
+              stage.phase_c().cash("FIRM")==40,
+              "invalid direct draw must fail before posting any bank cash");
+    });
+    independently_caught.advance_day(caught);
+    check(core(independently_caught).financial().balanced(),
+          "caught invalid direct draw cannot leave partial finance state");
+
+    policy.investments.push_back({"PLEDGED-STEEL","widgets",0,1,1});
+    p0::DailyGame project_game(daily::SnapshotCodec::decode(committed),policy);
+    phasegh::World::Plan observe;
+    observe[1].push_back([](phasegh::Stage& stage) {
+        auto& c=stage.phase_c();
+        check(c.phase_d_material_available("FIRM","R","steel")==0&&
+              c.stock("FIRM","R","steel")==5,
+              "opening encumbrance must be visible to Stage1 planners");
+        bool denied=false;
+        try {c.phase_g_release_reserved_goods(
+            "FIRM","R","steel","G-COLLATERAL:LINE-A",5);}
+        catch(const std::logic_error&) {denied=true;}
+        check(denied&&c.phase_d_material_available("FIRM","R","steel")==0&&
+              c.outstanding_loan("FIRM")==40,
+              "public Stage1 release cannot remove an existing drawn lien");
+    });
+    observe[3].push_back([](phasegh::Stage& stage) {
+        auto& c=stage.phase_c();
+        bool denied=false;
+        try {c.phase_g_release_reserved_goods(
+            "FIRM","R","steel","G-COLLATERAL:LINE-A",5);}
+        catch(const std::invalid_argument&) {denied=true;}
+        check(denied&&c.phase_d_material_available("FIRM","R","steel")==0&&
+              c.stock("FIRM","R","steel")==5&&
+              c.outstanding_loan("FIRM")==40&&
+              stage.commerce().credit.at("LINE-A").drawn==40,
+              "generic trade settlement release cannot free existing bank collateral");
+    });
+    project_game.advance_day(observe);
+    check(project_game.world().engine().base().core().construction("PLEDGED-STEEL").paid_work==0&&
+          core(project_game).cash("CLIENT")==100&&
+          core(project_game).stock("FIRM","R","steel")==5&&
+          project_game.world().engine().trade_credit("LINE-A").drawn==40,
+          "pledged steel cannot pay construction or be consumed by it");
+}
+
+static void caught_bank_rejection_releases_only_its_new_collateral_ticket() {
+    using namespace phasec;
+    constexpr Money opening_cash=std::numeric_limits<Money>::max()-5;
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(1,"A","ROOT");
+    geo.seed_assignment(1,1);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_actor("FIRM",opening_cash);
+    c.seed_market("R","steel",10,10,10);
+    c.seed_stock("FIRM","R","steel",5);
+    phasegh::World::Plan offer;
+    offer[9].push_back([](phasegh::Stage& stage) {
+        phasegh::CreditFacility line;
+        line.id="CREDIT"; line.borrower="FIRM"; line.pledge_region="R";
+        line.pledge_good="steel"; line.pledged_goods=5; line.limit=10;
+        stage.offer_trade_credit(line);
+    });
+    gh.advance(offer);
+    auto game=daily::World::adopt(std::move(gh),321);
+    phasegh::World::Plan attempts;
+    attempts[1].push_back([](phasegh::Stage& stage) {
+        auto& live=stage.phase_c();
+        bool denied=false;
+        try {stage.draw_trade_credit("CREDIT",10);}
+        catch(const std::overflow_error&) {denied=true;}
+        check(denied&&stage.commerce().credit.at("CREDIT").drawn==0&&
+              live.cash("FIRM")==opening_cash&&live.outstanding_loan("FIRM")==0&&
+              live.phase_d_material_available("FIRM","R","steel")==5,
+              "caught rejected first draw must return its new collateral ticket");
+        stage.draw_trade_credit("CREDIT",3); // Real lower draw fits the C journal.
+        check(stage.commerce().credit.at("CREDIT").drawn==3&&
+              live.phase_d_material_available("FIRM","R","steel")==0,
+              "same-day valid draw must use inventory freed by rejected first draw");
+        denied=false;
+        try {stage.draw_trade_credit("CREDIT",7);}
+        catch(const std::overflow_error&) {denied=true;}
+        check(denied&&stage.commerce().credit.at("CREDIT").drawn==3&&
+              live.cash("FIRM")==opening_cash+3&&live.outstanding_loan("FIRM")==3&&
+              live.phase_d_material_available("FIRM","R","steel")==0,
+              "caught rejected extension must retain the earlier genuine lien");
+    });
+    game.advance_day(attempts);
+    const auto& committed=game.engine().base().core().core();
+    check(committed.outstanding_loan("FIRM")==3&&
+          committed.financial().balance("BANK:loan")==3&&
+          committed.stock("FIRM","R","steel")==5&&
+          committed.financial().balanced()&&
+          game.engine().trade_credit("CREDIT").drawn==3,
+          "only legitimate smaller loan and existing inventory commit");
+}
+
 int main(){
     try{
         automatic_sovereign_budget_uses_laws_effective_today();
         automatic_budget_retains_real_coupon_only_financing();
         refinance_only_matured_sovereign_principal_with_existing_cash();
         late_sale_cash_pays_earned_wages_before_bank_service();
+        collateral_cannot_be_reused_after_actual_inventory_shrinks();
+        caught_bank_rejection_releases_only_its_new_collateral_ticket();
         public_health_budget_and_treatment_require_eligible_clinics();
         std::string failures;
         for(const auto* extra:{"seeded-closed","law-closed","self-recipient"})

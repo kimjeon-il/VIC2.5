@@ -36,6 +36,8 @@
 #include <utility>
 #include <vector>
 
+namespace vic25::phasegh { class Stage; }
+
 namespace vic25::phasec {
 using Id = phaseb::Id;
 using People = phaseb::People;
@@ -190,6 +192,7 @@ struct AdvanceReport {
 
 class IntegratedWorld {
     friend struct SnapshotCodec;
+    friend class ::vic25::phasegh::Stage;
 public:
     using Task = std::function<void(IntegratedWorld&)>;
     using Plan = std::array<std::vector<Task>, 12>;
@@ -269,6 +272,10 @@ public:
                  const std::string& purpose,Quantity amount) {
         require_stage({3,7});
         ensure(phase_d_reservation_mode_,"phase G reservation mode disabled");
+        // Trade and cargo settlement may release their own holds, never
+        // a bank lien; its failed first-draw rollback is private to G/C.
+        ensure(!purpose.starts_with("G-COLLATERAL:"),
+               "trade settlement cannot release a bank collateral ticket");
         resources_.release_goods({owner,region,good},purpose,amount);
     }
     Id phase_d_certify_occupational_training(Id source,People count,
@@ -5485,6 +5492,20 @@ public:
     }
 
 private:
+    // G Stage validates the first draw. Own both the new transient ticket
+    // and the loan here; arbitrary Stage1 callbacks cannot release a lien.
+    void phase_g_lend_with_new_collateral(const std::string& borrower,
+            const std::string& region,const std::string& good,
+            const std::string& facility,Quantity pledged,Money amount) {
+        const auto ticket="G-COLLATERAL:"+facility;
+        phase_d_reserve_material(borrower,region,good,ticket,pledged);
+        try {
+            lend(borrower,amount);
+        } catch(...) {
+            resources_.release_goods({borrower,region,good},ticket,pledged);
+            throw;
+        }
+    }
     [[nodiscard]] bool peasant_only_draft(const std::string& country)const {
         for(const auto& [slot,id]:p2_active_base_) {
             (void)slot;

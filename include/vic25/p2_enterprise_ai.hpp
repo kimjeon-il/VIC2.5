@@ -198,14 +198,10 @@ inline Money draw_documented_credit(phasegh::Stage& gh,
     for(const auto& [id,line]:gh.commerce().credit) {
         if(borrowed>=requested)break;
         if(!line.active||line.borrower!=borrower ||
-           line.effective>c.month()||line.drawn>=line.limit||
-           c.stock(borrower,line.pledge_region,line.pledge_good)<
-                      line.pledged_goods)continue;
-        if(line.pledge_region==spending_region &&
-           line.pledge_good==spending_good &&
-           c.stock(borrower,spending_region,spending_good)<
-              phaseb::add_checked(line.pledged_goods,required_spending_units))
-            continue;
+           line.effective>c.month()||line.drawn>=line.limit)continue;
+        const auto keep_free=line.pledge_region==spending_region&&
+            line.pledge_good==spending_good?required_spending_units:0;
+        if(!gh.trade_credit_collateral_available(id,keep_free))continue;
         const Money draw=std::min(requested-borrowed,line.limit-line.drawn);
         if(draw<=0)continue;
         gh.draw_trade_credit(id,draw);
