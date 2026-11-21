@@ -2236,9 +2236,25 @@ public:
         const auto& demo=people_.demographic(row.key.demographic);
         ensure(econ.livelihood=="subsistence"||econ.livelihood=="self_employed",
                "not own-account labor");
-        const Quantity limit=positive_product(row.count,max_output_per_person);
-        ensure(household_output_[slice]+output<=limit,"subsistence labor overproduced");
-        household_output_[slice]+=output;
+        Quantity limit=positive_product(row.count,max_output_per_person);
+        // Subsistence farms are modeled as own-account household activity.
+        // Only the legal ceiling changes; posted output remains actual goods.
+        if(econ.livelihood=="subsistence" &&
+           p1_region_incorporated(demo.region)==std::optional<bool>{false}) {
+            const auto owner=sovereignty_.find(demo.region);
+            if(owner!=sovereignty_.end() &&
+               p2_selected_law(owner->second,"colonization")=="colonial_exploitation") {
+                constexpr Quantity scale=1'000'000;
+                static const auto delta=static_cast<Quantity>(std::llround(
+                    p2_catalog_raw_modifier("law_colonial_exploitation",
+                        "building_unincorporated_subsistence_output_mult")*scale));
+                limit=p4_scaled(limit,phaseb::add_checked(scale,delta),scale);
+            }
+        }
+        const auto previous=household_output_.find(slice);
+        const Quantity used=previous==household_output_.end()?0:previous->second;
+        ensure(used<=limit&&output<=limit-used,"subsistence labor overproduced");
+        household_output_[slice]=used+output;
         tracked_goods_.insert(good);
         goods_.produce({"HH:"+std::to_string(row.key.household),demo.region,good},output);
         if(phase_d_reservation_mode_)

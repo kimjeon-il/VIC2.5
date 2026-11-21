@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,23>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,24>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,23> evidence{{
+    static const std::array<CanonicalLawRowEvidence,24> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -135,7 +135,10 @@ inline const std::array<CanonicalLawRowEvidence,23>& canonical_law_row_evidence(
          "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
         {{"law_monarchy","country_legitimacy_ideological_incoherence_mult",0.1,false,false},
          "IntegratedWorld::p1_legitimacy",
-         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"}
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
+        {{"law_colonial_exploitation","building_unincorporated_subsistence_output_mult",-0.1,false,false},
+         "IntegratedWorld::household_produce (explicit Stage 4 own-account ceiling)",
+         "test_phase_c::D4-T49"}
     }};
     return evidence;
 }

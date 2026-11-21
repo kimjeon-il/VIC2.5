@@ -271,6 +271,16 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     check(legitimacy_base==6 && legitimacy_incoherence==4,
           "verified national legitimacy rows missing");
 
+    check(std::count_if(audit.begin(),audit.end(),[](const auto& entry) {
+        return entry.source.source_id=="law_colonial_exploitation" &&
+               entry.source.key=="building_unincorporated_subsistence_output_mult" &&
+               !entry.source.boolean && !entry.source.institution && !entry.source.sponsor &&
+               entry.normalized_value==-100'000 &&
+               entry.status==CanonicalLawRowStatus::verified_row &&
+               entry.executor=="IntegratedWorld::household_produce (explicit Stage 4 own-account ceiling)" &&
+               entry.behavior_test=="test_phase_c::D4-T49";
+    })==1,"explicit Stage 4 subsistence proof missing");
+
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.
     const std::array<CanonicalLawRowEvidence,3> mixed{{
