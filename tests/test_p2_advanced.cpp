@@ -38,6 +38,8 @@ struct Fixture {
             P1PowerDistribution::universal_vote,
             P1LegislatureKind::bicameral,"constitution:bicameral"});
         c.seed_interest_group("Workers");
+        c.p3_seed_group({"A","Workers","","","",
+                         P3GroupType::trade_unions,850'000,0});
         c.p4_register_party({"MAJ","A","HEAD_MAJ",900'000,true,true});
         c.p4_register_party({"OPP","A","HEAD_OPP",100'000,true,true});
         const auto initial=day({2000,1,2});

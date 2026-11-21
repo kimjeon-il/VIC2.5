@@ -14,14 +14,14 @@ static const IntegratedWorld& core(const daily::World& world) {
 }
 struct Fixture {
     phasegh::World gh{24000};
-    explicit Fixture(const std::string& law_choice) {
+    explicit Fixture(const std::string& law_choice,Money employer_cash=1000) {
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"R","A");
         geo.seed_unit(100,"A","Administration");
         geo.seed_assignment(1,100);
         auto& c=geo.seed_core().seed_core();
         c.seed_actor("A",1000);
-        c.seed_actor("EMP",1000);
+        c.seed_actor("EMP",employer_cash);
         c.seed_actor("WORKER",0);
         c.seed_government("A","HEAD","PM",5,3);
         c.seed_p1_constitution("A",{
@@ -111,7 +111,46 @@ static void judicial_law_constrains_only_overdue_real_claims() {
                      "judicial enforcement may not fabricate creditor funding");
     }
 }
+static void judicial_recovery_uses_payable_claim_and_real_cash() {
+    const auto check_collection=[](int age,Money cash,Money expected) {
+        Fixture f{"executive_subordinate",cash};
+        auto world=daily::World::adopt(std::move(f.gh),103);
+        const auto issued=world.day_index();
+        const auto accrue=[](phasegh::Stage& gh,daily::DayIndex date) {
+            gh.phase_c().phase_time_accrue_contract_wage(
+                "DEBT","EMP","WORKER","A","A",100,date);
+        };
+        if(age>0) {
+            phasegh::World::Plan owe;
+            owe[5].push_back([&](phasegh::Stage& gh){accrue(gh,issued);});
+            world.advance_day(owe);
+            while(world.day_index()<issued+age)world.advance_day();
+        }
+        const Money treasury_before=core(world).cash("A");
+        const Money withholding=expected*core(world).income_tax_ppm("A")/1'000'000;
+        phasegh::World::Plan settle;
+        settle[5].push_back([&](phasegh::Stage& gh) {
+            if(age==0)accrue(gh,issued);
+            gh.phase_c().phase_time_settle_wage_arrears(issued+age);
+        });
+        world.advance_day(settle);
+        const auto& c=core(world);
+        const auto remaining=c.wage_arrears().find("DEBT");
+        require_test((remaining==c.wage_arrears().end()?Money{0}:
+                          remaining->second.outstanding)==100-expected,
+                     "collection did not preserve the unpaid portion of the actual claim");
+        require_test(c.cash("EMP")==cash-expected&&
+                     c.cash("WORKER")==expected-withholding&&
+                     c.cash("A")==treasury_before+withholding,
+                     "collection did not conserve the exact payment and tax withholding");
+    };
+    check_collection(0,50,50);     // ordinary same-day payroll
+    check_collection(29,1000,100); // not overdue yet
+    check_collection(30,1000,40);  // collectible amount bounded by the claim
+    check_collection(30,50,20);    // collectible amount bounded by real cash
+}
 int main() {
     no_confidence_is_an_actual_vote();
     judicial_law_constrains_only_overdue_real_claims();
+    judicial_recovery_uses_payable_claim_and_real_cash();
 }

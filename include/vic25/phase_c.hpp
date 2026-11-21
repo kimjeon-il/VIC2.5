@@ -3272,7 +3272,10 @@ public:
                 if(created)
                     entry->second=p1_judiciary_view(claim.country)
                                       .enforceable_contract_ppm;
-                enforceable=p4_scaled(free,entry->second,1'000'000);
+                // The court rate limits recovery of this actually
+                // collectible claim, not the employer's full cash balance.
+                enforceable=p4_scaled(std::min(free,claim.outstanding),
+                                      entry->second,1'000'000);
             }
             const Money paid=std::min(enforceable,claim.outstanding);
             if(paid<=0){++it;continue;}
