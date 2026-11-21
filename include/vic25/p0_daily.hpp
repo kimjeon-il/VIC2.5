@@ -1217,74 +1217,89 @@ public:
                 break;
             }
         }
-        // When a country has no explicit national budget, derive only the
-        // obligations backed by current statutory services and contracts.
-        // Unobserved transport rates, historical coupons and fictional tax
-        // income are never inserted. An unknown bank rate disables endogenous
-        // commercial bids; only real investor orders can finance such debt.
+        phasegh::World::Plan plan;
+        struct NationalBudgetDay {
+            // Preserve auction allocation order for shared investors and
+            // sorted country order for public service payout.
+            std::vector<std::string> order;
+            std::map<std::string,NationalBudgetEnvelope> by_country;
+            void append(NationalBudgetEnvelope envelope) {
+                order.push_back(envelope.country);
+                by_country.emplace(order.back(),std::move(envelope));
+            }
+        };
+        auto national_day=std::make_shared<NationalBudgetDay>();
+        for(const auto& budget:decisions.national_budget_envelopes)
+            national_day->append(budget);
+        const bool has_budget_plan=decisions.auto_national_budgets_from_actual_services||
+                                   !national_day->order.empty();
+        // Read actual dated laws after Stage0 has applied them. Freeze the
+        // automatic envelopes once before Stage1 auctions, for Stage5 as well.
         if(decisions.auto_national_budgets_from_actual_services) {
-            std::set<std::string> managed;
-            for(const auto& b:decisions.national_budget_envelopes)
-                managed.insert(b.country);
+            std::set<std::string> managed(national_day->order.begin(),
+                                          national_day->order.end());
             for(const auto& b:decisions.sovereign_financing)
                 managed.insert(b.country);
-            for(const auto& [country,government]:game_c.governments()) {
-                (void)government;
-                if(managed.contains(country)||!game_c.has_country_treasury(
-                        country))continue;
-                const auto fiscal=game_c.country_fiscal(country);
-                Money real_need=0;
-                for(const auto& [id,svc]:game_c.public_institutions()) {
-                    const auto slots=game_c.public_clinic_fundable_slots(id,country);
-                    if(slots<=0||!game_c.has_market(svc.region,svc.good)||
-                       game_c.phase_d_workforce(svc.operator_id)<=0)
-                        continue;
-                    const Quantity throughput=daily_budget::increment(
-                        slots,date.day,dim);
-                    const Quantity on_hand=game_c.stock(
-                        svc.operator_id,svc.region,svc.good);
-                    const Quantity units=std::min(throughput,on_hand);
-                    if(units>0)
-                        real_need=phaseb::add_checked(real_need,
-                            times(units,game_c.market(
-                                svc.region,svc.good).price));
+            plan[1].push_back([national_day,managed=std::move(managed),
+                               programs=decisions.public_budget,date,dim]
+                              (phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                for(const auto& [country,government]:c.governments()) {
+                    (void)government;
+                    if(managed.contains(country)||!c.has_country_treasury(
+                            country))continue;
+                    const auto fiscal=c.country_fiscal(country);
+                    Money real_need=0;
+                    for(const auto& [id,svc]:c.public_institutions()) {
+                        const auto slots=c.public_clinic_fundable_slots(id,country);
+                        if(slots<=0||!c.has_market(svc.region,svc.good)||
+                           c.phase_d_workforce(svc.operator_id)<=0)
+                            continue;
+                        const Quantity throughput=daily_budget::increment(
+                            slots,date.day,dim);
+                        const Quantity on_hand=c.stock(
+                            svc.operator_id,svc.region,svc.good);
+                        const Quantity units=std::min(throughput,on_hand);
+                        if(units>0)
+                            real_need=phaseb::add_checked(real_need,
+                                times(units,c.market(
+                                    svc.region,svc.good).price));
+                    }
+                    for(const auto& public_program:programs)
+                        if(public_program.country==country)
+                            real_need=phaseb::add_checked(real_need,
+                                public_program.daily_spending_limit);
+                    if(real_need<=0&&fiscal.unpaid_coupons<=0)continue;
+                    const Money observed_receipts=std::max<Money>(
+                        0,fiscal.realized_revenue);
+                    // The cumulative borrowing ceiling is anchored to
+                    // independently realized treasury receipts, NOT existing
+                    // bond principal plus receipts. Adding existing principal
+                    // here would create new unearned debt headroom every day.
+                    const Money unsecured_ceiling=std::max<Money>(
+                        1,observed_receipts);
+                    const Money daily_financing_need=phaseb::add_checked(
+                        real_need,fiscal.unpaid_coupons);
+                    NationalBudgetEnvelope envelope;
+                    envelope.country=country;
+                    envelope.reserve_cash=0;
+                    envelope.maximum_daily_spending=real_need;
+                    envelope.target_cash=fiscal.unpaid_coupons;
+                    envelope.maximum_daily_new_bonds=
+                        std::max<Money>(1,daily_financing_need);
+                    envelope.maximum_total_bond_principal=
+                        std::max<Money>(1,unsecured_ceiling);
+                    envelope.minimum_coupon_ppm=
+                        c.annual_bank_interest_ppm();
+                    envelope.maximum_coupon_ppm=envelope.minimum_coupon_ppm;
+                    envelope.maturity_days=365; // declared game policy, not historical rate
+                    envelope.offer_to_operating_firms=
+                        envelope.minimum_coupon_ppm>0;
+                    envelope.finance_real_public_services=true;
+                    national_day->append(std::move(envelope));
                 }
-                for(const auto& public_program:decisions.public_budget)
-                    if(public_program.country==country)
-                        real_need=phaseb::add_checked(real_need,
-                            public_program.daily_spending_limit);
-                if(real_need<=0&&fiscal.unpaid_coupons<=0)continue;
-                const Money observed_receipts=std::max<Money>(
-                    0,fiscal.realized_revenue);
-                // The cumulative borrowing ceiling is anchored to
-                // independently realized treasury receipts, NOT existing
-                // bond principal plus receipts. Adding existing principal
-                // here would create new unearned debt headroom every day.
-                const Money unsecured_ceiling=std::max<Money>(
-                    1,observed_receipts);
-                const Money daily_financing_need=phaseb::add_checked(
-                    real_need,fiscal.unpaid_coupons);
-                NationalBudgetEnvelope envelope;
-                envelope.country=country;
-                envelope.reserve_cash=0;
-                envelope.maximum_daily_spending=real_need;
-                envelope.target_cash=fiscal.unpaid_coupons;
-                envelope.maximum_daily_new_bonds=
-                    std::max<Money>(1,daily_financing_need);
-                envelope.maximum_total_bond_principal=
-                    std::max<Money>(1,unsecured_ceiling);
-                envelope.minimum_coupon_ppm=
-                    game_c.annual_bank_interest_ppm();
-                envelope.maximum_coupon_ppm=envelope.minimum_coupon_ppm;
-                envelope.maturity_days=365; // declared game policy, not historical rate
-                envelope.offer_to_operating_firms=
-                    envelope.minimum_coupon_ppm>0;
-                envelope.finance_real_public_services=true;
-                decisions.national_budget_envelopes.push_back(
-                    std::move(envelope));
-            }
+            });
         }
-        phasegh::World::Plan plan;
         // A solvent private buyer must really fund each bond. Mere
         // government demand for funds never creates an investor deposit.
         for(const auto& financing:decisions.sovereign_financing)
@@ -1315,83 +1330,87 @@ public:
         // Each country's financing requirement is determined from its real
         // C treasury, not a fictitious construction point budget. Private
         // bids are sorted by required coupon and capped by actual cash.
-        for(const auto& national:decisions.national_budget_envelopes)
+        if(has_budget_plan)
             plan[1].push_back(
-                [national,orders=decisions.bond_buyer_orders,
+                [national_day,orders=decisions.bond_buyer_orders,
                  today=world_.day_index()](phasegh::Stage& gh) {
                     auto& c=gh.phase_c();
-                    if(!c.has_country_treasury(national.country))return;
-                    const auto fiscal=c.country_fiscal(national.country);
-                    const Money desired=phaseb::add_checked(
-                        national.target_cash,national.maximum_daily_spending);
-                    if(fiscal.cash>=desired||
-                       fiscal.bond_principal>=
-                         national.maximum_total_bond_principal)return;
-                    Money want=std::min({
-                        desired-fiscal.cash,
-                        national.maximum_daily_new_bonds,
-                        national.maximum_total_bond_principal-
-                            fiscal.bond_principal});
-                    std::vector<BondBuyerOrder> bids;
-                    for(const auto& order:orders)
-                        if(order.country==national.country)
-                            bids.push_back(order);
-                    if(national.offer_to_operating_firms&&
-                       national.minimum_coupon_ppm>0&&
-                       national.maximum_coupon_ppm>=
-                         c.annual_bank_interest_ppm()) {
-                        std::set<std::string> contacted;
-                        for(const auto& [site,f]:c.facilities()) {
-                            (void)site;
-                            const auto& owner=f.owner;
-                            if(!contacted.insert(owner).second||
-                               c.firm_bankrupt(owner)||!c.has_actor(owner)||
-                               c.has_government(owner)||
-                               owner==fiscal.treasury ||
-                               std::any_of(bids.begin(),bids.end(),
-                                    [&](const auto& bid){
-                                        return bid.buyer==owner;
-                                    }))continue;
-                            const Money free=std::max<Money>(0,
-                                c.phase_d_cash_available(owner));
-                            if(free<=1)continue;
-                            const Money reserve=free-free/4;
-                            if(free-reserve<=0)continue;
-                            bids.push_back({national.country,owner,
-                                free-reserve,reserve,
-                                c.annual_bank_interest_ppm()});
+                    const auto finance=[&](const NationalBudgetEnvelope& national) {
+                        if(!c.has_country_treasury(national.country))return;
+                        const auto fiscal=c.country_fiscal(national.country);
+                        const Money desired=phaseb::add_checked(
+                            national.target_cash,national.maximum_daily_spending);
+                        if(fiscal.cash>=desired||
+                           fiscal.bond_principal>=
+                             national.maximum_total_bond_principal)return;
+                        Money want=std::min({
+                            desired-fiscal.cash,
+                            national.maximum_daily_new_bonds,
+                            national.maximum_total_bond_principal-
+                                fiscal.bond_principal});
+                        std::vector<BondBuyerOrder> bids;
+                        for(const auto& order:orders)
+                            if(order.country==national.country)
+                                bids.push_back(order);
+                        if(national.offer_to_operating_firms&&
+                           national.minimum_coupon_ppm>0&&
+                           national.maximum_coupon_ppm>=
+                             c.annual_bank_interest_ppm()) {
+                            std::set<std::string> contacted;
+                            for(const auto& [site,f]:c.facilities()) {
+                                (void)site;
+                                const auto& owner=f.owner;
+                                if(!contacted.insert(owner).second||
+                                   c.firm_bankrupt(owner)||!c.has_actor(owner)||
+                                   c.has_government(owner)||
+                                   owner==fiscal.treasury ||
+                                   std::any_of(bids.begin(),bids.end(),
+                                        [&](const auto& bid){
+                                            return bid.buyer==owner;
+                                        }))continue;
+                                const Money free=std::max<Money>(0,
+                                    c.phase_d_cash_available(owner));
+                                if(free<=1)continue;
+                                const Money reserve=free-free/4;
+                                if(free-reserve<=0)continue;
+                                bids.push_back({national.country,owner,
+                                    free-reserve,reserve,
+                                    c.annual_bank_interest_ppm()});
+                            }
                         }
-                    }
-                    std::sort(bids.begin(),bids.end(),
-                        [](const auto& a,const auto& b) {
-                            return std::tuple{a.minimum_coupon_ppm,a.buyer}<
-                                   std::tuple{b.minimum_coupon_ppm,b.buyer};
-                        });
-                    for(const auto& bid:bids) {
-                        if(want<=0)break;
-                        if(!c.has_actor(bid.buyer)||
-                           c.firm_bankrupt(bid.buyer)||
-                           bid.buyer==fiscal.treasury)continue;
-                        const int coupon=std::max(
-                            national.minimum_coupon_ppm,
-                            bid.minimum_coupon_ppm);
-                        if(coupon>national.maximum_coupon_ppm)continue;
-                        const Money liquidity=c.phase_d_cash_available(
-                            bid.buyer);
-                        if(liquidity<=bid.cash_reserve)continue;
-                        const Money purchase=std::min({
-                            want,bid.max_daily_subscription,
-                            liquidity-bid.cash_reserve});
-                        if(purchase<=0)continue;
-                        const auto id="P0:AUCTION:"+national.country+":"+
-                            std::to_string(today)+":"+bid.buyer;
-                        const auto& prime=
-                            c.government(national.country).prime_minister;
-                        c.issue_sovereign_bond(id,national.country,prime,
-                                              bid.buyer,purchase,coupon,today,
-                            phaseb::add_checked(today,national.maturity_days));
-                        want-=purchase;
-                    }
+                        std::sort(bids.begin(),bids.end(),
+                            [](const auto& a,const auto& b) {
+                                return std::tuple{a.minimum_coupon_ppm,a.buyer}<
+                                       std::tuple{b.minimum_coupon_ppm,b.buyer};
+                            });
+                        for(const auto& bid:bids) {
+                            if(want<=0)break;
+                            if(!c.has_actor(bid.buyer)||
+                               c.firm_bankrupt(bid.buyer)||
+                               bid.buyer==fiscal.treasury)continue;
+                            const int coupon=std::max(
+                                national.minimum_coupon_ppm,
+                                bid.minimum_coupon_ppm);
+                            if(coupon>national.maximum_coupon_ppm)continue;
+                            const Money liquidity=c.phase_d_cash_available(
+                                bid.buyer);
+                            if(liquidity<=bid.cash_reserve)continue;
+                            const Money purchase=std::min({
+                                want,bid.max_daily_subscription,
+                                liquidity-bid.cash_reserve});
+                            if(purchase<=0)continue;
+                            const auto id="P0:AUCTION:"+national.country+":"+
+                                std::to_string(today)+":"+bid.buyer;
+                            const auto& prime=
+                                c.government(national.country).prime_minister;
+                            c.issue_sovereign_bond(id,national.country,prime,
+                                                  bid.buyer,purchase,coupon,today,
+                                phaseb::add_checked(today,national.maturity_days));
+                            want-=purchase;
+                        }
+                    };
+                    for(const auto& country:national_day->order)
+                        finance(national_day->by_country.at(country));
                 });
         auto salary_shortfall=std::make_shared<std::set<std::string>>();
         std::set<Id> preplanned_payroll_slices;
@@ -3166,52 +3185,50 @@ public:
         // Aggregate all policy categories under a single national cash
         // envelope. Real health providers are funded from existing treasury
         // deposits, actual medicines, and staffed operating facilities.
-        std::map<std::string,NationalBudgetEnvelope> national_envelopes;
-        for(const auto& b:decisions.national_budget_envelopes)
-            national_envelopes.emplace(b.country,b);
         auto budget_spent_today=
             std::make_shared<std::map<std::string,Money>>();
-        for(const auto& [country,budget]:national_envelopes) {
-            if(!budget.finance_real_public_services||
-               budget.maximum_daily_spending<=0)continue;
-            plan[5].push_back([budget,date,dim,budget_spent_today]
+        if(has_budget_plan)
+            plan[5].push_back([national_day,date,dim,budget_spent_today]
                               (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
-                if(!c.has_country_treasury(budget.country))return;
-                const auto& treasury=c.country_treasury(budget.country);
-                for(const auto& [id,svc]:c.public_institutions()) {
-                    const auto slots=c.public_clinic_fundable_slots(id,budget.country);
-                    if(slots<=0||!c.has_market(svc.region,svc.good))continue;
-                    const auto available_slots=daily_budget::remaining(
-                        slots,svc.provided,date.day,dim);
-                    if(available_slots<=0||c.phase_d_workforce(
-                            svc.operator_id)<=0||
-                       c.stock(svc.operator_id,svc.region,svc.good)<=0)
-                        continue;
-                    const Money unit=c.market(svc.region,svc.good).price;
-                    if(unit<=0)continue;
-                    const auto daily_left=budget.maximum_daily_spending-
-                        (*budget_spent_today)[budget.country];
-                    const auto cash_left=c.phase_d_cash_available(treasury)-
-                        budget.reserve_cash;
-                    if(daily_left<=0||cash_left<=0)break;
-                    const auto intended=phaseb::mul_checked(
-                        std::min<Quantity>(available_slots,
-                            c.stock(svc.operator_id,svc.region,svc.good)),unit);
-                    const Money paid=std::min({intended,daily_left,cash_left});
-                    if(paid<=0)continue;
-                    c.spend_country_budget(budget.country,svc.operator_id,paid);
-                    (*budget_spent_today)[budget.country]=
-                        phaseb::add_checked(
-                            (*budget_spent_today)[budget.country],paid);
+                for(const auto& [country,budget]:national_day->by_country) {
+                    if(!budget.finance_real_public_services||
+                       budget.maximum_daily_spending<=0||
+                       !c.has_country_treasury(country))continue;
+                    const auto& treasury=c.country_treasury(budget.country);
+                    for(const auto& [id,svc]:c.public_institutions()) {
+                        const auto slots=c.public_clinic_fundable_slots(id,budget.country);
+                        if(slots<=0||!c.has_market(svc.region,svc.good))continue;
+                        const auto available_slots=daily_budget::remaining(
+                            slots,svc.provided,date.day,dim);
+                        if(available_slots<=0||c.phase_d_workforce(
+                                svc.operator_id)<=0||
+                           c.stock(svc.operator_id,svc.region,svc.good)<=0)
+                            continue;
+                        const Money unit=c.market(svc.region,svc.good).price;
+                        if(unit<=0)continue;
+                        const auto daily_left=budget.maximum_daily_spending-
+                            (*budget_spent_today)[budget.country];
+                        const auto cash_left=c.phase_d_cash_available(treasury)-
+                            budget.reserve_cash;
+                        if(daily_left<=0||cash_left<=0)break;
+                        const auto intended=phaseb::mul_checked(
+                            std::min<Quantity>(available_slots,
+                                c.stock(svc.operator_id,svc.region,svc.good)),unit);
+                        const Money paid=std::min({intended,daily_left,cash_left});
+                        if(paid<=0)continue;
+                        c.spend_country_budget(budget.country,svc.operator_id,paid);
+                        (*budget_spent_today)[budget.country]=
+                            phaseb::add_checked(
+                                (*budget_spent_today)[budget.country],paid);
+                    }
                 }
             });
-        }
         // Public obligations are paid directly from the real C fiscal
         // wallet to an existing service provider with a declared policy cap.
         // An absent provider or empty treasury cannot produce "free" output.
         for(const auto& program:decisions.public_budget)
-            plan[5].push_back([program,national_envelopes,budget_spent_today]
+            plan[5].push_back([program,national_day,budget_spent_today]
                               (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 if(!c.has_country_treasury(program.country)||
@@ -3222,8 +3239,8 @@ public:
                 if(free<=program.treasury_cash_reserve)return;
                 Money amount=std::min(program.daily_spending_limit,
                                       free-program.treasury_cash_reserve);
-                auto budget=national_envelopes.find(program.country);
-                if(budget!=national_envelopes.end()) {
+                const auto budget=national_day->by_country.find(program.country);
+                if(budget!=national_day->by_country.end()) {
                     const auto& envelope=budget->second;
                     const auto remaining=envelope.maximum_daily_spending-
                                            (*budget_spent_today)[program.country];

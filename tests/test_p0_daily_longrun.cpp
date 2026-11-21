@@ -479,8 +479,173 @@ static void public_health_budget_and_treatment_require_eligible_clinics(
     }
 }
 
+static void automatic_sovereign_budget_uses_laws_effective_today() {
+    using namespace phasec;
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    auto& ledger=geo.seed_core().seed_core();
+    for(const auto* country:{"A","B"}) {
+        const std::string tag=country,region="R"+tag,clinic=tag+"_CLINIC";
+        const int number=tag=="A"?1:2;
+        geo.seed_province(number,region,tag);
+        geo.seed_unit(number,tag,"ROOT");
+        geo.seed_assignment(number,number);
+        ledger.seed_government(tag,tag+"_HEAD",tag+"_PM",5,3);
+        ledger.seed_p1_constitution(tag,{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,
+            "fixture:constitution"});
+        ledger.seed_actor(tag+"_TREASURY",0);
+        ledger.seed_actor(tag+"_BIDDER",100);
+        ledger.seed_actor(clinic,0);
+        ledger.seed_country_treasury(tag,tag+"_TREASURY");
+        ledger.seed_market(region,"medicine",1,1,1);
+        ledger.seed_public_institution(clinic,clinic,region,"medicine",16,1);
+        ledger.seed_p1_institution(tag,clinic,P1InstitutionKind::healthcare,5);
+        ledger.seed_stock(clinic,region,"medicine",10);
+        auto& pop=ledger.seed_population();
+        const auto hh=pop.household_profile({region,"mixed","shared",5});
+        const auto econ=pop.economic_profile({region,"worker","wage","employee",
+            pop.default_education()});
+        const auto demo=pop.demographic_profile({region,24000-300,
+            phaseb::Sex::female,"culture","faith","citizen","free",
+            pop.default_health(),phaseb::Service::civilian});
+        const auto worker=pop.seed_population(demo,econ,hh,5,number);
+        pop.hire(worker,1,clinic,"worker",10,{});
+        if(tag=="B") {
+            P2BaseLaw prior;
+            prior.id="B_HEALTH"; prior.country=tag; prior.domain="healthcare";
+            prior.scope="national"; prior.base_choice="fixture-care";
+            prior.legal_basis="fixture:prior-health-statute";
+            prior.clauses={{"health-right",tag,P2ClauseKind::public_healthcare_right,1}};
+            ledger.p2_seed_base(prior);
+        }
+    }
+    gh.validate();
+    auto opening=daily::World::adopt(std::move(gh),316);
+    const auto today=opening.day_index();
+    phasegh::World::Plan introduce;
+    introduce[9].push_back([today](phasegh::Stage& stage) {
+        auto& c=stage.phase_c();
+        P2Bill grant;
+        grant.id="GRANT"; grant.country="A"; grant.proposer="A_PM";
+        grant.legal_basis="fixture:health-grant"; grant.effective_day=today+1;
+        grant.proposed_base.id="A_HEALTH"; grant.proposed_base.country="A";
+        grant.proposed_base.domain="healthcare"; grant.proposed_base.scope="national";
+        grant.proposed_base.base_choice="fixture-care";
+        grant.proposed_base.legal_basis=grant.legal_basis;
+        grant.proposed_base.clauses={{"health-right","A",
+            P2ClauseKind::public_healthcare_right,1}};
+        c.p2_submit_bill(grant,today);
+        c.p2_approve_bill("GRANT",{});
+        c.p2_promulgate_bill("GRANT","A_HEAD",today);
+        P2Bill repeal;
+        repeal.id="REPEAL"; repeal.country="B"; repeal.proposer="B_PM";
+        repeal.legal_basis="fixture:health-repeal"; repeal.effective_day=today+1;
+        repeal.action=P2BillAction::repeal_base; repeal.target_id="B_HEALTH";
+        c.p2_submit_bill(repeal,today);
+        c.p2_approve_bill("REPEAL",{});
+        c.p2_promulgate_bill("REPEAL","B_HEAD",today);
+    });
+    p0::Policies policies;
+    policies.daily_food_units_per_person=0;
+    policies.bond_buyer_orders={{"A","A_BIDDER",10,0,0},{"B","B_BIDDER",10,0,0}};
+    const auto core=[](const p0::DailyGame& game)->const IntegratedWorld& {
+        return game.world().engine().base().core().core();
+    };
+    p0::DailyGame before(std::move(opening),policies);
+    before.advance_day(introduce); // Jan 1: daily clinic quota is zero.
+    check(!core(before).public_clinic_entitled("A_CLINIC")&&
+          core(before).public_clinic_entitled("B_CLINIC")&&
+          core(before).sovereign_bond_principal("A")==0&&
+          core(before).sovereign_bond_principal("B")==0,
+          "dated bills must not alter opening day or create pre-effective debt");
+
+    const auto pending=daily::SnapshotCodec::encode(before.world());
+    p0::DailyGame reopened(daily::SnapshotCodec::decode(pending),policies);
+    reopened.advance_day(); // Jan 2: exactly one clinic quota and both P2 laws mature.
+    const auto& settled=core(reopened);
+    check(settled.public_clinic_entitled("A_CLINIC")&&
+          !settled.public_clinic_entitled("B_CLINIC"),
+          "test health laws did not take effect at opening on their authorized date");
+    const bool grant_paid=settled.cash("A_CLINIC")==1&&
+             settled.cash("A_BIDDER")==99&&
+             settled.sovereign_bond_principal("A")==1&&
+             settled.country_fiscal("A").realized_expenditure==1&&
+             settled.cash("A_TREASURY")==0;
+    const bool repeal_no_debt=settled.cash("B_CLINIC")==0&&
+             settled.cash("B_BIDDER")==100&&
+             settled.sovereign_bond_principal("B")==0&&
+             settled.country_fiscal("B").realized_expenditure==0&&
+             settled.cash("B_TREASURY")==0;
+    if(!grant_paid||!repeal_no_debt)
+        throw std::runtime_error(std::string("dated clinic budget: ")+
+            (grant_paid?"grant correctly paid":"grant failed real same-day payment")+
+            "; "+(repeal_no_debt?"repeal had no debt":"repeal issued imaginary principal"));
+
+    // A manually configured freeze is not overwritten by automatic funding
+    // even when the newly valid clinic is otherwise eligible for a real bid.
+    policies.national_budget_envelopes.push_back({"A",0,0,0,1,1,0,0,365,false,true});
+    p0::DailyGame explicit_freeze(daily::SnapshotCodec::decode(pending),policies);
+    explicit_freeze.advance_day();
+    const auto& fixed=core(explicit_freeze);
+    check(fixed.public_clinic_entitled("A_CLINIC")&&fixed.cash("A_CLINIC")==0&&
+          fixed.cash("A_BIDDER")==100&&fixed.sovereign_bond_principal("A")==0&&
+          fixed.sovereign_bond_principal("B")==0,
+          "explicit envelope cannot be replaced by an automatic one");
+}
+
+static void automatic_budget_retains_real_coupon_only_financing() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(1,"A","ROOT");
+    geo.seed_assignment(1,1);
+    auto& opening=geo.seed_core().seed_core();
+    opening.seed_government("A","HEAD","PM",5,3);
+    opening.seed_actor("TREASURY",0);
+    opening.seed_actor("INITIAL_HOLDER",365);
+    opening.seed_actor("STANDING_BIDDER",100);
+    opening.seed_actor("TRANSFER_DONOR",500);
+    opening.seed_actor("PAID_RECIPIENT",0);
+    opening.seed_country_treasury("A","TREASURY");
+    auto world=daily::World::adopt(std::move(gh),317);
+    const auto today=world.day_index();
+    phasegh::World::Plan obligation;
+    obligation[1].push_back([today](phasegh::Stage& stage) {
+        stage.phase_c().issue_sovereign_bond("ORIGINAL","A","PM",
+            "INITIAL_HOLDER",365,1'000'000,today,today+365);
+    });
+    obligation[5].push_back([](phasegh::Stage& stage) {
+        auto& c=stage.phase_c();
+        c.pay("TRANSFER_DONOR","TREASURY",500);
+        c.spend_country_budget("A","PAID_RECIPIENT",865);
+    });
+    p0::Policies policies;
+    policies.daily_food_units_per_person=0;
+    policies.bond_buyer_orders.push_back({"A","STANDING_BIDDER",10,0,0});
+    p0::DailyGame game(std::move(world),policies);
+    const auto core=[&]()->const phasec::IntegratedWorld& {
+        return game.world().engine().base().core().core();
+    };
+    game.advance_day(obligation);
+    game.advance_day(); // The first actual coupon accrues, but cannot be paid.
+    check(core().country_fiscal("A").unpaid_coupons==1&&
+          core().country_fiscal("A").realized_revenue==500&&
+          core().cash("TREASURY")==0&&core().cash("STANDING_BIDDER")==100&&
+          core().sovereign_bond_principal("A")==365,
+          "unfunded authentic coupon must be visible before automatic financing");
+    game.advance_day(); // Existing unpaid coupon is enough to derive an envelope.
+    check(core().sovereign_bond_principal("A")==366&&
+          core().country_fiscal("A").unpaid_coupons==1&&
+          core().cash("STANDING_BIDDER")==99&&
+          core().cash("INITIAL_HOLDER")==1&&core().cash("TREASURY")==0,
+          "coupon-only automatic envelope must fund actual dated coupon cash");
+}
+
 int main(){
     try{
+        automatic_sovereign_budget_uses_laws_effective_today();
+        automatic_budget_retains_real_coupon_only_financing();
         public_health_budget_and_treatment_require_eligible_clinics();
         std::string failures;
         for(const auto* extra:{"seeded-closed","law-closed","self-recipient"})
