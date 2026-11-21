@@ -356,7 +356,7 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==86,
+    check(canonical_law_row_evidence().size()==99,
           "expected 73 preserved witnesses and 13 exact direct typed strength rows");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
@@ -597,6 +597,26 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(typed_strength_proven.size()==typed_strengths.size(),
           "missing exact direct typed strength witness");
+
+    std::size_t exact_profession_strength=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test!="test_p3_p5_politics::exact_professions_weight_actual_group_members")continue;
+        check(row.source.key.starts_with("country_") && row.source.key.ends_with("_pol_str_mult") &&
+              !row.source.boolean && !row.source.institution && !row.source.sponsor &&
+              row.executor=="IntegratedWorld::p3_group_view (verified occupation-weighted membership)" &&
+              row.status==CanonicalLawRowStatus::verified_row,
+              "occupation witness mixed with a direct interest-group or qualified modifier");
+        auto mismatch=row.source;
+        mismatch.institution=true;
+        check(classify_canonical_law_row(mismatch,canonical_law_row_evidence()).status==
+                  CanonicalLawRowStatus::no_recorded_path,
+              "flat occupation strength witness leaked to an institution-qualified row");
+        ++exact_profession_strength;
+    }
+    check(exact_profession_strength==13 &&
+          classify_canonical_law_row({"law_shinsengumi","country_officers_pol_str_mult",0.1,false,false},
+              canonical_law_row_evidence()).status==CanonicalLawRowStatus::no_recorded_path,
+          "occupation coverage missed exact receipts or claimed unverified officers");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

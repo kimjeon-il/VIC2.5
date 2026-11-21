@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,86>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,99>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,86> evidence{{
+    static const std::array<CanonicalLawRowEvidence,99> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -324,7 +324,46 @@ inline const std::array<CanonicalLawRowEvidence,86>& canonical_law_row_evidence(
          "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
         {{"amendment_factory_councils","interest_group_ig_trade_unions_pol_str_mult",0.25,false,false},
          "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
-         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"}
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"law_latifundias","country_peasants_pol_str_mult",-0.2,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_appointed_bureaucrats","country_bureaucrats_pol_str_mult",0.5,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_communal_administration","country_bureaucrats_pol_str_mult",-0.25,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"amendment_bourgeois_specialists","country_bureaucrats_pol_str_mult",0.15,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_technocracy","country_academics_pol_str_mult",0.33,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_guild_system","country_shopkeepers_pol_str_mult",0.25,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_latifundias","country_aristocrats_pol_str_mult",0.4,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_oligarchy","country_capitalists_pol_str_mult",0.25,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_elder_council","country_clergymen_pol_str_mult",0.5,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_organic_regulation","country_clerks_pol_str_mult",0.25,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_technocracy","country_engineers_pol_str_mult",0.33,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_homesteading","country_farmers_pol_str_mult",0.25,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"},
+        {{"law_extraordinary_commission","country_soldiers_pol_str_mult",0.15,false,false},
+         "IntegratedWorld::p3_group_view (verified occupation-weighted membership)",
+         "test_p3_p5_politics::exact_professions_weight_actual_group_members"}
     }};
     return evidence;
 }

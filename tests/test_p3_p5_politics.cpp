@@ -365,14 +365,96 @@ static void shinsengumi_changes_movement_risk_without_altering_pop() {
          "movement law should change real pressure without modifying POP radicalism");
 }
 
+static void exact_professions_weight_actual_group_members() {
+    const auto run=[](const std::string& domain,const std::string& choice,
+                      const std::string& profession,People weighted,bool amendment=false) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        for(const auto* nation:{"A","B"}) {
+            const auto id=std::string_view(nation)=="A"?1:2;
+            geo.seed_province(id,nation,nation);geo.seed_unit(id,nation,"District");
+            geo.seed_assignment(id,id);
+        }
+        auto& core=geo.seed_core().seed_core();
+        core.seed_actor("EMP",1000);
+        core.seed_interest_group("Role");core.seed_interest_group("Peer");
+        for(const auto* nation:{"A","B"}) {
+            core.seed_actor(nation,55);
+            core.seed_government(nation,"HEAD","PM",5,3);
+            core.seed_p1_constitution(nation,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+            core.p3_seed_group({nation,"Role","","","",P3GroupType::custom,0,0});
+            core.p3_seed_group({nation,"Peer","","","",P3GroupType::custom,0,0});
+        }
+        if(!choice.empty())core.p2_seed_base({"law-A","A",domain,"national",
+                                             choice,"fixture:law"});
+        if(amendment)core.p2_seed_amendment({"amendment_bourgeois_specialists","law-A",
+            "fixture:law","",{{"approved-provision","A",
+                P2ClauseKind::political_association_allowed,1}}});
+        auto& pop=core.seed_population();
+        std::vector<std::pair<phaseb::Id,std::string>> joining;
+        for(const auto* nation:{"A","B"}) {
+            const auto h=pop.household_profile({nation,"mixed","shared",100});
+            const auto d=pop.demographic_profile({nation,23640,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+            for(const auto* name:{"Role","Peer"}) {
+                const auto job=std::string_view(name)=="Role"?profession:"worker";
+                const auto e=pop.economic_profile({nation,job,"wage","employee",pop.default_education()});
+                const auto id=pop.seed_population(d,e,h,100);
+                pop.hire(id,1,"EMP",job,1,{});
+                joining.emplace_back(id,name);
+            }
+        }
+        auto world=daily::World::adopt(std::move(gh),307);
+        phasegh::World::Plan plan;
+        plan[9].push_back([joining](phasegh::Stage& stage) {
+            for(const auto& [id,name]:joining)stage.phase_c().join_interest_group(id,name,100);
+        });
+        world.advance_day(plan);
+        const auto& live=c(world);
+        const auto actual=live.p3_group_view("A","Role");
+        const auto peer=live.p3_group_view("A","Peer");
+        const auto score=[&](People n) { return (n*1'000'000/(weighted+100))*9/10; };
+        need(actual.members==100 && peer.members==100 &&
+             actual.clout_ppm==score(weighted) && peer.clout_ppm==score(100),
+             "canonical occupation law did not weight only its actual local group members");
+        need(live.p3_group_view("B","Role").clout_ppm==450'000 &&
+             live.p3_group_view("B","Peer").clout_ppm==450'000 &&
+             live.people().population()==400 && live.cash("EMP")==1000 &&
+             live.cash("A")==55 && live.cash("B")==55,
+             "occupation law changed foreign clout or manufactured POP/cash");
+        for(const auto& [id,group]:joining) {
+            (void)group;
+            need(live.people().employed(id)==1,"occupation law recreated employment");
+        }
+    };
+    run("land_reform","law_latifundias","peasants",80); // Preexisting plural.
+    run("land_reform","law_latifundias","peasant",80);
+    run("land_reform","law_latifundias","Peasant",100); // Not a case-folded alias.
+    run("bureaucracy","law_appointed_bureaucrats","bureaucrat",150);
+    run("bureaucracy","law_communal_administration","bureaucrat",75);
+    run("bureaucracy","law_communal_administration","bureaucrat",90,true);
+    run("distribution_of_power","law_technocracy","academic",133);
+    run("labour_associations","law_guild_system","shopkeeper",125);
+    run("land_reform","law_latifundias","aristocrat",140);
+    run("distribution_of_power","law_oligarchy","capitalist",125);
+    run("distribution_of_power","law_elder_council","clergyman",150);
+    run("distribution_of_power","law_organic_regulation","clerk",125);
+    run("distribution_of_power","law_technocracy","engineer",133);
+    run("land_reform","law_homesteading","farmer",125);
+    run("internal_security","law_extraordinary_commission","soldier",115);
+    run("","","peasant",100);
+}
+
 int main() {
     try {
         real_pop_attitudes_and_national_clout();
+        exact_professions_weight_actual_group_members();
         shinsengumi_changes_movement_risk_without_altering_pop();
         actual_next_day_strike_and_no_double_participants();
         armed_conflict_requires_real_deployments_and_verified_control();
         legal_concession_resolves_without_armed_conflict();
-        std::cout<<"P3/P5 politics: five real-ledger integration scenarios PASS\n";
+        std::cout<<"P3/P5 politics: six real-ledger integration scenarios PASS\n";
         return 0;
     } catch(const std::exception& error) {
         std::cerr<<"P3/P5 POLITICS FAILED: "<<error.what()<<"\n";
