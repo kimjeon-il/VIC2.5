@@ -518,6 +518,8 @@ inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
         }
         return "";
     }();
+    const auto metric=*group_id?
+        std::string("interest_group_")+group_id+"_pol_str_mult":std::string{};
     std::int64_t strength=1'000'000;
     for(const auto& [slot,id]:p2_active_base_) {
         (void)slot;
@@ -525,8 +527,6 @@ inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
         if(law.country!=country)continue;
         // Prefer exact source IG multipliers if they exist. The previous
         // simplified clout bonus remains a fallback for uncoded new laws.
-        const auto metric=std::string("interest_group_")+group_id+
-                          "_pol_str_mult";
         if(*group_id) {
             const auto original=politics::catalogue().modifier(
                 law.base_choice,metric);
@@ -537,6 +537,43 @@ inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
         }
         strength=phaseb::add_checked(strength,
             politics::clout_bonus(law.domain,law.base_choice,group));
+    }
+    // Direct, flat named-IG rows affect the legally targeted category,
+    // independent of sponsorship or office. Scope the source before reading
+    // its raw value: generic law aggregation includes permissive attachments.
+    struct NamedStrengthRow {const char* amendment;P3GroupType type;};
+    using IG=P3GroupType;
+    static constexpr NamedStrengthRow rows[]={
+        {"amendment_geheime_staatskonferenz_metternich",IG::landowners},
+        {"amendment_geheime_staatskonferenz_kolowrat",IG::intelligentsia},
+        {"amendment_geheime_staatskonferenz_kolowrat",IG::armed_forces},
+        {"amendment_geheime_staatskonferenz_kolowrat",IG::landowners},
+        {"amendment_frugal_ordinance",IG::petite_bourgeoisie},
+        {"amendment_corporate_state_nominating_body_tu",IG::trade_unions},
+        {"amendment_corporate_state_nominating_body_id",IG::industrialists},
+        {"amendment_corporate_state_nominating_body_it",IG::intelligentsia},
+        {"amendment_welfare_pro_employer_bias",IG::industrialists},
+        {"amendment_prussian_education",IG::armed_forces},
+        {"amendment_taikunate",IG::landowners},
+        {"amendment_american_fugitive_slaves_act",IG::landowners},
+        {"amendment_factory_councils",IG::trade_unions}
+    };
+    for(const auto& row:rows) {
+        if(group!=row.type||!p2_active_amendments_.contains(row.amendment))
+            continue;
+        const auto& amendment=p2_amendments_.at(row.amendment);
+        const auto& parent=p2_laws_.at(amendment.law_id);
+        if(parent.country!=country||parent.tier==P2NormTier::local_ordinance||
+           (!parent.scope.empty()&&parent.scope!="national")||
+           !p2_is_active_base(amendment.law_id)||
+           !politics::catalogue().has(parent.domain,parent.base_choice))continue;
+        const auto* source=p2_catalog_amendment(row.amendment);
+        if(!source||!p2_catalog_amendment_applies(*source,parent.base_choice)||
+           (!source->possible_country_tags.empty()&&
+            !p2_catalog_list_contains(source->possible_country_tags,country)))continue;
+        strength=phaseb::add_checked(strength,
+            static_cast<std::int64_t>(std::llround(
+                p2_catalog_raw_modifier(row.amendment,metric)*1'000'000.0)));
     }
     if(const auto sponsor=p2_negotiated_sponsor_effects_.find({country,sponsor_group});
        sponsor!=p2_negotiated_sponsor_effects_.end())

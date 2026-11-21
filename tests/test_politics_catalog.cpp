@@ -356,8 +356,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==73,
-          "expected exact witness count including only two new internal migration rows");
+    check(canonical_law_row_evidence().size()==86,
+          "expected 73 preserved witnesses and 13 exact direct typed strength rows");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
         if(row.source.key=="state_peasants_mass_migration_disallowed_bool") {
@@ -556,6 +556,47 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
         ++institution_commitments;
     }
     check(institution_commitments==2,"expected two exact bureaucratic institution cost witnesses");
+
+    constexpr std::string_view direct_strength_fixture=
+        "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout";
+    const std::map<std::pair<std::string_view,std::string_view>,std::int64_t>
+        typed_strengths={
+        {{"amendment_geheime_staatskonferenz_metternich","interest_group_ig_landowners_pol_str_mult"},250'000},
+        {{"amendment_geheime_staatskonferenz_kolowrat","interest_group_ig_intelligentsia_pol_str_mult"},500'000},
+        {{"amendment_geheime_staatskonferenz_kolowrat","interest_group_ig_armed_forces_pol_str_mult"},250'000},
+        {{"amendment_geheime_staatskonferenz_kolowrat","interest_group_ig_landowners_pol_str_mult"},-250'000},
+        {{"amendment_frugal_ordinance","interest_group_ig_petty_bourgeoisie_pol_str_mult"},-200'000},
+        {{"amendment_corporate_state_nominating_body_tu","interest_group_ig_trade_unions_pol_str_mult"},150'000},
+        {{"amendment_corporate_state_nominating_body_id","interest_group_ig_industrialists_pol_str_mult"},150'000},
+        {{"amendment_corporate_state_nominating_body_it","interest_group_ig_intelligentsia_pol_str_mult"},150'000},
+        {{"amendment_welfare_pro_employer_bias","interest_group_ig_industrialists_pol_str_mult"},100'000},
+        {{"amendment_prussian_education","interest_group_ig_armed_forces_pol_str_mult"},100'000},
+        {{"amendment_taikunate","interest_group_ig_landowners_pol_str_mult"},100'000},
+        {{"amendment_american_fugitive_slaves_act","interest_group_ig_landowners_pol_str_mult"},100'000},
+        {{"amendment_factory_councils","interest_group_ig_trade_unions_pol_str_mult"},250'000}};
+    std::set<std::pair<std::string_view,std::string_view>> typed_strength_proven;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=direct_strength_fixture)continue;
+        const auto pair=std::make_pair(row.source.source_id,row.source.key);
+        const auto expected=typed_strengths.find(pair);
+        check(!row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)"&&
+              expected!=typed_strengths.end()&&expected->second==row.normalized_value&&
+              typed_strength_proven.insert(pair).second,
+              "direct typed strength evidence lost the exact row or executor");
+        for(int alternative=0;alternative<3;++alternative) {
+            auto mismatch=row.source;
+            if(alternative==0)mismatch.sponsor=true;
+            if(alternative==1)mismatch.institution=true;
+            if(alternative==2)mismatch.key="country_bureaucrats_pol_str_mult";
+            check(classify_canonical_law_row(mismatch,canonical_law_row_evidence()).status
+                      !=CanonicalLawRowStatus::verified_row,
+                  "direct typed strength leaked to sponsorship, institution, or profession");
+        }
+    }
+    check(typed_strength_proven.size()==typed_strengths.size(),
+          "missing exact direct typed strength witness");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

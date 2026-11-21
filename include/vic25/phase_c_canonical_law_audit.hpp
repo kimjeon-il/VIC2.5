@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,73>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,86>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,73> evidence{{
+    static const std::array<CanonicalLawRowEvidence,86> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -285,7 +285,46 @@ inline const std::array<CanonicalLawRowEvidence,73>& canonical_law_row_evidence(
          "test_politics_identity::institutional_bureaucracy_prices_ongoing_commitments"},
         {{"amendment_bourgeois_specialists","country_bureaucracy_investment_cost_factor_mult",-0.05,false,false},
          "IntegratedWorld::p1_bureaucracy (ongoing institutional commitments)",
-         "test_politics_identity::institutional_bureaucracy_prices_ongoing_commitments"}
+         "test_politics_identity::institutional_bureaucracy_prices_ongoing_commitments"},
+        {{"amendment_geheime_staatskonferenz_metternich","interest_group_ig_landowners_pol_str_mult",0.25,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_geheime_staatskonferenz_kolowrat","interest_group_ig_intelligentsia_pol_str_mult",0.5,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_geheime_staatskonferenz_kolowrat","interest_group_ig_armed_forces_pol_str_mult",0.25,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_geheime_staatskonferenz_kolowrat","interest_group_ig_landowners_pol_str_mult",-0.25,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_frugal_ordinance","interest_group_ig_petty_bourgeoisie_pol_str_mult",-0.2,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_corporate_state_nominating_body_tu","interest_group_ig_trade_unions_pol_str_mult",0.15,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_corporate_state_nominating_body_id","interest_group_ig_industrialists_pol_str_mult",0.15,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_corporate_state_nominating_body_it","interest_group_ig_intelligentsia_pol_str_mult",0.15,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_welfare_pro_employer_bias","interest_group_ig_industrialists_pol_str_mult",0.1,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_prussian_education","interest_group_ig_armed_forces_pol_str_mult",0.1,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_taikunate","interest_group_ig_landowners_pol_str_mult",0.1,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_american_fugitive_slaves_act","interest_group_ig_landowners_pol_str_mult",0.1,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"},
+        {{"amendment_factory_councils","interest_group_ig_trade_unions_pol_str_mult",0.25,false,false},
+         "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (direct named amendment strength)",
+         "test_p2_advanced::direct_named_amendment_strength_changes_actual_clout"}
     }};
     return evidence;
 }
