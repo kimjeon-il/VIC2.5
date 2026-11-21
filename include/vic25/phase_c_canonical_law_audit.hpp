@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,138>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,148>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,138> evidence{{
+    static const std::array<CanonicalLawRowEvidence,148> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -481,6 +481,36 @@ inline const std::array<CanonicalLawRowEvidence,138>& canonical_law_row_evidence
          "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
         {{"law_laissez_faire","country_disable_nationalization_bool",1,true,false},
          "Phase D commissioned-factory nationalization (legal title and cash journals only)",
+         "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"law_traditionalism","building_nationalization_cost_mult",1,false,false},
+         "Phase D commissioned-factory compensation (modeled statutory cash price)",
+         "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"law_traditionalism","building_nationalization_investment_return_add",0.1,false,false},
+         "Phase D commissioned-factory compensation (modeled price, not investment pool)",
+         "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"law_interventionism","building_nationalization_investment_return_add",0.5,false,false},
+         "Phase D commissioned-factory compensation (modeled price, not investment pool)",
+         "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"law_agrarianism","building_nationalization_investment_return_add",0.5,false,false},
+         "Phase D commissioned-factory compensation (modeled price, not investment pool)",
+         "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"law_industry_banned","building_nationalization_investment_return_add",0.5,false,false},
+         "Phase D commissioned-factory compensation (modeled price, not investment pool)",
+         "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"law_extraction_economy","building_nationalization_investment_return_add",0.5,false,false},
+         "Phase D commissioned-factory compensation (modeled price, not investment pool)",
+         "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"law_command_economy","building_nationalization_cost_mult",-0.5,false,false},
+         "Phase D commissioned-factory compensation (modeled statutory cash price)",
+         "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"law_command_economy","building_nationalization_radicals_mult",-0.75,false,false},
+         "Phase D commissioned-factory grievance (same employer and locale only)",
+         "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"amendment_industrial_socialization","building_nationalization_cost_mult",-0.25,false,false},
+         "Phase D commissioned-factory compensation (modeled statutory cash price)",
+         "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
+        {{"amendment_shop_councils","building_nationalization_cost_mult",-0.15,false,false},
+         "Phase D commissioned-factory compensation (modeled statutory cash price)",
          "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"}
     }};
     return evidence;

@@ -356,7 +356,7 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==138,
+    check(canonical_law_row_evidence().size()==148,
           "expected 129 preserved witnesses and two peasant-only draft rows");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
@@ -736,7 +736,7 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
 
     std::size_t factories_prohibited=0,factories_compensation=0;
     for(const auto& row:audit) {
-        if(row.behavior_test!="test_phase_d::commissioned_nationalization_requires_available_statutory_compensation")continue;
+        if(row.behavior_test!="test_phase_d::commissioned_nationalization_requires_available_statutory_compensation" || !row.source.boolean)continue;
         check(row.source.boolean && !row.source.institution && !row.source.sponsor &&
               row.normalized_value==1 && row.status==CanonicalLawRowStatus::verified_row &&
               row.executor=="Phase D commissioned-factory nationalization (legal title and cash journals only)",
@@ -753,6 +753,33 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(factories_prohibited==1 && factories_compensation==5,
           "commissioned-factory ownership receipt witnesses missing");
+
+    std::size_t nationalization_cost=0,nationalization_return=0,nationalization_grievance=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test!="test_phase_d::commissioned_nationalization_requires_available_statutory_compensation" || row.source.boolean)
+            continue;
+        check(!row.source.institution && !row.source.sponsor &&
+              row.status==CanonicalLawRowStatus::verified_row,
+              "commissioned-factory numeric witness has wrong scope");
+        if(row.source.key=="building_nationalization_cost_mult") {
+            check(row.executor=="Phase D commissioned-factory compensation (modeled statutory cash price)",
+                  "commissioned factory cost proof is not actual compensation");
+            ++nationalization_cost;
+        } else if(row.source.key=="building_nationalization_investment_return_add") {
+            check(row.executor=="Phase D commissioned-factory compensation (modeled price, not investment pool)",
+                  "project-specific compensation evidence was mistaken for an investment pool return");
+            ++nationalization_return;
+        } else {
+            check(row.source.key=="building_nationalization_radicals_mult" &&
+                  row.source.source_id=="law_command_economy" &&
+                  row.normalized_value==-750'000 &&
+                  row.executor=="Phase D commissioned-factory grievance (same employer and locale only)",
+                  "factory grievance proof lost real employer and local scope");
+            ++nationalization_grievance;
+        }
+    }
+    check(nationalization_cost==4 && nationalization_return==5 && nationalization_grievance==1,
+          "exact numeric nationalization witness counts differ");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

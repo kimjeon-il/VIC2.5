@@ -1434,6 +1434,43 @@ public:
         f.owner=buyer;
         events_.push_back("bankrupt-real-factory-cash-sale");
     }
+    // Only directly authored national effects used by the commissioned
+    // compensation / acquisition grievance path. Unrelated custom legal
+    // slots cannot impersonate an economic-system or a compatible parent.
+    [[nodiscard]] std::int64_t p2_factory_nationalization_ppm(
+            const std::string& country,std::string_view key)const {
+        const auto raw=[&](std::string_view id) {
+            return static_cast<std::int64_t>(std::llround(
+                p2_catalog_raw_modifier(id,key)*1'000'000.0));
+        };
+        const auto eligible=[&](const P2BaseLaw& law) {
+            return law.country==country&&law.tier!=P2NormTier::local_ordinance&&
+                (law.scope.empty()||law.scope=="national")&&
+                politics::catalogue().has(law.domain,law.base_choice);
+        };
+        std::int64_t result=0;
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(!eligible(law)||politics::bare_group(law.domain)!="economic_system")
+                continue;
+            result=raw(p2_catalog_canonical_choice(law.base_choice));
+            break;
+        }
+        if(key=="building_nationalization_cost_mult")
+            for(const char* id:{"amendment_industrial_socialization","amendment_shop_councils"}) {
+                if(!p2_active_amendments_.contains(id))continue;
+                const auto& amendment=p2_amendments_.at(id);
+                const auto& parent=p2_laws_.at(amendment.law_id);
+                const auto* source=p2_catalog_amendment(id);
+                if(!eligible(parent)||!p2_is_active_base(amendment.law_id)||
+                   !source||!p2_catalog_amendment_applies(*source,parent.base_choice)||
+                   (!source->possible_country_tags.empty()&&
+                    !p2_catalog_list_contains(source->possible_country_tags,country)))continue;
+                result=phaseb::add_checked(result,raw(id));
+            }
+        return result;
+    }
     void phase_d_transfer_factory_legal(const std::string& site,
             const std::string& buyer,Money price,Money project_book_value) {
         require_stage({7});
@@ -1511,8 +1548,8 @@ public:
            buyer==country_treasury(sovereignty_.at(f.region))) {
             const auto nation=sovereignty_.at(f.region);
             const double severity=std::clamp(
-                1.0+p2_catalog_modifier_value(nation,
-                      "building_nationalization_radicals_mult"),0.0,4.0);
+                1.0+p2_factory_nationalization_ppm(nation,
+                      "building_nationalization_radicals_mult")/1'000'000.0,0.0,4.0);
             const double shortfall=static_cast<double>(
                 project_book_value-price)/static_cast<double>(
                 project_book_value);

@@ -1192,19 +1192,33 @@ public:
         }
         const auto& p=d_.constructions.at(project_id);
         if(p.capitalized_value<=0)return false;
-        const auto cost_factor=std::clamp(1.0+
-            c_.p2_catalog_modifier_value(
-                country,"building_nationalization_cost_mult"),0.1,4.0);
-        const auto owner_return=std::clamp(1.0+
-            c_.p2_catalog_modifier_value(
-                country,"building_nationalization_investment_return_add"),
-            0.1,4.0);
-        const auto required=std::ceil(
-            static_cast<long double>(p.capitalized_value)*
-            cost_factor*owner_return);
-        if(required>static_cast<long double>(
-             std::numeric_limits<Money>::max()/4))return false;
-        const auto price=static_cast<Money>(required);
+        // Keep the documented VIC2.5 product (including the modeled
+        // investment-return price factor), rounding only once at the end.
+        // This does not implement the original investment-pool destination.
+        constexpr Money ppm=1'000'000;
+        constexpr Money square=ppm*ppm;
+        constexpr Money limit=std::numeric_limits<Money>::max()/4;
+        const auto factor=[&](std::string_view key) {
+            return std::clamp<Money>(ppm+c_.p2_factory_nationalization_ppm(
+                country,key),100'000,4*ppm);
+        };
+        const Money product_ppm=phaseb::mul_checked(
+            factor("building_nationalization_cost_mult"),
+            factor("building_nationalization_investment_return_add"));
+        // For book=q*ppm+r and factor product=u*ppm+v, the exact
+        // quotient is q*u + (q*v+r*u)/ppm + r*v/ppm^2. Split each
+        // cross term before summing; no wide/platform-dependent type.
+        const Money q=p.capitalized_value/ppm,r=p.capitalized_value%ppm;
+        const Money u=product_ppm/ppm,v=product_ppm%ppm;
+        if(u&&q>limit/u)return false;
+        Money price=phaseb::mul_checked(q,u);
+        const Money cross1=phaseb::mul_checked(q,v);
+        const Money cross2=phaseb::mul_checked(r,u);
+        const Money residual=(cross1%ppm+cross2%ppm)*ppm+r*v;
+        const Money tail=cross1/ppm+cross2/ppm+
+                         residual/square+(residual%square!=0);
+        if(tail>limit-price)return false;
+        price+=tail;
         if(price<=0)return false;
         const bool can_pay=c_.phase_d_cash_available(treasury)>=price;
         const bool compensation_required=c_.p2_catalog_modifier_value(

@@ -94,7 +94,9 @@ static void test_construction_accepted_wip_next_month() {
 static void commissioned_nationalization_requires_available_statutory_compensation() {
     using namespace vic25::phasec;
     const auto run=[](const std::string& law,Money government_cash,
-                      bool accepted,bool paid,Money exact=-1) {
+                      bool accepted,bool paid,Money exact=-1,
+                      std::string amendment="",bool wrong_parent=false,
+                      bool forged=false,bool foreign=false,Money work_price=20) {
         World w{1000};
         auto& c=w.seed_core();
         c.seed_actor("CLIENT",200);
@@ -108,16 +110,57 @@ static void commissioned_nationalization_requires_available_statutory_compensati
             P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:law"});
         c.p2_seed_base({"A:ECONOMIC","A","lawgroup_economic_system","national",
                         "law_"+law,"fixture:law"});
+        if(!amendment.empty()) {
+            const auto owner=foreign?"B":"A";
+            if(foreign) {
+                c.seed_region("FOREIGN","B");
+                c.seed_government("B","HEAD_B","PRIME_B",5,3);
+                c.seed_p1_constitution("B",{P1GovernancePrinciple::monarchy,
+                    P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:law"});
+            }
+            const auto parent=wrong_parent?"A:ECONOMIC":std::string(owner)+":GOV";
+            if(!wrong_parent)
+                c.p2_seed_base({parent,owner,"lawgroup_governance_principles","",
+                                "law_corporate_state","fixture:qualified parent"});
+            c.p2_seed_amendment({amendment,parent,"fixture:numeric effect","",
+                {{"association",owner,P2ClauseKind::political_association_allowed,1}}});
+        }
+        if(forged) {
+            c.p2_seed_base({"A:FICTIVE", "A","custom_economic_scope","national",
+                            "law_command_economy","fixture:unrelated choice"});
+            P2BaseLaw local{"A:LOCAL","A","custom_regional_scope","R",
+                            "law_traditionalism","fixture:unrelated ordinance"};
+            local.tier=P2NormTier::local_ordinance;
+            c.p2_seed_base(local);
+        }
         const auto worker=people(w,"R",2);
+        Id employee=0,unrelated=0,remote=0;
+        if(law=="command_economy") {
+            c.seed_region("REMOTE","A");
+            employee=people(w,"R",3);
+            unrelated=people(w,"R",4);
+            remote=people(w,"REMOTE",3);
+        }
         c.seed_stock("BUILDER","R","steel",2);
-        w.seed_construction(project());
+        auto construction=project();
+        construction.cash_price_per_work=work_price;
+        w.seed_construction(construction);
+        const auto book=2*work_price;
         World::Plan work;
-        work[2].push_back([worker](Stage& s){s.phase_c().hire(worker,2,"BUILDER",1);});
+        work[2].push_back([=](Stage& s){
+            auto& live=s.phase_c();
+            live.hire(worker,2,"BUILDER",1);
+            if(employee) {
+                live.hire(employee,1,"CLIENT",1);
+                live.hire(unrelated,1,"PRIVATE",1);
+                live.hire(remote,1,"CLIENT",1);
+            }
+        });
         full_work_plan(work,2);
         w.advance(work);
         w.advance();
         check(w.construction("P").commissioned&&
-              w.construction("P").capitalized_value==40&&
+              w.construction("P").capitalized_value==book&&
               w.core().shares("FACILITY:NEW_MILL","CLIENT")==1,
               "fixture lacks a real commissioned and capitalized title");
         const auto opening_private=w.core().cash("CLIENT");
@@ -146,7 +189,7 @@ static void commissioned_nationalization_requires_available_statutory_compensati
                   rollback.core().cash("GOV")==government_cash&&
                   rollback.core().cash("CLIENT")==opening_private&&
                   rollback.core().shares("FACILITY:NEW_MILL","CLIENT")==1&&
-                  rollback.core().financial().balance("CLIENT:fixed_asset")==40&&
+                  rollback.core().financial().balance("CLIENT:fixed_asset")==book&&
                   rollback.core().financial().balance("CLIENT:capital")==opening_seller_capital&&
                   rollback.core().financial().balance("GOV:capital")==opening_buyer_capital,
                   "aborted acquisition leaked an owner journal or title");
@@ -154,7 +197,19 @@ static void commissioned_nationalization_requires_available_statutory_compensati
         bool acquired=false;
         World::Plan decision;
         decision[7].push_back([&](Stage& stage) {
+            const auto radical=[&](Id id) {
+                const auto& attitudes=stage.phase_c().p3_attitudes();
+                const auto it=attitudes.find(id);
+                return it==attitudes.end()?0:it->second.radical_ppm;
+            };
+            const auto before_employee=radical(employee);
+            const auto before_unrelated=radical(unrelated);
+            const auto before_remote=radical(remote);
             acquired=stage.nationalize_commissioned_factory("NEW_MILL");
+            if(employee)
+                check(radical(employee)==before_employee+(paid?5'000:10'000)&&
+                      radical(unrelated)==before_unrelated&&radical(remote)==before_remote,
+                      "Command Economy shock must affect only actual seller's local employees");
         });
         try { w.advance(decision); }
         catch(const std::exception& error) {
@@ -169,12 +224,12 @@ static void commissioned_nationalization_requires_available_statutory_compensati
               w.construction("P").client==(accepted?"GOV":"CLIENT")&&
               ledger.shares("FACILITY:NEW_MILL","GOV")==int(accepted)&&
               ledger.shares("FACILITY:NEW_MILL","CLIENT")==int(!accepted)&&
-              ledger.financial().balance("CLIENT:fixed_asset")==(accepted?0:40),
+              ledger.financial().balance("CLIENT:fixed_asset")==(accepted?0:book),
               "commissioned nationalization did not jointly enforce statutory cash and title");
         if(accepted)
-            check(ledger.financial().balance("GOV:fixed_asset")==40&&
-                  ledger.financial().balance("CLIENT:capital")==opening_seller_capital+40&&
-                  ledger.financial().balance("GOV:capital")==opening_buyer_capital-40,
+            check(ledger.financial().balance("GOV:fixed_asset")==book&&
+                  ledger.financial().balance("CLIENT:capital")==opening_seller_capital+book&&
+                  ledger.financial().balance("GOV:capital")==opening_buyer_capital-book,
                   "existing book value did not move as a balanced owner journal");
         if(law=="laissez_faire") {
             // Ordinary funded private-party C transfer is not nationalization.
@@ -203,12 +258,23 @@ static void commissioned_nationalization_requires_available_statutory_compensati
     for(const std::string law:{"traditionalism","interventionism","agrarianism",
                                "industry_banned","extraction_economy"}) {
         run(law,1,false,false,0);
-        run(law,200,true,true);
+        run(law,200,true,true,law=="traditionalism"?88:60);
     }
+    run("traditionalism",87,false,false,0);
+    run("traditionalism",88,true,true,88);
     run("interventionism",59,false,false,0);
     run("interventionism",60,true,true,60);
     run("laissez_faire",200,false,false,0);
     run("command_economy",0,true,false,0);
+    run("command_economy",20,true,true,20);
+    run("command_economy",20,true,true,20,"",false,true);
+    run("interventionism",45,true,true,45,"amendment_industrial_socialization");
+    run("interventionism",51,true,true,51,"amendment_shop_councils");
+    run("interventionism",42,false,false,0,"amendment_industrial_socialization",false,false,false,19);
+    run("interventionism",43,true,true,43,"amendment_industrial_socialization",false,false,false,19);
+    run("interventionism",200,true,true,60,"amendment_shop_councils",true);
+    run("interventionism",200,true,true,60,"amendment_shop_councils",false,false,true);
+    run("interventionism",200,true,true,60,"",false,true);
 
     // Historical facility with an explicit existing securities-backed
     // title, independently from the commissioned non-security case above.
