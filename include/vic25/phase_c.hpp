@@ -1695,6 +1695,10 @@ public:
            !p2_has_registered_company_equity(company)||
            firm_bankrupt(company))return 0;
         const auto holders=ownership_.holders("company:"+company);
+        // This sole canonical source belongs to the household's sovereign
+        // economic law, not an unrecognized ordinance or name-only overlay.
+        static const double contribution=std::max(0.0,p2_catalog_raw_modifier(
+            "law_industry_banned","state_aristocrats_investment_pool_contribution_add"));
         Money contributed=0;
         for(const auto& [holder,shares]:holders) {
             if(shares<=0||holder.rfind("HH:",0)!=0||
@@ -1711,9 +1715,12 @@ public:
                    econ.profession!="aristocrats")continue;
                 const auto& dem=people_.demographic(pop.key.demographic);
                 aristocrats=phaseb::add_checked(aristocrats,pop.count);
-                weighted_mod+=static_cast<long double>(pop.count)*
-                    std::max(0.0,p2_region_modifier_value(dem.region,
-                        "state_aristocrats_investment_pool_contribution_add"));
+                const auto sovereign=sovereignty_.find(dem.region);
+                if(sovereign==sovereignty_.end()||
+                   !governments_.contains(sovereign->second)||
+                   p2_selected_law(sovereign->second,"economic_system")!="industry_banned")
+                    continue;
+                weighted_mod+=static_cast<long double>(pop.count)*contribution;
             }
             if(total<=0||aristocrats<=0||weighted_mod<=0)continue;
             const double fraction=std::clamp(

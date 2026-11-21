@@ -356,7 +356,7 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==180,
+    check(canonical_law_row_evidence().size()==181,
           "expected exact canonical witness count including 30 more paid-order rows");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
@@ -839,6 +839,15 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(nationalization_cost==4 && nationalization_return==5 && nationalization_grievance==1,
           "exact numeric nationalization witness counts differ");
+
+    check(std::count_if(audit.begin(),audit.end(),[](const auto& row) {
+        return row.source.source_id=="law_industry_banned" &&
+               row.source.key=="state_aristocrats_investment_pool_contribution_add" &&
+               !row.source.boolean && !row.source.institution && !row.source.sponsor &&
+               row.normalized_value==250'000 && row.status==CanonicalLawRowStatus::verified_row &&
+               row.executor=="IntegratedWorld::p2_invest_from_aristocratic_shareholders (modeled monthly household-to-company capital only)" &&
+               row.behavior_test=="test_p0_daily::aristocratic_shareholders_inject_only_lawful_monthly_capital";
+    })==1,"specific paid monthly aristocratic capital witness missing");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

@@ -330,6 +330,89 @@ static void canonical_profession_sources_change_real_construction_orders() {
     run("law_agrarianism","aristocrat",true,16,{"MEX","law_latifundias","",false});
 }
 
+static void aristocratic_shareholders_inject_only_lawful_monthly_capital() {
+    enum class Law { national, other, fake_local, fake_national, absent };
+    const auto run=[](Law law,bool shares,bool aristocrat,bool funded,
+                      bool holder_abroad,bool mixed,phasec::Money expected) {
+        using namespace phasec;
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");geo.seed_province(2,"X","B");
+        geo.seed_unit(11,"A","A-admin");geo.seed_unit(22,"B","B-admin");
+        geo.seed_assignment(1,11);geo.seed_assignment(2,22);
+        auto& d=geo.seed_core();auto& core=d.seed_core();
+        for(const auto* nat:{"A","B"}) {
+            core.seed_actor(nat,0);
+            core.seed_government(nat,"HEAD","PM",5,3);
+            core.seed_p1_constitution(nat,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+        }
+        core.seed_actor("FIRM",100);core.seed_actor("BUILDER",0);
+        core.seed_production_facility("SITE","FIRM","R",10);
+        phased::ConstructionProject project;
+        project.id="PROJECT";project.client="FIRM";project.contractor="BUILDER";
+        project.region="R";project.material_good="steel";project.target_site="SITE";
+        project.work_required=project.material_per_work=project.workers_per_work=1;
+        project.target_capacity=10;project.cash_price_per_work=10;
+        project.accepted_work=project.paid_work=project.capitalized_work=1;
+        project.capitalized_value=10;project.commissioned=true;project.ready_month=23999;
+        d.seed_construction(project);
+        const std::string region=holder_abroad?"X":"R";
+        auto& pop=core.seed_population();
+        const auto h=pop.household_profile({region,"family","shared",10});
+        const auto demo=pop.demographic_profile({region,23700,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+        const auto add=[&](const char* profession) {
+            const auto econ=pop.economic_profile({region,profession,"self_employed","self_employed",
+                                                pop.default_education()});
+            pop.seed_population(demo,econ,h,10);
+        };
+        add(aristocrat?"aristocrat":"worker");
+        if(mixed)add("worker");
+        const std::string wallet="HH:"+std::to_string(h);
+        const Money opening=funded?100:0;
+        core.seed_actor(wallet,opening);
+        core.seed_shares("company:FIRM",shares?wallet:"A",100);
+        if(law!=Law::absent) {
+            const bool fake=law==Law::fake_local||law==Law::fake_national;
+            P2BaseLaw enacted{"ACT","A",fake?"custom_economy":"economic_system",
+                law==Law::fake_local?"R":"national",
+                law==Law::other?"law_agrarianism":"law_industry_banned","fixture:law"};
+            if(law==Law::fake_local)enacted.tier=P2NormTier::local_ordinance;
+            core.p2_seed_base(enacted);
+        }
+        p0::DailyGame game(daily::World::adopt(std::move(gh),15),{});
+        const auto opening_capital=c(game).financial().balance("FIRM:capital");
+        const auto verify=[&] {
+            const auto& live=c(game);
+            const std::string diagnostic="aristocratic capital requires a real entitled holder and exact sovereign enacted law (case "+
+                std::to_string(static_cast<int>(law))+")";
+            require_test(live.cash(wallet)==opening-expected &&
+                         live.cash("FIRM")==100+expected &&
+                         live.cash("A")==0 && live.cash("B")==0 &&
+                         live.shares("company:FIRM",shares?wallet:"A")==100,
+                         diagnostic.c_str());
+            require_test(live.financial().balance("FIRM:capital")==opening_capital-expected &&
+                         live.financial().balance("FIRM:revenue")==0,
+                         "actual contribution belongs to the company's capital, not operating revenue");
+        };
+        game.advance_day();
+        verify();
+        game.advance_day();
+        verify(); // Monthly decision, not another ordinary-day transfer.
+    };
+    run(Law::national,true,true,true,false,false,25);
+    run(Law::national,true,true,true,false,true,12);
+    run(Law::national,false,true,true,false,false,0);
+    run(Law::national,true,false,true,false,false,0);
+    run(Law::national,true,true,false,false,false,0);
+    run(Law::national,true,true,true,true,false,0);
+    run(Law::other,true,true,true,false,false,0);
+    run(Law::absent,true,true,true,false,false,0);
+    run(Law::fake_local,true,true,true,false,false,0);
+    run(Law::fake_national,true,true,true,false,false,0);
+}
+
 static void daily_market_shortage_and_political_response() {
     auto w=fixture();
     const auto& slices=w.base().core().core().people().slices();
@@ -1708,6 +1791,7 @@ int main(){
     try{
         daily_production_trade_ai_investment_replay();
         household_shareholder_efficiency_changes_paid_daily_construction_orders();
+        aristocratic_shareholders_inject_only_lawful_monthly_capital();
         canonical_profession_sources_change_real_construction_orders();
         daily_market_shortage_and_political_response();
         daily_insolvent_hunger_is_not_ignored();
