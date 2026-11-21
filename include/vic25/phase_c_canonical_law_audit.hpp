@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,34>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,36>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,34> evidence{{
+    static const std::array<CanonicalLawRowEvidence,36> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -76,6 +76,12 @@ inline const std::array<CanonicalLawRowEvidence,34>& canonical_law_row_evidence(
         {{"law_terakoya","state_education_access_add",0.25,false,false},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
+        {{"law_industry_banned","state_peasants_education_access_add",-0.1,false,false},
+         "IntegratedWorld::phase_time_auto_demography",
+         "test_politics_domain::occupation_specific_law_changes_actual_peasant_schooling"},
+        {{"law_terakoya","state_peasants_education_access_add",0.2,false,false},
+         "IntegratedWorld::phase_time_auto_demography",
+         "test_politics_domain::occupation_specific_law_changes_actual_peasant_schooling"},
         {{"law_frontier_colonization","state_migration_pull_unincorporated_mult",0.5,false,false},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_domain::colonial_migration_pull_requires_verified_destination"},

@@ -224,11 +224,87 @@ static void colonial_migration_pull_requires_verified_destination() {
 
 }
 
+static void occupation_specific_law_changes_actual_peasant_schooling() {
+    const auto run=[](const std::string& schools,bool industry_banned,
+                      phaseb::People peasant,phaseb::People others) {
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");
+        geo.seed_unit(1,"A","HOME");
+        geo.seed_assignment(1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",100);
+        c.seed_government("A","HEAD","PRIME",5,3);
+        c.seed_p1_constitution("A",{
+            P1GovernancePrinciple::monarchy,P1PowerDistribution::autocracy,
+            P1LegislatureKind::none,"fixture:constitution"});
+        const auto law=[&](const std::string& group,const std::string& choice) {
+            P2BaseLaw entry;
+            entry.id=group;entry.country="A";entry.domain=group;
+            entry.scope="national";entry.base_choice="law_"+choice;
+            entry.legal_basis="fixture:education-law";
+            c.p2_seed_base(entry);
+        };
+        if(!schools.empty())law("education_system",schools);
+        if(industry_banned)law("economic_system","industry_banned");
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"R","shared","shared",100'000});
+        const auto seed=[&](const std::string& profession,const std::string& livelihood,
+                            int age) {
+            const auto economic=pop.economic_profile({"R",profession,livelihood,
+                "ineligible",pop.default_education()});
+            const auto dem=pop.demographic_profile({"R",24000-age*12,
+                phaseb::Sex::male,"culture","faith","citizen","free",
+                pop.default_health(),phaseb::Service::civilian});
+            pop.seed_population(dem,economic,h,100'000);
+        };
+        seed("peasant","subsistence",8);
+        seed("worker","wage",8);
+        seed("grower","subsistence",8);
+        seed("peasant","subsistence",7);
+        auto rules=isolated();
+        rules.primary_access_ppm=310'000; // exactly 1% on January 1
+        c.enable_demography(rules);
+        auto world=daily::World::adopt(std::move(gh),23);
+        world.advance_day();
+        const auto snapshot=daily::SnapshotCodec::encode(world);
+        const auto replay=daily::SnapshotCodec::decode(snapshot);
+        const auto& people=replay.engine().base().core().core().people();
+        const auto all_schooling=[&](const std::string& profession,int age) {
+            phaseb::People count=0;
+            for(const auto& [id,row]:people.slices()) {
+                const auto& econ=people.economic(row.key.economic);
+                if(econ.profession!=profession||people.age_months_slice(id)!=age*12)
+                    continue;
+                const auto& ed=people.education(econ.education);
+                if(ed.school==phaseb::School::primary) {
+                    check(ed.literacy==60,"schooling did not produce the real literacy profile");
+                    count+=row.count;
+                } else check(ed.school==phaseb::School::none&&ed.literacy==0,
+                             "law created an unsupported education profile");
+            }
+            return count;
+        };
+        check(all_schooling("peasant",8)==peasant&&
+              all_schooling("worker",8)==others&&all_schooling("grower",8)==others,
+              "education law altered the wrong POP occupation or daily access amount");
+        check(all_schooling("peasant",7)==0&&people.population()==400'000&&
+              daily::SnapshotCodec::encode(replay)==snapshot,
+              "education law changed age eligibility, population, or persisted state");
+    };
+    run("",false,1000,1000);
+    run("",true,677,1000);
+    run("terakoya",false,2451,1806);
+    run("terakoya",true,2129,1806);
+    run("no_schools",true,0,0);
+}
+
 int main() {
     try {
         native_rate_callback_changes_real_pop_only();
         enacted_law_changes_only_its_own_real_daily_schooling();
         colonial_migration_pull_requires_verified_destination();
+        occupation_specific_law_changes_actual_peasant_schooling();
         std::cout<<"VIC2.5 POLITICS REAL POP DOMAIN EFFECTS PASS\n";
     }catch(const std::exception& e) {
         std::cerr<<"POLITICS DOMAIN FAILURE: "<<e.what()<<"\n";

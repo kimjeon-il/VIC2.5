@@ -4009,6 +4009,7 @@ public:
         struct PoliticalRates {
             std::int64_t birth{},school{},migration{},mortality{};
             std::int64_t healthcare{},school_institution{},unincorporated_migration{};
+            std::int64_t peasant_school{};
             bool schools_allowed{true};
         };
         // In the absence of a separate national investment ledger, derive
@@ -4059,6 +4060,23 @@ public:
         };
         constexpr const char* mortality_key="state_mortality_mult";
         constexpr const char* school_key="state_education_access_add";
+        // The profession-specific rows are flat national base-law effects.
+        // They do not depend on projected school facilities or incorporation.
+        std::map<std::string,std::int64_t> peasant_school_ppm;
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(law.tier==P2NormTier::local_ordinance||
+               (!law.scope.empty()&&law.scope!="national")||
+               !politics::catalogue().has(law.domain,law.base_choice))continue;
+            const auto value=p2_catalog_raw_modifier(
+                p2_catalog_canonical_choice(law.base_choice),
+                "state_peasants_education_access_add");
+            if(value==0)continue;
+            auto& total=peasant_school_ppm[law.country];
+            total=phaseb::add_checked(total,static_cast<std::int64_t>(
+                std::llround(value*1'000'000.0)));
+        }
         std::map<std::string,PoliticalRates> rates;
         if(!p3_groups_.empty()||!p2_active_base_.empty()||
            !p1_active_mandates_.empty())
@@ -4082,6 +4100,7 @@ public:
                     effect("state_migration_pull_mult"),
                     p2_modifier_ppm(country,mortality_key),healthcare,school_institution,
                     p2_modifier_ppm(country,"state_migration_pull_unincorporated_mult"),
+                    peasant_school_ppm.contains(country)?peasant_school_ppm.at(country):0,
                     education!=std::optional<std::string>("no_schools")});
             }
         phaseb::Engine::RateAdjustment adjustment;
@@ -4101,6 +4120,9 @@ public:
                 if(!policy.schools_allowed)return 0;
                 auto access=phaseb::add_checked(policy.school,
                     p1_local_decree_ppm(juris->second,dem.region,school_key));
+                if(policy.peasant_school!=0 &&
+                   population.economic(population.slice(id).key.economic).profession=="peasant")
+                    access=phaseb::add_checked(access,policy.peasant_school);
                 const auto incorporated=p1_incorporation_.find(dem.region);
                 if(incorporated!=p1_incorporation_.end()&&incorporated->second)
                     access=phaseb::add_checked(access,policy.school_institution);
