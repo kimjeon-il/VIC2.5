@@ -462,6 +462,13 @@ class Stage {
     std::int32_t day_of_month_{};
     std::int32_t days_in_month_{};
     std::int64_t day_index_{-1};
+    struct ProductionInputNeed {
+        Quantity units{};
+        Money ceiling{}, payroll{};
+    };
+    // Shared by Stage1 callbacks and discovery, never committed or saved.
+    std::map<std::tuple<std::string,std::string,std::string>,ProductionInputNeed>
+        production_input_needs_;
     // Cumulative allowance: never regrant a full month of quota daily.
     Quantity day_budget(Quantity total,Quantity used)const {
         if(day_of_month_<=0)return total; // historical stand-alone month engine
@@ -1001,6 +1008,18 @@ public:
 
     void plan_autonomous_trade();
     void plan_market_discovery();
+    void register_production_input_need(
+            const std::string& trader,const std::string& region,
+            const std::string& good,Quantity units,Money ceiling,Money payroll) {
+        at(1);
+        require(units>0&&ceiling>0&&payroll>0&&
+                phase_c().has_market(region,good),
+                "G_ERR_INVALID_PRODUCTION_INPUT_NEED");
+        // Do not aggregate forecasts for unrelated factories on one cash
+        // account. Keep the first selected recipe in deterministic ID order.
+        production_input_needs_.try_emplace(
+            {trader,region,good},ProductionInputNeed{units,ceiling,payroll});
+    }
     void register_daily_merchant(MerchantOffice office) {
         at(1);
         require(!office.trader.empty()&&!office.market_region.empty()&&

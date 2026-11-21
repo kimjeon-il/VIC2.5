@@ -7,7 +7,10 @@ using namespace vic25;
 static void verify(bool ok,const char* why) {
     if(!ok)throw std::runtime_error(why);
 }
-static phasegh::World commerce_fixture(bool future=false, int future_start=24001, bool fixed_quotes=false) {
+static phasegh::World commerce_fixture(bool future=false,int future_start=24001,
+        bool fixed_quotes=false,bool producer=false,
+        phasec::Money freight=2,phasec::Money cash=1000,
+        bool costly_remote_payroll=false) {
     phasegh::World gh(24000);
     auto& e=gh.seed_geography();
     e.seed_province(1,"SOURCE","A");
@@ -19,17 +22,19 @@ static phasegh::World commerce_fixture(bool future=false, int future_start=24001
     e.seed_assignment(2,22);
     auto& c=e.seed_core().seed_core();
     for(const auto& actor:{"A","B","SELLER","TRADER","CARRIER"})
-        c.seed_actor(actor,std::string(actor)=="TRADER"?1000:0);
+        c.seed_actor(actor,std::string(actor)=="TRADER"?cash:0);
     c.seed_government("A","HEAD_A","PM_A",5,3);
     c.seed_government("B","HEAD_B","PM_B",5,3);
     c.seed_market("SOURCE","ore",10,fixed_quotes?10:1,fixed_quotes?10:100,0);
-    c.seed_market("PORT","ore",30,fixed_quotes?30:1,fixed_quotes?30:100,8);
+    const phasec::Money port_ore=producer?9:30;
+    c.seed_market("PORT","ore",port_ore,fixed_quotes?port_ore:1,
+                  fixed_quotes?port_ore:100,producer?0:8);
     c.seed_stock("SELLER","SOURCE","ore",20);
     gh.seed_verified_geographic_link("test-rail-link",1,2,"rail");
     phasegh::TransportEdge edge;
     edge.id="documented-freight";edge.carrier="CARRIER";
     edge.from=1;edge.to=2;edge.mode="rail";
-    edge.monthly_capacity=62;edge.freight_per_unit=2;
+    edge.monthly_capacity=62;edge.freight_per_unit=freight;
     edge.transit_days=2;edge.evidence_id="fixture-rate-and-rail-document";
     edge.valid_from_month=future?future_start:23999;
     edge.valid_through_month=24012;
@@ -42,6 +47,39 @@ static phasegh::World commerce_fixture(bool future=false, int future_start=24001
     fictional.monthly_capacity=100;fictional.freight_per_unit=0;
     fictional.transit_days=1;
     gh.seed_transport_edge(fictional);
+    if(producer) {
+        auto& d=e.seed_core();
+        c.seed_market("PORT","fuel",6,1,100,0);
+        c.seed_market("PORT","tools",35,1,100,2);
+        c.seed_stock("TRADER","PORT","fuel",2);
+        c.seed_production_facility("WORKS","TRADER","PORT",31);
+        phased::IndustryRecipe recipe;
+        recipe.id="MAKE_TOOLS";recipe.site="WORKS";
+        recipe.inputs={{"ore",2},{"fuel",2}};
+        recipe.outputs={{"tools",2}};
+        recipe.workers_per_batch=recipe.capacity_per_batch=1;
+        d.seed_recipe(recipe);
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"PORT","mixed","shared",1});
+        const auto economy=pop.economic_profile({"PORT","worker","wage","employee",
+                                               pop.default_education()});
+        const auto dem=pop.demographic_profile({"PORT",23700,phaseb::Sex::female,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto worker=pop.seed_population(dem,economy,h,1);
+        c.seed_actor("HH:"+std::to_string(h),0);
+        pop.hire(worker,1,"TRADER","worker",93,phaseb::JobRequirements{});
+        if(costly_remote_payroll) {
+            const auto remote_h=pop.household_profile({"SOURCE","mixed","shared",1});
+            const auto remote_economy=pop.economic_profile({"SOURCE","worker","wage",
+                                                           "employee",pop.default_education()});
+            const auto remote_dem=pop.demographic_profile({"SOURCE",23700,phaseb::Sex::female,
+                "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+            const auto remote_worker=pop.seed_population(remote_dem,remote_economy,remote_h,1);
+            c.seed_actor("HH:"+std::to_string(remote_h),0);
+            pop.hire(remote_worker,1,"TRADER","worker",1240,phaseb::JobRequirements{});
+        }
+    }
     gh.validate();
     return gh;
 }
@@ -87,6 +125,87 @@ static void no_historical_service_no_trade() {
            game.world().engine().base().core().core().stock(
                "SELLER","SOURCE","ore")==20,
            "future railway service traded before its documented start");
+}
+static void producer_imports_for_final_sales_not_ore_resale(
+        bool future,phasec::Money freight,phasec::Money cash,bool should_trade,
+        bool costly_remote_payroll=false) {
+    p0::Policies options;
+    options.daily_food_units_per_person=0;
+    options.monthly_clothing_units_per_person=0;
+    options.allow_endogenous_investment_credit=false;
+    options.allow_collateralized_enterprise_credit=false;
+    p0::DailyGame game(daily::World::adopt(
+        commerce_fixture(future,24001,false,true,freight,cash,costly_remote_payroll),
+        6),options);
+    game.advance_day();
+    auto core=[&]() -> const phasec::IntegratedWorld& {
+        return game.world().engine().base().core().core();
+    };
+    auto fills=[&]() -> const std::vector<phasegh::TradeFill>& {
+        return game.world().engine().commerce().fills;
+    };
+    verify(fills().size()==(should_trade?1u:0u),
+           "production need did not discover only an affordable profitable dated input shipment");
+    verify(core().stock("TRADER","PORT","ore")==0 &&
+           core().stock("TRADER","PORT","tools")==0,
+           "discovery teleported inputs or manufactured before arrival");
+    if(!should_trade) {
+        verify(core().stock("SELLER","SOURCE","ore")==20 &&
+               core().cash("SELLER")==0 && core().cash("CARRIER")==0,
+               "rejected shipment changed actual stock or paid a seller");
+        return;
+    }
+    verify(fills().front().quantity==2 &&
+           fills().front().physical_path==std::vector<std::string>{"documented-freight"} &&
+           fills().front().route_id.starts_with("G:DISCOVERY:") &&
+           core().cash("SELLER")==20 && core().cash("CARRIER")==4 &&
+           core().stock("SELLER","SOURCE","ore")==18,
+           "production discovery bypassed actual G fulfillment or payment");
+    const auto snapshot=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(snapshot),options);
+    game.advance_day();
+    replay.advance_day();
+    verify(fills().size()==1 && core().stock("TRADER","PORT","ore")==0 &&
+           core().stock("TRADER","PORT","tools")==0,
+           "in-flight input was duplicated or used before arrival");
+    game.advance_day();
+    replay.advance_day();
+    verify(daily::SnapshotCodec::encode(game.world())==
+           daily::SnapshotCodec::encode(replay.world()),
+           "in-transit input roll-forward diverged after loading");
+    verify(fills().size()==1 && core().stock("TRADER","PORT","ore")==0 &&
+           core().stock("TRADER","PORT","tools")==2,
+           "factory did not consume physically arrived ore in ordinary production");
+}
+static void earned_wage_arrears_take_priority_over_input_imports() {
+    p0::Policies quiet;
+    quiet.daily_food_units_per_person=0;
+    quiet.monthly_clothing_units_per_person=0;
+    quiet.allow_endogenous_investment_credit=false;
+    quiet.allow_collateralized_enterprise_credit=false;
+    quiet.allow_endogenous_input_procurement=false;
+    p0::DailyGame earlier(daily::World::adopt(
+        commerce_fixture(false,24001,false,true),6),quiet);
+    phasegh::World::Plan additional;
+    additional[5].push_back([today=earlier.world().day_index()](phasegh::Stage& stage) {
+        auto& c=stage.phase_c();
+        const auto worker=c.people().jobs().begin()->first;
+        const auto h=c.people().slice(worker).key.household;
+        c.phase_time_accrue_contract_wage(
+            "earned-previous-day","TRADER","HH:"+std::to_string(h),"B","",40,today);
+    });
+    earlier.advance_day(additional);
+    verify(earlier.world().engine().base().core().core()
+               .outstanding_worker_wages("TRADER")==40,
+           "wage-priority fixture did not accrue a real prior-day claim");
+    quiet.allow_endogenous_input_procurement=true;
+    p0::DailyGame later(earlier.world(),quiet);
+    later.advance_day();
+    const auto& c=later.world().engine().base().core().core();
+    verify(later.world().engine().commerce().fills.empty() &&
+           c.outstanding_worker_wages("TRADER")==0 &&
+           c.stock("SELLER","SOURCE","ore")==20,
+           "import bypassed an outstanding earned wage claim");
 }
 static void bank_credit_uses_actual_profit_and_balance_sheet() {
     phasec::IntegratedWorld c(24000);
@@ -211,5 +330,11 @@ int main() {
     factory_freight_wages_and_fifty_day_replay(false);
     merchant_discovers_seller_goods_and_path();
     no_historical_service_no_trade();
+    producer_imports_for_final_sales_not_ore_resale(false,2,1000,true);
+    producer_imports_for_final_sales_not_ore_resale(true,2,1000,false);
+    producer_imports_for_final_sales_not_ore_resale(false,18,1000,false);
+    producer_imports_for_final_sales_not_ore_resale(false,2,5,false);
+    producer_imports_for_final_sales_not_ore_resale(false,2,1000,false,true);
+    earned_wage_arrears_take_priority_over_input_imports();
     bank_credit_uses_actual_profit_and_balance_sheet();
 }

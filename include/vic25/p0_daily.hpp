@@ -3395,6 +3395,105 @@ public:
                     if(!at_war.contains(policy.country))
                         c.peacetime_military_support(unit);
             });
+        if(decisions.allow_endogenous_input_procurement)
+            plan[1].push_back([recipes=std::move(autonomous_operating_recipes),
+                              date,dim,today=world_.day_index()](phasegh::Stage& gh){
+                const auto& c=gh.phase_c();
+                const auto& domain=gh.phase_d().state();
+                for(const auto& id:recipes) {
+                    const auto& r=domain.recipes.at(id);
+                    if(r.needs_retrofit||r.requires_same_stage_nonstorable_energy||
+                       r.outputs.empty()||r.inputs.empty()||
+                       !c.facilities().contains(r.site))continue;
+                    const auto& f=c.facility(r.site);
+                    if(c.firm_bankrupt(f.owner)||c.outstanding_worker_wages(f.owner)>0||
+                       f.capacity<=f.damaged||
+                       !c.has_market(f.region,r.outputs.front().good))continue;
+                    if(!r.tech_id.empty()) {
+                        auto it=domain.active_site_tech.find(r.site);
+                        if(it==domain.active_site_tech.end()||it->second!=r.tech_id)
+                            continue;
+                    }
+                    if(const auto it=domain.site_archetypes.find(r.site);
+                       it!=domain.site_archetypes.end()) {
+                        const auto* archetype=building::find(it->second);
+                        const auto* profile=building::profile(it->second);
+                        if(!archetype||!profile||
+                           profile->operation!=building::Operation::recipe||
+                           archetype->industry!=r.industry_class)continue;
+                    }
+                    const auto& product=r.outputs.front();
+                    const auto& output=c.market(f.region,product.good);
+                    if(c.stock(f.owner,f.region,product.good)>=
+                       std::max(output.target_stock,
+                         c.previous_daily_solvent_unmet(f.region,product.good,today)))
+                        continue;
+                    const Quantity allowed=daily_budget::cumulative(
+                        f.capacity-f.damaged,date.day,dim);
+                    const auto used=used_site_capacity(domain,r.site,c.month());
+                    if(allowed<=used||allowed-used<r.capacity_per_batch||
+                       c.phase_d_workforce(f.owner)-c.phase_d_shared_labor_used(f.owner)
+                           <r.workers_per_batch)continue;
+                    People paid_workers=0;
+                    Money max_wage=0;
+                    for(const auto& [slice,job]:c.people().jobs()) {
+                        if(job.employer!=f.owner||job.wage_per_month<=0||
+                           c.people().demographic(c.people().slice(slice).key.demographic)
+                               .region!=f.region)continue;
+                        paid_workers=phaseb::add_checked(paid_workers,job.count);
+                        const Money daily=job.wage_per_month/dim+
+                                     (job.wage_per_month%dim!=0);
+                        max_wage=std::max(max_wage,daily);
+                    }
+                    if(paid_workers<r.workers_per_batch||max_wage<=0)continue;
+                    // Local paid staffing is mandatory, but production prices
+                    // use the firm's highest actual day wage across regions.
+                    const Money payroll=times(std::max(max_wage,
+                        actual_daily_worker_wage(c,f.owner,date.day,dim)),
+                        r.workers_per_batch);
+                    Money remaining=times(product.per_unit,output.price)-payroll;
+                    if(remaining<=0)continue;
+                    std::map<std::string,Quantity> input_units;
+                    for(const auto& input:r.inputs)
+                        input_units[input.good]=phaseb::add_checked(
+                            input_units[input.good],input.per_unit);
+                    std::string missing;
+                    Quantity needed=0;
+                    bool valid=true;
+                    for(const auto& [good,units]:input_units) {
+                        if(!c.has_market(f.region,good)) {valid=false;break;}
+                        const auto have=c.phase_d_material_available(f.owner,f.region,good);
+                        if(have<units) {
+                            if(!missing.empty()) {valid=false;break;}
+                            missing=good;
+                            needed=units;
+                        } else {
+                            const auto expense=times(units,c.market(f.region,good).price);
+                            if(expense>=remaining) {valid=false;break;}
+                            remaining-=expense;
+                        }
+                    }
+                    if(!valid||missing.empty())continue;
+                    // Require entire batch to be profitable after wages and
+                    // all other inputs, not just a cheap raw commodity.
+                    const Money ceiling=(remaining-1)/needed;
+                    if(ceiling<c.market(f.region,missing).price)continue;
+                    Quantity still_wanted=needed-
+                        c.phase_d_material_available(f.owner,f.region,missing);
+                    for(const auto& [key,stock]:c.physical_inventory()) {
+                        if(stock<=0||key.good_id!=missing||key.region_id!=f.region||
+                           key.holder_id==f.owner||key.holder_id.starts_with("HH:")||
+                           !c.has_actor(key.holder_id)||c.firm_bankrupt(key.holder_id))
+                            continue;
+                        still_wanted-=std::min(still_wanted,
+                            c.phase_d_material_available(key.holder_id,f.region,missing));
+                        if(still_wanted==0)break;
+                    }
+                    if(still_wanted>0)
+                        gh.register_production_input_need(
+                            f.owner,f.region,missing,needed,ceiling,payroll);
+                }
+            });
         // Army supply is planned once after civilian freight quotations:
         // no independent late-stage scan of the same arsenal stock.
         // Closing market observations is a daily accounting operation,

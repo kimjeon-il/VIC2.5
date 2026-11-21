@@ -48,24 +48,27 @@ inline void Stage::plan_market_discovery() {
         // Choose the highest observed unit margin, tie-broken by shorter
         // documented delivery and stable source IDs. One order per office
         // and calendar day bounds path searches and speculative repeat buys.
-        bool found=false;
+        bool found=false,production_chosen=false;
         Source chosen{};
         PathQuote path_chosen{};
-        Money price_chosen=0,duty_chosen=0,spread_chosen=0;
+        Money price_chosen=0,duty_chosen=0,spread_chosen=0,reserve_chosen=reserve;
         Quantity quantity_chosen=0;
         std::string exporting,importing;
         std::map<std::string,std::optional<PathQuote>> path_quotes;
         for(const auto& [good,offer_group]:supply) {
-            if(!c.has_market(merchant.market_region,good)||
-               c.market(merchant.market_region,good).target_stock<=0)
+            if(!c.has_market(merchant.market_region,good))continue;
+            const auto& dest_price=c.market(merchant.market_region,good);
+            const auto need=production_input_needs_.find(
+                {merchant.trader,merchant.market_region,good});
+            if(need==production_input_needs_.end()&&dest_price.target_stock<=0)
                 continue;
             for(const auto& offer:offer_group) {
             if(offer.seller==merchant.trader||
                offer.region==merchant.market_region)continue;
             const auto& source_price=c.market(offer.region,offer.good);
-            const auto& dest_price=c.market(merchant.market_region,offer.good);
-            if(source_price.price<=0||dest_price.price<=source_price.price||
-               dest_price.target_stock<=0)continue;
+            if(source_price.price<=0||
+               (need==production_input_needs_.end()&&
+                dest_price.price<=source_price.price))continue;
             Quantity en_route=0;
             for(const auto& [id,shipment]:trade_.daily_shipments) {
                 (void)id;
@@ -82,9 +85,15 @@ inline void Stage::plan_market_discovery() {
                     en_route=phaseb::add_checked(en_route,p.quantity);
             const Quantity held=c.phase_d_material_available(
                 merchant.trader,merchant.market_region,offer.good);
-            if(held>=dest_price.target_stock||
-               en_route>=dest_price.target_stock-held)continue;
-            const Quantity gap=dest_price.target_stock-held-en_route;
+            const auto gap_for=[&](Quantity target) {
+                return std::max<Quantity>(0,
+                    std::max<Quantity>(0,target-held)-en_route);
+            };
+            const Quantity resale_gap=gap_for(dest_price.target_stock);
+            const Quantity production_gap=need==production_input_needs_.end()?0:
+                gap_for(need->second.units);
+            if(production_gap<=0&&
+               (resale_gap<=0||dest_price.price<=source_price.price))continue;
             const Quantity actual_stock=c.phase_d_material_available(
                 offer.seller,offer.region,offer.good);
             if(actual_stock<=0)continue;
@@ -122,25 +131,47 @@ inline void Stage::plan_market_discovery() {
             const Money landed=phaseb::add_checked(
                 phaseb::add_checked(source_price.price,tax_per_unit),
                 candidate->freight_per_unit);
-            if(landed<=0||landed>=dest_price.price)continue;
-            const Money margin=dest_price.price-landed;
-            const Money minimum_spread=phaseb::add_checked(
-                phaseb::mul_checked(dest_price.price/1'000'000,
-                    merchant.minimum_margin_ppm),
-                phaseb::mul_checked(dest_price.price%1'000'000,
-                    merchant.minimum_margin_ppm)/1'000'000);
-            if(margin<minimum_spread)continue;
-            const Quantity available=lawful_trade_quantity(from,to,offer.good,
-                std::min({gap,actual_stock,candidate->capacity,
-                     merchant.maximum_daily_units,(free-reserve)/landed}));
+            if(landed<=0)continue;
+            Money margin=0,candidate_reserve=reserve;
+            Quantity available=0;
+            bool production=false;
+            if(production_gap>0 && landed<=need->second.ceiling) {
+                const Money protected_cash=std::max(reserve,need->second.payroll);
+                if(free>protected_cash) {
+                    const Quantity covered=lawful_trade_quantity(
+                        from,to,offer.good,std::min({production_gap,actual_stock,
+                           candidate->capacity,merchant.maximum_daily_units,
+                           (free-protected_cash)/landed}));
+                    if(covered==production_gap) {
+                        production=true;available=covered;
+                        candidate_reserve=protected_cash;
+                        margin=need->second.ceiling-landed;
+                    }
+                }
+            }
+            if(!production) {
+                if(resale_gap<=0||landed>=dest_price.price)continue;
+                margin=dest_price.price-landed;
+                const Money minimum_spread=phaseb::add_checked(
+                    phaseb::mul_checked(dest_price.price/1'000'000,
+                        merchant.minimum_margin_ppm),
+                    phaseb::mul_checked(dest_price.price%1'000'000,
+                        merchant.minimum_margin_ppm)/1'000'000);
+                if(margin<minimum_spread)continue;
+                available=lawful_trade_quantity(from,to,offer.good,
+                    std::min({resale_gap,actual_stock,candidate->capacity,
+                         merchant.maximum_daily_units,(free-reserve)/landed}));
+            }
             if(available<=0)continue;
-            if(!found||std::tuple{margin,-candidate->travel_days,
+            if(!found||std::tuple{production,margin,-candidate->travel_days,
                                   offer.seller,offer.region,offer.good}>
-                       std::tuple{spread_chosen,-path_chosen.travel_days,
-                                  chosen.seller,chosen.region,chosen.good}) {
+                       std::tuple{production_chosen,spread_chosen,
+                                  -path_chosen.travel_days,chosen.seller,
+                                  chosen.region,chosen.good}) {
                 found=true;chosen=offer;path_chosen=*candidate;
                 quantity_chosen=available;price_chosen=source_price.price;
                 duty_chosen=rate;spread_chosen=margin;
+                reserve_chosen=candidate_reserve;production_chosen=production;
                 exporting=from;importing=to;
             }
             }
@@ -153,7 +184,7 @@ inline void Stage::plan_market_discovery() {
         const Money cost=phaseb::add_checked(
             goods_cost,phaseb::add_checked(duty,freight));
         if(cost<=0||c.phase_d_cash_available(merchant.trader)<
-            phaseb::add_checked(cost,reserve))continue;
+            phaseb::add_checked(cost,reserve_chosen))continue;
         const std::string eid="G:DISCOVERY:"+std::to_string(day_index_)+":"+
            merchant.trader+":"+merchant.market_region+":"+chosen.good;
         if(trade_.executed.contains(eid))continue;
