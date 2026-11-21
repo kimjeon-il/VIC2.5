@@ -354,8 +354,32 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
               "direct named group approval proof leaked to a sponsored row");
         ++direct_named_approval;
     }
-    check(direct_named_approval==7 && canonical_law_row_evidence().size()==50,
-          "direct named group evidence did not preserve the exact 43 prior witnesses");
+    check(direct_named_approval==7 && canonical_law_row_evidence().size()==52,
+          "exact evidence did not preserve all 50 prior witnesses");
+
+    constexpr std::string_view named_culture_fixture=
+        "test_politics_identity::canonical_named_acceptance_changes_only_verified_pop_and_country";
+    std::size_t basque=0,polish=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=named_culture_fixture)continue;
+        check(!row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.executor=="IntegratedWorld::p2_acceptance (exact verified named culture)"&&
+              row.status==CanonicalLawRowStatus::verified_row,
+              "named culture evidence has an incorrect scope or executor");
+        if(row.source.source_id=="amendment_reinstated_fueros"&&
+           row.source.key=="country_basque_cultural_acceptance_add"&&
+           row.normalized_value==20'000'000)++basque;
+        else if(row.source.source_id=="amendment_haiti_polish_naturalization"&&
+                row.source.key=="country_polish_cultural_acceptance_add"&&
+                row.normalized_value==60'000'000)++polish;
+        else check(false,"another culture or source inherited the exact witness");
+        auto wrong_scope=row.source;
+        wrong_scope.institution=true;
+        check(classify_canonical_law_row(wrong_scope,canonical_law_row_evidence()).status==
+                  CanonicalLawRowStatus::no_recorded_path,
+              "an institutional row inherited the flat culture witness");
+    }
+    check(basque==1&&polish==1,"missing exact Basque or Polish culture evidence");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

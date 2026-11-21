@@ -121,6 +121,34 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
             }
         }
     }
+    // These canonically named additions target exact verified culture IDs.
+    // Use the country evaluating acceptance (including a foreign migration
+    // destination), not the current sovereign of the POP's home region.
+    const char* amendment_id=nullptr;
+    const char* effect_key=nullptr;
+    if(evidence.culture=="basque") {
+        amendment_id="amendment_reinstated_fueros";
+        effect_key="country_basque_cultural_acceptance_add";
+    } else if(evidence.culture=="polish") {
+        amendment_id="amendment_haiti_polish_naturalization";
+        effect_key="country_polish_cultural_acceptance_add";
+    }
+    if(amendment_id&&p2_active_amendments_.contains(amendment_id)) {
+        const auto& adopted=p2_amendments_.at(amendment_id);
+        const auto& parent=p2_laws_.at(adopted.law_id);
+        if(parent.country==country&&parent.tier!=P2NormTier::local_ordinance&&
+           (parent.scope.empty()||parent.scope=="national")&&
+           politics::bare_group(parent.domain)=="citizenship"&&
+           politics::bare_law(parent.base_choice)==*law&&
+           p2_is_active_base(adopted.law_id)) {
+            const auto* source=p2_catalog_amendment(amendment_id);
+            if(source&&p2_catalog_amendment_applies(*source,parent.base_choice)&&
+               (source->possible_country_tags.empty()||
+                p2_catalog_list_contains(source->possible_country_tags,country)))
+                score=phaseb::add_checked(score,static_cast<std::int64_t>(
+                    std::llround(p2_catalog_raw_modifier(amendment_id,effect_key))));
+        }
+    }
     score=std::clamp<std::int64_t>(score,0,100);
     const auto level=score>=80?P2AcceptanceLevel::full:
                      score>=60?P2AcceptanceLevel::second_class:

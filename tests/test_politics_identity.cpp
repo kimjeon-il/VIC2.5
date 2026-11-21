@@ -780,10 +780,159 @@ static void chiefs_aid_uses_only_effective_welfare_bureaucracy() {
     scenario("chiefs_distribute_aid",P1InstitutionKind::welfare,"FOREIGN","FOREIGN",true,false,100);
 }
 
+static void canonical_named_acceptance_changes_only_verified_pop_and_country() {
+    const auto run=[](const std::string& named,const std::string& target,
+                      const std::string& citizenship,const std::string& amendment,
+                      int before,int after,int invalid_parent=0) {
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"SOURCE","ORIGIN");
+        geo.seed_province(2,"TARGET",target);
+        geo.seed_unit(1,"ORIGIN","SOURCE-UNIT");
+        geo.seed_unit(2,target,"TARGET-UNIT");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& c=geo.seed_core().seed_core();
+        for(const auto& tag:{std::string("ORIGIN"),target}) {
+            c.seed_actor(tag,0);
+            c.seed_government(tag,"HEAD","PRIME",5,3);
+            c.seed_p1_constitution(tag,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,
+                "fixture:constitution"});
+            law(c,tag,"citizenship",citizenship);
+            law(c,tag,"migration",tag==target?"migration_controls":"no_migration_controls");
+        }
+        const std::string heritage=named=="basque"?"PRIMARY_H":"OTHER_H";
+        c.p2_seed_culture({"primary",{"PRIMARY_H"},{"PRIMARY_HG"},
+                            {"PRIMARY_L"},{"PRIMARY_LG"},{},{}});
+        c.p2_seed_culture({named,{heritage},{"SHARED_HG"},{"OTHER_L"},{"SHARED_LG"},{},{}});
+        const auto alias=named=="basque"?"Basque":"Polish";
+        c.p2_seed_culture({alias,{heritage},{"SHARED_HG"},{"OTHER_L"},{"SHARED_LG"},{},{}});
+        c.p2_seed_national_identity({"ORIGIN",{"primary"},{}});
+        c.p2_seed_national_identity({target,{"primary"},{}});
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"SOURCE","mixed","shared",25'000});
+        const auto e=pop.economic_profile({"SOURCE","worker","wage","employee",
+                                            pop.default_education()});
+        const auto seed=[&](const std::string& culture) {
+            const auto d=pop.demographic_profile({"SOURCE",23640,phaseb::Sex::male,
+                culture,"faith","citizen","free",pop.default_health(),
+                phaseb::Service::civilian});
+            return pop.seed_population(d,e,h,100'000);
+        };
+        const Id named_slice=seed(named), alias_slice=seed(alias), unknown=seed("unknown");
+        phaseb::DemographyRules rules;
+        rules.fertility_ppm=rules.infant_death_ppm=rules.child_death_ppm=0;
+        rules.adult_death_ppm=rules.senior_death_ppm=rules.very_old_death_ppm=0;
+        rules.illness_incidence_ppm=rules.accident_ppm=0;
+        rules.primary_access_ppm=rules.secondary_access_ppm=rules.tertiary_access_ppm=0;
+        rules.adult_literacy_access_ppm=rules.training_ppm=0;
+        rules.migration_ppm=310'000;
+        rules.destination_by_region["SOURCE"]="TARGET";
+        c.enable_demography(rules);
+        std::string parent=target+":citizenship";
+        if(invalid_parent==1) {
+            P2BaseLaw local;
+            local.id="LOCAL";local.country=target;local.domain="regional_rules";
+            local.scope="TARGET";local.tier=P2NormTier::local_ordinance;
+            local.base_choice="local_rule";local.legal_basis="fixture:local";
+            c.p2_seed_base(local);
+            parent=local.id;
+        } else if(invalid_parent==2)parent=target+":migration";
+        const P2Amendment addition{amendment,parent,"fixture:amendment","",
+            {{"verified-amendment-clause",target,
+              P2ClauseKind::political_association_allowed,1}}};
+        if(invalid_parent)c.p2_seed_amendment(addition);
+        auto world=daily::World::adopt(std::move(gh),17);
+        const auto check_score=[&](int expected,bool allowed) {
+            const auto& live=view(world);
+            const auto actual=live.p2_acceptance(target,named_slice);
+            const auto other=live.p2_acceptance(target,alias_slice);
+            const auto origin=live.p2_acceptance("ORIGIN",named_slice);
+            const auto level=expected>=80?P2AcceptanceLevel::full:
+                expected>=60?P2AcceptanceLevel::second_class:
+                expected>=40?P2AcceptanceLevel::open_prejudice:
+                expected>=20?P2AcceptanceLevel::cultural_erasure:
+                              P2AcceptanceLevel::violent_hostility;
+            const auto score=[](const auto& candidate) {
+                return candidate?candidate->score:-1;
+            };
+            if(!(actual&&actual->score==expected&&actual->level==level&&
+                 actual->region=="SOURCE"&&other&&other->score==before&&
+                 origin&&origin->score==before&&!live.p2_acceptance(target,unknown)))
+                throw std::runtime_error("named culture acceptance scope: "+named+
+                    ", expected="+std::to_string(expected)+", target="+
+                    std::to_string(score(actual))+", decoy="+std::to_string(score(other))+
+                    ", origin="+std::to_string(score(origin))+
+                    ", date="+std::to_string(world.day_index()));
+            check(live.p2_migration_permitted(named_slice,"TARGET")==allowed&&
+                  !live.p2_migration_permitted(alias_slice,"TARGET")&&
+                  !live.p2_migration_permitted(unknown,"TARGET"),
+                  "named culture acceptance did not feed the actual destination gate");
+        };
+        const auto arrived=[&] {
+            const auto& people=view(world).people();
+            phaseb::People count=0;
+            for(const auto& [id,row]:people.slices()) {
+                (void)id;
+                const auto& demo=people.demographic(row.key.demographic);
+                if(demo.region!="TARGET")continue;
+                check(demo.culture==named,"an ineligible culture crossed the controlled border");
+                count+=row.count;
+            }
+            return count;
+        };
+        check_score(before,false);
+        if(invalid_parent) {
+            world.advance_day();
+            check(arrived()==0,"incompatible or local parent allowed real migration");
+            return;
+        }
+        const auto enact=[&](bool repeal) {
+            const auto start=world.day_index();
+            phasegh::World::Plan plan;
+            plan[9].push_back([&,start,repeal](phasegh::Stage& stage) {
+                auto& live=stage.phase_c();
+                P2Bill b;
+                b.id=repeal?"REPEAL":"ADOPT";b.country=target;b.proposer="PRIME";
+                b.legal_basis="fixture:legislation";b.effective_day=start+2;
+                b.action=repeal?P2BillAction::repeal_amendment:P2BillAction::attach_amendment;
+                if(repeal)b.target_id=amendment;
+                else b.proposed_amendment=addition;
+                const auto id=b.id;
+                live.p2_submit_bill(std::move(b),start);
+                live.p2_approve_bill(id,{});
+                live.p2_promulgate_bill(id,"HEAD",start);
+            });
+            world.advance_day(plan);
+            world.advance_day();
+        };
+        enact(false);
+        check_score(before,false);
+        check(arrived()==0,"pending law changed migration before effective day");
+        world.advance_day();
+        check_score(after,true);
+        check(arrived()==1000,"the named eligible POP did not really cross on effective day");
+        const auto bytes=daily::SnapshotCodec::encode(world);
+        world=daily::SnapshotCodec::decode(bytes);
+        check_score(after,true);
+        enact(true);
+        const auto before_repeal=arrived();
+        world.advance_day();
+        check_score(before,false);
+        check(arrived()==before_repeal&&view(world).people().population()==300'000,
+              "repealed enactment still moved people or violated POP balance");
+    };
+    run("basque","ESP","subjecthood","amendment_reinstated_fueros",20,40);
+    run("polish","HAI","cultural_exclusion","amendment_haiti_polish_naturalization",20,80);
+    run("basque","ESP","subjecthood","amendment_reinstated_fueros",20,40,1);
+    run("polish","HAI","cultural_exclusion","amendment_haiti_polish_naturalization",20,80,2);
+}
+
 int main(){
     try{
         chiefs_aid_uses_only_effective_welfare_bureaucracy();
         source_ideologies_laws_traits();
+        canonical_named_acceptance_changes_only_verified_pop_and_country();
         acceptance_and_five_tier_rights();
         physical_migration_and_law_block();
         abolition_preserves_real_people_and_membership();
