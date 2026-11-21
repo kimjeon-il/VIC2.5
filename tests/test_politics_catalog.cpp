@@ -356,7 +356,7 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==132,
+    check(canonical_law_row_evidence().size()==138,
           "expected 129 preserved witnesses and two peasant-only draft rows");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
@@ -733,6 +733,26 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
                 row.source.key=="country_disallow_trade_outside_kyushu_bool") &&
                row.status==CanonicalLawRowStatus::verified_row;
     }),"ordinary isolationism proof missing or leaked to undocumented gateways");
+
+    std::size_t factories_prohibited=0,factories_compensation=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test!="test_phase_d::commissioned_nationalization_requires_available_statutory_compensation")continue;
+        check(row.source.boolean && !row.source.institution && !row.source.sponsor &&
+              row.normalized_value==1 && row.status==CanonicalLawRowStatus::verified_row &&
+              row.executor=="Phase D commissioned-factory nationalization (legal title and cash journals only)",
+              "commissioned-factory witness lost exact legal scope");
+        if(row.source.key=="country_disable_nationalization_bool") {
+            check(row.source.source_id=="law_laissez_faire",
+                  "outright commissioned nationalization ban misattributed");
+            ++factories_prohibited;
+        } else {
+            check(row.source.key=="country_disable_nationalization_without_compensation_bool",
+                  "commissioned nationalization evidence leaked to a different modifier");
+            ++factories_compensation;
+        }
+    }
+    check(factories_prohibited==1 && factories_compensation==5,
+          "commissioned-factory ownership receipt witnesses missing");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

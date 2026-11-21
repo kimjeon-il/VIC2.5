@@ -91,6 +91,152 @@ static void test_construction_accepted_wip_next_month() {
     check(w.core().stock("BUILDER","R","steel")==0,"construction double-used material");
     w.validate();
 }
+static void commissioned_nationalization_requires_available_statutory_compensation() {
+    using namespace vic25::phasec;
+    const auto run=[](const std::string& law,Money government_cash,
+                      bool accepted,bool paid,Money exact=-1) {
+        World w{1000};
+        auto& c=w.seed_core();
+        c.seed_actor("CLIENT",200);
+        c.seed_actor("BUILDER",20);
+        c.seed_actor("GOV",government_cash);
+        c.seed_actor("PRIVATE",200);
+        c.seed_region("R","A");
+        c.seed_government("A","HEAD","PRIME",5,3);
+        c.seed_country_treasury("A","GOV");
+        c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:law"});
+        c.p2_seed_base({"A:ECONOMIC","A","lawgroup_economic_system","national",
+                        "law_"+law,"fixture:law"});
+        const auto worker=people(w,"R",2);
+        c.seed_stock("BUILDER","R","steel",2);
+        w.seed_construction(project());
+        World::Plan work;
+        work[2].push_back([worker](Stage& s){s.phase_c().hire(worker,2,"BUILDER",1);});
+        full_work_plan(work,2);
+        w.advance(work);
+        w.advance();
+        check(w.construction("P").commissioned&&
+              w.construction("P").capitalized_value==40&&
+              w.core().shares("FACILITY:NEW_MILL","CLIENT")==1,
+              "fixture lacks a real commissioned and capitalized title");
+        const auto opening_private=w.core().cash("CLIENT");
+        const auto opening_seller_capital=w.core().financial().balance("CLIENT:capital");
+        const auto opening_buyer_capital=w.core().financial().balance("GOV:capital");
+        if(accepted) {
+            auto rollback=w;
+            World::Plan candidate;
+            candidate[7].push_back([](Stage& stage) {
+                check(stage.nationalize_commissioned_factory("NEW_MILL")&&
+                      stage.phase_c().shares("FACILITY:NEW_MILL","GOV")==1,
+                      "rollback control never reached real acquired title");
+            });
+            candidate[8].push_back([](Stage&) {
+                throw std::runtime_error("abort after both owner journals");
+            });
+            bool aborted=false;
+            try { rollback.advance(candidate); }
+            catch(const std::runtime_error& e) {
+                if(std::string(e.what())!="abort after both owner journals")throw;
+                aborted=true;
+            }
+            check(aborted&&rollback.month()==w.month()&&
+                  rollback.construction("P").client=="CLIENT"&&
+                  rollback.core().facility("NEW_MILL").owner=="CLIENT"&&
+                  rollback.core().cash("GOV")==government_cash&&
+                  rollback.core().cash("CLIENT")==opening_private&&
+                  rollback.core().shares("FACILITY:NEW_MILL","CLIENT")==1&&
+                  rollback.core().financial().balance("CLIENT:fixed_asset")==40&&
+                  rollback.core().financial().balance("CLIENT:capital")==opening_seller_capital&&
+                  rollback.core().financial().balance("GOV:capital")==opening_buyer_capital,
+                  "aborted acquisition leaked an owner journal or title");
+        }
+        bool acquired=false;
+        World::Plan decision;
+        decision[7].push_back([&](Stage& stage) {
+            acquired=stage.nationalize_commissioned_factory("NEW_MILL");
+        });
+        try { w.advance(decision); }
+        catch(const std::exception& error) {
+            throw std::runtime_error(law+" treasury="+std::to_string(government_cash)+
+                " Stage 7 commissioned acquisition: "+error.what());
+        }
+        const auto& ledger=w.core();
+        const auto debit=government_cash-ledger.cash("GOV");
+        check(acquired==accepted&&ledger.cash("CLIENT")==opening_private+debit&&
+              (paid?debit>0:debit==0)&&(exact<0||debit==exact)&&
+              ledger.facility("NEW_MILL").owner==(accepted?"GOV":"CLIENT")&&
+              w.construction("P").client==(accepted?"GOV":"CLIENT")&&
+              ledger.shares("FACILITY:NEW_MILL","GOV")==int(accepted)&&
+              ledger.shares("FACILITY:NEW_MILL","CLIENT")==int(!accepted)&&
+              ledger.financial().balance("CLIENT:fixed_asset")==(accepted?0:40),
+              "commissioned nationalization did not jointly enforce statutory cash and title");
+        if(accepted)
+            check(ledger.financial().balance("GOV:fixed_asset")==40&&
+                  ledger.financial().balance("CLIENT:capital")==opening_seller_capital+40&&
+                  ledger.financial().balance("GOV:capital")==opening_buyer_capital-40,
+                  "existing book value did not move as a balanced owner journal");
+        if(law=="laissez_faire") {
+            // Ordinary funded private-party C transfer is not nationalization.
+            // Do not commit it separately from D's project-owner transaction.
+            auto private_control=w;
+            World::Plan private_sale;
+            private_sale[7].push_back([](Stage& stage) {
+                stage.phase_c().phase_d_transfer_factory_paid("NEW_MILL","PRIVATE",20,40);
+                check(stage.phase_c().facility("NEW_MILL").owner=="PRIVATE"&&
+                      stage.phase_c().shares("FACILITY:NEW_MILL","PRIVATE")==1&&
+                      stage.phase_c().cash("PRIVATE")==180,
+                      "laissez-faire nationalization ban prohibited an ordinary private purchase");
+                throw std::runtime_error("rollback narrower C-only control");
+            });
+            bool explicit_rollback=false;
+            try{private_control.advance(private_sale);}
+            catch(const std::runtime_error& e) {
+                explicit_rollback=std::string(e.what())=="rollback narrower C-only control";
+                if(!explicit_rollback)throw;
+            }
+            check(explicit_rollback&&private_control.core().facility("NEW_MILL").owner=="CLIENT",
+                  "private control did not exercise the intended legal sale");
+        }
+        w.validate();
+    };
+    for(const std::string law:{"traditionalism","interventionism","agrarianism",
+                               "industry_banned","extraction_economy"}) {
+        run(law,1,false,false,0);
+        run(law,200,true,true);
+    }
+    run("interventionism",59,false,false,0);
+    run("interventionism",60,true,true,60);
+    run("laissez_faire",200,false,false,0);
+    run("command_economy",0,true,false,0);
+
+    // Historical facility with an explicit existing securities-backed
+    // title, independently from the commissioned non-security case above.
+    World historical{1000};
+    seed_actor_set(historical);
+    auto& core=historical.seed_core();
+    core.seed_production_facility("HISTORIC","CLIENT","R",2);
+    core.seed_shares("FACILITY:HISTORIC","CLIENT",1);
+    const auto old_cap=core.financial().balance("CLIENT:capital");
+    const auto buyer_cap=core.financial().balance("FACTORY:capital");
+    World::Plan private_title_sale;
+    private_title_sale[7].push_back([](Stage& stage) {
+        stage.phase_c().phase_d_transfer_factory_paid("HISTORIC","FACTORY",7,0);
+    });
+    historical.advance(private_title_sale);
+    const auto& acquired=historical.core();
+    check(acquired.facility("HISTORIC").owner=="FACTORY"&&
+          acquired.shares("FACILITY:HISTORIC","FACTORY")==1&&
+          acquired.shares("FACILITY:HISTORIC","CLIENT")==0&&
+          acquired.financial().balance("CLIENT:security:FACILITY:HISTORIC")==0&&
+          acquired.financial().balance("FACTORY:security:FACILITY:HISTORIC")==1&&
+          acquired.financial().balance("CLIENT:capital")==old_cap+1&&
+          acquired.financial().balance("FACTORY:capital")==buyer_cap-1&&
+          acquired.cash("FACTORY")==13&&acquired.cash("CLIENT")==207,
+          "existing security title was not moved with per-owner journals and real cash");
+    historical.validate();
+}
+
 static void research_month(World::Plan& p,Quantity q,bool review) {
     p[1].push_back([q](Stage& s){s.plan_research("R",q);});
     p[4].push_back([q](Stage& s){s.perform_research("R",q);});
@@ -304,6 +450,7 @@ static void test_repeated_world_deterministic() {
 }
 int main() {
     try {
+        commissioned_nationalization_requires_available_statutory_compensation();
         const auto run=[](const char* label,auto func){
             try {func();}
             catch(const std::exception& e) {

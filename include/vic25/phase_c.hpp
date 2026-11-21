@@ -1474,8 +1474,10 @@ public:
                 ensure_security_account(buyer,title);
                 money_.post({unique("factory-title-security-transfer"),
                    "transfer real facility security title",{
+                   {account(old,"capital"),1,0},
+                   {security_account(old,title),0,1},
                    {security_account(buyer,title),1,0},
-                   {security_account(old,title),0,1}}});
+                   {account(buyer,"capital"),0,1}}});
             }
         }
         // A completed factory's book value is existing paid WIP, never
@@ -1488,8 +1490,13 @@ public:
                 money_.add_account(new_asset,buyer,AccountType::asset);
             money_.post({unique("factory-book-value-transfer"),
                 "carry existing paid fixed capital to new operator",{
+                // Each owner books its own capital reallocation; the
+                // distinct cash compensation below cannot balance this
+                // noncash transfer across actor boundaries.
+                {account(old,"capital"),project_book_value,0},
+                {old_asset,0,project_book_value},
                 {new_asset,project_book_value,0},
-                {old_asset,0,project_book_value}}});
+                {account(buyer,"capital"),0,project_book_value}}});
         }
         if(price>0)pay(buyer,old,price);
         if(tracked_assets_.contains(title))
