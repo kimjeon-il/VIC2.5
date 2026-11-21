@@ -356,8 +356,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==60,
-          "expected exact total after adding only the flat Shinsengumi witness");
+    check(canonical_law_row_evidence().size()==63,
+          "expected exact total after adding three Austrian review speed witnesses");
 
     constexpr std::string_view named_culture_fixture=
         "test_politics_identity::canonical_named_acceptance_changes_only_verified_pop_and_country";
@@ -407,11 +407,11 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(national_success==3&&target_success==4,
           "missing precise national or proposal-specific enactment rows");
-    const auto untested_speed=classify_canonical_law_row(
-        {"amendment_geheime_staatskonferenz","country_law_enactment_speed_mult",-0.2,false,false},
+    const auto mismatched_speed=classify_canonical_law_row(
+        {"amendment_geheime_staatskonferenz","country_law_enactment_speed_mult",-0.2,false,true},
         canonical_law_row_evidence());
-    check(untested_speed.status!=CanonicalLawRowStatus::verified_row,
-          "success witness credited unrelated review speed");
+    check(mismatched_speed.status==CanonicalLawRowStatus::no_recorded_path,
+          "flat cadence evidence leaked to an institution-qualified row");
 
     check(std::count_if(audit.begin(),audit.end(),[](const auto& row) {
         return row.source.source_id=="law_shinsengumi" &&
@@ -425,6 +425,24 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
         return row.source.key=="political_movement_radicalism_add" && row.source.institution &&
                row.status==CanonicalLawRowStatus::verified_row;
     }),"flat movement law proof missing or leaked to institutional variants");
+
+    std::size_t austrian_speed=0,staged_review_success=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test=="test_p2_advanced::canonical_enactment_success_changes_real_review_outcome") {
+            check(row.source.key!="country_law_enactment_speed_mult",
+                  "review success proof leaked to cadence");
+            ++staged_review_success;
+        }
+        if(row.behavior_test!="test_p2_advanced::austrian_law_speed_changes_only_new_review_intervals")continue;
+        check(row.source.key=="country_law_enactment_speed_mult" &&
+              !row.source.boolean && !row.source.institution && !row.source.sponsor &&
+              row.executor=="IntegratedWorld::p2_scaled_new_review_days (fixed checkpoint reciprocal ceiling)" &&
+              row.status==CanonicalLawRowStatus::verified_row,
+              "Austrian review speed witness lost precise scope");
+        ++austrian_speed;
+    }
+    check(austrian_speed==3 && staged_review_success==7,
+          "expected three review cadence witnesses separate from seven success witnesses");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

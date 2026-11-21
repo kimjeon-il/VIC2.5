@@ -5448,6 +5448,12 @@ private:
         std::int64_t);
     void p2_rebuild_due_index();
     void p2_rebuild_negotiated_sponsor_effects();
+    [[nodiscard]] std::int64_t p2_active_national_enactment_points(
+        const std::string&,const char*,const char*)const;
+    [[nodiscard]] std::int64_t p2_austrian_enactment_modifier_ppm(
+        const std::string&,const char*)const;
+    [[nodiscard]] std::int64_t p2_scaled_new_review_days(
+        const std::string&,std::int64_t)const;
     void p2_rebuild_review_due_index();
     static int compare_nonnegative_ratios(std::uint64_t a, std::uint64_t b,
                                           std::uint64_t c, std::uint64_t d) {

@@ -797,9 +797,10 @@ inline void IntegratedWorld::p2_submit_bill(P2Bill bill,std::int64_t today) {
     const bool process=bill.effective_day==-1;
     p2_bills_.emplace(id,std::move(bill));
     if(process) {
+        const auto review_day=today+p2_scaled_new_review_days(country,review_days);
         p2_enactments_.emplace(id,P2Enactment{
-            id,country,key,1,0,0,0,today+review_days,-1,false});
-        p2_review_due_[today+review_days].insert(id);
+            id,country,key,1,0,0,0,review_day,-1,false});
+        p2_review_due_[review_day].insert(id);
     }
     events_.push_back("p2-bill-introduced");
 }

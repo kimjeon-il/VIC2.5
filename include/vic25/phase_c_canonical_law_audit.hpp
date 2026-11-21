@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,60>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,63>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,60> evidence{{
+    static const std::array<CanonicalLawRowEvidence,63> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -246,7 +246,16 @@ inline const std::array<CanonicalLawRowEvidence,60>& canonical_law_row_evidence(
          "test_p2_advanced::canonical_enactment_success_changes_real_review_outcome"},
         {{"law_shinsengumi","political_movement_radicalism_add",-0.05,false,false},
          "IntegratedWorld::p3_movement_view (flat derived radicalism)",
-         "test_p3_p5_politics::shinsengumi_changes_movement_risk_without_altering_pop"}
+         "test_p3_p5_politics::shinsengumi_changes_movement_risk_without_altering_pop"},
+        {{"amendment_geheime_staatskonferenz_metternich","country_law_enactment_speed_mult",-0.1,false,false},
+         "IntegratedWorld::p2_scaled_new_review_days (fixed checkpoint reciprocal ceiling)",
+         "test_p2_advanced::austrian_law_speed_changes_only_new_review_intervals"},
+        {{"amendment_geheime_staatskonferenz_kolowrat","country_law_enactment_speed_mult",-0.25,false,false},
+         "IntegratedWorld::p2_scaled_new_review_days (fixed checkpoint reciprocal ceiling)",
+         "test_p2_advanced::austrian_law_speed_changes_only_new_review_intervals"},
+        {{"amendment_geheime_staatskonferenz","country_law_enactment_speed_mult",-0.2,false,false},
+         "IntegratedWorld::p2_scaled_new_review_days (fixed checkpoint reciprocal ceiling)",
+         "test_p2_advanced::austrian_law_speed_changes_only_new_review_intervals"}
     }};
     return evidence;
 }

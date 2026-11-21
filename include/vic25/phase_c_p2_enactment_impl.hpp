@@ -2,6 +2,48 @@
 // Three-step law progress; C/P3 political support is the source of probability,
 // while existing P2/P4 chambers retain the final legal vote and law effects.
 namespace vic25::phasec {
+inline std::int64_t IntegratedWorld::p2_active_national_enactment_points(
+        const std::string& country,const char* id,const char* key)const {
+    if(!p2_active_amendments_.contains(id))return 0;
+    const auto& amendment=p2_amendments_.at(id);
+    const auto& parent=p2_laws_.at(amendment.law_id);
+    const auto* source=p2_catalog_amendment(id);
+    if(parent.country!=country||parent.tier==P2NormTier::local_ordinance||
+       (!parent.scope.empty()&&parent.scope!="national")||
+       !p2_is_active_base(amendment.law_id)||
+       !politics::catalogue().has(parent.domain,parent.base_choice)||
+       !source||!p2_catalog_amendment_applies(*source,parent.base_choice)||
+       (!source->possible_country_tags.empty()&&
+        !p2_catalog_list_contains(source->possible_country_tags,country)))
+        return 0;
+    return static_cast<std::int64_t>(std::llround(
+        p2_catalog_raw_modifier(id,key)*1'000'000.0));
+}
+inline std::int64_t IntegratedWorld::p2_austrian_enactment_modifier_ppm(
+        const std::string& country,const char* key)const {
+    std::int64_t total=0;
+    for(const auto* amendment:{
+            "amendment_geheime_staatskonferenz_metternich",
+            "amendment_geheime_staatskonferenz_kolowrat",
+            "amendment_geheime_staatskonferenz"})
+        total=phaseb::add_checked(total,
+            p2_active_national_enactment_points(country,amendment,key));
+    return total;
+}
+inline std::int64_t IntegratedWorld::p2_scaled_new_review_days(
+        const std::string& country,std::int64_t days)const {
+    // The original game's 1.13.9 notes document speed (not duration)
+    // multipliers and a 10% speed floor. VIC2.5 adapts this to its existing
+    // fixed checkpoint scheduler by taking the reciprocal, rounded up to a
+    // full day. This is not a claim about the original engine's rounding.
+    // Read active law only when scheduling a new interval: the persisted due
+    // date and its day-dependent roll must not be rebased after law changes.
+    const auto speed=std::max<std::int64_t>(100'000,phaseb::add_checked(
+        1'000'000,p2_austrian_enactment_modifier_ppm(
+            country,"country_law_enactment_speed_mult")));
+    const auto scaled=phaseb::mul_checked(days,1'000'000);
+    return scaled/speed+(scaled%speed!=0);
+}
 inline bool IntegratedWorld::p2_has_review_due(std::int64_t day)const {
     return p2_review_due_.contains(day);
 }
@@ -98,30 +140,8 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         assess(governments_.at(bill.country).head_of_state,20'000);
         if(const auto fav=p1_favorites_.find(bill.country);
            fav!=p1_favorites_.end())assess(fav->second,25'000);
-        const auto active_national_points=[&](const char* id,const char* key) {
-            if(!p2_active_amendments_.contains(id))return std::int64_t{0};
-            const auto& amendment=p2_amendments_.at(id);
-            const auto& parent=p2_laws_.at(amendment.law_id);
-            const auto* source=p2_catalog_amendment(id);
-            if(parent.country!=bill.country||
-               parent.tier==P2NormTier::local_ordinance||
-               (!parent.scope.empty()&&parent.scope!="national")||
-               !p2_is_active_base(amendment.law_id)||
-               !politics::catalogue().has(parent.domain,parent.base_choice)||
-               !source||!p2_catalog_amendment_applies(*source,parent.base_choice)||
-               (!source->possible_country_tags.empty()&&
-                !p2_catalog_list_contains(source->possible_country_tags,bill.country)))
-                return std::int64_t{0};
-            return static_cast<std::int64_t>(std::llround(
-                p2_catalog_raw_modifier(id,key)*1'000'000.0));
-        };
-        std::int64_t legal_success=0;
-        for(const auto* amendment:{
-                "amendment_geheime_staatskonferenz_metternich",
-                "amendment_geheime_staatskonferenz_kolowrat",
-                "amendment_geheime_staatskonferenz"})
-            legal_success=phaseb::add_checked(legal_success,
-                active_national_points(amendment,"country_law_enactment_success_add"));
+        auto legal_success=p2_austrian_enactment_modifier_ppm(
+            bill.country,"country_law_enactment_success_add");
         // These are four authored proposal-specific chances, not four flat
         // national bonuses and not changes to votes, assent or bill dates.
         if(bill.action==P2BillAction::enact_or_replace_base&&
@@ -138,7 +158,8 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
             else if(target=="anarchy")
                 key="country_enactment_success_chance_law_anarchy_add";
             if(key)legal_success=phaseb::add_checked(legal_success,
-                active_national_points("amendment_tradition_of_free_elections",key));
+                p2_active_national_enactment_points(
+                    bill.country,"amendment_tradition_of_free_elections",key));
         }
         std::int64_t success=std::clamp<std::int64_t>(phaseb::add_checked(
             support+e.success_bonus_ppm+personal_modifier,legal_success),0,900'000);
@@ -204,7 +225,8 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
                                         legit<50?1500:1000;
         const auto period=days*legitimacy_multiplier/1000*
                           (1000-unused/4)/1000;
-        e.next_review_day=today+std::clamp(period,30,300);
+        e.next_review_day=today+std::clamp<std::int64_t>(
+            p2_scaled_new_review_days(bill.country,period),30,300);
         p2_review_due_[e.next_review_day].insert(id);
     }
 }

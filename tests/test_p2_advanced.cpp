@@ -710,6 +710,134 @@ static void canonical_enactment_success_changes_real_review_outcome() {
              "law_technocracy",100'000,true);
 }
 
+static void austrian_law_speed_changes_only_new_review_intervals() {
+    const auto run=[](const std::string& country,const std::string& parent_choice,
+                      const std::string& source,int speed_ppm,int first,
+                      bool starts_after_scheduling=false) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R",country);geo.seed_unit(1,country,"R");
+        geo.seed_assignment(1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor(country,100);
+        c.seed_government(country,"HEAD","PM",5,3);
+        c.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:authority"});
+        c.seed_interest_group("Actual");
+        c.p3_seed_group({country,"Actual","","","",P3GroupType::custom,0,0});
+        c.seed_p1_coalition(country,{{"Actual"},{},false});
+        c.p2_seed_base({"opening",country,"distribution_of_power","",parent_choice,"fixture:law"});
+        if(!source.empty()&&!starts_after_scheduling)c.p2_seed_amendment({source,"opening","fixture:active","",
+            {{"association",country,P2ClauseKind::political_association_allowed,1}}});
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"R","mixed","shared",250});
+        const auto e=pop.economic_profile({"R","worker","wage","employee",
+                                          pop.default_education()});
+        const auto d=pop.demographic_profile({"R",23651,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto cohort=pop.seed_population(d,e,h,1000);
+        c.p3_seed_movement({"Backing",country,"review_fixture","reformed","",
+            P3MovementGoal::legal_reform,{"Actual"},{},300'000,100'000,true});
+        auto world=daily::World::adopt(std::move(gh),31);
+        const auto start=world.day_index();
+        phasegh::World::Plan submit;
+        submit[9].push_back([&](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            live.join_interest_group(cohort,"Actual",400);
+            P2Bill bill;
+            bill.id="STAGED";bill.country=country;bill.proposer="PM";
+            bill.legal_basis="fixture:review";
+            bill.proposed_base={"revised",country,"review_fixture","national",
+                "reformed","fixture:review"};
+            live.p2_submit_bill(std::move(bill),start);
+            if(starts_after_scheduling) {
+                P2Bill attach;
+                attach.id="ATTACH-SPEED";attach.country=country;attach.proposer="PM";
+                attach.legal_basis="fixture:active";attach.effective_day=start+1;
+                attach.action=P2BillAction::attach_amendment;
+                attach.proposed_amendment={source,"opening","fixture:active","",
+                    {{"association",country,P2ClauseKind::political_association_allowed,1}}};
+                live.p2_submit_bill(std::move(attach),start);
+                live.p2_approve_bill("ATTACH-SPEED",{});
+                live.p2_promulgate_bill("ATTACH-SPEED","HEAD",start);
+            }
+        });
+        world.advance_day(submit);
+        const auto progress=[&]() -> const P2Enactment& {
+            return ledger(world).p2_enactments().at("STAGED");
+        };
+        ok(progress().next_review_day==start+first,
+           "active speed did not lengthen the first real review interval");
+        const auto until=[&](std::int64_t due) {
+            while(world.day_index()<due)world.advance_day();
+        };
+        const auto base_period=[&]() {
+            const auto& core=ledger(world);
+            const auto legit=core.p1_legitimacy(country).score;
+            const auto authority=core.p1_authority_budget(country);
+            const auto unused=authority.supply>0?
+                std::clamp(authority.available*1000/authority.supply,0,1000):0;
+            ok(legit>=25&&core.p3_movement_view("Backing").support_ppm==400'000,
+               "speed fixture lacked actual eligible regular review support");
+            return 100*(legit>=90?750:legit<50?1500:1000)/1000*
+                       (1000-unused/4)/1000;
+        };
+        const auto first_day=start+first;
+        until(first_day);
+        ok(progress().checks==0&&progress().next_review_day==first_day&&
+           (!starts_after_scheduling||ledger(world).p2_amendment_active(source)),
+           "first review ran early or new law rebased a saved checkpoint");
+        const auto first_unmodified=base_period();
+        auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+        world.advance_day();replay.advance_day();
+        const auto expected_period=std::clamp<std::int64_t>(
+            (first_unmodified*1'000'000LL+speed_ppm-1)/speed_ppm,30,300);
+        const auto second_day=first_day+expected_period;
+        ok(progress().checks==1&&progress().last_review_day==first_day&&
+           progress().next_review_day==second_day&&
+           daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+           "speed did not preserve first/recurring date and saved replay equivalence");
+        if(source.empty()||speed_ppm==1'000'000)return;
+        const auto now=world.day_index();
+        phasegh::World::Plan repeal;
+        repeal[9].push_back([&](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            P2Bill bill;
+            bill.id="REPEAL-SPEED";bill.country=country;bill.proposer="PM";
+            bill.legal_basis="fixture:repeal";bill.effective_day=now+1;
+            bill.action=P2BillAction::repeal_amendment;bill.target_id=source;
+            live.p2_submit_bill(std::move(bill),now);
+            live.p2_approve_bill("REPEAL-SPEED",{});
+            live.p2_promulgate_bill("REPEAL-SPEED","HEAD",now);
+        });
+        world.advance_day(repeal);
+        auto after_promulgation=daily::SnapshotCodec::decode(
+            daily::SnapshotCodec::encode(world));
+        world.advance_day();after_promulgation.advance_day();
+        ok(!ledger(world).p2_amendment_active(source)&&
+           progress().next_review_day==second_day&&progress().checks==1&&
+           daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(after_promulgation),
+           "actual repeal or reload illegally rescheduled a saved checkpoint");
+        until(second_day);
+        const auto later_unmodified=base_period();
+        world.advance_day();
+        ok(progress().checks==2&&progress().last_review_day==second_day&&
+           progress().next_review_day==
+              second_day+std::clamp<std::int64_t>(later_unmodified,30,300),
+           "expired law did not leave only new subsequent intervals unmodified");
+    };
+    const std::string auto_law="law_autocracy";
+    run("AUS",auto_law,"",1'000'000,100);
+    run("AUS",auto_law,"amendment_geheime_staatskonferenz_metternich",900'000,112);
+    run("AUS",auto_law,"amendment_geheime_staatskonferenz",800'000,125);
+    run("AUS",auto_law,"amendment_geheime_staatskonferenz_kolowrat",750'000,134);
+    run("OTHER",auto_law,"amendment_geheime_staatskonferenz_metternich",1'000'000,100);
+    run("AUS","law_oligarchy","amendment_geheime_staatskonferenz_metternich",1'000'000,100);
+    run("AUS",auto_law,"amendment_geheime_staatskonferenz_metternich",
+        900'000,100,true);
+}
+
 int main(){
     try{
         actual_upper_house_personal_terms_and_replay();
@@ -719,7 +847,8 @@ int main(){
         remaining_negotiated_sponsor_rows_use_actual_coalition();
         direct_named_group_approval_tracks_law_not_the_coalition();
         canonical_enactment_success_changes_real_review_outcome();
-        std::cout<<"P2 advanced politics: seven focused scenarios PASS\n";
+        austrian_law_speed_changes_only_new_review_intervals();
+        std::cout<<"P2 advanced politics: eight focused scenarios PASS\n";
         return 0;
     }catch(const std::exception& ex){
         std::cerr<<"P2 ADVANCED POLITICS FAILED: "<<ex.what()<<"\n";
