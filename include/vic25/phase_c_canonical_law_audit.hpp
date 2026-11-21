@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,122>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,129>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,122> evidence{{
+    static const std::array<CanonicalLawRowEvidence,129> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -433,7 +433,28 @@ inline const std::array<CanonicalLawRowEvidence,122>& canonical_law_row_evidence
          "test_p2_advanced::national_base_group_strength_requires_genuine_law_slot"},
         {{"law_legacy_slavery","interest_group_ig_landowners_pol_str_mult",0.25,false,false},
          "IntegratedWorld::p2_political_strength_ppm -> p3_group_view (active national base law strength)",
-         "test_p2_advanced::national_base_group_strength_requires_genuine_law_slot"}
+         "test_p2_advanced::national_base_group_strength_requires_genuine_law_slot"},
+        {{"law_religious_schools","interest_group_ig_devout_pol_str_mult",0.1,false,true},
+         "IntegratedWorld::p2_political_strength_ppm (funded staffed national institution)",
+         "test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members"},
+        {{"law_private_schools","interest_group_ig_intelligentsia_pol_str_mult",0.1,false,true},
+         "IntegratedWorld::p2_political_strength_ppm (funded staffed national institution)",
+         "test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members"},
+        {{"law_charitable_health_system","interest_group_ig_devout_pol_str_mult",0.1,false,true},
+         "IntegratedWorld::p2_political_strength_ppm (funded staffed national institution)",
+         "test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members"},
+        {{"law_private_health_insurance","interest_group_ig_petty_bourgeoisie_pol_str_mult",0.1,false,true},
+         "IntegratedWorld::p2_political_strength_ppm (funded staffed national institution)",
+         "test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members"},
+        {{"law_chiefs_distribute_aid","interest_group_ig_landowners_pol_str_mult",0.1,false,true},
+         "IntegratedWorld::p2_political_strength_ppm (funded staffed national institution)",
+         "test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members"},
+        {{"law_chiefs_distribute_aid","interest_group_ig_devout_pol_str_mult",0.15,false,true},
+         "IntegratedWorld::p2_political_strength_ppm (funded staffed national institution)",
+         "test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members"},
+        {{"law_chiefs_distribute_aid","interest_group_ig_armed_forces_pol_str_mult",0.1,false,true},
+         "IntegratedWorld::p2_political_strength_ppm (funded staffed national institution)",
+         "test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members"}
     }};
     return evidence;
 }

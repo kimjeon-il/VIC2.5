@@ -543,6 +543,53 @@ inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
         strength=phaseb::add_checked(strength,
             politics::clout_bonus(law.domain,law.base_choice,group));
     }
+    struct InstitutionalStrengthRow {
+        const char* department;
+        const char* source;
+        P1InstitutionKind kind;
+        P3GroupType group;
+    };
+    static constexpr InstitutionalStrengthRow institutional_rows[]={
+        {"health_system","law_charitable_health_system",P1InstitutionKind::healthcare,P3GroupType::devout},
+        {"health_system","law_private_health_insurance",P1InstitutionKind::healthcare,P3GroupType::petite_bourgeoisie},
+        {"welfare","law_chiefs_distribute_aid",P1InstitutionKind::welfare,P3GroupType::landowners},
+        {"welfare","law_chiefs_distribute_aid",P1InstitutionKind::welfare,P3GroupType::devout},
+        {"welfare","law_chiefs_distribute_aid",P1InstitutionKind::welfare,P3GroupType::armed_forces},
+        {"education_system","law_religious_schools",P1InstitutionKind::education,P3GroupType::devout},
+        {"education_system","law_private_schools",P1InstitutionKind::education,P3GroupType::intelligentsia}
+    };
+    for(const auto& row:institutional_rows) {
+        if(row.group!=group)continue;
+        const auto selected=p2_selected_law(country,row.department);
+        if(!selected||p2_catalog_canonical_choice(*selected)!=row.source)continue;
+        int effective_level=0;
+        for(const auto& [id,link]:p1_institutions_) {
+            if(link.country!=country||link.kind!=row.kind)continue;
+            const auto& service=public_institutions_.at(id);
+            const auto sovereign=sovereignty_.find(service.region);
+            if(sovereign==sovereignty_.end()||sovereign->second!=country||
+               !p1_region_incorporated(service.region).value_or(false))continue;
+            const auto& jobs=people_.jobs();
+            const bool local_staff=std::any_of(jobs.begin(),jobs.end(),
+                [&](const auto& entry) {
+                    const auto& [slice,job]=entry;
+                    return job.employer==service.operator_id&&
+                        people_.demographic(people_.slice(slice).key.demographic)
+                            .region==service.region&&
+                        job.count>currently_striking(slice);
+                });
+            if(!local_staff)continue;
+            const auto capacity=p1_institution_capacity(id);
+            if(capacity.usable_slots>0)
+                effective_level=std::max(effective_level,static_cast<int>(capacity.level));
+        }
+        if(effective_level<=0)continue;
+        // Existing flat and legacy rows have their own consumer above.
+        const auto incremental=p2_catalog_raw_modifier(row.source,metric,effective_level)-
+                               p2_catalog_raw_modifier(row.source,metric,0);
+        strength=phaseb::add_checked(strength,
+            static_cast<std::int64_t>(std::llround(incremental*1'000'000.0)));
+    }
     // Direct, flat named-IG rows affect the legally targeted category,
     // independent of sponsorship or office. Scope the source before reading
     // its raw value: generic law aggregation includes permissive attachments.

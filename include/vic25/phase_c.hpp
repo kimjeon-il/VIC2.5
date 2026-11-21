@@ -5219,6 +5219,8 @@ public:
     }
 
 private:
+    [[nodiscard]] P3GroupView p3_group_view_impl(
+        const std::string& country,const std::string& group,bool include_clout)const;
     phaseb::World people_;
     FinancialLedger money_;
     // Reservations are transient for one staged month; never another money/POP stock.

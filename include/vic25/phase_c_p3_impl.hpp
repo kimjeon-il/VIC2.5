@@ -186,135 +186,143 @@ inline void IntegratedWorld::p3_seed_movement(P3Movement movement) {
 
 inline P3GroupView IntegratedWorld::p3_group_view(
         const std::string& country,const std::string& group)const {
+    return p3_group_view_impl(country,group,true);
+}
+inline P3GroupView IntegratedWorld::p3_group_view_impl(
+        const std::string& country,const std::string& group,bool include_clout)const {
     const auto& profile=p3_groups_.at({country,group});
     P3GroupView view{country,group};
-    People country_group_members=0;
     People affiliated_weight=0,group_weight=0;
-    const auto legal_modifiers=p2_active_modifiers(country);
-    // Only evidenced Economic IDs acquire a new alias. Existing plural
-    // and other profession lookups continue using the established path.
-    static constexpr std::array occupation_aliases{
-        std::pair{"academic","country_academics_pol_str_mult"},
-        std::pair{"aristocrat","country_aristocrats_pol_str_mult"},
-        std::pair{"bureaucrat","country_bureaucrats_pol_str_mult"},
-        std::pair{"capitalist","country_capitalists_pol_str_mult"},
-        std::pair{"clergyman","country_clergymen_pol_str_mult"},
-        std::pair{"clerk","country_clerks_pol_str_mult"},
-        std::pair{"engineer","country_engineers_pol_str_mult"},
-        std::pair{"farmer","country_farmers_pol_str_mult"},
-        std::pair{"peasant","country_peasants_pol_str_mult"},
-        std::pair{"shopkeeper","country_shopkeepers_pol_str_mult"},
-        std::pair{"soldier","country_soldiers_pol_str_mult"}};
-    using OccupationEffects=std::map<std::string_view,std::int64_t>;
-    std::optional<OccupationEffects> canonical_occupation_effects;
-    const auto profession_strength=[&](const std::string& profession) {
-        const auto alias=std::find_if(occupation_aliases.begin(),occupation_aliases.end(),
-            [&](const auto& pair){return profession==pair.first;});
-        if(alias!=occupation_aliases.end()) {
-            if(!canonical_occupation_effects) {
-                auto& effects=canonical_occupation_effects.emplace();
-                static const auto by_source=[] {
-                    std::map<std::string_view,OccupationEffects> index;
-                    for(const auto& row:p2_catalog_115().modifiers) {
-                        if(row.boolean||row.institution||row.sponsor||
-                           std::none_of(occupation_aliases.begin(),occupation_aliases.end(),
-                               [&](const auto& item){return row.key==item.second;}))continue;
-                        auto& value=index[row.source_id][row.key];
-                        value=phaseb::add_checked(value,static_cast<std::int64_t>(
-                            std::llround(row.value*1'000'000.0)));
-                    }
-                    return index;
-                }();
-                const auto national=[&](const P2BaseLaw& law) {
-                    return law.country==country&&law.tier!=P2NormTier::local_ordinance&&
-                           (law.scope.empty()||law.scope=="national")&&
-                           politics::catalogue().has(law.domain,law.base_choice);
-                };
-                const auto add=[&](std::string_view id) {
-                    const auto found=by_source.find(id);
-                    if(found==by_source.end())return;
-                    for(const auto& [key,ppm]:found->second)
-                        effects[key]=phaseb::add_checked(effects[key],ppm);
-                };
-                for(const auto& [slot,id]:p2_active_base_) {
-                    (void)slot;
-                    const auto& law=p2_laws_.at(id);
-                    if(national(law))add(p2_catalog_canonical_choice(law.base_choice));
-                }
-                for(const auto& id:p2_active_amendments_) {
-                    if(!by_source.contains(id))continue;
-                    const auto& amendment=p2_amendments_.at(id);
-                    const auto& parent=p2_laws_.at(amendment.law_id);
-                    const auto* src=p2_catalog_amendment(id);
-                    if(!national(parent)||!p2_is_active_base(amendment.law_id)||
-                       !src||!p2_catalog_amendment_applies(*src,parent.base_choice)||
-                       (!src->possible_country_tags.empty()&&
-                        !p2_catalog_list_contains(src->possible_country_tags,country)))continue;
-                    add(id);
-                }
-            }
-            const auto it=canonical_occupation_effects->find(alias->second);
-            return it==canonical_occupation_effects->end()?std::int64_t{0}:it->second;
-        }
-        const auto it=legal_modifiers.find(
-            "country_"+profession+"_pol_str_mult");
-        return it!=legal_modifiers.end()&&!it->second.boolean?
-            it->second.value_ppm:std::int64_t{0};
-    };
-    const auto scale=[&](People actual,std::int64_t multiplier_ppm){
-        ensure(multiplier_ppm>=0&&multiplier_ppm<=3'000'000,
-               "P3 legal political strength out of range");
-        const People whole=phaseb::mul_checked(
-            actual,multiplier_ppm/1'000'000);
-        const People fractional=p4_scaled(
-            actual,multiplier_ppm%1'000'000,1'000'000);
-        return phaseb::add_checked(whole,fractional);
-    };
-    for(const auto& [key,n]:membership_) {
-        if(n<=0||!people_.has_slice(key.first))continue;
-        const auto organization=p3_groups_.find({country,key.second});
-        if(organization==p3_groups_.end())continue;
-        const auto& dem=people_.demographic(
-            people_.slice(key.first).key.demographic);
-        const auto nation=sovereignty_.find(dem.region);
-        if(nation==sovereignty_.end()||nation->second!=country)continue;
-        // Organizational efficiency is applied to REAL affiliated people,
-        // not minted into a separate political-point or membership ledger.
-        const People organized=phaseb::add_checked(n,
-             p4_scaled(n,organization->second.organization_ppm,1'000'000));
-        const auto legal_strength=p2_political_strength_ppm(
-            country,organization->second.type,key.second);
-        People weighted=scale(organized,legal_strength);
-        // Occupation-specific law modifiers and acceptance penalties apply
-        // only to the actual members of this living POP slice.
-        const auto& economic=people_.economic(
-            people_.slice(key.first).key.economic);
-        const auto occupational=std::clamp<std::int64_t>(
-            1'000'000+profession_strength(economic.profession),0,3'000'000);
-        weighted=scale(weighted,occupational);
-        if(const auto acceptance=p2_acceptance_effect(country,key.first))
-            weighted=scale(weighted,std::clamp<std::int64_t>(
-                acceptance->political_strength_ppm,0,3'000'000));
-        affiliated_weight=phaseb::add_checked(affiliated_weight,weighted);
-        if(key.second==group) {
-            country_group_members=phaseb::add_checked(country_group_members,n);
-            group_weight=phaseb::add_checked(group_weight,weighted);
-        }
-    }
-    view.members=country_group_members;
     const auto coalition=p1_coalitions_.find(country);
     const bool government_access=coalition!=p1_coalitions_.end()&&
         std::find(coalition->second.ruling_groups.begin(),
                   coalition->second.ruling_groups.end(),group)!=
             coalition->second.ruling_groups.end();
-    if(affiliated_weight>0&&group_weight>0) {
-        const auto share=p3_fraction(group_weight,affiliated_weight);
-        // Cabinet access only applies when this group ACTUALLY governs.
-        const auto institutional=government_access?
-            profile.institutional_access_ppm/10:0;
-        view.clout_ppm=static_cast<std::int32_t>(
-             std::min<std::int64_t>(1'000'000,
-                 static_cast<std::int64_t>(share)*9/10+institutional));
+    if(include_clout) {
+        const auto legal_modifiers=p2_active_modifiers(country);
+        // Only evidenced Economic IDs acquire a new alias. Existing plural
+        // and other profession lookups continue using the established path.
+        static constexpr std::array occupation_aliases{
+            std::pair{"academic","country_academics_pol_str_mult"},
+            std::pair{"aristocrat","country_aristocrats_pol_str_mult"},
+            std::pair{"bureaucrat","country_bureaucrats_pol_str_mult"},
+            std::pair{"capitalist","country_capitalists_pol_str_mult"},
+            std::pair{"clergyman","country_clergymen_pol_str_mult"},
+            std::pair{"clerk","country_clerks_pol_str_mult"},
+            std::pair{"engineer","country_engineers_pol_str_mult"},
+            std::pair{"farmer","country_farmers_pol_str_mult"},
+            std::pair{"peasant","country_peasants_pol_str_mult"},
+            std::pair{"shopkeeper","country_shopkeepers_pol_str_mult"},
+            std::pair{"soldier","country_soldiers_pol_str_mult"}};
+        using OccupationEffects=std::map<std::string_view,std::int64_t>;
+        std::optional<OccupationEffects> canonical_occupation_effects;
+        const auto profession_strength=[&](const std::string& profession) {
+            const auto alias=std::find_if(occupation_aliases.begin(),occupation_aliases.end(),
+                [&](const auto& pair){return profession==pair.first;});
+            if(alias!=occupation_aliases.end()) {
+                if(!canonical_occupation_effects) {
+                    auto& effects=canonical_occupation_effects.emplace();
+                    static const auto by_source=[] {
+                        std::map<std::string_view,OccupationEffects> index;
+                        for(const auto& row:p2_catalog_115().modifiers) {
+                            if(row.boolean||row.institution||row.sponsor||
+                               std::none_of(occupation_aliases.begin(),occupation_aliases.end(),
+                                   [&](const auto& item){return row.key==item.second;}))continue;
+                            auto& value=index[row.source_id][row.key];
+                            value=phaseb::add_checked(value,static_cast<std::int64_t>(
+                                std::llround(row.value*1'000'000.0)));
+                        }
+                        return index;
+                    }();
+                    const auto national=[&](const P2BaseLaw& law) {
+                        return law.country==country&&law.tier!=P2NormTier::local_ordinance&&
+                               (law.scope.empty()||law.scope=="national")&&
+                               politics::catalogue().has(law.domain,law.base_choice);
+                    };
+                    const auto add=[&](std::string_view id) {
+                        const auto found=by_source.find(id);
+                        if(found==by_source.end())return;
+                        for(const auto& [key,ppm]:found->second)
+                            effects[key]=phaseb::add_checked(effects[key],ppm);
+                    };
+                    for(const auto& [slot,id]:p2_active_base_) {
+                        (void)slot;
+                        const auto& law=p2_laws_.at(id);
+                        if(national(law))add(p2_catalog_canonical_choice(law.base_choice));
+                    }
+                    for(const auto& id:p2_active_amendments_) {
+                        if(!by_source.contains(id))continue;
+                        const auto& amendment=p2_amendments_.at(id);
+                        const auto& parent=p2_laws_.at(amendment.law_id);
+                        const auto* src=p2_catalog_amendment(id);
+                        if(!national(parent)||!p2_is_active_base(amendment.law_id)||
+                           !src||!p2_catalog_amendment_applies(*src,parent.base_choice)||
+                           (!src->possible_country_tags.empty()&&
+                            !p2_catalog_list_contains(src->possible_country_tags,country)))continue;
+                        add(id);
+                    }
+                }
+                const auto it=canonical_occupation_effects->find(alias->second);
+                return it==canonical_occupation_effects->end()?std::int64_t{0}:it->second;
+            }
+            const auto it=legal_modifiers.find(
+                "country_"+profession+"_pol_str_mult");
+            return it!=legal_modifiers.end()&&!it->second.boolean?
+                it->second.value_ppm:std::int64_t{0};
+        };
+        const auto scale=[&](People actual,std::int64_t multiplier_ppm){
+            ensure(multiplier_ppm>=0&&multiplier_ppm<=3'000'000,
+                   "P3 legal political strength out of range");
+            const People whole=phaseb::mul_checked(
+                actual,multiplier_ppm/1'000'000);
+            const People fractional=p4_scaled(
+                actual,multiplier_ppm%1'000'000,1'000'000);
+            return phaseb::add_checked(whole,fractional);
+        };
+        // Read each group's legal strength once in this immutable view.
+        // The exact ID retains the distinction between negotiated sponsors.
+        std::map<std::string_view,std::int32_t> strength_by_group;
+        for(const auto& [key,n]:membership_) {
+            if(n<=0||!people_.has_slice(key.first))continue;
+            const auto organization=p3_groups_.find({country,key.second});
+            if(organization==p3_groups_.end())continue;
+            const auto& dem=people_.demographic(
+                people_.slice(key.first).key.demographic);
+            const auto nation=sovereignty_.find(dem.region);
+            if(nation==sovereignty_.end()||nation->second!=country)continue;
+            // Organizational efficiency is applied to REAL affiliated people,
+            // not minted into a separate political-point or membership ledger.
+            const People organized=phaseb::add_checked(n,
+                 p4_scaled(n,organization->second.organization_ppm,1'000'000));
+            auto strength=strength_by_group.find(key.second);
+            if(strength==strength_by_group.end())
+                strength=strength_by_group.emplace(key.second,
+                    p2_political_strength_ppm(country,organization->second.type,key.second)).first;
+            People weighted=scale(organized,strength->second);
+            // Occupation-specific law modifiers and acceptance penalties apply
+            // only to the actual members of this living POP slice.
+            const auto& economic=people_.economic(
+                people_.slice(key.first).key.economic);
+            const auto occupational=std::clamp<std::int64_t>(
+                1'000'000+profession_strength(economic.profession),0,3'000'000);
+            weighted=scale(weighted,occupational);
+            if(const auto acceptance=p2_acceptance_effect(country,key.first))
+                weighted=scale(weighted,std::clamp<std::int64_t>(
+                    acceptance->political_strength_ppm,0,3'000'000));
+            affiliated_weight=phaseb::add_checked(affiliated_weight,weighted);
+            if(key.second==group) {
+                group_weight=phaseb::add_checked(group_weight,weighted);
+            }
+        }
+        if(affiliated_weight>0&&group_weight>0) {
+            const auto share=p3_fraction(group_weight,affiliated_weight);
+            // Cabinet access only applies when this group ACTUALLY governs.
+            const auto institutional=government_access?
+                profile.institutional_access_ppm/10:0;
+            view.clout_ppm=static_cast<std::int32_t>(
+                 std::min<std::int64_t>(1'000'000,
+                     static_cast<std::int64_t>(share)*9/10+institutional));
+        }
     }
     int approval=50;
     const auto preferred=p1_group_legal_preference(profile);
@@ -358,6 +366,7 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         if(sovereign==sovereignty_.end()||sovereign->second!=country)continue;
         members=phaseb::add_checked(members,n);
     }
+    view.members=members;
     if(members>0)
         for(const auto& [key,n]:membership_) {
             if(key.second!=group||n<=0||!people_.has_slice(key.first))continue;
@@ -434,7 +443,10 @@ inline std::vector<politics::IGEffect>
 IntegratedWorld::p3_active_traits(
         const std::string& country,const std::string& group)const {
     const auto& profile=p3_groups_.at({country,group});
-    const auto view=p3_group_view(country,group);
+    // Traits depend on membership and approval, not clout. Education
+    // capacity can read an active trait while effective institutions
+    // contribute to clout, so this projection deliberately omits weighting.
+    const auto view=p3_group_view_impl(country,group,false);
     return politics::active_ig_effects(profile.type,view.approval,view.members);
 }
 inline std::int64_t IntegratedWorld::p3_trait_modifier_ppm(

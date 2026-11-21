@@ -446,15 +446,128 @@ static void exact_professions_weight_actual_group_members() {
     run("","","peasant",100);
 }
 
+static void funded_institutions_weight_only_their_typed_group_members() {
+    enum class Site { valid, absent, unfunded, unstaffed, shared, foreign, police };
+    const auto run=[](const std::string& domain,const std::string& choice,
+                      P1InstitutionKind kind,P3GroupType type,Site condition,
+                      People expected,bool with_trait=false) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_unit(1,"A","Local");geo.seed_unit(2,"B","Foreign");
+        geo.seed_province(1,"HOME","A");geo.seed_assignment(1,1);
+        geo.seed_province(2,"OTHER","A");geo.seed_assignment(2,1);
+        geo.seed_province(3,"FOREIGN","B");geo.seed_assignment(3,2);
+        auto& core=geo.seed_core().seed_core();
+        core.seed_interest_group("Target");core.seed_interest_group("Peer");
+        for(const auto* nation:{"A","B"}) {
+            core.seed_actor(nation,condition==Site::unfunded&&
+                std::string_view(nation)=="A"?0:50);
+            core.seed_government(nation,"HEAD","PM",5,3);
+            core.seed_p1_constitution(nation,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+            core.p3_seed_group({nation,"Target","","","",type,0,0});
+            core.p3_seed_group({nation,"Peer","","","",P3GroupType::custom,0,0});
+        }
+        core.p2_seed_base({"department","A",domain,"national",choice,"fixture:law"});
+        if(with_trait)core.p3_set_ideologies("A","Target",{"materialist"});
+        core.seed_actor("SERVICE",condition==Site::unfunded?0:100);
+        core.seed_actor("EMP",1000);
+        auto& pop=core.seed_population();
+        std::vector<std::pair<phaseb::Id,std::string>> joining;
+        for(const auto* region:{"HOME","OTHER","FOREIGN"}) {
+            core.p1_set_incorporation(region,true);
+            const auto h=pop.household_profile({region,"mixed","shared",100});
+            const auto d=pop.demographic_profile({region,23640,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+            const auto st=pop.economic_profile({region,"staff","wage","employee",pop.default_education()});
+            const bool staff=condition==Site::shared?std::string_view(region)=="OTHER":
+                condition!=Site::unstaffed&&condition!=Site::absent;
+            if(staff) {
+                const auto id=pop.seed_population(d,st,h,100);
+                pop.hire(id,10,"SERVICE","staff",1,{});
+            }
+            if(std::string_view(region)=="OTHER")continue;
+            for(const auto* name:{"Target","Peer"}) {
+                const auto e=pop.economic_profile({region,name,"wage","employee",pop.default_education()});
+                const auto id=pop.seed_population(d,e,h,100);
+                pop.hire(id,1,"EMP",name,1,{});
+                joining.emplace_back(id,name);
+            }
+        }
+        const auto service=[&](const std::string& id,const std::string& region,
+                               const std::string& country,P1InstitutionKind actual,int level) {
+            core.seed_public_institution(id,"SERVICE",region,"inputs",100,10);
+            core.seed_p1_institution(country,id,actual,level);
+        };
+        if(condition!=Site::absent&&condition!=Site::foreign)
+            service("MAIN","HOME","A",condition==Site::police?P1InstitutionKind::policing:kind,condition==Site::shared?3:1);
+        if(condition==Site::valid||condition==Site::shared)
+            service("HIGH","OTHER","A",kind,condition==Site::shared?1:3);
+        if(condition==Site::foreign)
+            service("FOREIGN_SERVICE","FOREIGN","B",kind,3);
+        if(condition==Site::valid)
+            core.p2_seed_amendment({"effective-level","department","fixture:level","",
+                {{"proven-level","HIGH",P2ClauseKind::public_institution_level,2}}});
+        auto world=daily::World::adopt(std::move(gh),308);
+        const auto before_population=c(world).people().population();
+        phasegh::World::Plan plan;
+        plan[9].push_back([joining](phasegh::Stage& stage) {
+            for(const auto& [id,name]:joining)stage.phase_c().join_interest_group(id,name,100);
+        });
+        world.advance_day(plan);
+        const auto& live=c(world);
+        const auto home=live.p3_group_view("A","Target");
+        const auto peer=live.p3_group_view("A","Peer");
+        const auto clout=[&](People weight){return (weight*1'000'000/(expected+100))*9/10;};
+        if(home.members!=100||peer.members!=100||home.clout_ppm!=clout(expected)||
+           peer.clout_ppm!=clout(100))
+            throw std::runtime_error("effective institution clout differs: "+choice+
+                ", site case "+std::to_string(static_cast<int>(condition))+
+                ", got "+std::to_string(home.clout_ppm)+"/"+std::to_string(peer.clout_ppm)+
+                ", expected "+std::to_string(clout(expected))+"/"+std::to_string(clout(100)));
+        need(live.p3_group_view("B","Target").clout_ppm==450'000 &&
+             live.people().population()==before_population && live.cash("EMP")==1000,
+             "institutional clout mutated population/cash or leaked overseas");
+        if(with_trait) {
+            const auto traits=live.p3_active_traits("A","Target");
+            need(std::any_of(traits.begin(),traits.end(),[](const auto& trait) {
+                return trait.modifier=="state_education_access_add"&&trait.value_ppm==-100'000;
+            }),"clout-free approval projection lost the existing Education trait");
+            if(condition==Site::valid)
+                need(live.p1_institution_capacity("HIGH").usable_slots==36,
+                     "existing active Education trait was omitted from real capacity");
+        }
+        return std::tuple{home.members,home.approval,home.radical_ppm,home.engagement_ppm};
+    };
+    constexpr auto H=P1InstitutionKind::healthcare,W=P1InstitutionKind::welfare,
+                   E=P1InstitutionKind::education;
+    constexpr auto D=P3GroupType::devout,L=P3GroupType::landowners,
+                   A=P3GroupType::armed_forces,B=P3GroupType::petite_bourgeoisie,
+                   I=P3GroupType::intelligentsia;
+    run("health_system","law_charitable_health_system",H,D,Site::valid,120);
+    run("health_system","law_private_health_insurance",H,B,Site::valid,120);
+    run("welfare","law_chiefs_distribute_aid",W,L,Site::valid,120);
+    run("welfare","law_chiefs_distribute_aid",W,D,Site::valid,130);
+    run("welfare","law_chiefs_distribute_aid",W,A,Site::valid,120);
+    run("education_system","law_private_schools",E,I,Site::valid,120);
+    const auto effective=run("education_system","law_religious_schools",E,D,Site::valid,120,true);
+    const auto unfunded=run("education_system","law_religious_schools",E,D,Site::unfunded,100,true);
+    need(effective==unfunded,"institution loss should not change approval, attitudes, engagement or members");
+    for(const auto invalid:{Site::absent,Site::unfunded,Site::unstaffed,Site::foreign,Site::police})
+        run("welfare","law_chiefs_distribute_aid",W,D,invalid,100);
+    run("health_system","law_charitable_health_system",H,D,Site::shared,110);
+}
+
 int main() {
     try {
         real_pop_attitudes_and_national_clout();
         exact_professions_weight_actual_group_members();
+        funded_institutions_weight_only_their_typed_group_members();
         shinsengumi_changes_movement_risk_without_altering_pop();
         actual_next_day_strike_and_no_double_participants();
         armed_conflict_requires_real_deployments_and_verified_control();
         legal_concession_resolves_without_armed_conflict();
-        std::cout<<"P3/P5 politics: six real-ledger integration scenarios PASS\n";
+        std::cout<<"P3/P5 politics: seven real-ledger integration scenarios PASS\n";
         return 0;
     } catch(const std::exception& error) {
         std::cerr<<"P3/P5 POLITICS FAILED: "<<error.what()<<"\n";

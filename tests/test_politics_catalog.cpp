@@ -356,7 +356,7 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==122,
+    check(canonical_law_row_evidence().size()==129,
           "expected 99 preserved witnesses and 23 exact national base strength rows");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
@@ -672,6 +672,30 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(base_strength_proven.size()==base_strengths.size(),
           "missing exact national base strength witness");
+
+    std::size_t institutional_strength=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test!="test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members")continue;
+        check(row.source.key.starts_with("interest_group_ig_") &&
+              row.source.key.ends_with("_pol_str_mult") &&
+              !row.source.boolean && row.source.institution && !row.source.sponsor &&
+              row.executor=="IntegratedWorld::p2_political_strength_ppm (funded staffed national institution)" &&
+              row.status==CanonicalLawRowStatus::verified_row,
+              "effective institution clout witness lost its exact qualification");
+        auto mismatch=row.source;
+        mismatch.institution=false;
+        check(classify_canonical_law_row(mismatch,canonical_law_row_evidence()).status==
+                  CanonicalLawRowStatus::no_recorded_path,
+              "institutional group strength proof leaked to a flat row");
+        ++institutional_strength;
+    }
+    check(institutional_strength==7 &&
+          std::none_of(audit.begin(),audit.end(),[](const auto& row) {
+              return row.source.institution && row.status==CanonicalLawRowStatus::verified_row &&
+                     row.source.key.starts_with("interest_group_ig_") &&
+                     row.source.key.ends_with("_pol_str_mult") &&
+                     row.behavior_test!="test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members";
+          }),"institution group strength evidence leaked to an unresolved owner");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.
