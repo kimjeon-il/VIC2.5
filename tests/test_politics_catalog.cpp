@@ -356,8 +356,43 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==69,
-          "expected exact total after adding the single homeland witness");
+    check(canonical_law_row_evidence().size()==71,
+          "expected exact witness count including only two new internal migration rows");
+    std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
+    for(const auto& row:audit) {
+        if(row.source.key=="state_peasants_mass_migration_disallowed_bool") {
+            check(row.status!=CanonicalLawRowStatus::verified_row&&
+                  row.behavior_test.empty(),
+                  "mass migration inherited internal migration evidence");
+            if(row.source.source_id=="law_serfdom") {
+                check(row.source.value==1&&row.source.boolean&&
+                      row.normalized_value==1,
+                      "unwired mass migration lost its original boolean value");
+                ++serfdom_mass;
+            }
+        }
+        if(row.source.key!="state_peasants_internal_migration_disallowed_bool")continue;
+        check(row.source.value==1&&row.source.boolean&&!row.source.institution&&
+              !row.source.sponsor&&row.normalized_value==1&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="IntegratedWorld::p2_migration_permitted (same-sovereign interregional peasant migration)"&&
+              row.behavior_test=="test_politics_identity::land_reform_restricts_only_peasant_internal_migration",
+              "internal migration evidence lost its exact boolean and flat scope");
+        if(row.source.source_id=="law_serfdom")++serfdom_internal;
+        if(row.source.source_id=="law_tenant_farmers")++tenant_internal;
+        auto qualifier=row.source;
+        qualifier.institution=true;
+        check(classify_canonical_law_row(qualifier,canonical_law_row_evidence()).status!=
+                  CanonicalLawRowStatus::verified_row,
+              "flat internal migration proof leaked to an institutional row");
+        qualifier.institution=false;
+        qualifier.sponsor=true;
+        check(classify_canonical_law_row(qualifier,canonical_law_row_evidence()).status!=
+                  CanonicalLawRowStatus::verified_row,
+              "flat internal migration proof leaked to a sponsor row");
+    }
+    check(serfdom_internal==1&&tenant_internal==1&&serfdom_mass==1,
+          "exact sources for internal and mass migration are not individually auditable");
 
     std::size_t homeland=0,other_homeland_rows=0;
     for(const auto& row:audit) {

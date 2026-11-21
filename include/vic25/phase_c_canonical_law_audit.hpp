@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,69>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,71>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,69> evidence{{
+    static const std::array<CanonicalLawRowEvidence,71> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -196,6 +196,12 @@ inline const std::array<CanonicalLawRowEvidence,69>& canonical_law_row_evidence(
         {{"law_restricted_child_labor","state_peasants_mortality_mult",0.02,false,false},
          "IntegratedWorld::phase_time_auto_demography (exact occupation mortality)",
          "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"},
+        {{"law_serfdom","state_peasants_internal_migration_disallowed_bool",1,true,false},
+         "IntegratedWorld::p2_migration_permitted (same-sovereign interregional peasant migration)",
+         "test_politics_identity::land_reform_restricts_only_peasant_internal_migration"},
+        {{"law_tenant_farmers","state_peasants_internal_migration_disallowed_bool",1,true,false},
+         "IntegratedWorld::p2_migration_permitted (same-sovereign interregional peasant migration)",
+         "test_politics_identity::land_reform_restricts_only_peasant_internal_migration"},
         {{"law_no_colonial_affairs","country_acceptance_homeland_add",10,false,false},
          "IntegratedWorld::p2_acceptance (explicit verified homeland)",
          "test_politics_identity::no_colonial_affairs_adds_only_verified_homeland_acceptance"},

@@ -1044,6 +1044,102 @@ static void no_colonial_affairs_adds_only_verified_homeland_acceptance() {
           "replaced colonization law retained a stale effect on real migration");
 }
 
+static void land_reform_restricts_only_peasant_internal_migration() {
+    const auto run=[](const std::string& choice,bool domestic,bool restricted,
+                      const std::string& borders="no_migration_controls") {
+        const std::string target=domestic?"A":"B";
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.set_dataset("peasant-internal-migration-fixture");
+        geo.seed_province(1,"SOURCE","A");
+        geo.seed_province(2,"TARGET",target);
+        geo.seed_unit(1,"A","SOURCE-UNIT");
+        geo.seed_unit(2,target,"TARGET-UNIT");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",50);c.seed_actor("HOUSE",0);
+        c.seed_government("A","HEAD","PRIME",5,3);
+        const auto constitution=[&](const std::string& tag) {
+            c.seed_p1_constitution(tag,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,
+                "fixture:constitution"});
+        };
+        constitution("A");
+        if(!domestic) {
+            c.seed_actor("B",0);
+            c.seed_government("B","HEAD","PRIME",5,3);
+            constitution("B");
+            law(c,"B","migration",borders);
+            law(c,"B","land_reform","tenant_farmers");
+        } else law(c,"A","migration",borders);
+        if(!choice.empty())law(c,"A","land_reform",choice);
+        auto& pop=c.seed_population();
+        const auto home=pop.household_profile({"SOURCE","mixed","shared",50});
+        const auto away=pop.household_profile({"TARGET","mixed","shared",0});
+        const auto dem=pop.demographic_profile({"SOURCE",23640,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto seed=[&](const std::string& profession) {
+            const auto economic=pop.economic_profile({"SOURCE",profession,"wage",
+                "employee",pop.default_education()});
+            return pop.seed_population(dem,economic,home,100'000);
+        };
+        const auto peasant=seed("peasant"),worker=seed("worker");
+        phaseb::DemographyRules rules;
+        rules.fertility_ppm=rules.infant_death_ppm=rules.child_death_ppm=0;
+        rules.adult_death_ppm=rules.senior_death_ppm=rules.very_old_death_ppm=0;
+        rules.illness_incidence_ppm=rules.accident_ppm=0;
+        rules.primary_access_ppm=rules.secondary_access_ppm=rules.tertiary_access_ppm=0;
+        rules.adult_literacy_access_ppm=rules.training_ppm=0;
+        rules.migration_ppm=310'000;
+        rules.destination_by_region["SOURCE"]="TARGET";
+        c.enable_demography(rules);
+        auto world=daily::World::adopt(std::move(gh),19);
+        const auto start=daily::SnapshotCodec::encode(world);
+        const bool closed=!domestic&&borders=="closed_borders";
+        check(view(world).p2_migration_permitted(peasant,"SOURCE"),
+              "same-region movement is not internal migration");
+        phasegh::World::Plan explicit_move;
+        explicit_move[10].push_back([=](phasegh::Stage& stage) {
+            stage.phase_c().migrate_with_explicit_property_allocation(
+                peasant,7,"TARGET",away,"A","HOUSE",11,"",0);
+        });
+        if(restricted||closed) {
+            check(rejects([&]{world.advance_day(explicit_move);})&&
+                  daily::SnapshotCodec::encode(world)==start,
+                  choice=="serfdom"?
+                    "Serfdom did not atomically block free peasants moving domestically":
+                    "Tenant Farmers or ordinary closed border did not atomically block movement");
+        } else {
+            auto explicit_world=daily::SnapshotCodec::decode(start);
+            explicit_world.advance_day(explicit_move);
+            check(view(explicit_world).cash("A")==39&&
+                  view(explicit_world).cash("HOUSE")==11,
+                  "allowed explicit peasant migration failed to move actual property");
+        }
+        check(view(world).p2_migration_permitted(worker,"TARGET")==!closed,
+              "land reform restricted a non-peasant or bypassed an ordinary closed border");
+        world.advance_day();
+        People peasants=0,workers=0;
+        const auto& people=view(world).people();
+        for(const auto& [id,row]:people.slices()) {
+            if(people.demographic(row.key.demographic).region!="TARGET")continue;
+            if(people.economic(row.key.economic).profession=="peasant")peasants+=row.count;
+            else workers+=row.count;
+        }
+        check(peasants==((restricted||closed)?0:1000)&&
+              workers==(closed?0:1000)&&people.population()==200'000,
+              "daily peasant/internal law did not change actual saved POP transfer only");
+    };
+    run("serfdom",true,true);
+    run("tenant_farmers",true,true);
+    run("peasant_proprietorship",true,false,"closed_borders");
+    run("",true,false);
+    run("serfdom",false,false);
+    run("tenant_farmers",false,false);
+    run("tenant_farmers",false,false,"closed_borders");
+}
+
 int main(){
     try{
         chiefs_aid_uses_only_effective_welfare_bureaucracy();
@@ -1052,6 +1148,7 @@ int main(){
         canonical_named_acceptance_changes_only_verified_pop_and_country();
         acceptance_and_five_tier_rights();
         physical_migration_and_law_block();
+        land_reform_restricts_only_peasant_internal_migration();
         abolition_preserves_real_people_and_membership();
         economic_law_restricts_real_company_ownership();
         military_peasant_levy_restricts_real_conscripts();

@@ -202,10 +202,19 @@ inline bool IntegratedWorld::p2_migration_permitted(
     }
     const auto& home=from->second;
     const auto& target=sovereignty_.at(destination_region);
-    if(dem.legal_status=="serf"&&
-       p2_selected_law(home,"land_reform")==std::optional<std::string>("serfdom"))
-        return false;
-    if(home==target)return true; // border controls are international only
+    const bool domestic=home==target;
+    const bool internal_peasant=domestic&&dem.region!=destination_region&&
+        people_.economic(people_.slice(source).key.economic).profession=="peasant";
+    if(dem.legal_status=="serf"||internal_peasant) {
+        const auto land_reform=p2_selected_law(home,"land_reform");
+        if(dem.legal_status=="serf"&&land_reform=="serfdom")return false;
+        // Ordinary foreign routes are not the distinct mass-migration mechanic.
+        if(internal_peasant&&land_reform&&p2_catalog_raw_modifier(
+            p2_catalog_canonical_choice(*land_reform),
+            "state_peasants_internal_migration_disallowed_bool")!=0.0)
+            return false;
+    }
+    if(domestic)return true; // border controls are international only
     const auto departure=p2_selected_law(home,"migration");
     const auto arrival=p2_selected_law(target,"migration");
     if(departure==std::optional<std::string>("closed_borders")||
