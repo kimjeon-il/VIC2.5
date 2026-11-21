@@ -290,10 +290,31 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
                entry.executor=="IntegratedWorld::p3_group_view (verified same-country negotiated sponsor)" &&
                entry.behavior_test=="test_p2_advanced::negotiated_sponsor_uses_actual_same_country_group";
     })==1,"negotiated sponsor-specific clout proof missing");
-    check(std::none_of(audit.begin(),audit.end(),[](const auto& entry) {
-        return entry.source.source_id=="amendment_generic_sponsor_polstr_increase_negotiation_1" &&
-               entry.status==CanonicalLawRowStatus::verified_row;
-    }),"proof leaked to a different sponsored amendment");
+    std::size_t negotiated_strength=0,negotiated_approval=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test!="test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition")
+            continue;
+        check(row.source.sponsor && !row.source.boolean && !row.source.institution &&
+              row.status==CanonicalLawRowStatus::verified_row,
+              "negotiated witness lost the exact sponsor qualification");
+        if(row.source.key=="interest_group_pol_str_mult") {
+            check(row.executor=="IntegratedWorld::p3_group_view (same-country negotiated sponsor clout)",
+                  "negotiated political strength witness lost exact executor scope");
+            ++negotiated_strength;
+        } else {
+            check(row.source.key=="interest_group_in_government_approval_add" &&
+                  row.executor=="IntegratedWorld::p3_group_view (same-country negotiated sponsor in actual governing coalition)",
+                  "government approval witness lost actual coalition scope");
+            ++negotiated_approval;
+        }
+        auto mismatch=row.source;
+        mismatch.sponsor=false;
+        check(classify_canonical_law_row(mismatch,canonical_law_row_evidence()).status==
+                  CanonicalLawRowStatus::no_recorded_path,
+              "proof leaked from a sponsored effect to a non-sponsored row");
+    }
+    check(negotiated_strength==5 && negotiated_approval==4,
+          "missing precise political strength or approval sponsor evidence");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

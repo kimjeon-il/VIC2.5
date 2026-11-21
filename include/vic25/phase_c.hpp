@@ -5345,11 +5345,13 @@ private:
     std::map<std::string,P2ChamberDecision> p2_chamber_decisions_;
     std::map<std::string,P2GroupDemand> p2_group_demands_;
     std::map<std::string,std::vector<P2NegotiatedAmendment>> p2_negotiated_;
-    static constexpr const char* negotiated_clout_amendment_=
-        "amendment_generic_sponsor_polstr_increase";
-    // Derived from the active canonical amendment and its real negotiation.
-    // Never serialized, never searched per P3 group/clout query.
-    std::optional<std::pair<std::string,std::string>> p2_negotiated_clout_sponsor_;
+    struct P2NegotiatedSponsorEffects {
+        std::int64_t strength_ppm{},government_approval{};
+    };
+    // Derived from actual enacted negotiations only. Never serialized or
+    // rebuilt per group/clout/approval query.
+    std::map<std::pair<std::string,std::string>,P2NegotiatedSponsorEffects>
+        p2_negotiated_sponsor_effects_;
     std::set<std::string> p2_negotiation_watch_; // derived from submitted bills
     std::vector<P2LawEvent> p2_history_;
     std::map<std::int64_t,std::set<std::string>> p2_due_; // derived from P2 bills
@@ -5398,7 +5400,7 @@ private:
         const std::string&,const std::vector<P2ElectionTransition>&,
         std::int64_t);
     void p2_rebuild_due_index();
-    void p2_rebuild_negotiated_clout_sponsor();
+    void p2_rebuild_negotiated_sponsor_effects();
     void p2_rebuild_review_due_index();
     static int compare_nonnegative_ratios(std::uint64_t a, std::uint64_t b,
                                           std::uint64_t c, std::uint64_t d) {

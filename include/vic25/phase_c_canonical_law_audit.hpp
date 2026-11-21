@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,25>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,34>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,25> evidence{{
+    static const std::array<CanonicalLawRowEvidence,34> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -141,7 +141,34 @@ inline const std::array<CanonicalLawRowEvidence,25>& canonical_law_row_evidence(
          "test_phase_c::D4-T49"},
         {{"amendment_generic_sponsor_polstr_increase","interest_group_pol_str_mult",0.2,false,false,true},
          "IntegratedWorld::p3_group_view (verified same-country negotiated sponsor)",
-         "test_p2_advanced::negotiated_sponsor_uses_actual_same_country_group"}
+         "test_p2_advanced::negotiated_sponsor_uses_actual_same_country_group"},
+        {{"amendment_preserved_bureaucratic_caste","interest_group_pol_str_mult",0.15,false,false,true},
+         "IntegratedWorld::p3_group_view (same-country negotiated sponsor clout)",
+         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"},
+        {{"amendment_generic_sponsor_polstr_approval_increase","interest_group_pol_str_mult",0.2,false,false,true},
+         "IntegratedWorld::p3_group_view (same-country negotiated sponsor clout)",
+         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"},
+        {{"amendment_generic_sponsor_polstr_approval_increase","interest_group_in_government_approval_add",2,false,false,true},
+         "IntegratedWorld::p3_group_view (same-country negotiated sponsor in actual governing coalition)",
+         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"},
+        {{"amendment_generic_sponsor_polstr_increase_negotiation_1","interest_group_pol_str_mult",0.2,false,false,true},
+         "IntegratedWorld::p3_group_view (same-country negotiated sponsor clout)",
+         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"},
+        {{"amendment_generic_sponsor_polstr_increase_negotiation_1","interest_group_in_government_approval_add",1,false,false,true},
+         "IntegratedWorld::p3_group_view (same-country negotiated sponsor in actual governing coalition)",
+         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"},
+        {{"amendment_generic_sponsor_polstr_increase_negotiation_2","interest_group_pol_str_mult",0.3,false,false,true},
+         "IntegratedWorld::p3_group_view (same-country negotiated sponsor clout)",
+         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"},
+        {{"amendment_generic_sponsor_polstr_increase_negotiation_2","interest_group_in_government_approval_add",2,false,false,true},
+         "IntegratedWorld::p3_group_view (same-country negotiated sponsor in actual governing coalition)",
+         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"},
+        {{"amendment_generic_sponsor_polstr_increase_negotiation_3","interest_group_pol_str_mult",0.4,false,false,true},
+         "IntegratedWorld::p3_group_view (same-country negotiated sponsor clout)",
+         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"},
+        {{"amendment_generic_sponsor_polstr_increase_negotiation_3","interest_group_in_government_approval_add",3,false,false,true},
+         "IntegratedWorld::p3_group_view (same-country negotiated sponsor in actual governing coalition)",
+         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"}
     }};
     return evidence;
 }

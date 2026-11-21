@@ -238,15 +238,13 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         }
     }
     view.members=country_group_members;
+    const auto coalition=p1_coalitions_.find(country);
+    const bool government_access=coalition!=p1_coalitions_.end()&&
+        std::find(coalition->second.ruling_groups.begin(),
+                  coalition->second.ruling_groups.end(),group)!=
+            coalition->second.ruling_groups.end();
     if(affiliated_weight>0&&group_weight>0) {
         const auto share=p3_fraction(group_weight,affiliated_weight);
-        bool government_access=false;
-        if(const auto coalition=p1_coalitions_.find(country);
-           coalition!=p1_coalitions_.end())
-            government_access=std::find(
-               coalition->second.ruling_groups.begin(),
-               coalition->second.ruling_groups.end(),group)!=
-               coalition->second.ruling_groups.end();
         // Cabinet access only applies when this group ACTUALLY governs.
         const auto institutional=government_access?
             profile.institutional_access_ppm/10:0;
@@ -315,7 +313,14 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         std::clamp<std::int64_t>(sum_radical,0,1'000'000));
     view.engagement_ppm=static_cast<std::int32_t>(
         std::clamp<std::int64_t>(sum_engagement,0,1'000'000));
-    view.approval=std::clamp(approval-view.radical_ppm/20'000,0,100);
+    std::int64_t sponsor_approval=0;
+    if(government_access&&view.members>0)
+        if(const auto sponsor=p2_negotiated_sponsor_effects_.find({country,group});
+           sponsor!=p2_negotiated_sponsor_effects_.end())
+            sponsor_approval=sponsor->second.government_approval;
+    view.approval=static_cast<std::int32_t>(std::clamp<std::int64_t>(
+        phaseb::add_checked(approval-view.radical_ppm/20'000,sponsor_approval),
+        0,100));
     return view;
 }
 
