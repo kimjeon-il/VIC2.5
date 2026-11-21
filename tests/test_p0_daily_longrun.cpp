@@ -59,9 +59,109 @@ static void one_year_continuity() {
     check(core.food_grievance("R")>0,"year-long unmet demand not registered");
     check(first.world().day_commit_id()==366,"daily commit counter wrong");
 }
+static void sovereign_bank_interest_law_uses_real_principal() {
+    const auto run=[](const std::string& group,const std::string& parent,
+                      const std::string& amendment,int base_ppm,
+                      phasec::Money interest,bool illiquid=false,
+                      bool local_parent=false,bool stack_with_laissez=false) {
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");
+        geo.seed_unit(1,"A","ROOT");
+        geo.seed_assignment(1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",0);
+        c.seed_actor("TREASURY",0);
+        c.seed_actor("FIRM",0);
+        c.seed_actor("SINK",0);
+        c.seed_government("A","HEAD","PM",5,3);
+        c.seed_p1_constitution("A",{phasec::P1GovernancePrinciple::monarchy,
+            phasec::P1PowerDistribution::autocracy,phasec::P1LegislatureKind::none,
+            "fixture:constitution"});
+        c.seed_country_treasury("A","TREASURY");
+        c.seed_annual_bank_interest_ppm(base_ppm);
+        if(!parent.empty()) {
+            phasec::P2BaseLaw law;
+            law.id="BASE";law.country="A";law.domain=group;
+            law.scope=local_parent?"R":"national";
+            if(local_parent)law.tier=phasec::P2NormTier::local_ordinance;
+            law.base_choice=parent;law.legal_basis="fixture:law";
+            c.p2_seed_base(law);
+        }
+        if(stack_with_laissez) {
+            phasec::P2BaseLaw economy;
+            economy.id="ECONOMY";economy.country="A";economy.domain="economic_system";
+            economy.scope="national";economy.base_choice="law_laissez_faire";
+            economy.legal_basis="fixture:economy";
+            c.p2_seed_base(economy);
+        }
+        if(!amendment.empty())
+            c.p2_seed_amendment({amendment,"BASE","fixture:amendment","",
+                {{"actual-law-clause","A",
+                  phasec::P2ClauseKind::political_association_allowed,1}}});
+        auto world=daily::World::adopt(std::move(gh),19);
+        constexpr phasec::Money principal=365'000;
+        const phasec::Money private_interest=base_ppm/1000;
+        phasegh::World::Plan loans;
+        loans[1].push_back([principal](phasegh::Stage& stage) {
+            stage.phase_c().lend("TREASURY",principal);
+            stage.phase_c().lend("FIRM",principal);
+        });
+        if(illiquid)loans[5].push_back([principal](phasegh::Stage& stage) {
+            stage.phase_c().pay("TREASURY","SINK",principal);
+        });
+        world.advance_day(loans);
+        const auto saved=daily::SnapshotCodec::encode(world);
+        auto restored=daily::SnapshotCodec::decode(saved);
+        for(int elapsed=1;elapsed<=2;++elapsed) {
+            const auto& ledger=world.engine().base().core().core();
+            check(ledger.outstanding_loan("TREASURY")==principal &&
+                  ledger.outstanding_loan("FIRM")==principal,
+                  "interest changed actual loan principal");
+            check(ledger.cash("TREASURY")==
+                      (illiquid?0:principal-elapsed*interest),
+                  "law did not affect exactly the sovereign's elapsed daily interest");
+            check(ledger.cash("FIRM")==principal-elapsed*private_interest,
+                  "sovereign interest law leaked into a private loan");
+            const auto& finance=ledger.financial();
+            const auto receivable=finance.has_account("BANK:interest_receivable")?
+                                  finance.balance("BANK:interest_receivable"):0;
+            check(receivable==(illiquid?elapsed*interest:0),
+                  "interest claims were not conserved with actual available cash");
+            if(elapsed==1) {
+                world.advance_day();
+                restored.advance_day();
+                check(daily::SnapshotCodec::encode(world)==
+                      daily::SnapshotCodec::encode(restored),
+                      "active interest outcome did not survive saved elapsed day");
+            }
+        }
+    };
+    run("","", "",100'000,100);
+    run("church_and_state","law_state_religion","amendment_draconian_blasphemy_laws",
+        100'000,120);
+    run("land_reform","law_commercialized_agriculture","amendment_open_legal_questions",
+        100'000,90,false,false,true); // (10% + 2 percentage points) × 75%
+    run("governance_principles","law_corporate_state","amendment_industrial_socialization",
+        100'000,130);
+    run("governance_principles","law_corporate_state","amendment_shop_councils",
+        100'000,110);
+    run("governance_principles","law_corporate_state","amendment_foreign_investment_seizures",
+        100'000,150);
+    run("church_and_state","law_state_religion","amendment_draconian_blasphemy_laws",
+        100'000,120,true);
+    run("church_and_state","law_state_religion","amendment_draconian_blasphemy_laws",
+        0,0);
+    run("regional_finance","local_rate","amendment_draconian_blasphemy_laws",
+        100'000,100,false,true);
+    run("migration","law_no_migration_controls","amendment_draconian_blasphemy_laws",
+        100'000,100);
+}
+
 int main(){
     try{
         one_year_continuity();
+        sovereign_bank_interest_law_uses_real_principal();
         std::cout<<"P0 daily 366-day save-replay and conservations: PASS\n";
         return 0;
     }catch(const std::exception& e){

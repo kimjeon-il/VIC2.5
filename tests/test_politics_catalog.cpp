@@ -235,6 +235,25 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     check(flat_migration==3&&unrecorded_institution==1,
           "flat colonial migration evidence leaked to the institution row");
 
+    std::size_t sovereign_interest=0,chiefs_aid=0;
+    for(const auto& entry:audit) {
+        if(entry.status!=CanonicalLawRowStatus::verified_row)continue;
+        if(entry.source.key=="country_loan_interest_rate_add" &&
+           !entry.source.institution && !entry.source.sponsor && !entry.source.boolean &&
+           entry.executor=="IntegratedWorld::phase_time_accrue_and_settle_interest" &&
+           entry.behavior_test=="test_p0_daily_longrun::sovereign_bank_interest_law_uses_real_principal")
+            ++sovereign_interest;
+        if(entry.source.source_id=="law_chiefs_distribute_aid" &&
+           entry.source.key=="country_bureaucracy_add" &&
+           entry.source.institution && !entry.source.sponsor && !entry.source.boolean &&
+           entry.normalized_value==10'000'000 &&
+           entry.executor=="IntegratedWorld::p1_bureaucracy" &&
+           entry.behavior_test=="test_politics_identity::chiefs_aid_uses_only_effective_welfare_bureaucracy")
+            ++chiefs_aid;
+    }
+    check(sovereign_interest==5&&chiefs_aid==1,
+          "scoped sovereign interest and welfare evidence missing");
+
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.
     const std::array<CanonicalLawRowEvidence,3> mixed{{

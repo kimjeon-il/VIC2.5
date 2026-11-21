@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,7>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,13>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,7> evidence{{
+    static const std::array<CanonicalLawRowEvidence,13> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -87,7 +87,25 @@ inline const std::array<CanonicalLawRowEvidence,7>& canonical_law_row_evidence()
          "test_politics_domain::colonial_migration_pull_requires_verified_destination"},
         {{"law_sakoku","country_disallow_aggressive_plays_bool",1,true,false},
          "phasegh::Stage::open_crisis (claimant initiation)",
-         "test_phase_gh_diplomacy::sakoku_blocks_only_new_claimant_initiation"}
+         "test_phase_gh_diplomacy::sakoku_blocks_only_new_claimant_initiation"},
+        {{"amendment_draconian_blasphemy_laws","country_loan_interest_rate_add",0.02,false,false},
+         "IntegratedWorld::phase_time_accrue_and_settle_interest",
+         "test_p0_daily_longrun::sovereign_bank_interest_law_uses_real_principal"},
+        {{"amendment_open_legal_questions","country_loan_interest_rate_add",0.02,false,false},
+         "IntegratedWorld::phase_time_accrue_and_settle_interest",
+         "test_p0_daily_longrun::sovereign_bank_interest_law_uses_real_principal"},
+        {{"amendment_industrial_socialization","country_loan_interest_rate_add",0.03,false,false},
+         "IntegratedWorld::phase_time_accrue_and_settle_interest",
+         "test_p0_daily_longrun::sovereign_bank_interest_law_uses_real_principal"},
+        {{"amendment_shop_councils","country_loan_interest_rate_add",0.01,false,false},
+         "IntegratedWorld::phase_time_accrue_and_settle_interest",
+         "test_p0_daily_longrun::sovereign_bank_interest_law_uses_real_principal"},
+        {{"amendment_foreign_investment_seizures","country_loan_interest_rate_add",0.05,false,false},
+         "IntegratedWorld::phase_time_accrue_and_settle_interest",
+         "test_p0_daily_longrun::sovereign_bank_interest_law_uses_real_principal"},
+        {{"law_chiefs_distribute_aid","country_bureaucracy_add",10,false,true},
+         "IntegratedWorld::p1_bureaucracy",
+         "test_politics_identity::chiefs_aid_uses_only_effective_welfare_bureaucracy"}
     }};
     return evidence;
 }

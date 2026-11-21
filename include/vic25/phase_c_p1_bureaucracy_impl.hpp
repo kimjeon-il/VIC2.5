@@ -291,9 +291,47 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
             v.commander_cost=phaseb::add_checked(
                 v.commander_cost,officer.cost);
     }
-    const auto legal=phaseb::add_checked(
-        p2_modifier_ppm(country,"country_bureaucracy_add"),
-        p3_trait_modifier_ppm(country,"country_bureaucracy_add"));
+    constexpr const char* bureaucracy_key="country_bureaucracy_add";
+    auto legal=phaseb::add_checked(
+        p2_modifier_ppm(country,bureaucracy_key),
+        p3_trait_modifier_ppm(country,bureaucracy_key));
+    if(const auto welfare=p2_selected_law(country,"welfare");
+       welfare && p2_catalog_canonical_choice(*welfare)=="law_chiefs_distribute_aid") {
+        // Existing service capacity is independent of this bureaucracy
+        // calculation. An unfunded, unstaffed or unavailable link cannot
+        // turn an institutional law modifier into administrative output.
+        int effective_level=0;
+        for(const auto& [id,link]:p1_institutions_) {
+            if(link.country!=country||link.kind!=P1InstitutionKind::welfare)continue;
+            const auto& service=public_institutions_.at(id);
+            const auto sovereign=sovereignty_.find(service.region);
+            const auto incorporated=p1_incorporation_.find(service.region);
+            if(sovereign==sovereignty_.end()||sovereign->second!=country||
+               incorporated==p1_incorporation_.end()||!incorporated->second)
+                continue;
+            const auto& jobs=people_.jobs();
+            const bool local_staff=std::any_of(jobs.begin(),jobs.end(),
+                [&](const auto& entry) {
+                    const auto& [slice,job]=entry;
+                    return job.employer==service.operator_id&&
+                        people_.demographic(people_.slice(slice).key.demographic)
+                            .region==service.region&&
+                        job.count>currently_striking(slice);
+                });
+            if(!local_staff)continue;
+            const auto active=p1_institution_capacity(id);
+            if(active.usable_slots>0)
+                effective_level=std::max(effective_level,static_cast<int>(active.level));
+        }
+        if(effective_level>0) {
+            const auto canonical=p2_catalog_canonical_choice(*welfare);
+            // One national welfare institution, with no duplicate flat value.
+            const auto delta=p2_catalog_raw_modifier(canonical,bureaucracy_key,effective_level)-
+                             p2_catalog_raw_modifier(canonical,bureaucracy_key,0);
+            legal=phaseb::add_checked(legal,
+                static_cast<std::int64_t>(std::llround(delta*1'000'000.0)));
+        }
+    }
     const auto base=std::max<std::int64_t>(0,phaseb::add_checked(
         100,phaseb::add_checked(v.office_output,legal/1'000'000)));
     const auto pct=std::clamp<std::int64_t>(

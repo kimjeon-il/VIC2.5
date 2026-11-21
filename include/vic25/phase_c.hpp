@@ -2968,6 +2968,25 @@ public:
         // modifiers) changes only the interest due on an existing country's
         // actual financial loan. No rate is assumed for a private company
         // without explicit country/jurisdiction evidence.
+        std::map<std::string,Money> sovereign_flat_points;
+        for(const auto& amendment_id:p2_active_amendments_) {
+            // Read the specific flat catalogue row, never the generic
+            // country aggregation that can also contain local ordinances.
+            const auto points=p2_catalog_raw_modifier(
+                amendment_id,"country_loan_interest_rate_add");
+            if(points==0)continue;
+            const auto& amendment=p2_amendments_.at(amendment_id);
+            const auto& parent=p2_laws_.at(amendment.law_id);
+            if(parent.tier==P2NormTier::local_ordinance||
+               (!parent.scope.empty()&&parent.scope!="national")||
+               !p2_is_active_base(amendment.law_id)||
+               !politics::catalogue().has(parent.domain,parent.base_choice))continue;
+            const auto* source=p2_catalog_amendment(amendment_id);
+            if(!source||!p2_catalog_amendment_applies(*source,parent.base_choice))continue;
+            auto& total=sovereign_flat_points[parent.country];
+            total=phaseb::add_checked(total,static_cast<Money>(
+                std::llround(points*1'000'000.0)));
+        }
         std::map<std::string,Money> sovereign_rates;
         if(!p3_groups_.empty()||!p2_active_base_.empty())
             for(const auto& [country,gov]:governments_) {
@@ -2978,8 +2997,14 @@ public:
                     p3_trait_modifier_ppm(country,"country_loan_interest_rate_mult"));
                 const auto ppm=std::clamp<std::int64_t>(
                     1'000'000+bonus,0,2'000'000);
-                const Money adjusted=phaseb::mul_checked(
-                    bank_interest_annual_ppm_,ppm)/1'000'000;
+                // Like other P1/P2 rates, flat points change the base
+                // before the relative modifier is applied. This only
+                // prices interest on an actual sovereign bank loan.
+                const auto points=sovereign_flat_points.find(country);
+                const Money base=std::max<Money>(0,phaseb::add_checked(
+                    bank_interest_annual_ppm_,points==sovereign_flat_points.end()?
+                    0:points->second));
+                const Money adjusted=phaseb::mul_checked(base,ppm)/1'000'000;
                 sovereign_rates.emplace(country_treasury(country),adjusted);
             }
         if(!money_.has_account("BANK:interest_receivable"))

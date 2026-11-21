@@ -619,8 +619,99 @@ static void enacted_education_changes_real_daily_schooling() {
     scenario("terakoya",2,true,"SCHOOL",1806,1806);
 }
 
+static void chiefs_aid_uses_only_effective_welfare_bureaucracy() {
+    const auto scenario=[](const std::string& choice,P1InstitutionKind kind,
+                           const std::string& service_region,
+                           const std::string& staff_region,
+                           bool funded,bool dated,std::int64_t expected) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"CORE","A");
+        geo.seed_province(2,"DEPENDENCY","A");
+        geo.seed_province(3,"FOREIGN","B");
+        geo.seed_unit(1,"A","A-ADMIN");geo.seed_unit(2,"B","B-ADMIN");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,1);geo.seed_assignment(3,2);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",0);c.seed_actor("B",0);
+        c.seed_actor("SERVICES",funded?100:0);
+        c.seed_government("A","HEAD","PRIME",5,3);
+        c.seed_government("B","HEAD-B","PRIME-B",5,3);
+        c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,
+            "fixture:executive"});
+        c.seed_p1_constitution("B",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,
+            "fixture:foreign-executive"});
+        c.p1_set_incorporation("CORE",true);
+        c.p1_set_incorporation("DEPENDENCY",false);
+        c.p1_set_incorporation("FOREIGN",true);
+        auto& pop=c.seed_population();
+        for(const auto& region:{"CORE","DEPENDENCY","FOREIGN"}) {
+            const auto hh=pop.household_profile({region,"mixed","shared",25'000});
+            const auto econ=pop.economic_profile({region,"worker","wage","employee",
+                                                 pop.default_education()});
+            const auto dem=pop.demographic_profile({region,23650,phaseb::Sex::female,
+                "culture","faith","citizen","free",pop.default_health(),
+                phaseb::Service::civilian});
+            const auto id=pop.seed_population(dem,econ,hh,100'000);
+            if(region==staff_region)pop.hire(id,10,"SERVICES","worker",10,{});
+        }
+        const auto country=service_region=="FOREIGN"?"B":"A";
+        c.seed_public_institution("AID-ONE","SERVICES",service_region,"food",100,1);
+        c.seed_public_institution("AID-TWO","SERVICES",service_region,"food",100,1);
+        c.seed_p1_institution(country,"AID-ONE",kind,1);
+        c.seed_p1_institution(country,"AID-TWO",kind,2);
+        if(!choice.empty())law(c,"A","welfare",dated?"poor_laws":choice);
+        auto world=daily::World::adopt(std::move(gh),42);
+        const auto& init=world.engine().base().core().core();
+        const auto opening_cost=init.p1_bureaucracy("A").institution_cost;
+        if(dated) {
+            const auto day=world.day_index();
+            phasegh::World::Plan plan;
+            plan[9].push_back([&](phasegh::Stage& stage) {
+                auto& live=stage.phase_c();
+                phasec::P2Bill bill;
+                bill.id="CHIEFS-BILL";bill.country="A";bill.proposer="PRIME";
+                bill.legal_basis="fixture:chiefs";bill.effective_day=day+2;
+                bill.proposed_base={"CHIEFS-LAW","A","lawgroup_welfare","national",
+                    "law_chiefs_distribute_aid","fixture:chiefs"};
+                live.p2_submit_bill(std::move(bill),day);
+                live.p2_approve_bill("CHIEFS-BILL",{});
+                live.p2_promulgate_bill("CHIEFS-BILL","HEAD",day);
+            });
+            world.advance_day(plan);
+            world.advance_day();
+            check(world.engine().base().core().core().p1_bureaucracy("A")
+                      .capacity.generated==100,
+                  "pending chiefs law created administrative output early");
+            world.advance_day();
+        }
+        const auto& live=world.engine().base().core().core();
+        const auto value=live.p1_bureaucracy("A");
+        if(value.capacity.generated!=expected)
+            throw std::runtime_error("wrong chiefs aid administration output for "+
+                choice+"/"+service_region+" (dated="+std::to_string(dated)+
+                "): expected "+std::to_string(expected)+", got "+
+                std::to_string(value.capacity.generated));
+        check(value.institution_cost==opening_cost &&
+              live.p2_modifier_ppm("A","country_bureaucracy_add")==0,
+              "institutional output altered nominal cost or leaked into flat modifiers");
+    };
+    scenario("chiefs_distribute_aid",P1InstitutionKind::welfare,"CORE","CORE",true,false,120);
+    scenario("chiefs_distribute_aid",P1InstitutionKind::welfare,"CORE","CORE",true,true,120);
+    scenario("poor_laws",P1InstitutionKind::welfare,"CORE","CORE",true,false,100);
+    scenario("",P1InstitutionKind::welfare,"CORE","CORE",true,false,100);
+    scenario("chiefs_distribute_aid",P1InstitutionKind::welfare,"CORE","",true,false,100);
+    scenario("chiefs_distribute_aid",P1InstitutionKind::welfare,"CORE","CORE",false,false,100);
+    scenario("chiefs_distribute_aid",P1InstitutionKind::welfare,"CORE","DEPENDENCY",true,false,100);
+    scenario("chiefs_distribute_aid",P1InstitutionKind::education,"CORE","CORE",true,false,100);
+    scenario("chiefs_distribute_aid",P1InstitutionKind::welfare,"DEPENDENCY","DEPENDENCY",true,false,100);
+    scenario("chiefs_distribute_aid",P1InstitutionKind::welfare,"FOREIGN","FOREIGN",true,false,100);
+}
+
 int main(){
     try{
+        chiefs_aid_uses_only_effective_welfare_bureaucracy();
         source_ideologies_laws_traits();
         acceptance_and_five_tier_rights();
         physical_migration_and_law_block();
