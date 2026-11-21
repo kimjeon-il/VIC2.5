@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,129>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,131>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,129> evidence{{
+    static const std::array<CanonicalLawRowEvidence,131> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -454,7 +454,13 @@ inline const std::array<CanonicalLawRowEvidence,129>& canonical_law_row_evidence
          "test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members"},
         {{"law_chiefs_distribute_aid","interest_group_ig_armed_forces_pol_str_mult",0.1,false,true},
          "IntegratedWorld::p2_political_strength_ppm (funded staffed national institution)",
-         "test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members"}
+         "test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members"},
+        {{"law_peasant_levies","country_can_only_conscript_peasants_bool",1,true,false},
+         "IntegratedWorld::mobilize / peacetime_military_staff (actual peasant-only draft)",
+         "test_politics_identity::military_peasant_levy_restricts_real_conscripts"},
+        {{"law_warrior_caste","country_can_only_conscript_peasants_bool",1,true,false},
+         "IntegratedWorld::mobilize / peacetime_military_staff (actual peasant-only draft)",
+         "test_politics_identity::military_peasant_levy_restricts_real_conscripts"}
     }};
     return evidence;
 }

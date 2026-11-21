@@ -898,6 +898,7 @@ public:
         };
         People needed=std::max<People>(
             0,p.standing_target-active_strength(unit));
+        const bool requires_peasant=peasant_only_draft(p.country);
         for(const auto service:{phaseb::Service::reserve,
                                 phaseb::Service::civilian}) {
             if(needed<=0||quota<=0)break;
@@ -907,9 +908,7 @@ public:
                 const auto& row=people_.slice(id);
                 const auto& econ=people_.economic(row.key.economic);
                 const auto model=p2_selected_law(p.country,"army_model");
-                if(model&&*model=="peasant_levies"&&
-                   econ.profession!="peasant"&&
-                   econ.livelihood!="subsistence")continue;
+                if(requires_peasant&&econ.profession!="peasant")continue;
                 People recruited=std::min({needed,quota,row.count});
                 if(model) {
                     const auto rate=politics::catalogue().modifier(
@@ -3796,14 +3795,27 @@ public:
                 .value_or(conscription_enabled_?1:0)!=0;
         }
         ensure(permitted,"P2 military service law does not permit conscription");
+        const auto deployment=army_deployments_.find(unit);
+        const bool origin_restricted=jurisdiction!=sovereignty_.end()&&
+            peasant_only_draft(jurisdiction->second);
+        const bool command_restricted=deployment!=army_deployments_.end()&&
+            (jurisdiction==sovereignty_.end()||
+             deployment->second.country!=jurisdiction->second)&&
+            peasant_only_draft(deployment->second.country);
+        if(origin_restricted||command_restricted) {
+            // A foreign (or unproven) cohort cannot bypass the known
+            // command country's restrictive draft. Unbound legacy units
+            // still use the real cohort's regional sovereign when known.
+            ensure(deployment==army_deployments_.end()||
+                   (jurisdiction!=sovereignty_.end()&&
+                    deployment->second.country==jurisdiction->second),
+                   "P2 peasant-only draft requires domestic jurisdiction");
+            ensure(people_.economic(s.key.economic).profession=="peasant",
+                   "P2 peasant-only draft requires actual peasant profession");
+        }
         if(jurisdiction!=sovereignty_.end()) {
             const auto& country=jurisdiction->second;
             if(const auto model=p2_selected_law(country,"army_model")) {
-                const auto& job=people_.economic(s.key.economic);
-                if(*model=="peasant_levies")
-                    ensure(job.profession=="peasant"||
-                           job.livelihood=="subsistence",
-                           "P2 peasant levies require actual peasant POP");
                 if(const auto rate=politics::catalogue().modifier(
                        *model,"state_conscription_rate_add");
                    rate&&rate->value_ppm>0&&!rate->boolean) {
@@ -5219,6 +5231,21 @@ public:
     }
 
 private:
+    [[nodiscard]] bool peasant_only_draft(const std::string& country)const {
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(law.country!=country||law.tier==P2NormTier::local_ordinance||
+               (!law.scope.empty()&&law.scope!="national")||
+               politics::bare_group(law.domain)!="army_model"||
+               !politics::catalogue().has(law.domain,law.base_choice))continue;
+            const auto choice=p2_catalog_canonical_choice(law.base_choice);
+            return (choice=="law_peasant_levies"||choice=="law_warrior_caste")&&
+                p2_catalog_raw_modifier(choice,
+                    "country_can_only_conscript_peasants_bool")!=0;
+        }
+        return false;
+    }
     [[nodiscard]] P3GroupView p3_group_view_impl(
         const std::string& country,const std::string& group,bool include_clout)const;
     phaseb::World people_;

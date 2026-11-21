@@ -356,8 +356,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==129,
-          "expected 99 preserved witnesses and 23 exact national base strength rows");
+    check(canonical_law_row_evidence().size()==131,
+          "expected 129 preserved witnesses and two peasant-only draft rows");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
         if(row.source.key=="state_peasants_mass_migration_disallowed_bool") {
@@ -696,6 +696,30 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
                      row.source.key.ends_with("_pol_str_mult") &&
                      row.behavior_test!="test_p3_p5_politics::funded_institutions_weight_only_their_typed_group_members";
           }),"institution group strength evidence leaked to an unresolved owner");
+
+    constexpr std::string_view draft_fixture="test_politics_identity::military_peasant_levy_restricts_real_conscripts";
+    std::set<std::string_view> draft_sources;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=draft_fixture)continue;
+        check(row.source.key=="country_can_only_conscript_peasants_bool"&&
+              row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.normalized_value==1&&row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="IntegratedWorld::mobilize / peacetime_military_staff (actual peasant-only draft)"&&
+              draft_sources.insert(row.source.source_id).second,
+              "draft evidence lost the exact flat boolean, source or real executor");
+        for(int alternative=0;alternative<4;++alternative) {
+            auto mismatch=row.source;
+            if(alternative==0)mismatch.sponsor=true;
+            if(alternative==1)mismatch.institution=true;
+            if(alternative==2)mismatch.boolean=false;
+            if(alternative==3)mismatch.key="country_limit_officers_qualifications_to_upper_strata";
+            check(classify_canonical_law_row(mismatch,canonical_law_row_evidence()).behavior_test
+                      !=draft_fixture,
+                  "actual draft evidence leaked into a non-draft or qualified row");
+        }
+    }
+    check(draft_sources==std::set<std::string_view>{"law_peasant_levies","law_warrior_caste"},
+          "expected both exact national peasant-only conscription sources");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

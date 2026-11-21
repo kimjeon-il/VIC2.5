@@ -279,50 +279,99 @@ static void economic_law_restricts_real_company_ownership() {
 }
 
 static void military_peasant_levy_restricts_real_conscripts() {
-    Scenario fixture;
-    auto& core=fixture.gh.seed_geography().seed_core().seed_core();
-    core.seed_unit("LEVY");
-    law(core,"A","army_model","peasant_levies");
-    P2BaseLaw conscription;
-    conscription.id="A:lawful_conscription";
-    conscription.country="A";conscription.domain="conscription_fixture";
-    conscription.scope="national";conscription.base_choice="military-law";
-    conscription.legal_basis="fixture:conscription";
-    conscription.clauses.push_back({
-        "conscription-permitted","A",
-        P2ClauseKind::conscription_authorized,1});
-    core.p2_seed_base(conscription);
-    auto& pop=core.seed_population();
-    const auto row=pop.slice(fixture.primary);
-    const auto economic=pop.economic_profile({
-        "RA","peasant","subsistence","self_employed",
-        pop.default_education()});
-    const auto peasant=pop.seed_population(
-        row.key.demographic,economic,row.key.household,100,7001);
-    fixture.gh.validate();
-    auto world=daily::World::adopt(std::move(fixture.gh),12);
-    const auto before=daily::SnapshotCodec::encode(world);
-    phasegh::World::Plan blocked;
-    const auto civilian=fixture.primary;
-    blocked[10].push_back([civilian](phasegh::Stage& gh) {
-        gh.phase_c().mobilize(civilian,1,"LEVY");
-    });
-    check(rejects([&]{world.advance_day(blocked);})&&
-          daily::SnapshotCodec::encode(world)==before,
-          "peasant levies conscripted non-peasant workers");
-    const auto total=view(world).people().population();
-    phasegh::World::Plan actual;
-    actual[10].push_back([peasant](phasegh::Stage& gh) {
-        gh.phase_c().mobilize(peasant,3,"LEVY");
-    });
-    world.advance_day(actual);
-    check(view(world).people().population()==total&&
-          view(world).active_strength("LEVY")==3,
-          "actual lawful militia failed POP/army conservation");
-    const auto saved=daily::SnapshotCodec::encode(world);
-    check(daily::SnapshotCodec::encode(
-        daily::SnapshotCodec::decode(saved))==saved,
-          "military law actual conscripts failed checkpoint replay");
+    for(const std::string model:{"peasant_levies","warrior_caste","mass_conscription"}) {
+        const bool restricted=model!="mass_conscription";
+        Scenario fixture;
+        auto& core=fixture.gh.seed_geography().seed_core().seed_core();
+        core.seed_unit("LEVY");
+        core.seed_army_deployment("LEVY","A","RA");
+        law(core,"A","army_model",model);
+        P2BaseLaw conscription;
+        conscription.id="A:lawful_conscription";
+        conscription.country="A";conscription.domain="conscription_fixture";
+        conscription.scope="national";conscription.base_choice="military-law";
+        conscription.legal_basis="fixture:conscription";
+        conscription.clauses.push_back({
+            "conscription-permitted","A",
+            P2ClauseKind::conscription_authorized,1});
+        core.p2_seed_base(conscription);
+        auto& pop=core.seed_population();
+        const auto row=pop.slice(fixture.primary);
+        const auto economic=pop.economic_profile({
+            "RA","peasant","subsistence","self_employed",pop.default_education()});
+        const auto proxy_economic=pop.economic_profile({
+            "RA","laborer","subsistence","self_employed",pop.default_education()});
+        const auto peasant=pop.seed_population(
+            row.key.demographic,economic,row.key.household,100,7001);
+        const auto proxy=pop.seed_population(
+            row.key.demographic,proxy_economic,row.key.household,100,7002);
+        const auto foreign=pop.slice(fixture.other);
+        const auto foreign_economic=pop.economic_profile({
+            "RB","peasant","subsistence","self_employed",pop.default_education()});
+        const auto foreign_peasant=pop.seed_population(
+            foreign.key.demographic,foreign_economic,foreign.key.household,100,7003);
+        auto active=pop.demographic(row.key.demographic);
+        active.service=phaseb::Service::active;
+        const auto standing=pop.seed_population(pop.demographic_profile(active),
+            proxy_economic,row.key.household,3,7004);
+        core.seed_active("LEVY",standing);
+        PeacetimeMilitaryProgram program;
+        program.unit="LEVY";program.country="A";
+        program.standing_target=4;program.daily_enlist_limit=1;
+        core.set_peacetime_military_program(program);
+        fixture.gh.validate();
+        auto world=daily::World::adopt(std::move(fixture.gh),12);
+        const auto before=daily::SnapshotCodec::encode(world);
+        const auto draft=[](phaseb::Id source) {
+            phasegh::World::Plan plan;
+            plan[10].push_back([source](phasegh::Stage& gh) {
+                gh.phase_c().mobilize(source,1,"LEVY");
+            });
+            return plan;
+        };
+        if(restricted) {
+            auto scheduled=world;
+            phasegh::World::Plan staff;
+            staff[10].push_back([](phasegh::Stage& gh) {
+                (void)gh.phase_c().peacetime_military_staff("LEVY");
+            });
+            scheduled.advance_day(staff);
+            const auto& result=view(scheduled);
+            check(result.active_strength("LEVY")==4&&
+                  result.unit_slices("LEVY").at(standing)==3&&
+                  result.people().population()==view(world).people().population(),
+                  "automatic draft must skip disallowed POP without losing standing force");
+            for(const auto& [id,n]:result.unit_slices("LEVY")) {
+                if(id==standing)continue;
+                const auto& drafted=result.people().slice(id);
+                check(n==1&&result.people().economic(drafted.key.economic).profession=="peasant",
+                      "automatic draft bypassed exact peasant profession");
+            }
+            check(rejects([&]{world.advance_day(draft(proxy));})&&
+                  daily::SnapshotCodec::encode(world)==before,
+                  "the peasant draft used livelihood instead of actual POP profession");
+            check(rejects([&]{world.advance_day(draft(foreign_peasant));})&&
+                  daily::SnapshotCodec::encode(world)==before,
+                  "foreign jurisdiction bypassed the conscripting country's law");
+        }
+        const auto total=view(world).people().population();
+        world.advance_day(draft(restricted?peasant:proxy));
+        check(view(world).people().population()==total&&
+              view(world).active_strength("LEVY")==4,
+              "legal draft did not conserve standing troops and actual POP");
+        auto saved=daily::SnapshotCodec::encode(world);
+        world=daily::SnapshotCodec::decode(saved);
+        check(daily::SnapshotCodec::encode(world)==saved,
+              "verified conscripts did not survive save and reload");
+        phasegh::World::Plan leave;
+        leave[10].push_back([standing](phasegh::Stage& gh) {
+            gh.phase_c().demobilize("LEVY",standing,1);
+        });
+        world.advance_day(leave);
+        check(view(world).active_strength("LEVY")==3&&
+              view(world).people().population()==total,
+              "the draft qualification must not interfere with real discharge");
+    }
 }
 
 static void effective_workhouse_amendment_reduces_only_welfare_cost(
