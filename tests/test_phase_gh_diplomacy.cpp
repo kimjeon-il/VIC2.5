@@ -1,4 +1,5 @@
 #include "vic25/phase_gh.hpp"
+#include "vic25/daily_snapshot.hpp"
 #include <iostream>
 #include <stdexcept>
 using namespace vic25::phasegh;
@@ -6,8 +7,8 @@ static void verify(bool ok,const char* why){if(!ok)throw std::runtime_error(why)
 template<class F>static bool rejected(F&& f) {
     try{f();}catch(const std::exception&){return true;}return false;
 }
-static World fixture(bool route=false) {
-    World w(100);
+static World fixture(bool route=false,std::int64_t month=100) {
+    World w(month);
     auto& e=w.seed_geography();
     e.set_dataset("GH-diplomacy-fixture");
     e.seed_province(1,"RA1","A");
@@ -216,8 +217,93 @@ static void crisis_partial_offers_and_compensation() {
     verify(!w.advise_crisis("CR","C").can_mediate,
            "AI read-only assessment of closed crisis");
 }
+static void sakoku_blocks_only_new_claimant_initiation() {
+    using namespace vic25;
+    auto gh=fixture(false,24000);
+    auto& c=gh.seed_geography().seed_core().seed_core();
+    c.seed_p1_constitution("A",{phasec::P1GovernancePrinciple::monarchy,
+        phasec::P1PowerDistribution::autocracy,phasec::P1LegislatureKind::none,
+        "fixture:executive-authority"});
+    c.p2_seed_base({"opening-trade-law","A","trade_policy","national",
+                    "law_free_trade","fixture:opening-law"});
+    auto world=daily::World::adopt(std::move(gh),19);
+    World::Plan claims;
+    claims[9].push_back([](Stage& s) {
+        s.geography().queue_claim("A-CLAIM",2,"A",true);
+        s.geography().queue_claim("B-CLAIM-ON-A",1,"B",true);
+        s.geography().queue_claim("B-CLAIM-ON-C",3,"B",true);
+    });
+    world.advance_day(claims);
+    while(world.date().month==1)world.advance_day();
+
+    constexpr const char* key="country_disallow_aggressive_plays_bool";
+    const auto effective=world.day_index()+2;
+    World::Plan opening;
+    opening[9].push_back([effective](Stage& s) {
+        auto& live=s.phase_c();
+        phasec::P2Bill bill;
+        bill.id="SAKOKU-BILL";bill.country="A";bill.proposer="PM_A";
+        bill.legal_basis="fixture:trade-law";bill.effective_day=effective;
+        bill.proposed_base={"SAKOKU-LAW","A","trade_policy","national",
+                            "law_sakoku","fixture:trade-law"};
+        live.p2_submit_bill(std::move(bill),effective-2);
+        live.p2_approve_bill("SAKOKU-BILL",{});
+        live.p2_promulgate_bill("SAKOKU-BILL","A-head",effective-2);
+        verify(live.p2_modifier_ppm("A",key)==0,
+               "promulgated but not effective Sakoku locked crisis opening");
+        s.open_crisis("EXISTING",2,"A","B","PM_A");
+    });
+    world.advance_day(opening);
+    world.advance_day();
+    world.advance_day();
+    const auto& c2=world.engine().base().core().core();
+    verify(c2.p2_modifier_ppm("A",key)>0 &&
+           world.engine().diplomacy().crises.at("EXISTING").status==
+               CrisisStatus::scheduled &&
+           world.engine().base().spatial().claims.at(2).contains("A"),
+           "active Sakoku must not cancel an earlier crisis or its real claim");
+
+    const auto before=daily::SnapshotCodec::encode(world);
+    World::Plan prohibited;
+    prohibited[9].push_back([](Stage& s) {
+        s.open_crisis("PROHIBITED",2,"A","B","PM_A");
+    });
+    bool blocked=false;
+    try { world.advance_day(prohibited); }
+    catch(const std::invalid_argument& error) {
+        blocked=std::string(error.what()).find("H_ERR_AGGRESSIVE_PLAYS_PROHIBITED")
+            !=std::string::npos;
+    }
+    verify(blocked,"active Sakoku did not reject a claimant-initiated crisis");
+    verify(daily::SnapshotCodec::encode(world)==before,
+           "rejected crisis modified the live claim or its transaction");
+
+    World::Plan permitted;
+    permitted[9].push_back([](Stage& s) {
+        s.open_crisis("RESPONDENT",1,"B","A","PM_B");
+        s.open_crisis("MEDIATION",3,"B","C","PM_B");
+    });
+    world.advance_day(permitted);
+    while(world.date().month==2)world.advance_day();
+    World::Plan defense_and_mediation;
+    defense_and_mediation[9].push_back([](Stage& s) {
+        s.submit_crisis_position("RESPONDENT","A","defends_status_quo",true,"PM_A");
+        s.mediate_crisis("MEDIATION","A","PM_A");
+        s.mediate_crisis("EXISTING","C","PM_C");
+        s.resolve_crisis_without_war("EXISTING","PM_A","PM_B");
+    });
+    world.advance_day(defense_and_mediation);
+    const auto& d=world.engine().diplomacy();
+    verify(d.crises.at("RESPONDENT").status==CrisisStatus::active &&
+           d.crises.at("MEDIATION").mediator=="A" &&
+           d.crises.at("EXISTING").status==CrisisStatus::settled &&
+           d.wars.empty(),
+           "Sakoku interfered with defense, mediation or an already-open crisis");
+}
+
 int main(){
     try{
+        sakoku_blocks_only_new_claimant_initiation();
         multilateral_treaty_and_trade_restrictions();
         territory_and_reparations_are_E_and_C_events();
         organization_voting_veto_membership_change();

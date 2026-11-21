@@ -3967,7 +3967,7 @@ public:
         // *rates*, not as extra births, students, jobs or migrants.
         struct PoliticalRates {
             std::int64_t birth{},school{},migration{},mortality{};
-            std::int64_t healthcare{},school_institution{};
+            std::int64_t healthcare{},school_institution{},unincorporated_migration{};
             bool schools_allowed{true};
         };
         // In the absence of a separate national investment ledger, derive
@@ -4040,6 +4040,7 @@ public:
                     effect(school_key),
                     effect("state_migration_pull_mult"),
                     p2_modifier_ppm(country,mortality_key),healthcare,school_institution,
+                    p2_modifier_ppm(country,"state_migration_pull_unincorporated_mult"),
                     education!=std::optional<std::string>("no_schools")});
             }
         phaseb::Engine::RateAdjustment adjustment;
@@ -4086,8 +4087,14 @@ public:
                 const auto next=sovereignty_.find(dest->second);
                 if(next!=sovereignty_.end())
                     if(const auto target=rates.find(next->second);
-                       target!=rates.end())
+                       target!=rates.end()) {
                         factor=target->second.migration;
+                        // Apply only the receiving country's flat effects
+                        // to a destination verified as unincorporated.
+                        if(!p1_region_incorporated(dest->second).value_or(true))
+                            factor=phaseb::add_checked(factor,
+                                target->second.unincorporated_migration);
+                    }
             } else return base;
             const auto scaled=std::clamp<std::int64_t>(
                 1'000'000+factor,0,2'000'000);

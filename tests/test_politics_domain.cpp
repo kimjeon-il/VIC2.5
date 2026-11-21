@@ -143,10 +143,92 @@ static void enacted_law_changes_only_its_own_real_daily_schooling() {
     check(daily::SnapshotCodec::encode(copy)==saved,
           "lawful day-native school demographics did not save and replay");
 }
+static void colonial_migration_pull_requires_verified_destination() {
+    const auto run=[](const std::string& colonization,bool on_destination,
+                      int incorporation,bool closed,bool homestead,bool nativist,
+                      phaseb::People expected) {
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"SOURCE","A");
+        geo.seed_province(2,"TARGET","B");
+        geo.seed_unit(1,"A","HOME");
+        geo.seed_unit(2,"B","DESTINATION");
+        geo.seed_assignment(1,1);
+        geo.seed_assignment(2,2);
+        auto& c=geo.seed_core().seed_core();
+        for(const auto* country:{"A","B"}) {
+            c.seed_actor(country,100);
+            c.seed_government(country,"HEAD","PRIME",5,3);
+            c.seed_p1_constitution(country,{
+                P1GovernancePrinciple::monarchy,P1PowerDistribution::autocracy,
+                P1LegislatureKind::none,"fixture:constitution"});
+        }
+        c.p1_set_incorporation("SOURCE",false);
+        if(incorporation>=0)c.p1_set_incorporation("TARGET",incorporation>0);
+        const auto law=[&](const std::string& country,const std::string& group,
+                           const std::string& choice) {
+            P2BaseLaw entry;
+            entry.id=country+":"+group;entry.country=country;
+            entry.domain=group;entry.scope="national";
+            entry.base_choice="law_"+choice;entry.legal_basis="fixture:law";
+            c.p2_seed_base(entry);
+            return entry.id;
+        };
+        const auto amendment=[&](const std::string& id,const std::string& parent,
+                                 const std::string& clause) {
+            c.p2_seed_amendment({id,parent,"fixture:amendment","",
+                {{clause,"B",P2ClauseKind::political_association_allowed,1}}});
+        };
+        const auto border=law("B","migration",closed?"closed_borders":
+                                                   "no_migration_controls");
+        if(!colonization.empty())
+            law(on_destination?"B":"A","colonization",colonization);
+        if(homestead) {
+            const auto land=law("B","land_reform","homesteading");
+            amendment("amendment_homestead_acts",land,"homestead-clause");
+        }
+        if(nativist)amendment("amendment_nativist_labour_market",border,"labor-clause");
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"SOURCE","shared","shared",25'000});
+        const auto e=pop.economic_profile({"SOURCE","worker","wage","employee",
+                                           pop.default_education()});
+        const auto d=pop.demographic_profile({"SOURCE",23640,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        pop.seed_population(d,e,h,100'000);
+        auto rules=isolated();
+        rules.migration_ppm=310'000; // exactly 1% on January 1
+        rules.destination_by_region["SOURCE"]="TARGET";
+        c.enable_demography(rules);
+        auto world=daily::World::adopt(std::move(gh),9);
+        world.advance_day();
+        const auto& people=world.engine().base().core().core().people();
+        phaseb::People moved=0;
+        for(const auto& [id,row]:people.slices()) {
+            (void)id;
+            if(people.demographic(row.key.demographic).region=="TARGET")moved+=row.count;
+        }
+        check(moved==expected && people.population()==100'000,
+              "colonial migration pull changed the wrong destination or real POP count");
+    };
+    run("frontier_colonization",true,0,false,false,false,1500);
+    run("colonial_resettlement",true,0,false,false,false,1500);
+    run("frontier_colonization",true,1,false,false,false,1000);
+    run("frontier_colonization",true,-1,false,false,false,1000);
+    run("frontier_colonization",false,0,false,false,false,1000);
+    run("frontier_colonization",true,0,true,false,false,0);
+    run("internal_colonization",true,0,false,false,false,1000);
+    run("",true,0,false,true,false,1250);
+    run("frontier_colonization",true,0,false,true,false,1750);
+    run("frontier_colonization",true,0,false,false,true,1400);
+
+}
+
 int main() {
     try {
         native_rate_callback_changes_real_pop_only();
         enacted_law_changes_only_its_own_real_daily_schooling();
+        colonial_migration_pull_requires_verified_destination();
         std::cout<<"VIC2.5 POLITICS REAL POP DOMAIN EFFECTS PASS\n";
     }catch(const std::exception& e) {
         std::cerr<<"POLITICS DOMAIN FAILURE: "<<e.what()<<"\n";

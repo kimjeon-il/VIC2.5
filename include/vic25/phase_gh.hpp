@@ -964,6 +964,11 @@ public:
                 phase_c().sovereignty(spatial_.spatial().provinces.at(province).region)
                     ==respondent && claimant!=respondent,
                 "H_ERR_MISSING_UNDERLYING_DISPUTE");
+        // Only initiating a new external confrontation is constrained.
+        // Existing claims and crises, defense and mediation stay independent.
+        require(phase_c().p2_modifier_ppm(
+                    claimant,"country_disallow_aggressive_plays_bool")==0,
+                "H_ERR_AGGRESSIVE_PLAYS_PROHIBITED");
         diplomacy_.crises.emplace(id,Crisis{id,claimant,respondent,"",province,
                                   phase_c().month()+1,CrisisStatus::scheduled});
         ++diplomacy_.revision;

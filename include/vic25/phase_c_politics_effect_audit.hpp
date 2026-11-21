@@ -63,6 +63,7 @@ inline const std::map<std::string,std::string>& wired_law_effects() {
         {"country_authority_add","phasec::IntegratedWorld::p1_authority_capacity"},
         {"country_authority_mult","phasec::IntegratedWorld::p1_authority_capacity"},
         {"country_block_government_reform_bool","phasec::IntegratedWorld::schedule_p1_cabinet_daily (voluntary reform)"},
+        {"country_disallow_aggressive_plays_bool","phasegh::Stage::open_crisis (claimant initiation)"},
         {"country_influence_add","phasegh::World::diplomatic_capacity"},
         {"country_influence_mult","phasegh::World::diplomatic_capacity"},
         {"country_prestige_mult","phasec::IntegratedWorld::p1_prestige"},

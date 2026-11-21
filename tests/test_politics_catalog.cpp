@@ -1,6 +1,7 @@
 #include "vic25/daily_snapshot.hpp"
 #include "vic25/phase_c_politics_catalog.hpp"
 #include "vic25/phase_c_politics_effect_audit.hpp"
+#include "vic25/phase_c_canonical_law_audit.hpp"
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -200,6 +201,70 @@ static void trait_only_hostility_does_not_claim_law_coverage() {
     }
 }
 
+static void canonical_effect_audit_retains_scope_and_evidence() {
+    using namespace politics;
+    const auto audit=audit_canonical_law_modifiers();
+    const auto& canonical=p2_catalog_115().modifiers;
+    std::set<std::string_view> keys;
+    check(audit.size()==canonical.size()&&audit.size()==1117,
+          "canonical audit omitted or duplicated a source row");
+    for(std::size_t i=0;i<audit.size();++i) {
+        check(same_canonical_law_row(audit[i].source,canonical[i]),
+              "canonical audit did not preserve exact row metadata");
+        keys.insert(audit[i].source.key);
+    }
+    check(keys.size()==350,"canonical audit key inventory changed");
+    for(const auto& proof:canonical_law_row_evidence())
+        check(std::count_if(audit.begin(),audit.end(),[&](const auto& entry) {
+            return same_canonical_law_row(entry.source,proof.row) &&
+                   entry.status==CanonicalLawRowStatus::verified_row &&
+                   entry.executor==proof.executor &&
+                   entry.behavior_test==proof.behavior_test;
+        })==1,"curated behavior evidence failed to match exactly one canonical row");
+
+    std::size_t flat_migration=0,unrecorded_institution=0;
+    for(const auto& entry:audit) {
+        if(entry.source.key!="state_migration_pull_unincorporated_mult")continue;
+        if(!entry.source.institution &&
+           entry.status==CanonicalLawRowStatus::verified_row)++flat_migration;
+        if(entry.source.source_id=="law_internal_colonization" &&
+           entry.source.institution &&
+           entry.status==CanonicalLawRowStatus::no_recorded_path)
+            ++unrecorded_institution;
+    }
+    check(flat_migration==3&&unrecorded_institution==1,
+          "flat colonial migration evidence leaked to the institution row");
+
+    // Synthetic evidence: three flat source rows share a key with an
+    // institutional row. This does not assert unresolved migration behavior.
+    const std::array<CanonicalLawRowEvidence,3> mixed{{
+        {{"demo_a","mixed_key",0.5,false,false},"daily","test_a"},
+        {{"demo_b","mixed_key",0.5,false,false},"daily","test_b"},
+        {{"demo_c","mixed_key",0.25,false,false},"daily","test_c"}
+    }};
+    for(const auto& proof:mixed) {
+        const auto row=classify_canonical_law_row(proof.row,mixed,"legacy");
+        check(row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="daily"&&row.behavior_test==proof.behavior_test,
+              "specific proven source row was not distinguished");
+    }
+    auto different_scope=mixed[0].row;
+    different_scope.institution=true;
+    const auto institution=classify_canonical_law_row(different_scope,mixed,"legacy");
+    check(institution.source.institution&&institution.normalized_value==500000&&
+          institution.status==CanonicalLawRowStatus::named_candidate&&
+          institution.executor=="legacy"&&institution.behavior_test.empty(),
+          "institution row inherited flat behavior evidence");
+    different_scope.institution=false;
+    different_scope.sponsor=true;
+    check(classify_canonical_law_row(different_scope,mixed).status==
+          CanonicalLawRowStatus::no_recorded_path,
+          "sponsor row inherited flat behavior evidence");
+    check(classify_canonical_law_row({"demo","boolean",1,true},{}).normalized_value==1 &&
+          classify_canonical_law_row({"demo","negative",-0.125},{}).normalized_value==-125000,
+          "diagnostic changed catalog numeric/boolean representation");
+}
+
 static void legal_policies_and_override_priority() {
     auto gh=make_world("laissez_faire");
     auto& c=gh.seed_geography().seed_core().seed_core();
@@ -330,6 +395,7 @@ int main() {
     try {
         trait_only_hostility_does_not_claim_law_coverage();
         catalogued_laws_and_stances();
+        canonical_effect_audit_retains_scope_and_evidence();
         legal_policies_and_override_priority();
         observed_clout_ideology_and_legitimacy();
         source_law_incompatibilities_are_symmetric_and_real();
