@@ -151,12 +151,31 @@ inline P1LegitimacyView IntegratedWorld::p1_legitimacy(
     // Political legitimacy is penalized by observable conflict between
     // coalition groups' ideological positions on actually adopted laws.
     // No invented party ideology, POP count, or political-power token.
-    std::int64_t disputes=0,comparisons=0;
+    std::int64_t disputes=0,comparisons=0,base_points_ppm=0,incoherence_ppm=0;
+    const auto national=[&](const P2BaseLaw& law) {
+        return law.country==country&&law.tier!=P2NormTier::local_ordinance&&
+               (law.scope.empty()||law.scope=="national")&&
+               politics::catalogue().has(law.domain,law.base_choice);
+    };
+    const auto legitimacy_values=[](std::string_view source) {
+        return std::pair{
+            static_cast<std::int64_t>(std::llround(p2_catalog_raw_modifier(
+                source,"country_legitimacy_base_add")*1'000'000.0)),
+            static_cast<std::int64_t>(std::llround(p2_catalog_raw_modifier(
+                source,"country_legitimacy_ideological_incoherence_mult")*1'000'000.0))};
+    };
+    const auto add_legitimacy=[&](const auto& values) {
+        base_points_ppm=phaseb::add_checked(base_points_ppm,values.first);
+        incoherence_ppm=phaseb::add_checked(incoherence_ppm,values.second);
+    };
     for(const auto& [slot,law_id]:p2_active_base_) {
         (void)slot;
         const auto& law=p2_laws_.at(law_id);
         if(law.country!=country||
            !politics::catalogue().has(law.domain,law.base_choice))continue;
+        if(national(law))
+            add_legitimacy(legitimacy_values(
+                p2_catalog_canonical_choice(law.base_choice)));
         for(std::size_t i=0;i<coalition.ruling_groups.size();++i) {
             const auto& left=coalition.ruling_groups[i];
             if(!p3_groups_.contains({country,left}))continue;
@@ -173,11 +192,31 @@ inline P1LegitimacyView IntegratedWorld::p1_legitimacy(
             }
         }
     }
-    if(comparisons>0)
+    for(const auto& id:p2_active_amendments_) {
+        const auto& amendment=p2_amendments_.at(id);
+        const auto& parent=p2_laws_.at(amendment.law_id);
+        if(!national(parent)||!p2_is_active_base(amendment.law_id))continue;
+        const auto values=legitimacy_values(id);
+        if(values.first==0&&values.second==0)continue;
+        const auto* source=p2_catalog_amendment(id);
+        if(!source||!p2_catalog_amendment_applies(*source,parent.base_choice)||
+           (!source->possible_country_tags.empty()&&
+            !p2_catalog_list_contains(source->possible_country_tags,country)))continue;
+        add_legitimacy(values);
+    }
+    if(comparisons>0) {
+        const auto observed=std::min<std::int64_t>(20,disputes*5/comparisons);
+        const auto factor=std::max<std::int64_t>(0,
+            phaseb::add_checked(1'000'000,incoherence_ppm));
         result.ideological_incompatibility=static_cast<int>(
-            std::min<std::int64_t>(20,disputes*5/comparisons));
-    result.score=std::clamp(result.score-
-                           result.ideological_incompatibility,0,100);
+            std::min<std::int64_t>(std::numeric_limits<int>::max(),
+                                 phaseb::mul_checked(observed,factor)/1'000'000));
+    }
+    // Constitutional effects change the measured score, not its underlying
+    // votes, support, confidence threshold or coalition membership.
+    const auto legal_base=phaseb::add_checked(result.score,base_points_ppm/1'000'000);
+    result.score=static_cast<int>(std::clamp<std::int64_t>(
+        phaseb::add_checked(legal_base,-result.ideological_incompatibility),0,100));
     return result;
 }
 

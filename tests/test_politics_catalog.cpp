@@ -254,6 +254,23 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     check(sovereign_interest==5&&chiefs_aid==1,
           "scoped sovereign interest and welfare evidence missing");
 
+    std::size_t legitimacy_base=0,legitimacy_incoherence=0;
+    for(const auto& entry:audit) {
+        if(!entry.source.key.starts_with("country_legitimacy_") ||
+           entry.status!=CanonicalLawRowStatus::verified_row)continue;
+        check(!entry.source.boolean && !entry.source.institution && !entry.source.sponsor &&
+              entry.executor=="IntegratedWorld::p1_legitimacy" &&
+              entry.behavior_test=="test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy",
+              "legitimacy proof has the wrong scope or executor");
+        if(entry.source.key=="country_legitimacy_base_add")++legitimacy_base;
+        if(entry.source.key=="country_legitimacy_ideological_incoherence_mult")++legitimacy_incoherence;
+        check(entry.source.key=="country_legitimacy_base_add" ||
+              entry.source.key=="country_legitimacy_ideological_incoherence_mult",
+              "legitimacy proof leaked to an unverified modifier");
+    }
+    check(legitimacy_base==6 && legitimacy_incoherence==4,
+          "verified national legitimacy rows missing");
+
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.
     const std::array<CanonicalLawRowEvidence,3> mixed{{
@@ -410,6 +427,111 @@ static void no_new_fictional_leader_or_dynamic_ideology() {
               "A","WORKERS",{"fictional_unknown_ideology"});}),
           "unknown political ideology accepted");
 }
+static void enacted_national_laws_change_only_calculated_legitimacy() {
+    const auto run=[](const std::string& power,const std::string& government,
+                      const std::string& amendment,bool conflict,bool local_parent,
+                      int flat,int penalty,bool outsiders=false) {
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"VIENNA","AUS");
+        geo.seed_unit(1,"AUS","ADMIN");
+        geo.seed_assignment(1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("AUS",500);
+        c.seed_government("AUS","HEAD","PRIME",5,3);
+        c.seed_p1_constitution("AUS",{
+            P1GovernancePrinciple::monarchy,P1PowerDistribution::autocracy,
+            P1LegislatureKind::none,"fixture:constitution"});
+        for(const auto* group:{"WORKERS","BUSINESS"})c.seed_interest_group(group);
+        c.seed_p1_coalition("AUS",{conflict?
+            std::vector<std::string>{"WORKERS","BUSINESS"}:
+            std::vector<std::string>{"WORKERS"},{},false});
+        c.p3_seed_group({"AUS","WORKERS","","","",P3GroupType::trade_unions,0,0});
+        c.p3_seed_group({"AUS","BUSINESS","","","",P3GroupType::industrialists,0,0});
+        c.p3_set_ideologies("AUS","WORKERS",{"proletarian"});
+        c.p3_set_ideologies("AUS","BUSINESS",{"laissez_faire"});
+        if(outsiders) {
+            c.seed_interest_group("OUTSIDE");
+            c.p3_seed_group({"AUS","OUTSIDE","","","",P3GroupType::rural_folk,0,0});
+        }
+        const auto law=[&](const std::string& id,const std::string& group,
+                           const std::string& choice,bool local=false) {
+            P2BaseLaw entry;
+            entry.id=id;entry.country="AUS";entry.domain=group;
+            entry.scope=local?"VIENNA":"national";entry.base_choice=choice;
+            if(local)entry.tier=P2NormTier::local_ordinance;
+            entry.legal_basis="fixture:law";
+            c.p2_seed_base(entry);
+        };
+        law("ECONOMY","economic_system","law_cooperative_ownership");
+        if(!power.empty())law("POWER","distribution_of_power",power);
+        if(!government.empty())law("GOVERNMENT","governance_principles",government);
+        if(local_parent)law("LOCAL","regional_rules","civic_rule",true);
+        if(!amendment.empty())
+            c.p2_seed_amendment({amendment,local_parent?"LOCAL":"POWER",
+                "fixture:amendment","",{{"actual-clause","AUS",
+                    P2ClauseKind::political_association_allowed,1}}});
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"VIENNA","mixed","shared",100});
+        const auto e=pop.economic_profile({"VIENNA","worker","wage","employee",
+                                           pop.default_education()});
+        const auto d=pop.demographic_profile({"VIENNA",23650,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto slice=pop.seed_population(d,e,h,100);
+        auto world=daily::World::adopt(std::move(gh),10);
+        phasegh::World::Plan join;
+        join[9].push_back([slice,outsiders](phasegh::Stage& stage) {
+            if(outsiders)stage.phase_c().join_interest_group(slice,"OUTSIDE",100);
+            else {
+                stage.phase_c().join_interest_group(slice,"WORKERS",50);
+                stage.phase_c().join_interest_group(slice,"BUSINESS",50);
+            }
+        });
+        world.advance_day(join);
+        const auto& live=world.engine().base().core().core();
+        const auto view=live.p1_legitimacy("AUS");
+        if(!(view.observed_groups&&(outsiders?view.group_support==0:view.group_support>0)&&
+              !view.observed_election&&view.electoral_support==50&&
+              view.legal_compatibility==100&&live.government("AUS").quorum==0)) {
+            std::cerr<<"support="<<view.group_support<<", groups="<<view.observed_groups
+                     <<", election="<<view.observed_election<<", seats="
+                     <<view.electoral_support<<", legal="<<view.legal_compatibility
+                     <<", quorum="<<live.government("AUS").quorum<<"\n";
+            throw std::runtime_error("legitimacy fixture lost actual support or voting authority");
+        }
+        check(live.p3_law_stance("AUS","WORKERS","economic_system",
+                 "cooperative_ownership")==2&&
+              live.p3_law_stance("AUS","BUSINESS","economic_system",
+                 "cooperative_ownership")==-2,
+              "fixture did not record actual opposing stances");
+        const int baseline=(50*view.group_support+30*view.electoral_support+
+                            20*view.legal_compatibility)/100;
+        check(view.ideological_incompatibility==penalty&&
+              view.score==std::clamp(baseline+flat-penalty,0,100),
+              "adopted law did not adjust actual cabinet legitimacy in the correct units");
+        check(live.people().population()==100&&live.cash("AUS")==500,
+              "legitimacy calculation created a fictional POP or treasury change");
+    };
+    run("","","",true,false,0,20);
+    run("law_autocracy","","",true,false,0,30);
+    run("law_autocracy","","",false,false,0,0);
+    run("","law_corporate_state","",true,false,0,15);
+    run("law_elder_council","","",true,false,20,18);
+    run("law_autocracy","","amendment_cult_of_personality",true,false,-5,30);
+    run("law_universal_suffrage","","amendment_tradition_of_free_elections",
+        true,false,10,20);
+    for(const auto* variant:{"amendment_geheime_staatskonferenz",
+          "amendment_geheime_staatskonferenz_metternich","amendment_geheime_staatskonferenz_kolowrat"})
+        run("law_autocracy","",variant,true,false,50,30);
+    run("law_autocracy","","amendment_geheime_staatskonferenz",
+        false,false,50,0); // result would exceed 100 without the upper clamp
+    run("law_autocracy","","amendment_cult_of_personality",true,true,0,30);
+    run("law_elder_council","","amendment_cult_of_personality",true,false,20,18);
+    run("law_autocracy","law_monarchy","amendment_cult_of_personality",
+        true,false,-5,32,true); // negative result clamps to zero
+}
+
 int main() {
     try {
         trait_only_hostility_does_not_claim_law_coverage();
@@ -417,6 +539,7 @@ int main() {
         canonical_effect_audit_retains_scope_and_evidence();
         legal_policies_and_override_priority();
         observed_clout_ideology_and_legitimacy();
+        enacted_national_laws_change_only_calculated_legitimacy();
         source_law_incompatibilities_are_symmetric_and_real();
         no_new_fictional_leader_or_dynamic_ideology();
         std::cout<<"VIC2.5 POLITICAL LAWS IDEOLOGIES GROUPS PASS\n";

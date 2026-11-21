@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,13>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,23>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,13> evidence{{
+    static const std::array<CanonicalLawRowEvidence,23> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -105,7 +105,37 @@ inline const std::array<CanonicalLawRowEvidence,13>& canonical_law_row_evidence(
          "test_p0_daily_longrun::sovereign_bank_interest_law_uses_real_principal"},
         {{"law_chiefs_distribute_aid","country_bureaucracy_add",10,false,true},
          "IntegratedWorld::p1_bureaucracy",
-         "test_politics_identity::chiefs_aid_uses_only_effective_welfare_bureaucracy"}
+         "test_politics_identity::chiefs_aid_uses_only_effective_welfare_bureaucracy"},
+        {{"law_elder_council","country_legitimacy_base_add",20,false,false},
+         "IntegratedWorld::p1_legitimacy",
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
+        {{"amendment_cult_of_personality","country_legitimacy_base_add",-5,false,false},
+         "IntegratedWorld::p1_legitimacy",
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
+        {{"amendment_tradition_of_free_elections","country_legitimacy_base_add",10,false,false},
+         "IntegratedWorld::p1_legitimacy",
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
+        {{"amendment_geheime_staatskonferenz","country_legitimacy_base_add",50,false,false},
+         "IntegratedWorld::p1_legitimacy",
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
+        {{"amendment_geheime_staatskonferenz_metternich","country_legitimacy_base_add",50,false,false},
+         "IntegratedWorld::p1_legitimacy",
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
+        {{"amendment_geheime_staatskonferenz_kolowrat","country_legitimacy_base_add",50,false,false},
+         "IntegratedWorld::p1_legitimacy",
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
+        {{"law_autocracy","country_legitimacy_ideological_incoherence_mult",0.5,false,false},
+         "IntegratedWorld::p1_legitimacy",
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
+        {{"law_corporate_state","country_legitimacy_ideological_incoherence_mult",-0.25,false,false},
+         "IntegratedWorld::p1_legitimacy",
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
+        {{"law_elder_council","country_legitimacy_ideological_incoherence_mult",-0.1,false,false},
+         "IntegratedWorld::p1_legitimacy",
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
+        {{"law_monarchy","country_legitimacy_ideological_incoherence_mult",0.1,false,false},
+         "IntegratedWorld::p1_legitimacy",
+         "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"}
     }};
     return evidence;
 }
