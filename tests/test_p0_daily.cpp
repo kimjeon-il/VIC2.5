@@ -106,151 +106,228 @@ static void daily_production_trade_ai_investment_replay() {
     require_test(game.world().engine().base().core().construction("NEW_FARM").commissioned,
                  "daily private investment must commission completed facilities");
 }
-static void household_shareholder_efficiency_changes_paid_daily_construction_orders() {
-    const auto run=[](const char* law,const char* profession,bool share,
+struct InvestmentOrderLegalSources {
+    std::string country="A",land_reform,amendment;
+    bool parents_amendment_in_land_reform{};
+};
+static void check_paid_investment_order(const char* law,const char* profession,bool share,
                       bool foreign,bool resolved,phasec::Money cash,
                       phaseb::People expected,phaseb::People maximum=4,
                       phaseb::People staff=12,phaseb::People material=20,
                       bool public_funds=false,phasec::Money arrears=0,
-                      int false_amendment=0) {
-        phasegh::World gh(24000);
-        auto& geo=gh.seed_geography();
-        geo.seed_province(1,"R","A");geo.seed_unit(11,"A","ROOT");
-        geo.seed_assignment(1,11);
-        if(foreign) {
-            geo.seed_province(2,"F","B");geo.seed_unit(12,"B","FOREIGN");
-            geo.seed_assignment(2,12);
-        }
-        auto& industry=geo.seed_core();
-        auto& core=industry.seed_core();
-        core.seed_actor("A",0);core.seed_actor("FIRM",cash);
-        core.seed_actor("BUILDER",0);core.seed_actor("CORP",10);
-        const auto enact=[&](const std::string& country,const char* choice) {
-            core.seed_government(country,"HEAD","PM",5,3);
-            core.seed_p1_constitution(country,{phasec::P1GovernancePrinciple::monarchy,
-                phasec::P1PowerDistribution::autocracy,
-                phasec::P1LegislatureKind::none,"fixture:constitution"});
-            phasec::P2BaseLaw act;
-            act.id=country+":economy";act.country=country;
-            act.domain="economic_system";act.scope="national";
-            act.base_choice=choice;act.legal_basis="fixture:economy";
-            core.p2_seed_base(act);
-        };
-        enact("A",law);
-        if(public_funds)core.seed_country_treasury("A","FIRM");
-        if(false_amendment==1) {
-            phasec::P2BaseLaw local;
-            local.id="LOCAL";local.country="A";local.domain="synthetic";
-            local.scope="R";local.tier=phasec::P2NormTier::local_ordinance;
-            local.base_choice="not_a_catalogue_law";local.legal_basis="fixture:local";
-            core.p2_seed_base(local);
-            core.p2_seed_amendment({"amendment_farmers_cooperatives","LOCAL",
-              "fixture:lookalike","",{{"legal-clause","A",
-               phasec::P2ClauseKind::political_association_allowed,1}}});
-        } else if(false_amendment==2)
-            core.p2_seed_amendment({"amendment_economic_regeneration_1","A:economy",
-              "fixture:invalid-country-tag","",{{"legal-clause","A",
-               phasec::P2ClauseKind::political_association_allowed,1}}});
-        if(foreign) {
-            core.seed_actor("B",0);
-            enact("B",law);
-        }
-        const auto builders=people(gh,"R",staff,"worker");
-        core.seed_population().hire(builders,staff,"BUILDER","worker",1,
-                                    phaseb::JobRequirements{});
-        const auto investor=people(gh,foreign?"F":"R",7,profession);
-        const auto household="HH:"+std::to_string(
-            resolved?core.people().slice(investor).key.household:999999);
-        core.seed_actor(household,100);
-        core.seed_shares("company:FIRM",share?household:"CORP",100);
-        core.seed_market("R","food",100,1,200,0);
-        core.seed_stock("BUILDER","R","steel",material);
-        phased::ConstructionProject project;
-        project.id="SITE";project.client="FIRM";project.contractor="BUILDER";
-        project.region="R";project.material_good="steel";project.target_site="NEW";
-        project.work_required=20;project.material_per_work=1;
-        project.workers_per_work=1;project.cash_price_per_work=10;
-        project.target_capacity=12;
-        industry.seed_construction(project);
-        p0::Policies opts;
-        opts.allow_endogenous_investment_credit=false;
-        opts.allow_collateralized_enterprise_credit=false;
-        opts.investments.push_back({"SITE","food",10,100,maximum});
-        p0::DailyGame game([&] {
-            if(arrears>0) {
-                core.seed_actor("EMPLOYEE",0);
-                const auto employee=people(gh,"R",1,"worker");
-                core.seed_population().hire(employee,1,"FIRM","worker",arrears,
-                                            phaseb::JobRequirements{});
-            }
-            auto clock=daily::World::adopt(std::move(gh),7);
-            if(arrears>0) {
-                const auto earned=clock.day_index();
-                phasegh::World::Plan preexisting;
-                preexisting[5].push_back([=](phasegh::Stage& stage) {
-                    stage.phase_c().phase_time_accrue_contract_wage(
-                        "already-earned","FIRM","EMPLOYEE","A","A",arrears,earned);
-                });
-                clock.advance_day(preexisting);
-            }
-            return clock;
-        }(),opts);
-        game.advance_day();
-        if(maximum==1) {
-            const bool traditional=std::string_view(law)=="law_traditionalism";
-            const auto expected_first=traditional?1:2;
-            const auto& first=game.world().engine().base().core().construction("SITE");
-            require_test(first.paid_work==expected_first&&
-                         c(game).cash("FIRM")==cash-10*expected_first,
-                         "first fractional calendar day granted or lost a whole order");
-            const auto saved=daily::SnapshotCodec::encode(game.world());
-            p0::DailyGame replay(daily::SnapshotCodec::decode(saved),opts);
-            game.advance_day();replay.advance_day();
-            require_test(daily::SnapshotCodec::encode(game.world())==
-                         daily::SnapshotCodec::encode(replay.world()),
-                         "fractional construction quota did not replay from the saved day");
-        }
-        const auto& work=game.world().engine().base().core().construction("SITE");
-        if(work.accepted_work!=expected||work.paid_work!=expected||
-           work.capitalized_work!=expected||work.capitalized_value!=10*expected)
-            throw std::runtime_error(
-                std::string("share-backed paid construction order: ")+law+
-                " "+profession+" expected="+std::to_string(expected)+
-                " paid="+std::to_string(work.paid_work)+
-                " accepted="+std::to_string(work.accepted_work)+
-                " capitalized="+std::to_string(work.capitalized_work)+
-                " capitalized value="+std::to_string(work.capitalized_value));
-
-        if(arrears>0)require_test(c(game).cash("EMPLOYEE")>0&&
-                                  c(game).cash("EMPLOYEE")+c(game).cash("A")==arrears&&
-                                  c(game).outstanding_worker_wages("FIRM")==0,
-                                  "existing earned household wages were not actually settled");
-        require_test(c(game).cash("FIRM")==cash-10*expected-arrears&&
-                     c(game).cash(household)==100&&c(game).cash("CORP")==10&&
-                     c(game).shares("company:FIRM",share?household:"CORP")==100&&
-                     c(game).stock("BUILDER","R","steel")==material-expected,
-                     "investment efficiency manufactured funds, equity or inputs");
+                      int false_amendment=0,InvestmentOrderLegalSources sources={}) {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R",sources.country);geo.seed_unit(11,sources.country,"ROOT");
+    geo.seed_assignment(1,11);
+    if(foreign) {
+        geo.seed_province(2,"F","B");geo.seed_unit(12,"B","FOREIGN");
+        geo.seed_assignment(2,12);
+    }
+    auto& industry=geo.seed_core();
+    auto& core=industry.seed_core();
+    core.seed_actor(sources.country,0);core.seed_actor("FIRM",cash);
+    core.seed_actor("BUILDER",0);core.seed_actor("CORP",10);
+    const auto enact=[&](const std::string& country,const char* choice) {
+        core.seed_government(country,"HEAD","PM",5,3);
+        core.seed_p1_constitution(country,{phasec::P1GovernancePrinciple::monarchy,
+            phasec::P1PowerDistribution::autocracy,
+            phasec::P1LegislatureKind::none,"fixture:constitution"});
+        phasec::P2BaseLaw act;
+        act.id=country+":economy";act.country=country;
+        act.domain="economic_system";act.scope="national";
+        act.base_choice=choice;act.legal_basis="fixture:economy";
+        core.p2_seed_base(act);
     };
+    enact(sources.country,law);
+    if(!sources.land_reform.empty()) {
+        phasec::P2BaseLaw land;
+        land.id=sources.country+":land";land.country=sources.country;
+        land.domain="land_reform";land.scope="national";
+        land.base_choice=sources.land_reform;land.legal_basis="fixture:land";
+        core.p2_seed_base(land);
+    }
+    if(!sources.amendment.empty()) {
+        const auto parent=sources.country+
+            (sources.parents_amendment_in_land_reform?":land":":economy");
+        core.p2_seed_amendment({sources.amendment,parent,"fixture:enacted","",
+            {{"actual-law-clause",sources.country,
+              phasec::P2ClauseKind::political_association_allowed,1}}});
+    }
+    if(public_funds)core.seed_country_treasury(sources.country,"FIRM");
+    if(false_amendment==1) {
+        phasec::P2BaseLaw local;
+        local.id="LOCAL";local.country=sources.country;local.domain="synthetic";
+        local.scope="R";local.tier=phasec::P2NormTier::local_ordinance;
+        local.base_choice="not_a_catalogue_law";local.legal_basis="fixture:local";
+        core.p2_seed_base(local);
+        core.p2_seed_amendment({"amendment_farmers_cooperatives","LOCAL",
+          "fixture:lookalike","",{{"legal-clause",sources.country,
+           phasec::P2ClauseKind::political_association_allowed,1}}});
+    } else if(false_amendment==2)
+        core.p2_seed_amendment({"amendment_economic_regeneration_1",sources.country+":economy",
+          "fixture:invalid-country-tag","",{{"legal-clause",sources.country,
+           phasec::P2ClauseKind::political_association_allowed,1}}});
+    if(foreign) {
+        core.seed_actor("B",0);
+        enact("B",law);
+    }
+    const auto builders=people(gh,"R",staff,"worker");
+    core.seed_population().hire(builders,staff,"BUILDER","worker",1,
+                                phaseb::JobRequirements{});
+    const auto investor=people(gh,foreign?"F":"R",7,profession);
+    const auto household="HH:"+std::to_string(
+        resolved?core.people().slice(investor).key.household:999999);
+    core.seed_actor(household,100);
+    core.seed_shares("company:FIRM",share?household:"CORP",100);
+    core.seed_market("R","food",100,1,200,0);
+    core.seed_stock("BUILDER","R","steel",material);
+    phased::ConstructionProject project;
+    project.id="SITE";project.client="FIRM";project.contractor="BUILDER";
+    project.region="R";project.material_good="steel";project.target_site="NEW";
+    project.work_required=20;project.material_per_work=1;
+    project.workers_per_work=1;project.cash_price_per_work=10;
+    project.target_capacity=12;
+    industry.seed_construction(project);
+    p0::Policies opts;
+    opts.allow_endogenous_investment_credit=false;
+    opts.allow_collateralized_enterprise_credit=false;
+    opts.investments.push_back({"SITE","food",10,100,maximum});
+    p0::DailyGame game([&] {
+        if(arrears>0) {
+            core.seed_actor("EMPLOYEE",0);
+            const auto employee=people(gh,"R",1,"worker");
+            core.seed_population().hire(employee,1,"FIRM","worker",arrears,
+                                        phaseb::JobRequirements{});
+        }
+        auto clock=daily::World::adopt(std::move(gh),7);
+        if(arrears>0) {
+            const auto earned=clock.day_index();
+            phasegh::World::Plan preexisting;
+            preexisting[5].push_back([=](phasegh::Stage& stage) {
+                stage.phase_c().phase_time_accrue_contract_wage(
+                    "already-earned","FIRM","EMPLOYEE",sources.country,sources.country,arrears,earned);
+            });
+            clock.advance_day(preexisting);
+        }
+        return clock;
+    }(),opts);
+    game.advance_day();
+    if(maximum==1) {
+        const bool traditional=std::string_view(law)=="law_traditionalism";
+        const auto expected_first=traditional?1:2;
+        const auto& first=game.world().engine().base().core().construction("SITE");
+        require_test(first.paid_work==expected_first&&
+                     c(game).cash("FIRM")==cash-10*expected_first,
+                     "first fractional calendar day granted or lost a whole order");
+        const auto saved=daily::SnapshotCodec::encode(game.world());
+        p0::DailyGame replay(daily::SnapshotCodec::decode(saved),opts);
+        game.advance_day();replay.advance_day();
+        require_test(daily::SnapshotCodec::encode(game.world())==
+                     daily::SnapshotCodec::encode(replay.world()),
+                     "fractional construction quota did not replay from the saved day");
+    }
+    const auto& work=game.world().engine().base().core().construction("SITE");
+    if(work.accepted_work!=expected||work.paid_work!=expected||
+       work.capitalized_work!=expected||work.capitalized_value!=10*expected)
+        throw std::runtime_error(
+            std::string("share-backed paid construction order: ")+law+
+            " "+profession+" "+sources.country+
+            " "+sources.land_reform+" "+sources.amendment+" expected="+std::to_string(expected)+
+            " paid="+std::to_string(work.paid_work)+
+            " accepted="+std::to_string(work.accepted_work)+
+            " capitalized="+std::to_string(work.capitalized_work)+
+            " capitalized value="+std::to_string(work.capitalized_value));
+
+    if(arrears>0)require_test(c(game).cash("EMPLOYEE")>0&&
+                              c(game).cash("EMPLOYEE")+c(game).cash(sources.country)==arrears&&
+                              c(game).outstanding_worker_wages("FIRM")==0,
+                              "existing earned household wages were not actually settled");
+    require_test(c(game).cash("FIRM")==cash-10*expected-arrears&&
+                 c(game).cash(household)==100&&c(game).cash("CORP")==10&&
+                 c(game).shares("company:FIRM",share?household:"CORP")==100&&
+                 c(game).stock("BUILDER","R","steel")==material-expected,
+                 "investment efficiency manufactured funds, equity or inputs");
+}
+static void household_shareholder_efficiency_changes_paid_daily_construction_orders() {
     // Existing private construction allocation first scales 4 to 5 (under
     // Traditionalism) or 6 (under Agrarianism). Isolate the shareholder rows
     // against those same laws without eligible ownership.
-    run("law_traditionalism","farmer",true,false,true,200,3);
-    run("law_traditionalism","farmer",false,false,true,200,5);
-    run("law_agrarianism","farmer",true,false,true,200,9);
-    run("law_agrarianism","farmer",false,false,true,200,6);
-    run("law_agrarianism","worker",true,false,true,200,6);
-    run("law_agrarianism","farmer",true,true,true,200,6);
-    run("law_agrarianism","farmer",true,false,false,200,6);
-    run("law_agrarianism","farmer",true,false,true,30,2);
-    run("law_agrarianism","farmer",true,false,true,9,0);
-    run("law_agrarianism","farmer",true,false,true,200,3,4,3,20);
-    run("law_agrarianism","farmer",true,false,true,200,2,4,12,2);
-    run("law_agrarianism","farmer",true,false,true,200,4,4,12,20,true);
-    run("law_agrarianism","farmer",true,false,true,120,6,4,12,20,false,60);
-    run("law_traditionalism","farmer",true,false,true,200,1,1);
-    run("law_agrarianism","farmer",true,false,true,200,3,1);
-    run("law_agrarianism","farmer",true,false,true,300,11,5,12,20,false,0,1);
-    run("law_agrarianism","aristocrat",true,false,true,200,9,4,12,20,false,0,2);
+    check_paid_investment_order("law_traditionalism","farmer",true,false,true,200,3);
+    check_paid_investment_order("law_traditionalism","farmer",false,false,true,200,5);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,true,200,9);
+    check_paid_investment_order("law_agrarianism","farmer",false,false,true,200,6);
+    check_paid_investment_order("law_agrarianism","worker",true,false,true,200,6);
+    check_paid_investment_order("law_agrarianism","farmer",true,true,true,200,6);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,false,200,6);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,true,30,2);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,true,9,0);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,true,200,3,4,3,20);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,true,200,2,4,12,2);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,true,200,4,4,12,20,true);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,true,120,6,4,12,20,false,60);
+    check_paid_investment_order("law_traditionalism","farmer",true,false,true,200,1,1);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,true,200,3,1);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,true,300,11,5,12,20,false,0,1);
+    check_paid_investment_order("law_agrarianism","aristocrat",true,false,true,200,9,4,12,20,false,0,2);
+}
+
+// Each case compares two actual paid orders from the same authorized
+// nation, law and construction model, removing only eligible share title for
+// a base source or only the one valid amendment/land law for a stack.
+static void canonical_profession_sources_change_real_construction_orders() {
+    const auto run=[](const char* economy,const char* profession,bool shares,
+                      phaseb::People paid,InvestmentOrderLegalSources legal={}) {
+        check_paid_investment_order(economy,profession,shares,false,true,
+            500,paid,8,24,30,false,0,0,std::move(legal));
+    };
+    const auto base=[&](const char* law,const char* profession,
+                        phaseb::People ordinary,phaseb::People affected) {
+        run(law,profession,false,ordinary);
+        run(law,profession,true,affected);
+    };
+    for(const char* job:{"shopkeeper","bureaucrat","capitalist","clergyman","aristocrat"})
+        base("law_traditionalism",job,10,5);
+    for(const char* job:{"aristocrats","clergymen"})
+        base("law_agrarianism",job,12,18);
+    base("law_agrarianism","capitalists",12,9);
+    for(const char* job:{"shopkeepers","bureaucrats"})
+        base("law_extraction_economy",job,12,6);
+    base("law_extraction_economy","capitalists",12,9);
+    for(const char* job:{"farmers","clergymen","aristocrats"})
+        base("law_extraction_economy",job,12,3);
+    for(const char* job:{"shopkeepers","capitalists"})
+        base("law_laissez_faire",job,14,18);
+    for(const char* job:{"shopkeepers","farmers"})
+        base("law_cooperative_ownership",job,10,13);
+    // An already authorized and privately paid explicit project, not an
+    // autonomous expansion proposal or an enabled global investment pool.
+    base("law_command_economy","bureaucrats",8,10);
+    base("law_agrarianism","farmer_unknown",12,12);
+
+    const auto amendment=[&](const char* source,const char* country,
+                             const char* profession,phaseb::People paid,
+                             const char* land="") {
+        run("law_interventionism",profession,true,12,{country,land,"",false});
+        run("law_interventionism",profession,true,paid,
+            {country,land,source,*land!='\0'});
+    };
+    for(const char* job:{"capitalist","aristocrat","shopkeeper"}) {
+        amendment("amendment_economic_regeneration_1","SPA",job,15);
+        amendment("amendment_economic_regeneration_2","POR",job,14);
+    }
+    amendment("amendment_farmers_cooperatives","USA","farmer",11,"law_homesteading");
+    amendment("amendment_zaibatsu_oligopoly_1","JAP","capitalist",15);
+    amendment("amendment_zaibatsu_oligopoly_2","JAP","capitalist",15);
+    run("law_interventionism","farmer",true,12,
+        {"USA","law_peasant_proprietorship","amendment_farmers_cooperatives",true});
+    run("law_interventionism","aristocrat",true,12,{"MEX","","",false});
+    run("law_interventionism","aristocrat",true,10,{"MEX","law_latifundias","",false});
+    run("law_interventionism","aristocrat",true,15,
+        {"MEX","law_expanded_latifundias","",false});
+    // Independent land/economic sources stack additively (+0.5 −0.2)
+    // before the real calendar-rounded order and cash settlement.
+    run("law_agrarianism","aristocrat",true,16,{"MEX","law_latifundias","",false});
 }
 
 static void daily_market_shortage_and_political_response() {
@@ -1631,6 +1708,7 @@ int main(){
     try{
         daily_production_trade_ai_investment_replay();
         household_shareholder_efficiency_changes_paid_daily_construction_orders();
+        canonical_profession_sources_change_real_construction_orders();
         daily_market_shortage_and_political_response();
         daily_insolvent_hunger_is_not_ignored();
         daily_price_not_replayed_at_month_close();

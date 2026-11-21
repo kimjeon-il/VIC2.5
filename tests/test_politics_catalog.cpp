@@ -356,41 +356,67 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==150,
-          "expected only two newly witnessed private construction order rows");
-    std::size_t shareholder_effects=0,unwitnessed_efficiencies=0;
+    check(canonical_law_row_evidence().size()==180,
+          "expected exact canonical witness count including 30 more paid-order rows");
+    std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
+    const std::set<std::string_view> documented_investor_keys{
+        "state_shopkeepers_investment_pool_efficiency_mult",
+        "state_bureaucrats_investment_pool_efficiency_mult",
+        "state_capitalists_investment_pool_efficiency_mult",
+        "state_farmers_investment_pool_efficiency_mult",
+        "state_clergymen_investment_pool_efficiency_mult",
+        "state_aristocrats_investment_pool_efficiency_mult"};
     for(const auto& row:audit) {
-        if(!row.source.key.ends_with("_investment_pool_efficiency_mult"))continue;
-        const bool farmer=row.source.key=="state_farmers_investment_pool_efficiency_mult";
-        const bool traditional=row.source.source_id=="law_traditionalism";
-        const bool agrarian=row.source.source_id=="law_agrarianism";
-        if(!farmer||(!traditional&&!agrarian)) {
-            check(row.status!=CanonicalLawRowStatus::verified_row&&row.behavior_test.empty(),
-                  "other investor occupations or laws inherited the farmer order witness");
-            ++unwitnessed_efficiencies;
-            continue;
+        if(!documented_investor_keys.contains(row.source.key))continue;
+        const bool prior=row.source.key=="state_farmers_investment_pool_efficiency_mult"&&
+            (row.source.source_id=="law_traditionalism"||
+             row.source.source_id=="law_agrarianism");
+        const bool command=row.source.source_id=="law_command_economy";
+        check(!row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.normalized_value==std::llround(row.source.value*1'000'000.0)&&
+              row.status==CanonicalLawRowStatus::verified_row,
+              "investment efficiency row lost exact flat scope or normalized value");
+        if(prior) {
+            const auto expected=row.source.source_id=="law_traditionalism"?-500'000:500'000;
+            check(row.normalized_value==expected&&
+                  row.executor=="p0::DailyGame::advance_day (private paid construction order quota)"&&
+                  row.behavior_test=="test_p0_daily::household_shareholder_efficiency_changes_paid_daily_construction_orders",
+                  "the two original farmer witnesses changed");
+            ++old_farmer_effects;
+        } else {
+            check(row.behavior_test=="test_p0_daily::canonical_profession_sources_change_real_construction_orders"&&
+                  row.executor==(command?
+                      "p0::DailyGame::advance_day (explicit funded private construction order only)":
+                      "p0::DailyGame::advance_day (private paid construction order quota)"),
+                  "profession-order scope or actual receipt test is missing");
+            if(command) {
+                check(row.source.key=="state_bureaucrats_investment_pool_efficiency_mult"&&
+                      row.normalized_value==250'000,
+                      "explicit-only Command Economy source was broadened");
+                ++explicit_only;
+            }
+            ++new_shareholder_effects;
         }
-        check(row.source.value==(traditional?-0.5:0.5)&&
-              row.normalized_value==(traditional?-500'000:500'000)&&
-              !row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
-              row.status==CanonicalLawRowStatus::verified_row&&
-              row.executor=="p0::DailyGame::advance_day (private paid construction order quota)"&&
-              row.behavior_test=="test_p0_daily::household_shareholder_efficiency_changes_paid_daily_construction_orders",
-              "farmer efficiency witness lost exact sign, qualification, or paid-order owner");
+        const auto unverified=[](P2CatalogModifier changed) {
+            return classify_canonical_law_row(changed,canonical_law_row_evidence()).status!=
+                   CanonicalLawRowStatus::verified_row;
+        };
         auto qualifier=row.source;
         qualifier.institution=true;
-        check(classify_canonical_law_row(qualifier,canonical_law_row_evidence()).status!=
-                  CanonicalLawRowStatus::verified_row,
-              "flat farmer efficiency proof leaked to an institutional row");
+        check(unverified(qualifier),"flat order proof leaked to an institution");
         qualifier.institution=false;
         qualifier.sponsor=true;
-        check(classify_canonical_law_row(qualifier,canonical_law_row_evidence()).status!=
-                  CanonicalLawRowStatus::verified_row,
-              "flat farmer efficiency proof leaked to a sponsor row");
-        ++shareholder_effects;
+        check(unverified(qualifier),"flat order proof leaked to a sponsor");
+        qualifier=row.source;
+        qualifier.value+=0.001;
+        check(unverified(qualifier),"flat order proof accepted a mismatched value");
     }
-    check(shareholder_effects==2&&unwitnessed_efficiencies>0,
-          "expected exactly two witnessed farmer order sources and visible unverified others");
+    check(old_farmer_effects==2&&new_shareholder_effects==30&&explicit_only==1,
+          "expected two original plus 30 new exact order witnesses");
+    check(classify_canonical_law_row(
+              {"law_agrarianism","country_investment_pool_efficiency_mult",0.5,false,false},
+              canonical_law_row_evidence()).status!=CanonicalLawRowStatus::verified_row,
+          "private construction orders must not imply an original global investment pool");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
         if(row.source.key=="state_peasants_mass_migration_disallowed_bool") {
