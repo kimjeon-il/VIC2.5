@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,52>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,59>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,52> evidence{{
+    static const std::array<CanonicalLawRowEvidence,59> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -222,7 +222,28 @@ inline const std::array<CanonicalLawRowEvidence,52>& canonical_law_row_evidence(
          "test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition"},
         {{"amendment_american_fugitive_slaves_act","interest_group_ig_landowners_approval_add",1,false,false},
          "IntegratedWorld::p3_group_view (direct named amendment group approval)",
-         "test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition"}
+         "test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition"},
+        {{"amendment_geheime_staatskonferenz_metternich","country_law_enactment_success_add",-0.05,false,false},
+         "IntegratedWorld::p2_review_due (actual staged enactment success)",
+         "test_p2_advanced::canonical_enactment_success_changes_real_review_outcome"},
+        {{"amendment_geheime_staatskonferenz_kolowrat","country_law_enactment_success_add",-0.15,false,false},
+         "IntegratedWorld::p2_review_due (actual staged enactment success)",
+         "test_p2_advanced::canonical_enactment_success_changes_real_review_outcome"},
+        {{"amendment_geheime_staatskonferenz","country_law_enactment_success_add",-0.1,false,false},
+         "IntegratedWorld::p2_review_due (actual staged enactment success)",
+         "test_p2_advanced::canonical_enactment_success_changes_real_review_outcome"},
+        {{"amendment_tradition_of_free_elections","country_enactment_success_chance_law_autocracy_add",-0.1,false,false},
+         "IntegratedWorld::p2_review_due (actual staged enactment success)",
+         "test_p2_advanced::canonical_enactment_success_changes_real_review_outcome"},
+        {{"amendment_tradition_of_free_elections","country_enactment_success_chance_law_oligarchy_add",-0.1,false,false},
+         "IntegratedWorld::p2_review_due (actual staged enactment success)",
+         "test_p2_advanced::canonical_enactment_success_changes_real_review_outcome"},
+        {{"amendment_tradition_of_free_elections","country_enactment_success_chance_law_technocracy_add",-0.1,false,false},
+         "IntegratedWorld::p2_review_due (actual staged enactment success)",
+         "test_p2_advanced::canonical_enactment_success_changes_real_review_outcome"},
+        {{"amendment_tradition_of_free_elections","country_enactment_success_chance_law_anarchy_add",-0.1,false,false},
+         "IntegratedWorld::p2_review_due (actual staged enactment success)",
+         "test_p2_advanced::canonical_enactment_success_changes_real_review_outcome"}
     }};
     return evidence;
 }

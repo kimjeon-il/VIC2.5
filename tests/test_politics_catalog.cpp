@@ -354,8 +354,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
               "direct named group approval proof leaked to a sponsored row");
         ++direct_named_approval;
     }
-    check(direct_named_approval==7 && canonical_law_row_evidence().size()==52,
-          "exact evidence did not preserve all 50 prior witnesses");
+    check(direct_named_approval==7 && canonical_law_row_evidence().size()==59,
+          "exact evidence did not preserve all direct named witnesses");
 
     constexpr std::string_view named_culture_fixture=
         "test_politics_identity::canonical_named_acceptance_changes_only_verified_pop_and_country";
@@ -380,6 +380,36 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
               "an institutional row inherited the flat culture witness");
     }
     check(basque==1&&polish==1,"missing exact Basque or Polish culture evidence");
+
+    constexpr std::string_view success_fixture=
+        "test_p2_advanced::canonical_enactment_success_changes_real_review_outcome";
+    std::size_t national_success=0,target_success=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=success_fixture)continue;
+        check(!row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.executor=="IntegratedWorld::p2_review_due (actual staged enactment success)"&&
+              row.status==CanonicalLawRowStatus::verified_row,
+              "enactment success evidence has the wrong scope or executor");
+        if(row.source.key=="country_law_enactment_success_add") {
+            check((row.source.source_id=="amendment_geheime_staatskonferenz_metternich"&&row.normalized_value==-50'000)||
+                  (row.source.source_id=="amendment_geheime_staatskonferenz_kolowrat"&&row.normalized_value==-150'000)||
+                  (row.source.source_id=="amendment_geheime_staatskonferenz"&&row.normalized_value==-100'000),
+                  "wrong national staged success magnitude");
+            ++national_success;
+        } else {
+            check(row.source.source_id=="amendment_tradition_of_free_elections"&&
+                  row.normalized_value==-100'000,
+                  "wrong source/magnitude inherited proposal success proof");
+            ++target_success;
+        }
+    }
+    check(national_success==3&&target_success==4,
+          "missing precise national or proposal-specific enactment rows");
+    const auto untested_speed=classify_canonical_law_row(
+        {"amendment_geheime_staatskonferenz","country_law_enactment_speed_mult",-0.2,false,false},
+        canonical_law_row_evidence());
+    check(untested_speed.status!=CanonicalLawRowStatus::verified_row,
+          "success witness credited unrelated review speed");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

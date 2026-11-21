@@ -595,6 +595,121 @@ static void direct_named_group_approval_tracks_law_not_the_coalition() {
         {0,0,0,0,0,0,0});
 }
 
+static void canonical_enactment_success_changes_real_review_outcome() {
+    const auto scenario=[](const std::string& country,const std::string& id,
+                           const std::string& parent,const std::string& domain,
+                           const std::string& choice,int row_penalty,
+                           bool qualifies,bool pending=false) {
+        const auto exercise=[&](bool attach,bool below=false) {
+            phasegh::World gh(24000);
+            auto& geo=gh.seed_geography();
+            geo.seed_province(1,"R",country);geo.seed_unit(1,country,"R");
+            geo.seed_assignment(1,1);
+            auto& c=geo.seed_core().seed_core();
+            c.seed_actor(country,100);
+            c.seed_government(country,"HEAD","PM",5,3);
+            c.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:authority"});
+            c.seed_interest_group("Actual");
+            c.p3_seed_group({country,"Actual","","","",P3GroupType::custom,0,0});
+            c.seed_p1_coalition(country,{{"Actual"},{},false});
+            c.p2_seed_base({"opening",country,"distribution_of_power","",parent,"fixture:law"});
+            auto& pop=c.seed_population();
+            const auto h=pop.household_profile({"R","mixed","shared",250});
+            const auto e=pop.economic_profile({"R","worker","wage","employee",
+                                              pop.default_education()});
+            const auto d=pop.demographic_profile({"R",23651,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),
+                phaseb::Service::civilian});
+            const auto members=pop.seed_population(d,e,h,1000);
+            c.p3_seed_movement({"Backing",country,domain,choice,"",
+                P3MovementGoal::legal_reform,{"Actual"},{},300'000,100'000,true});
+            auto world=daily::World::adopt(std::move(gh),19);
+            const auto start=world.day_index();
+            const auto due=start+(domain=="distribution_of_power"?150:
+                                  domain=="governance_principles"?200:100);
+            // Match the engine's existing deterministic roll, with no injected
+            // seed, and choose an interval between the two real thresholds.
+            std::string proposal;
+            for(int candidate=0;candidate<10000;++candidate) {
+                proposal="review-"+std::to_string(candidate);
+                std::uint64_t roll=14695981039346656037ULL;
+                for(const unsigned char ch:country+":"+proposal+":"+
+                        std::to_string(due)+":0") {roll^=ch;roll*=1099511628211ULL;}
+                const auto cutoff=static_cast<unsigned>(400'000-row_penalty);
+                const auto bucket=roll%1'000'000;
+                if((below&&bucket>=cutoff-1'000&&bucket<cutoff)||
+                   (!below&&bucket>=cutoff&&bucket<cutoff+1'000))break;
+                proposal.clear();
+            }
+            ok(!proposal.empty(),"no adversarial review roll found");
+            phasegh::World::Plan submit;
+            submit[9].push_back([&](phasegh::Stage& stage) {
+                auto& live=stage.phase_c();
+                live.join_interest_group(members,"Actual",400);
+                P2Bill bill;
+                bill.id=proposal;bill.country=country;bill.proposer="PM";
+                bill.legal_basis="fixture:ordinary-review";
+                bill.proposed_base={"revised",country,domain,"national",
+                    choice,"fixture:ordinary-review"};
+                live.p2_submit_bill(std::move(bill),start);
+                if(!attach)return;
+                P2Bill amendment;
+                amendment.id="ATTACH";amendment.country=country;amendment.proposer="PM";
+                amendment.legal_basis="fixture:lawlike-source";
+                amendment.action=P2BillAction::attach_amendment;
+                amendment.effective_day=pending?due+1:start+1;
+                amendment.proposed_amendment={id,"opening","fixture:lawlike-source","",
+                    {{"association",country,P2ClauseKind::political_association_allowed,1}}};
+                live.p2_submit_bill(std::move(amendment),start);
+                live.p2_approve_bill("ATTACH",{});
+                live.p2_promulgate_bill("ATTACH","HEAD",start);
+            });
+            world.advance_day(submit);
+            while(world.day_index()<due)world.advance_day();
+            const auto& before=ledger(world);
+            ok(before.p3_movement_view("Backing").support_ppm==400'000&&
+               before.p1_legitimacy(country).score>=25&&
+               before.p2_enactments().at(proposal).checks==0&&
+               before.p2_amendment_active(id)==(attach&&!pending),
+               "review controls are confounded by substantive support, timing or eligibility");
+            auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+            world.advance_day();replay.advance_day();
+            const auto& reviewed=ledger(world).p2_enactments().at(proposal);
+            ok(reviewed.checks==1 && !reviewed.ready &&
+               ledger(world).p2_bills().at(proposal).status==P2BillStatus::submitted&&
+               daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+               "review changed lawful vote/assent status or failed replay");
+            return reviewed.phase;
+        };
+        ok(exercise(false)==2,"baseline roll did not pass the actual 40% threshold");
+        ok(exercise(true)==(qualifies&&!pending?1:2),
+           "canonical law did not apply exactly to this actual staged success threshold");
+        if(qualifies&&!pending)
+            ok(exercise(true,true)==2,
+               "canonical law removed a success below the expected modified threshold");
+    };
+    const std::string domain="distribution_of_power";
+    const std::string autocracy="law_autocracy", oligarchy="law_oligarchy";
+    const std::string tradition="amendment_tradition_of_free_elections";
+    const std::string metternich="amendment_geheime_staatskonferenz_metternich";
+    scenario("AUS",metternich,autocracy,domain,oligarchy,50'000,true);
+    scenario("AUS","amendment_geheime_staatskonferenz_kolowrat",
+        autocracy,domain,oligarchy,150'000,true);
+    scenario("AUS","amendment_geheime_staatskonferenz",
+        autocracy,domain,oligarchy,100'000,true);
+    for(const auto& choice:{autocracy,std::string("oligarchy"),
+            std::string("law_technocracy"),std::string("law_anarchy")})
+        scenario("A",tradition,oligarchy,domain,choice,100'000,true);
+    scenario("OTHER",metternich,autocracy,domain,oligarchy,50'000,false);
+    scenario("AUS",metternich,oligarchy,domain,autocracy,50'000,false);
+    scenario("AUS",metternich,autocracy,domain,oligarchy,50'000,true,true);
+    scenario("A",tradition,oligarchy,domain,"law_wealth_voting",100'000,false);
+    scenario("A",tradition,oligarchy,"different_domain",autocracy,100'000,false);
+    scenario("A",tradition,oligarchy,"lawgroup_distribution_of_power",
+             "law_technocracy",100'000,true);
+}
+
 int main(){
     try{
         actual_upper_house_personal_terms_and_replay();
@@ -603,7 +718,8 @@ int main(){
         negotiated_sponsor_uses_actual_same_country_group();
         remaining_negotiated_sponsor_rows_use_actual_coalition();
         direct_named_group_approval_tracks_law_not_the_coalition();
-        std::cout<<"P2 advanced politics: six focused scenarios PASS\n";
+        canonical_enactment_success_changes_real_review_outcome();
+        std::cout<<"P2 advanced politics: seven focused scenarios PASS\n";
         return 0;
     }catch(const std::exception& ex){
         std::cerr<<"P2 ADVANCED POLITICS FAILED: "<<ex.what()<<"\n";

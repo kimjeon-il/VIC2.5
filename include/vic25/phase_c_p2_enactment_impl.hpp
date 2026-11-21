@@ -98,8 +98,50 @@ inline void IntegratedWorld::p2_review_due(std::int64_t today) {
         assess(governments_.at(bill.country).head_of_state,20'000);
         if(const auto fav=p1_favorites_.find(bill.country);
            fav!=p1_favorites_.end())assess(fav->second,25'000);
-        std::int64_t success=std::clamp<std::int64_t>(
-            support+e.success_bonus_ppm+personal_modifier,0,900'000);
+        const auto active_national_points=[&](const char* id,const char* key) {
+            if(!p2_active_amendments_.contains(id))return std::int64_t{0};
+            const auto& amendment=p2_amendments_.at(id);
+            const auto& parent=p2_laws_.at(amendment.law_id);
+            const auto* source=p2_catalog_amendment(id);
+            if(parent.country!=bill.country||
+               parent.tier==P2NormTier::local_ordinance||
+               (!parent.scope.empty()&&parent.scope!="national")||
+               !p2_is_active_base(amendment.law_id)||
+               !politics::catalogue().has(parent.domain,parent.base_choice)||
+               !source||!p2_catalog_amendment_applies(*source,parent.base_choice)||
+               (!source->possible_country_tags.empty()&&
+                !p2_catalog_list_contains(source->possible_country_tags,bill.country)))
+                return std::int64_t{0};
+            return static_cast<std::int64_t>(std::llround(
+                p2_catalog_raw_modifier(id,key)*1'000'000.0));
+        };
+        std::int64_t legal_success=0;
+        for(const auto* amendment:{
+                "amendment_geheime_staatskonferenz_metternich",
+                "amendment_geheime_staatskonferenz_kolowrat",
+                "amendment_geheime_staatskonferenz"})
+            legal_success=phaseb::add_checked(legal_success,
+                active_national_points(amendment,"country_law_enactment_success_add"));
+        // These are four authored proposal-specific chances, not four flat
+        // national bonuses and not changes to votes, assent or bill dates.
+        if(bill.action==P2BillAction::enact_or_replace_base&&
+           politics::bare_group(law_domain)=="distribution_of_power"&&
+           politics::catalogue().has(law_domain,desired)) {
+            const auto target=politics::bare_law(desired);
+            const char* key=nullptr;
+            if(target=="autocracy")
+                key="country_enactment_success_chance_law_autocracy_add";
+            else if(target=="oligarchy")
+                key="country_enactment_success_chance_law_oligarchy_add";
+            else if(target=="technocracy")
+                key="country_enactment_success_chance_law_technocracy_add";
+            else if(target=="anarchy")
+                key="country_enactment_success_chance_law_anarchy_add";
+            if(key)legal_success=phaseb::add_checked(legal_success,
+                active_national_points("amendment_tradition_of_free_elections",key));
+        }
+        std::int64_t success=std::clamp<std::int64_t>(phaseb::add_checked(
+            support+e.success_bonus_ppm+personal_modifier,legal_success),0,900'000);
         std::int64_t stall=std::clamp<std::int64_t>(
             opposition+e.setbacks*25'000,0,900'000);
         if(success+stall>1'000'000){
