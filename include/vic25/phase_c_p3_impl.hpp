@@ -219,7 +219,7 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         const People organized=phaseb::add_checked(n,
              p4_scaled(n,organization->second.organization_ppm,1'000'000));
         const auto legal_strength=p2_political_strength_ppm(
-            country,organization->second.type);
+            country,organization->second.type,key.second);
         People weighted=scale(organized,legal_strength);
         // Occupation-specific law modifiers and acceptance penalties apply
         // only to the actual members of this living POP slice.

@@ -265,12 +265,167 @@ static void real_economic_and_military_law_rejections() {
     }
 }
 
+static void negotiated_sponsor_uses_actual_same_country_group() {
+    constexpr const char* amendment="amendment_generic_sponsor_polstr_increase";
+    auto exercise=[&](bool direct) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"RA","A");geo.seed_province(2,"RB","B");
+        geo.seed_unit(1,"A","A");geo.seed_unit(2,"B","B");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& c=geo.seed_core().seed_core();
+        for(const auto* country:{"A","B"}) {
+            c.seed_actor(country,100);
+            c.seed_government(country,"HEAD","PM",5,3);
+            c.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:charter"});
+        }
+        c.seed_interest_group("Workers");
+        c.seed_interest_group("Peer");
+        for(const auto* country:{"A","B"})
+            for(const auto* group:{"Workers","Peer"})
+                c.p3_seed_group({country,group,"","","",P3GroupType::custom,0,0});
+        auto& pop=c.seed_population();
+        const auto seed=[&](const std::string& region) {
+            const auto h=pop.household_profile({region,"mixed","shared",25});
+            const auto e=pop.economic_profile({region,"worker","wage","employee",
+                                              pop.default_education()});
+            const auto d=pop.demographic_profile({region,23651,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),
+                phaseb::Service::civilian});
+            return pop.seed_population(d,e,h,100);
+        };
+        const auto a=seed("RA"),b=seed("RB");
+        auto provision=P2Amendment{amendment,direct?"opening-law":"",
+            "fixture:compromise","",{{"association","A",
+                P2ClauseKind::political_association_allowed,1}}};
+        c.p2_seed_base({"opening-law","A","sponsor_fixture","national",
+            "opening","fixture:law"});
+        if(direct)c.p2_seed_amendment(provision);
+        else c.p2_register_group_demand({"actual-demand","A","Workers",
+            "sponsor_fixture",provision,200'000});
+        auto world=daily::World::adopt(std::move(gh),43);
+        const auto start=world.day_index();
+        phasegh::World::Plan enrol;
+        enrol[9].push_back([&](phasegh::Stage& stage) {
+            auto& own=stage.phase_c();
+            for(const auto cohort:{a,b}) {
+                own.join_interest_group(cohort,"Workers",50);
+                own.join_interest_group(cohort,"Peer",50);
+            }
+            if(!direct) {
+                P2Bill bill;
+                bill.id="NEGOTIATED";bill.country="A";bill.proposer="PM";
+                bill.legal_basis="fixture:agreement";bill.effective_day=start+2;
+                bill.proposed_base={"negotiated-law","A","sponsor_fixture","national",
+                    "revised","fixture:agreement"};
+                own.p2_submit_bill(std::move(bill),start);
+            }
+        });
+        world.advance_day(enrol);
+        const auto clout=[&](const std::string& country,const std::string& group) {
+            return ledger(world).p3_group_view(country,group).clout_ppm;
+        };
+        ok(clout("A","Workers")==450'000&&clout("A","Peer")==450'000&&
+           clout("B","Workers")==450'000&&clout("B","Peer")==450'000,
+           "sponsor benefit appeared without an effective negotiated amendment");
+        if(direct) {
+            ok(ledger(world).p2_amendment_active(amendment),
+               "negative fixture must have an active amendment without sponsorship");
+            auto loaded=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+            ok(ledger(loaded).p3_group_view("A","Workers").clout_ppm==450'000,
+               "snapshot without negotiations invented sponsor provenance");
+            return;
+        }
+        ok(ledger(world).p2_negotiated().at("NEGOTIATED").front().group=="Workers",
+           "fixture lacked a genuine negotiated sponsor");
+        phasegh::World::Plan approve;
+        approve[9].push_back([&](phasegh::Stage& stage) {
+            auto& own=stage.phase_c();
+            if(own.p2_bills().at("NEGOTIATED").status==P2BillStatus::submitted) {
+                own.p2_approve_bill("NEGOTIATED",{});
+                own.p2_promulgate_bill("NEGOTIATED","HEAD",start+1);
+            } else {
+                ok(own.p2_bills().at("NEGOTIATED").status==P2BillStatus::promulgated,
+                   "negotiated bill was not lawfully approved");
+            }
+        });
+        world.advance_day(approve);
+        ok(clout("A","Workers")==450'000,"promulgation paid sponsor early");
+        auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+        world.advance_day();replay.advance_day();
+        ok(ledger(world).p2_amendment_active(amendment)&&
+           clout("A","Workers")==490'908&&clout("A","Peer")==409'090&&
+           clout("B","Workers")==450'000&&clout("B","Peer")==450'000,
+           "effective negotiated strength did not reach only the exact same-country sponsor");
+        ok(daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+           "negotiated clout changed after loading");
+        auto active=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+        ok(ledger(active).p3_group_view("A","Workers").clout_ppm==490'908,
+           "active snapshot did not rebuild the sponsor bonus");
+        const auto today=world.day_index();
+        phasegh::World::Plan replace_parent;
+        replace_parent[9].push_back([today](phasegh::Stage& stage) {
+            auto& own=stage.phase_c();
+            P2Bill bill;
+            bill.id="REPLACE-PARENT";bill.country="A";bill.proposer="PM";
+            bill.legal_basis="fixture:replace";bill.effective_day=today+1;
+            bill.proposed_base={"without-sponsor","A","sponsor_fixture","national",
+                                "replaced","fixture:replace"};
+            own.p2_submit_bill(std::move(bill),today);
+            own.p2_approve_bill("REPLACE-PARENT",{});
+            own.p2_promulgate_bill("REPLACE-PARENT","HEAD",today);
+        });
+        active.advance_day(replace_parent);
+        active.advance_day();
+        ok(!ledger(active).p2_amendment_active(amendment)&&
+           ledger(active).p3_group_view("A","Workers").clout_ppm==450'000,
+           "replacement of the actual parent retained the old sponsor bonus");
+        phasegh::World::Plan repeal;
+        repeal[9].push_back([&](phasegh::Stage& stage) {
+            auto& own=stage.phase_c();
+            P2Bill bill;
+            bill.id="REPEAL";bill.country="A";bill.proposer="PM";
+            bill.legal_basis="fixture:repeal";bill.effective_day=today+1;
+            bill.action=P2BillAction::repeal_amendment;bill.target_id=amendment;
+            own.p2_submit_bill(std::move(bill),today);
+            own.p2_approve_bill("REPEAL",{});
+            own.p2_promulgate_bill("REPEAL","HEAD",today);
+        });
+        world.advance_day(repeal);
+        ok(clout("A","Workers")==490'908,"repeal stopped clout before effective date");
+        // Repeal becomes effective at Stage0 in the staged copy; a later
+        // failure must roll back the recorded law and its derived clout.
+        const auto opening=daily::SnapshotCodec::encode(world);
+        phasegh::World::Plan fail;
+        fail[9].push_back([](phasegh::Stage&) {
+            throw std::invalid_argument("fixture: abort after Stage0");
+        });
+        bool aborted=false;
+        try { world.advance_day(fail); }
+        catch(const std::invalid_argument& e) {
+            aborted=std::string(e.what())=="fixture: abort after Stage0";
+        }
+        ok(aborted&&daily::SnapshotCodec::encode(world)==opening&&
+           clout("A","Workers")==490'908,
+           "failed day advanced the live sponsor record");
+        world.advance_day();
+        ok(!ledger(world).p2_amendment_active(amendment)&&
+           ledger(world).p2_negotiated().contains("NEGOTIATED")&&
+           clout("A","Workers")==450'000&&clout("A","Peer")==450'000,
+           "archived negotiation kept paying a repealed sponsor");
+    };
+    exercise(true);
+    exercise(false);
+}
+
 int main(){
     try{
         actual_upper_house_personal_terms_and_replay();
         negotiation_and_two_chamber_approval();
         real_economic_and_military_law_rejections();
-        std::cout<<"P2 advanced politics: three focused scenarios PASS\n";
+        negotiated_sponsor_uses_actual_same_country_group();
+        std::cout<<"P2 advanced politics: four focused scenarios PASS\n";
         return 0;
     }catch(const std::exception& ex){
         std::cerr<<"P2 ADVANCED POLITICS FAILED: "<<ex.what()<<"\n";

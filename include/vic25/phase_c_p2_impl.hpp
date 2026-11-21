@@ -502,7 +502,8 @@ inline std::string IntegratedWorld::p2_taxation_choice(
 }
 
 inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
-        const std::string& country,P3GroupType group)const {
+        const std::string& country,P3GroupType group,
+        const std::string& sponsor_group)const {
     const auto group_id=[&]() -> const char* {
         switch(group) {
             case P3GroupType::landowners:return "ig_landowners";
@@ -536,6 +537,16 @@ inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
         }
         strength=phaseb::add_checked(strength,
             politics::clout_bonus(law.domain,law.base_choice,group));
+    }
+    if(p2_negotiated_clout_sponsor_&&
+       p2_negotiated_clout_sponsor_->first==country&&
+       p2_negotiated_clout_sponsor_->second==sponsor_group) {
+        constexpr const char* key="interest_group_pol_str_mult";
+        static const auto bonus=static_cast<std::int64_t>(std::llround(
+            (p2_catalog_raw_modifier(negotiated_clout_amendment_,key,0,true)-
+             p2_catalog_raw_modifier(negotiated_clout_amendment_,key,0,false))*
+            1'000'000.0));
+        strength=phaseb::add_checked(strength,bonus);
     }
     return static_cast<std::int32_t>(
         std::clamp<std::int64_t>(strength,250'000,2'500'000));
@@ -1014,6 +1025,40 @@ inline void IntegratedWorld::phase_time_apply_p2(std::int64_t today) {
         events_.push_back("p2-law-effective:"+id);
     }
     p2_due_.erase(today);
+    p2_rebuild_negotiated_clout_sponsor();
+}
+
+inline void IntegratedWorld::p2_rebuild_negotiated_clout_sponsor() {
+    p2_negotiated_clout_sponsor_.reset();
+    if(!p2_active_amendments_.contains(negotiated_clout_amendment_))return;
+    const auto& amendment=p2_amendments_.at(negotiated_clout_amendment_);
+    if(!p2_is_active_base(amendment.law_id))return;
+    const auto& parent=p2_laws_.at(amendment.law_id);
+    if(parent.tier==P2NormTier::local_ordinance)return;
+    std::optional<std::pair<std::string,std::string>> sponsor;
+    for(const auto& [id,agreements]:p2_negotiated_) {
+        const auto bill=p2_bills_.find(id);
+        if(bill==p2_bills_.end()||bill->second.status!=P2BillStatus::effective||
+           bill->second.action!=P2BillAction::enact_or_replace_base||
+           bill->second.country!=parent.country||
+           bill->second.proposed_base.id!=amendment.law_id)continue;
+        for(const auto& accepted:agreements) {
+            if(accepted.amendment.id!=negotiated_clout_amendment_)continue;
+            const auto demand=p2_group_demands_.find(accepted.demand_id);
+            if(sponsor||accepted.bill_id!=id||
+               accepted.amendment.law_id!=amendment.law_id||
+               accepted.support_population<=0||
+               demand==p2_group_demands_.end()||
+               demand->second.country!=parent.country||
+               demand->second.interest_group!=accepted.group||
+               demand->second.law_domain!=parent.domain||
+               demand->second.amendment.id!=negotiated_clout_amendment_||
+               !p3_groups_.contains({parent.country,accepted.group}))
+                return; // A missing or ambiguous record cannot award clout.
+            sponsor.emplace(parent.country,accepted.group);
+        }
+    }
+    p2_negotiated_clout_sponsor_=std::move(sponsor);
 }
 
 inline void IntegratedWorld::p2_rebuild_due_index() {
@@ -1028,6 +1073,7 @@ inline void IntegratedWorld::p2_rebuild_due_index() {
             !p2_chamber_decisions_.at(id).lower_passed))
             p2_negotiation_watch_.insert(id);
     }
+    p2_rebuild_negotiated_clout_sponsor();
 }
 
 } // namespace vic25::phasec

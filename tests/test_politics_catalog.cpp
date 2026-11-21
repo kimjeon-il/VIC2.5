@@ -281,6 +281,20 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
                entry.behavior_test=="test_phase_c::D4-T49";
     })==1,"explicit Stage 4 subsistence proof missing");
 
+    check(std::count_if(audit.begin(),audit.end(),[](const auto& entry) {
+        return entry.source.source_id=="amendment_generic_sponsor_polstr_increase" &&
+               entry.source.key=="interest_group_pol_str_mult" &&
+               !entry.source.boolean && !entry.source.institution && entry.source.sponsor &&
+               entry.normalized_value==200'000 &&
+               entry.status==CanonicalLawRowStatus::verified_row &&
+               entry.executor=="IntegratedWorld::p3_group_view (verified same-country negotiated sponsor)" &&
+               entry.behavior_test=="test_p2_advanced::negotiated_sponsor_uses_actual_same_country_group";
+    })==1,"negotiated sponsor-specific clout proof missing");
+    check(std::none_of(audit.begin(),audit.end(),[](const auto& entry) {
+        return entry.source.source_id=="amendment_generic_sponsor_polstr_increase_negotiation_1" &&
+               entry.status==CanonicalLawRowStatus::verified_row;
+    }),"proof leaked to a different sponsored amendment");
+
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.
     const std::array<CanonicalLawRowEvidence,3> mixed{{
