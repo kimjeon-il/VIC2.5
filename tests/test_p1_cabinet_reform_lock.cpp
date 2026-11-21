@@ -105,9 +105,57 @@ static void austrian_amendment_blocks_voluntary_cabinet_reformation(
                  "a future caretaker action reversed a previously authorized cabinet");
 }
 
+static void incompatible_same_id_cabinet_amendment_does_not_lock() {
+    enum class InvalidScope {foreign,wrong_parent,local};
+    for(const auto scope:{InvalidScope::foreign,InvalidScope::wrong_parent,
+                          InvalidScope::local}) {
+        const std::string country=scope==InvalidScope::foreign?"OTHER":"AUS";
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"HOME",country);
+        geo.seed_unit(1,country,"ADMIN");
+        geo.seed_assignment(1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor(country,100);
+        c.seed_government(country,"HEAD","INCUMBENT",5,3);
+        c.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:charter"});
+        c.seed_interest_group("LANDOWNERS");
+        c.seed_p1_coalition(country,{{"LANDOWNERS"},{},false});
+        P2BaseLaw parent{"PARENT",country,"distribution_of_power","",
+                         "law_autocracy","fixture:charter"};
+        if(scope==InvalidScope::wrong_parent) {
+            parent.domain="lawgroup_governance_principles";
+            parent.base_choice="law_monarchy";
+        }
+        if(scope==InvalidScope::local) {
+            parent.domain="ordinary_local_policy";
+            parent.scope="HOME";parent.tier=P2NormTier::local_ordinance;
+        }
+        c.p2_seed_base(parent);
+        const std::string id="amendment_geheime_staatskonferenz";
+        c.p2_seed_amendment({id,parent.id,"fixture:same-id attachment","",
+            {{"association",country,P2ClauseKind::political_association_allowed,1}}});
+        auto world=daily::World::adopt(std::move(gh),43);
+        require_test(core(world).p2_amendment_active(id),
+                     "negative fixture did not create a generic active attachment");
+        phasegh::World::Plan lawful;
+        const auto next=world.day_index()+1;
+        lawful[9].push_back([&](phasegh::Stage& stage) {
+            stage.phase_c().schedule_p1_cabinet_daily(country,"HEAD","REFORMED",
+                {{"LANDOWNERS"},{},false},next,"fixture:voluntary-reformation");
+        });
+        world.advance_day(lawful);
+        world.advance_day();
+        require_test(core(world).government(country).prime_minister=="REFORMED",
+                     "unqualified Austrian attachment prevented actual constitutional reform");
+    }
+}
+
 int main() {
     for(const auto* variant:{"amendment_geheime_staatskonferenz",
                              "amendment_geheime_staatskonferenz_metternich",
                              "amendment_geheime_staatskonferenz_kolowrat"})
         austrian_amendment_blocks_voluntary_cabinet_reformation(variant);
+    incompatible_same_id_cabinet_amendment_does_not_lock();
 }

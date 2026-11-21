@@ -328,7 +328,10 @@ inline void IntegratedWorld::schedule_p1_cabinet_daily(
            !legal_basis.empty()&&!successor_prime.empty()&&
            governments_.at(country).head_of_state==incumbent_head,
            "P1 invalid cabinet formation");
-    if(p2_modifier_ppm(country,"country_block_government_reform_bool")!=0) {
+    // Share the exact Austrian source/parent/tag check with the staged
+    // legal reviews; a generic same-ID attachment cannot block reform.
+    if(p2_austrian_enactment_modifier_ppm(
+           country,"country_block_government_reform_bool")!=0) {
         const auto* prime=&governments_.at(country).prime_minister;
         const auto* incumbent=&p1_coalition(country);
         // Preserve previously authorized cabinets. Continuity is measured

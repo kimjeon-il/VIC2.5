@@ -356,8 +356,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==183,
-          "expected 181 preserved witnesses and two scoped treasury purchase rows");
+    check(canonical_law_row_evidence().size()==186,
+          "expected 183 preserved witnesses and three exact cabinet lock rows");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
         "state_shopkeepers_investment_pool_efficiency_mult",
@@ -871,6 +871,32 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(procurement_sources==std::set<std::string_view>{"law_peasant_levies","law_warrior_caste"},
           "expected both exact national treasury goods cost sources");
+
+    constexpr std::string_view cabinet_lock_fixture="test_p1_cabinet_reform_lock::austrian_amendment_blocks_voluntary_cabinet_reformation";
+    std::set<std::string_view> cabinet_lock_sources;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=cabinet_lock_fixture)continue;
+        check(row.source.key=="country_block_government_reform_bool"&&
+              row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.normalized_value==1&&row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="IntegratedWorld::schedule_p1_cabinet_daily (dated voluntary cabinet reform)"&&
+              cabinet_lock_sources.insert(row.source.source_id).second,
+              "wrong source or authority was put in the dated cabinet lock evidence");
+        for(int alternative=0;alternative<4;++alternative) {
+            auto mismatch=row.source;
+            if(alternative==0)mismatch.institution=true;
+            if(alternative==1)mismatch.sponsor=true;
+            if(alternative==2)mismatch.boolean=false;
+            if(alternative==3)mismatch.key="country_law_enactment_speed_mult";
+            check(classify_canonical_law_row(mismatch,canonical_law_row_evidence()).behavior_test
+                      !=cabinet_lock_fixture,
+                  "cabinet lock evidence leaked to another legal action or qualifier");
+        }
+    }
+    check(cabinet_lock_sources==std::set<std::string_view>{
+        "amendment_geheime_staatskonferenz","amendment_geheime_staatskonferenz_metternich",
+        "amendment_geheime_staatskonferenz_kolowrat"},
+        "expected all exact Austrian cabinet locks");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

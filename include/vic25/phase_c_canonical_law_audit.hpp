@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,183>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,186>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,183> evidence{{
+    static const std::array<CanonicalLawRowEvidence,186> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -616,7 +616,16 @@ inline const std::array<CanonicalLawRowEvidence,183>& canonical_law_row_evidence
          "test_phase_gh_commerce::authorized_treasury_goods_adjustment_settles_real_cash"},
         {{"law_warrior_caste","country_military_goods_cost_mult",-0.1,false,false},
          "phasegh::Stage::military_procurement_price (funded sovereign treasury commercial order)",
-         "test_phase_gh_commerce::authorized_treasury_goods_adjustment_settles_real_cash"}
+         "test_phase_gh_commerce::authorized_treasury_goods_adjustment_settles_real_cash"},
+        {{"amendment_geheime_staatskonferenz","country_block_government_reform_bool",1,true,false},
+         "IntegratedWorld::schedule_p1_cabinet_daily (dated voluntary cabinet reform)",
+         "test_p1_cabinet_reform_lock::austrian_amendment_blocks_voluntary_cabinet_reformation"},
+        {{"amendment_geheime_staatskonferenz_metternich","country_block_government_reform_bool",1,true,false},
+         "IntegratedWorld::schedule_p1_cabinet_daily (dated voluntary cabinet reform)",
+         "test_p1_cabinet_reform_lock::austrian_amendment_blocks_voluntary_cabinet_reformation"},
+        {{"amendment_geheime_staatskonferenz_kolowrat","country_block_government_reform_bool",1,true,false},
+         "IntegratedWorld::schedule_p1_cabinet_daily (dated voluntary cabinet reform)",
+         "test_p1_cabinet_reform_lock::austrian_amendment_blocks_voluntary_cabinet_reformation"}
     }};
     return evidence;
 }
