@@ -1074,6 +1074,57 @@ static void caught_bank_rejection_releases_only_its_new_collateral_ticket() {
           "only legitimate smaller loan and existing inventory commit");
 }
 
+static void automatic_program_finance_requires_an_actual_distinct_payee() {
+    using namespace phasec;
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    auto& ledger=geo.seed_core().seed_core();
+    p0::Policies policy;
+    policy.daily_food_units_per_person=0;
+    std::uint32_t id=0;
+    for(const auto* country:{"A","B","C","D"}) {
+        const std::string tag=country;
+        ++id;
+        geo.seed_province(id,"R"+tag,tag);
+        geo.seed_unit(id,tag,"ROOT");
+        geo.seed_assignment(id,id);
+        ledger.seed_government(tag,tag+"_HEAD",tag+"_PM",5,3);
+        ledger.seed_actor(tag+"_TREASURY",0);
+        ledger.seed_actor(tag+"_BIDDER",10);
+        ledger.seed_country_treasury(tag,tag+"_TREASURY");
+        policy.bond_buyer_orders.push_back({tag,tag+"_BIDDER",1,0,0});
+    }
+    ledger.seed_actor("REAL_PROVIDER",0);
+    ledger.seed_actor("FROZEN_PROVIDER",0);
+    policy.public_budget.push_back({"A","MISSING_PROVIDER",1,0});
+    policy.public_budget.push_back({"B","B_TREASURY",1,0});
+    policy.public_budget.push_back({"C","REAL_PROVIDER",1,0});
+    policy.public_budget.push_back({"D","FROZEN_PROVIDER",1,0});
+    policy.national_budget_envelopes.push_back({"D",0,0,0,1,1,0,0,365,false,true});
+    p0::DailyGame game(daily::World::adopt(std::move(gh),322),policy);
+    game.advance_day();
+    const auto& c=game.world().engine().base().core().core();
+    const auto unspent=[&](const std::string& country) {
+        const auto fiscal=c.country_fiscal(country);
+        return fiscal.bond_principal==0&&fiscal.realized_revenue==0&&
+               fiscal.realized_expenditure==0&&fiscal.cash==0&&
+               c.cash(country+"_BIDDER")==10;
+    };
+    const bool missing_no_debt=unspent("A");
+    const bool self_no_debt=unspent("B");
+    if(!missing_no_debt||!self_no_debt)
+        throw std::runtime_error(std::string("program funding: ")+
+            (missing_no_debt?"missing payee blocked":"missing payee caused real debt")+
+            "; "+(self_no_debt?"self payee blocked":"self payee caused real debt"));
+    const auto valid=c.country_fiscal("C");
+    check(valid.bond_principal==1&&valid.realized_expenditure==1&&valid.cash==0&&
+          c.cash("C_BIDDER")==9&&c.cash("REAL_PROVIDER")==1&&
+          c.shares("bond:"+c.sovereign_bonds().begin()->first,"C_BIDDER")==1,
+          "eligible program must pay real cash funded by its own standing bidder");
+    check(unspent("D")&&c.cash("FROZEN_PROVIDER")==0&&c.financial().balanced(),
+          "explicit freeze and balanced legal debt must remain authoritative");
+}
+
 int main(){
     try{
         automatic_sovereign_budget_uses_laws_effective_today();
@@ -1082,6 +1133,7 @@ int main(){
         late_sale_cash_pays_earned_wages_before_bank_service();
         collateral_cannot_be_reused_after_actual_inventory_shrinks();
         caught_bank_rejection_releases_only_its_new_collateral_ticket();
+        automatic_program_finance_requires_an_actual_distinct_payee();
         public_health_budget_and_treatment_require_eligible_clinics();
         std::string failures;
         for(const auto* extra:{"seeded-closed","law-closed","self-recipient"})

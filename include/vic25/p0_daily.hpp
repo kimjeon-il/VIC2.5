@@ -929,6 +929,14 @@ inline void fight(phasec::IntegratedWorld& c,const Engagement& e,
 class DailyGame {
     daily::World world_;
     Policies policies_;
+    // A program needs a real payee distinct from its actual treasury. Use
+    // the same eligibility before asking investors and before moving cash.
+    static bool valid_public_budget_recipient(
+            const phasec::IntegratedWorld& c,const PublicBudgetProgram& program) {
+        return c.has_country_treasury(program.country)&&
+               c.has_actor(program.recipient)&&
+               c.country_treasury(program.country)!=program.recipient;
+    }
 public:
     DailyGame(daily::World world,Policies policies)
       :world_(std::move(world)),policies_(std::move(policies)) {policies_.validate();}
@@ -1267,7 +1275,8 @@ public:
                                     svc.region,svc.good).price));
                     }
                     for(const auto& public_program:programs)
-                        if(public_program.country==country)
+                        if(public_program.country==country&&
+                           valid_public_budget_recipient(c,public_program))
                             real_need=phaseb::add_checked(real_need,
                                 public_program.daily_spending_limit);
                     // Opening contractual principal is a funding requirement,
@@ -3240,10 +3249,8 @@ public:
             plan[5].push_back([program,national_day,budget_spent_today]
                               (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
-                if(!c.has_country_treasury(program.country)||
-                   !c.has_actor(program.recipient))return;
+                if(!valid_public_budget_recipient(c,program))return;
                 const auto& treasury=c.country_treasury(program.country);
-                if(treasury==program.recipient)return;
                 const Money free=c.phase_d_cash_available(treasury);
                 if(free<=program.treasury_cash_reserve)return;
                 Money amount=std::min(program.daily_spending_limit,
