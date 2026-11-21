@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,36>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,43>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,36> evidence{{
+    static const std::array<CanonicalLawRowEvidence,43> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -174,7 +174,28 @@ inline const std::array<CanonicalLawRowEvidence,36>& canonical_law_row_evidence(
          "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"},
         {{"amendment_generic_sponsor_polstr_increase_negotiation_3","interest_group_in_government_approval_add",3,false,false,true},
          "IntegratedWorld::p3_group_view (same-country negotiated sponsor in actual governing coalition)",
-         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"}
+         "test_p2_advanced::remaining_negotiated_sponsor_rows_use_actual_coalition"},
+        {{"law_child_labor_allowed","state_laborers_mortality_mult",0.05,false,false},
+         "IntegratedWorld::phase_time_auto_demography (exact occupation mortality)",
+         "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"},
+        {{"law_child_labor_allowed","state_machinists_mortality_mult",0.05,false,false},
+         "IntegratedWorld::phase_time_auto_demography (exact occupation mortality)",
+         "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"},
+        {{"law_child_labor_allowed","state_farmers_mortality_mult",0.05,false,false},
+         "IntegratedWorld::phase_time_auto_demography (exact occupation mortality)",
+         "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"},
+        {{"law_child_labor_allowed","state_peasants_mortality_mult",0.05,false,false},
+         "IntegratedWorld::phase_time_auto_demography (exact occupation mortality)",
+         "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"},
+        {{"law_restricted_child_labor","state_laborers_mortality_mult",0.02,false,false},
+         "IntegratedWorld::phase_time_auto_demography (exact occupation mortality)",
+         "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"},
+        {{"law_restricted_child_labor","state_farmers_mortality_mult",0.02,false,false},
+         "IntegratedWorld::phase_time_auto_demography (exact occupation mortality)",
+         "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"},
+        {{"law_restricted_child_labor","state_peasants_mortality_mult",0.02,false,false},
+         "IntegratedWorld::phase_time_auto_demography (exact occupation mortality)",
+         "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"}
     }};
     return evidence;
 }

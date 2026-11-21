@@ -4006,10 +4006,18 @@ public:
         // Preserve the single Phase B POP registry. Country-scoped legal
         // modifiers and activated interest-group traits are applied as
         // *rates*, not as extra births, students, jobs or migrants.
+        // Phase B stores exact occupation IDs. Bind the catalog's plural
+        // modifier keys to the singular IDs, not a generic worker category.
+        constexpr std::array profession_mortality{
+            std::pair{"laborer","state_laborers_mortality_mult"},
+            std::pair{"machinist","state_machinists_mortality_mult"},
+            std::pair{"farmer","state_farmers_mortality_mult"},
+            std::pair{"peasant","state_peasants_mortality_mult"}};
         struct PoliticalRates {
             std::int64_t birth{},school{},migration{},mortality{};
             std::int64_t healthcare{},school_institution{},unincorporated_migration{};
             std::int64_t peasant_school{};
+            std::array<std::int64_t,profession_mortality.size()> occupation_mortality{};
             bool schools_allowed{true};
         };
         // In the absence of a separate national investment ledger, derive
@@ -4094,6 +4102,15 @@ public:
                     p2_selected_law(country,"health_system"),mortality_key);
                 const auto school_institution=institutional_ppm(
                     country,P1InstitutionKind::education,education,school_key);
+                std::array<std::int64_t,profession_mortality.size()> occupation_mortality{};
+                const auto child_law=p2_selected_law(country,"childrens_rights");
+                if(child_law=="child_labor_allowed"||child_law=="restricted_child_labor") {
+                    const auto canonical=p2_catalog_canonical_choice(*child_law);
+                    for(std::size_t i=0;i<profession_mortality.size();++i)
+                        occupation_mortality[i]=static_cast<std::int64_t>(std::llround(
+                            p2_catalog_raw_modifier(canonical,profession_mortality[i].second)*
+                            1'000'000.0));
+                }
                 rates.emplace(country,PoliticalRates{
                     effect("state_birth_rate_mult"),
                     effect(school_key),
@@ -4101,6 +4118,7 @@ public:
                     p2_modifier_ppm(country,mortality_key),healthcare,school_institution,
                     p2_modifier_ppm(country,"state_migration_pull_unincorporated_mult"),
                     peasant_school_ppm.contains(country)?peasant_school_ppm.at(country):0,
+                    occupation_mortality,
                     education!=std::optional<std::string>("no_schools")});
             }
         phaseb::Engine::RateAdjustment adjustment;
@@ -4139,6 +4157,13 @@ public:
             if(metric=="fertility")factor=policy.birth;
             else if(metric=="mortality") {
                 factor=policy.mortality;
+                const auto& profession=population.economic(
+                    population.slice(id).key.economic).profession;
+                for(std::size_t i=0;i<profession_mortality.size();++i)
+                    if(profession==profession_mortality[i].first) {
+                        factor=phaseb::add_checked(factor,policy.occupation_mortality[i]);
+                        break;
+                    }
                 const auto incorporated=p1_incorporation_.find(dem.region);
                 if(incorporated!=p1_incorporation_.end()&&incorporated->second)
                     factor=phaseb::add_checked(factor,policy.healthcare);

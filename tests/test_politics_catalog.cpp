@@ -316,6 +316,30 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     check(negotiated_strength==5 && negotiated_approval==4,
           "missing precise political strength or approval sponsor evidence");
 
+    std::size_t allowed_risk=0,restricted_risk=0;
+    constexpr std::string_view mortality_fixture=
+        "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality";
+    for(const auto& row:audit) {
+        if(row.behavior_test!=mortality_fixture)continue;
+        check(!row.source.boolean && !row.source.institution && !row.source.sponsor &&
+              row.executor=="IntegratedWorld::phase_time_auto_demography (exact occupation mortality)" &&
+              row.status==CanonicalLawRowStatus::verified_row,
+              "occupation mortality witness has the wrong flat scope or executor");
+        if(row.source.source_id=="law_child_labor_allowed" && row.normalized_value==50'000)
+            ++allowed_risk;
+        if(row.source.source_id=="law_restricted_child_labor" && row.normalized_value==20'000)
+            ++restricted_risk;
+    }
+    check(allowed_risk==4 && restricted_risk==3,
+          "exact occupation mortality witness count differs by law");
+    check(classify_canonical_law_row({"law_restricted_child_labor",
+              "state_machinists_mortality_mult",0.02,false,false},
+              canonical_law_row_evidence()).status==CanonicalLawRowStatus::no_recorded_path &&
+          classify_canonical_law_row({"law_child_labor_allowed",
+              "state_workers_mortality_mult",0.05,false,false},
+              canonical_law_row_evidence()).status==CanonicalLawRowStatus::no_recorded_path,
+          "named law evidence leaked to an unwitnessed occupation");
+
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.
     const std::array<CanonicalLawRowEvidence,3> mixed{{

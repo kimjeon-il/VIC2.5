@@ -469,6 +469,77 @@ static phaseb::People residents(const daily::World& world,const std::string& reg
     }
     return total;
 }
+static void childrens_rights_changes_only_exact_profession_mortality() {
+    const auto run=[](const std::string& choice,bool stacked,
+                      const std::array<phaseb::People,7>& expected) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"HOME","A");geo.seed_province(2,"FOREIGN","B");
+        geo.seed_unit(1,"A","ROOT");geo.seed_unit(2,"B","ROOT");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& c=geo.seed_core().seed_core();
+        for(const auto* owner:{"A","B"}) {
+            c.seed_actor(owner,100);
+            c.seed_government(owner,"HEAD","PRIME",5,3);
+            c.seed_p1_constitution(owner,{P1GovernancePrinciple::theocracy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"scenario:law"});
+        }
+        c.seed_actor("EMPLOYER",101);
+        if(!choice.empty())law(c,"A","childrens_rights",choice);
+        if(stacked) {
+            law(c,"A","governance_principles","theocracy");
+            law(c,"A","church_and_state","state_religion");
+            c.p2_seed_amendment({"amendment_draconian_blasphemy_laws",
+                "A:church_and_state","scenario:law","",{{"civil-law","A",
+                    P2ClauseKind::political_association_allowed,1}}});
+        }
+        const std::array<std::string,7> professions{
+            "laborer","machinist","farmer","peasant","clerk","worker","labourer"};
+        auto& pop=c.seed_population();
+        for(const auto* region:{"HOME","FOREIGN"}) {
+            const auto d=pop.demographic_profile({region,23650,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),
+                phaseb::Service::civilian});
+            const auto h=pop.household_profile({region,"mixed","shared",25'000});
+            for(const auto& profession:professions) {
+                const auto e=pop.economic_profile({region,profession,"wage","employee",
+                                                   pop.default_education()});
+                const auto slice=pop.seed_population(d,e,h,100'000);
+                pop.hire(slice,1,"EMPLOYER",profession,1,{});
+            }
+        }
+        phaseb::DemographyRules rules;
+        rules.fertility_ppm=0;rules.adult_death_ppm=310'000;
+        rules.illness_incidence_ppm=0;rules.accident_ppm=0;rules.migration_ppm=0;
+        c.enable_demography(rules);
+        auto world=daily::World::adopt(std::move(gh),43);
+        world.advance_day();
+        const auto& live=world.engine().base().core().core();
+        const auto& people=live.people();
+        for(const auto* region:{"HOME","FOREIGN"}) {
+            std::size_t seen=0;
+            for(const auto& [id,slice]:people.slices()) {
+                if(people.demographic(slice.key.demographic).region!=region)continue;
+                const auto& profession=people.economic(slice.key.economic).profession;
+                const auto found=std::find(professions.begin(),professions.end(),profession);
+                check(found!=professions.end(),"mortality invented/reassigned profession");
+                const auto idx=static_cast<std::size_t>(found-professions.begin());
+                const auto deaths=std::string_view(region)=="HOME"?expected[idx]:1000;
+                check(slice.count==100'000-deaths && people.employed(id)==1,
+                      "occupation or jurisdiction mortality differs from exact effective law");
+                ++seen;
+            }
+            check(seen==professions.size(),"occupation test lost a real POP cohort");
+        }
+        check(live.cash("EMPLOYER")==101 && live.cash("A")==100 && live.cash("B")==100,
+              "mortality changed employer or treasury cash");
+    };
+    run("",false,{1000,1000,1000,1000,1000,1000,1000});
+    run("child_labor_allowed",false,{1050,1050,1050,1050,1000,1000,1000});
+    run("restricted_child_labor",false,{1020,1000,1020,1020,1000,1000,1000});
+    run("child_labor_allowed",true,{1070,1070,1070,1070,1020,1020,1020});
+}
+
 static void effective_health_institution_and_flat_law_change_daily_mortality() {
     const auto fixture=[](const std::string& law,int level,bool funded,bool staffed,
                           bool flat,phaseb::People expected_core,
@@ -723,6 +794,7 @@ int main(){
         effective_workhouse_amendment_reduces_only_welfare_cost(
             "amendment_workhouse_regulations");
         effective_health_institution_and_flat_law_change_daily_mortality();
+        childrens_rights_changes_only_exact_profession_mortality();
         enacted_education_changes_real_daily_schooling();
         std::cout<<"VIC2.5 POLICY IDENTITY AND REFERENCE DATA PASS\n";
     }catch(const std::exception& e){
