@@ -483,6 +483,118 @@ static void remaining_negotiated_sponsor_rows_use_actual_coalition() {
         20,1,false,true);
 }
 
+static void direct_named_group_approval_tracks_law_not_the_coalition() {
+    const std::vector<std::pair<std::string,P3GroupType>> groups={
+        {"Land",P3GroupType::landowners},{"Rural",P3GroupType::rural_folk},
+        {"Army",P3GroupType::armed_forces},{"Petty",P3GroupType::petite_bourgeoisie},
+        {"Devout",P3GroupType::devout},{"Control",P3GroupType::custom},
+        {"Second Land",P3GroupType::landowners}};
+    const auto run=[&](const std::string& id,const std::string& domain,
+                       const std::string& law_choice,const std::string& country,
+                       const std::vector<int>& effects) {
+        const std::string foreign=country=="JAP"?"OTHER":"JAP";
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"RA",country);geo.seed_province(2,"RB",foreign);
+        geo.seed_unit(1,country,"AA");geo.seed_unit(2,foreign,"BB");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& c=geo.seed_core().seed_core();
+        for(const auto& [name,type]:groups){(void)type;c.seed_interest_group(name);}
+        auto& pop=c.seed_population();
+        const auto seed=[&](const std::string& owner,const std::string& region) {
+            c.seed_actor(owner,100);
+            c.seed_government(owner,"HEAD","PM",5,3);
+            c.seed_p1_constitution(owner,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:charter"});
+            for(const auto& [name,type]:groups)
+                c.p3_seed_group({owner,name,"","","",type,0,0});
+            c.seed_p1_coalition(owner,{{"Control"},{},false});
+            c.p2_seed_base({owner+":BASE",owner,domain,"",law_choice,"fixture:law"});
+            const auto h=pop.household_profile({region,"mixed","shared",25});
+            const auto e=pop.economic_profile({region,"worker","wage","employee",
+                                              pop.default_education()});
+            const auto d=pop.demographic_profile({region,23651,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),
+                phaseb::Service::civilian});
+            return pop.seed_population(d,e,h,100);
+        };
+        const auto own_slice=seed(country,"RA"),foreign_slice=seed(foreign,"RB");
+        auto world=daily::World::adopt(std::move(gh),29);
+        const auto start=world.day_index();
+        phasegh::World::Plan enroll;
+        enroll[9].push_back([&](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            for(const auto cohort:{own_slice,foreign_slice})for(const auto& [name,type]:groups) {
+                (void)type;live.join_interest_group(cohort,name,10);
+            }
+        });
+        world.advance_day(enroll);
+        const auto compare=[&](const daily::World& one,const daily::World& two,
+                               const std::vector<int>& difference) {
+            for(std::size_t i=0;i<groups.size();++i) {
+                auto approval=[&](const daily::World& w,const std::string& side) {
+                    return ledger(w).p3_group_view(side,groups[i].first).approval;
+                };
+                ok(approval(one,country)==approval(two,country)+difference[i]&&
+                   approval(one,foreign)==approval(two,foreign),
+                   "direct law approval did not reach only the exact same-country named category");
+            }
+        };
+        auto baseline=world;
+        phasegh::World::Plan attach;
+        attach[9].push_back([&](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            P2Bill bill;
+            bill.id="ATTACH";bill.country=country;bill.proposer="PM";
+            bill.legal_basis="fixture:approval";bill.effective_day=start+2;
+            bill.action=P2BillAction::attach_amendment;
+            bill.proposed_amendment={id,country+":BASE","fixture:approval","",
+                {{"association",country,P2ClauseKind::political_association_allowed,1}}};
+            live.p2_submit_bill(std::move(bill),start+1);
+            live.p2_approve_bill("ATTACH",{});
+            live.p2_promulgate_bill("ATTACH","HEAD",start+1);
+        });
+        world.advance_day(attach);baseline.advance_day();
+        const std::vector<int> zero(groups.size());
+        compare(world,baseline,zero);
+        auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+        world.advance_day();baseline.advance_day();replay.advance_day();
+        ok(ledger(world).p2_amendment_active(id)&&
+           daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+           "direct approval proof lacks effective legal amendment or deterministic replay");
+        compare(world,baseline,effects);
+        const auto repeal_day=world.day_index();
+        phasegh::World::Plan repeal;
+        repeal[9].push_back([&](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            P2Bill bill;
+            bill.id="REPEAL";bill.country=country;bill.proposer="PM";
+            bill.legal_basis="fixture:repeal";bill.effective_day=repeal_day+1;
+            bill.action=P2BillAction::repeal_amendment;bill.target_id=id;
+            live.p2_submit_bill(std::move(bill),repeal_day);
+            live.p2_approve_bill("REPEAL",{});
+            live.p2_promulgate_bill("REPEAL","HEAD",repeal_day);
+        });
+        world.advance_day(repeal);baseline.advance_day();
+        compare(world,baseline,effects);
+        world.advance_day();baseline.advance_day();
+        ok(!ledger(world).p2_amendment_active(id),"repeal did not actually execute");
+        compare(world,baseline,zero);
+    };
+    run("amendment_reinstated_fueros","citizenship","law_subjecthood","SPA",
+        {1,1,0,0,0,0,1});
+    run("amendment_frugal_ordinance","edo_social_system","law_strict_edo_system","JAP",
+        {2,0,2,-2,0,0,2});
+    run("amendment_sovereign_of_the_nation","governance_principles","law_monarchy","A",
+        {0,0,0,0,-1,0,0});
+    run("amendment_american_fugitive_slaves_act","slavery","law_legacy_slavery","USA",
+        {1,0,0,0,0,0,1});
+    run("amendment_frugal_ordinance","edo_social_system","law_strict_edo_system","OTHER",
+        {0,0,0,0,0,0,0});
+    run("amendment_frugal_ordinance","edo_social_system","law_lax_edo_system","JAP",
+        {0,0,0,0,0,0,0});
+}
+
 int main(){
     try{
         actual_upper_house_personal_terms_and_replay();
@@ -490,7 +602,8 @@ int main(){
         real_economic_and_military_law_rejections();
         negotiated_sponsor_uses_actual_same_country_group();
         remaining_negotiated_sponsor_rows_use_actual_coalition();
-        std::cout<<"P2 advanced politics: five focused scenarios PASS\n";
+        direct_named_group_approval_tracks_law_not_the_coalition();
+        std::cout<<"P2 advanced politics: six focused scenarios PASS\n";
         return 0;
     }catch(const std::exception& ex){
         std::cerr<<"P2 ADVANCED POLITICS FAILED: "<<ex.what()<<"\n";

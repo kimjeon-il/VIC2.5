@@ -340,6 +340,23 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
               canonical_law_row_evidence()).status==CanonicalLawRowStatus::no_recorded_path,
           "named law evidence leaked to an unwitnessed occupation");
 
+    std::size_t direct_named_approval=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test!="test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition")continue;
+        check(!row.source.boolean && !row.source.institution && !row.source.sponsor &&
+              row.executor=="IntegratedWorld::p3_group_view (direct named amendment group approval)" &&
+              row.status==CanonicalLawRowStatus::verified_row,
+              "direct named group approval witness has the wrong flat scope");
+        auto mismatch=row.source;
+        mismatch.sponsor=true;
+        check(classify_canonical_law_row(mismatch,canonical_law_row_evidence()).status==
+                  CanonicalLawRowStatus::no_recorded_path,
+              "direct named group approval proof leaked to a sponsored row");
+        ++direct_named_approval;
+    }
+    check(direct_named_approval==7 && canonical_law_row_evidence().size()==50,
+          "direct named group evidence did not preserve the exact 43 prior witnesses");
+
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.
     const std::array<CanonicalLawRowEvidence,3> mixed{{

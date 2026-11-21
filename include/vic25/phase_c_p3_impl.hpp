@@ -318,9 +318,51 @@ inline P3GroupView IntegratedWorld::p3_group_view(
         if(const auto sponsor=p2_negotiated_sponsor_effects_.find({country,group});
            sponsor!=p2_negotiated_sponsor_effects_.end())
             sponsor_approval=sponsor->second.government_approval;
+    // These authored direct effects belong to the country's named IG
+    // category, not to a sponsor or only to IGs in the ruling coalition.
+    struct NamedApprovalRow {
+        const char* amendment;
+        P3GroupType group;
+        const char* key;
+    };
+    static constexpr NamedApprovalRow rows[]={
+        {"amendment_reinstated_fueros",P3GroupType::landowners,
+         "interest_group_ig_landowners_approval_add"},
+        {"amendment_reinstated_fueros",P3GroupType::rural_folk,
+         "interest_group_ig_rural_folk_approval_add"},
+        {"amendment_frugal_ordinance",P3GroupType::armed_forces,
+         "interest_group_ig_armed_forces_approval_add"},
+        {"amendment_frugal_ordinance",P3GroupType::landowners,
+         "interest_group_ig_landowners_approval_add"},
+        {"amendment_frugal_ordinance",P3GroupType::petite_bourgeoisie,
+         "interest_group_ig_petty_bourgeoisie_approval_add"},
+        {"amendment_sovereign_of_the_nation",P3GroupType::devout,
+         "interest_group_ig_devout_approval_add"},
+        {"amendment_american_fugitive_slaves_act",P3GroupType::landowners,
+         "interest_group_ig_landowners_approval_add"}
+    };
+    std::int64_t named_approval=0;
+    if(view.members>0)
+        for(const auto& row:rows) {
+            if(profile.type!=row.group||
+               !p2_active_amendments_.contains(row.amendment))continue;
+            const auto& amendment=p2_amendments_.at(row.amendment);
+            const auto& parent=p2_laws_.at(amendment.law_id);
+            if(parent.country!=country||parent.tier==P2NormTier::local_ordinance||
+               (!parent.scope.empty()&&parent.scope!="national")||
+               !p2_is_active_base(amendment.law_id)||
+               !politics::catalogue().has(parent.domain,parent.base_choice))continue;
+            const auto* source=p2_catalog_amendment(row.amendment);
+            if(!source||!p2_catalog_amendment_applies(*source,parent.base_choice)||
+               (!source->possible_country_tags.empty()&&
+                !p2_catalog_list_contains(source->possible_country_tags,country)))continue;
+            named_approval=phaseb::add_checked(named_approval,
+                static_cast<std::int64_t>(std::llround(p2_catalog_raw_modifier(
+                    row.amendment,row.key))));
+        }
     view.approval=static_cast<std::int32_t>(std::clamp<std::int64_t>(
-        phaseb::add_checked(approval-view.radical_ppm/20'000,sponsor_approval),
-        0,100));
+        phaseb::add_checked(approval-view.radical_ppm/20'000,
+            phaseb::add_checked(sponsor_approval,named_approval)),0,100));
     return view;
 }
 

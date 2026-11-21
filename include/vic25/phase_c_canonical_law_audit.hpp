@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,43>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,50>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,43> evidence{{
+    static const std::array<CanonicalLawRowEvidence,50> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -195,7 +195,28 @@ inline const std::array<CanonicalLawRowEvidence,43>& canonical_law_row_evidence(
          "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"},
         {{"law_restricted_child_labor","state_peasants_mortality_mult",0.02,false,false},
          "IntegratedWorld::phase_time_auto_demography (exact occupation mortality)",
-         "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"}
+         "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"},
+        {{"amendment_reinstated_fueros","interest_group_ig_landowners_approval_add",1,false,false},
+         "IntegratedWorld::p3_group_view (direct named amendment group approval)",
+         "test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition"},
+        {{"amendment_reinstated_fueros","interest_group_ig_rural_folk_approval_add",1,false,false},
+         "IntegratedWorld::p3_group_view (direct named amendment group approval)",
+         "test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition"},
+        {{"amendment_frugal_ordinance","interest_group_ig_armed_forces_approval_add",2,false,false},
+         "IntegratedWorld::p3_group_view (direct named amendment group approval)",
+         "test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition"},
+        {{"amendment_frugal_ordinance","interest_group_ig_landowners_approval_add",2,false,false},
+         "IntegratedWorld::p3_group_view (direct named amendment group approval)",
+         "test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition"},
+        {{"amendment_frugal_ordinance","interest_group_ig_petty_bourgeoisie_approval_add",-2,false,false},
+         "IntegratedWorld::p3_group_view (direct named amendment group approval)",
+         "test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition"},
+        {{"amendment_sovereign_of_the_nation","interest_group_ig_devout_approval_add",-1,false,false},
+         "IntegratedWorld::p3_group_view (direct named amendment group approval)",
+         "test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition"},
+        {{"amendment_american_fugitive_slaves_act","interest_group_ig_landowners_approval_add",1,false,false},
+         "IntegratedWorld::p3_group_view (direct named amendment group approval)",
+         "test_p2_advanced::direct_named_group_approval_tracks_law_not_the_coalition"}
     }};
     return evidence;
 }
