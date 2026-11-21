@@ -356,8 +356,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==99,
-          "expected 73 preserved witnesses and 13 exact direct typed strength rows");
+    check(canonical_law_row_evidence().size()==122,
+          "expected 99 preserved witnesses and 23 exact national base strength rows");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
         if(row.source.key=="state_peasants_mass_migration_disallowed_bool") {
@@ -617,6 +617,61 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
           classify_canonical_law_row({"law_shinsengumi","country_officers_pol_str_mult",0.1,false,false},
               canonical_law_row_evidence()).status==CanonicalLawRowStatus::no_recorded_path,
           "occupation coverage missed exact receipts or claimed unverified officers");
+
+    constexpr std::string_view base_strength_fixture=
+        "test_p2_advanced::national_base_group_strength_requires_genuine_law_slot";
+    const std::map<std::pair<std::string_view,std::string_view>,std::int64_t>
+        base_strengths={
+        {{"law_hindu_caste_enforced","interest_group_ig_landowners_pol_str_mult"},250'000},
+        {{"law_hindu_caste_codified","interest_group_ig_landowners_pol_str_mult"},150'000},
+        {{"law_state_religion","interest_group_ig_devout_pol_str_mult"},300'000},
+        {{"law_caesaropapism","interest_group_ig_devout_pol_str_mult"},150'000},
+        {{"law_millet_system","interest_group_ig_devout_pol_str_mult"},300'000},
+        {{"law_people_of_the_book","interest_group_ig_devout_pol_str_mult"},300'000},
+        {{"law_freedom_of_conscience","interest_group_ig_devout_pol_str_mult"},150'000},
+        {{"law_state_atheism","interest_group_ig_devout_pol_str_mult"},-500'000},
+        {{"law_theocracy","interest_group_ig_devout_pol_str_mult"},250'000},
+        {{"law_council_republic","interest_group_ig_trade_unions_pol_str_mult"},250'000},
+        {{"law_corporate_state","interest_group_ig_petty_bourgeoisie_pol_str_mult"},250'000},
+        {{"law_social_monarchy","interest_group_ig_petty_bourgeoisie_pol_str_mult"},250'000},
+        {{"law_industry_banned","interest_group_ig_rural_folk_pol_str_mult"},500'000},
+        {{"law_serfdom","interest_group_ig_landowners_pol_str_mult"},250'000},
+        {{"law_manorialism","interest_group_ig_landowners_pol_str_mult"},150'000},
+        {{"law_tenant_farmers","interest_group_ig_landowners_pol_str_mult"},250'000},
+        {{"law_combination_acts","interest_group_ig_trade_unions_pol_str_mult"},-250'000},
+        {{"law_anti_strike_laws","interest_group_ig_trade_unions_pol_str_mult"},-100'000},
+        {{"law_right_to_associate","interest_group_ig_trade_unions_pol_str_mult"},100'000},
+        {{"law_factory_councils","interest_group_ig_trade_unions_pol_str_mult"},250'000},
+        {{"law_debt_slavery","interest_group_ig_landowners_pol_str_mult"},250'000},
+        {{"law_slave_trade","interest_group_ig_landowners_pol_str_mult"},500'000},
+        {{"law_legacy_slavery","interest_group_ig_landowners_pol_str_mult"},250'000}};
+    std::set<std::pair<std::string_view,std::string_view>> base_strength_proven;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=base_strength_fixture)continue;
+        const auto pair=std::make_pair(row.source.source_id,row.source.key);
+        const auto expected=base_strengths.find(pair);
+        check(!row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="IntegratedWorld::p2_political_strength_ppm -> p3_group_view (active national base law strength)"&&
+              expected!=base_strengths.end()&&expected->second==row.normalized_value&&
+              base_strength_proven.insert(pair).second,
+              "national base strength evidence lost the exact row or executor");
+        for(int alternative=0;alternative<3;++alternative) {
+            auto mismatch=row.source;
+            if(alternative==0)mismatch.sponsor=true;
+            if(alternative==1)mismatch.institution=true;
+            if(alternative==2)mismatch.key="country_aristocrats_pol_str_mult";
+            const auto classified=classify_canonical_law_row(
+                mismatch,canonical_law_row_evidence());
+            check(classified.behavior_test!=base_strength_fixture,
+                  "national base strength witness leaked to sponsorship, institution, or profession");
+            if(alternative<2)
+                check(classified.status!=CanonicalLawRowStatus::verified_row,
+                      "national base group strength was mistaken for a qualified row");
+        }
+    }
+    check(base_strength_proven.size()==base_strengths.size(),
+          "missing exact national base strength witness");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

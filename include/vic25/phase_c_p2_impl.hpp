@@ -524,7 +524,12 @@ inline std::int32_t IntegratedWorld::p2_political_strength_ppm(
     for(const auto& [slot,id]:p2_active_base_) {
         (void)slot;
         const auto& law=p2_laws_.at(id);
-        if(law.country!=country)continue;
+        // The compact modifier lookup is keyed by choice ID alone. Do
+        // not let a permissible custom/local choice lend that national
+        // effect to a different legal domain or a regional ordinance.
+        if(law.country!=country||law.tier==P2NormTier::local_ordinance||
+           (!law.scope.empty()&&law.scope!="national")||
+           !politics::catalogue().has(law.domain,law.base_choice))continue;
         // Prefer exact source IG multipliers if they exist. The previous
         // simplified clout bonus remains a fallback for uncoded new laws.
         if(*group_id) {

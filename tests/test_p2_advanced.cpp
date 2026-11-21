@@ -1098,6 +1098,143 @@ static void direct_named_amendment_strength_changes_actual_clout() {
         {0,0,0,0,0,0,0,0});
 }
 
+static void national_base_group_strength_requires_genuine_law_slot() {
+    using IG=P3GroupType;
+    const auto check_law=[](const std::string& country,const std::string& domain,
+                            const std::string& choice,IG group,int ppm,
+                            bool forge=false) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"RA",country);geo.seed_province(2,"RB","CONTROL");
+        geo.seed_unit(1,country,"AA");geo.seed_unit(2,"CONTROL","BB");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_interest_group("Target");c.seed_interest_group("Comparator");
+        auto& pop=c.seed_population();
+        const auto seed=[&](const std::string& owner,const std::string& region) {
+            c.seed_actor(owner,100);
+            c.seed_government(owner,"HEAD","PM",5,3);
+            const bool lawful_legislature=owner==country&&
+                domain=="governance_principles"&&
+                (choice=="council_republic"||choice=="social_monarchy");
+            c.seed_p1_constitution(owner,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,lawful_legislature?
+                    P1LegislatureKind::unicameral:P1LegislatureKind::none,
+                "fixture:charter"});
+            if(lawful_legislature) {
+                const auto initial=day({2000,2,1});
+                c.p4_seed_contest({owner+":LOWER",owner,"national","fixture:council",
+                    P4Office::legislature,P4BallotMethod::list_dhondt,
+                    P4TermMode::restart_after_poll,48,1'000'000,5,
+                    initial,initial,-1,true,true,false});
+            }
+            c.p3_seed_group({owner,"Target","","","",group,0,0});
+            c.p3_seed_group({owner,"Comparator","","","",IG::custom,0,0});
+            c.seed_p1_coalition(owner,{{"Comparator"},{},false});
+            const auto h=pop.household_profile({region,"mixed","shared",25});
+            const auto e=pop.economic_profile({region,"worker","wage","employee",
+                                              pop.default_education()});
+            const auto d=pop.demographic_profile({region,23651,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),
+                phaseb::Service::civilian});
+            return pop.seed_population(d,e,h,500);
+        };
+        const auto own=seed(country,"RA"),peer=seed("CONTROL","RB");
+        const P2BaseLaw selected{country+":BASE",country,"lawgroup_"+domain,"",
+            "law_"+choice,"fixture:recognized national choice"};
+        const bool requires_prior_affiliation=choice=="combination_acts";
+        if(!domain.empty()&&!requires_prior_affiliation)
+            c.p2_seed_base(selected);
+        if(forge) {
+            // Both records are admissible as custom legal entries, but have
+            // no authority to reproduce the effect of the national law ID.
+            c.p2_seed_base({country+":CUSTOM",country,"custom_national_scope","national",
+                "law_"+choice,"fixture:unrelated custom choice"});
+            P2BaseLaw regional{country+":REGIONAL",country,"custom_local_scope","RA",
+                "law_"+choice,"fixture:unrelated local choice"};
+            regional.tier=P2NormTier::local_ordinance;
+            c.p2_seed_base(regional);
+        }
+        auto world=daily::World::adopt(std::move(gh),29);
+        phasegh::World::Plan enroll;
+        enroll[9].push_back([&](phasegh::Stage& stage) {
+            for(const auto cohort:{own,peer}) {
+                stage.phase_c().join_interest_group(cohort,"Target",100);
+                stage.phase_c().join_interest_group(cohort,"Comparator",100);
+            }
+        });
+        if(requires_prior_affiliation) {
+            // This law prevents new registrations. Test organizations that
+            // lawfully enrolled while association was still allowed.
+            const auto now=world.day_index();
+            enroll[9].push_back([&](phasegh::Stage& stage) {
+                auto& live=stage.phase_c();
+                P2Bill bill;
+                bill.id="NEW-BASE";bill.country=country;bill.proposer="PM";
+                bill.legal_basis="fixture:restriction";bill.effective_day=now+1;
+                bill.proposed_base=selected;
+                live.p2_submit_bill(std::move(bill),now);
+                live.p2_approve_bill("NEW-BASE",{});
+                live.p2_promulgate_bill("NEW-BASE","HEAD",now);
+            });
+        }
+        world.advance_day(enroll);
+        if(requires_prior_affiliation) {
+            ok(ledger(world).p3_group_view(country,"Target").clout_ppm==450'000,
+               "affiliation must precede the pending ban");
+            world.advance_day();
+            ok(ledger(world).p2_is_active_base(selected.id),
+               "Combination Acts did not actually take effect");
+        }
+        const auto verify=[&] {
+            const auto& live=ledger(world);
+            const auto own_group=live.p3_group_view(country,"Target");
+            const auto control=live.p3_group_view("CONTROL","Target");
+            const int weight=(1'000'000+ppm)/10'000;
+            if(own_group.members!=100||control.members!=100||
+               own_group.clout_ppm!=(weight*1'000'000/(weight+100))*9/10||
+               control.clout_ppm!=450'000||
+               live.p2_political_strength_ppm(country,IG::custom,"Comparator")!=1'000'000)
+                throw std::runtime_error("wrong actual base group clout for "+choice+
+                    (forge?" (custom/local lookalikes present)":""));
+        };
+        verify();
+        if(forge) {
+            const auto bytes=daily::SnapshotCodec::encode(world);
+            world=daily::SnapshotCodec::decode(bytes);
+            verify();
+        }
+    };
+    check_law("A","","state_religion",IG::devout,0,true);
+    check_law("A","church_and_state","state_religion",IG::devout,300'000,true);
+
+    // Opening choices model historically recognisable governments. This tests
+    // effects of existing canonical laws, not whether arbitrary proposed
+    // laws bypass any historical visibility/technology/country requirement.
+    check_law("BIC","caste_hegemony","hindu_caste_enforced",IG::landowners,250'000);
+    check_law("BIC","caste_hegemony","hindu_caste_codified",IG::landowners,150'000);
+    check_law("RUS","church_and_state","caesaropapism",IG::devout,150'000);
+    check_law("TUR","church_and_state","millet_system",IG::devout,300'000);
+    check_law("EGY","church_and_state","people_of_the_book",IG::devout,300'000);
+    check_law("USA","church_and_state","freedom_of_conscience",IG::devout,150'000);
+    check_law("RUS","church_and_state","state_atheism",IG::devout,-500'000);
+    check_law("PAP","governance_principles","theocracy",IG::devout,250'000);
+    check_law("RUS","governance_principles","council_republic",IG::trade_unions,250'000);
+    check_law("ITA","governance_principles","corporate_state",IG::petite_bourgeoisie,250'000);
+    check_law("POR","governance_principles","social_monarchy",IG::petite_bourgeoisie,250'000);
+    check_law("A","economic_system","industry_banned",IG::rural_folk,500'000);
+    check_law("RUS","land_reform","serfdom",IG::landowners,250'000);
+    check_law("AUS","land_reform","manorialism",IG::landowners,150'000);
+    check_law("GBR","land_reform","tenant_farmers",IG::landowners,250'000);
+    check_law("GBR","labour_associations","combination_acts",IG::trade_unions,-250'000);
+    check_law("FRA","labour_associations","anti_strike_laws",IG::trade_unions,-100'000);
+    check_law("GBR","labour_associations","right_to_associate",IG::trade_unions,100'000);
+    check_law("RUS","labour_associations","factory_councils",IG::trade_unions,250'000);
+    check_law("SIA","slavery","debt_slavery",IG::landowners,250'000);
+    check_law("BRZ","slavery","slave_trade",IG::landowners,500'000);
+    check_law("USA","slavery","legacy_slavery",IG::landowners,250'000);
+}
+
 int main(){
     try{
         actual_upper_house_personal_terms_and_replay();
@@ -1110,7 +1247,8 @@ int main(){
         austrian_law_speed_changes_only_new_review_intervals();
         political_concessions_commit_real_national_authority();
         direct_named_amendment_strength_changes_actual_clout();
-        std::cout<<"P2 advanced politics: ten focused scenarios PASS\n";
+        national_base_group_strength_requires_genuine_law_slot();
+        std::cout<<"P2 advanced politics: eleven focused scenarios PASS\n";
         return 0;
     }catch(const std::exception& ex){
         std::cerr<<"P2 ADVANCED POLITICS FAILED: "<<ex.what()<<"\n";
