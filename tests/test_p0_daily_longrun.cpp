@@ -1125,8 +1125,92 @@ static void automatic_program_finance_requires_an_actual_distinct_payee() {
           "explicit freeze and balanced legal debt must remain authoritative");
 }
 
+static void known_birthdays_preserve_pre_transition_snapshot() {
+    using namespace vic25;
+    constexpr std::int64_t start=24000;
+    const auto rule=phaseb::LaborRule{};
+    phaseb::World pop(start-rule.maximum_age_months);
+    const auto cohort=[&](const std::string& region,bool known) {
+        const auto hh=pop.household_profile({region,"mixed","shared",1});
+        const auto econ=pop.economic_profile({region,"not_assigned","inactive",
+            "ineligible",pop.default_education()});
+        const phaseb::Demographic demo{region,pop.month(),phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian};
+        if(known) {
+            pop.set_native_calendar_day(2);
+            pop.birth(hh,demo,econ,phaseb::Sex::male,1);
+        } else pop.seed_population(pop.demographic_profile(demo),econ,hh,1);
+        return hh;
+    };
+    const auto retire_household=cohort("R2",true);
+    while(pop.month()<start-rule.minimum_age_months)pop.finish_month();
+    const auto entry_household=cohort("R1",true);
+    const auto legacy_household=cohort("R1",false);
+    check(entry_household==legacy_household,
+          "fixture should exercise different birth precision in one household");
+    while(pop.month()<start)pop.finish_month();
+    pop.set_native_calendar_day(1);
+    auto retire=pop.slices().begin()->first;
+    auto economics=pop.economic(pop.slice(retire).key.economic);
+    economics.profession="worker";economics.livelihood="wage";
+    economics.labor_class="employee";
+    retire=pop.reclassify_economic(retire,1,economics,0);
+    pop.hire(retire,1,"RETIRING_FIRM","worker",310,{});
+    auto gh=phasegh::World::from_legacy_phase_e(
+        phasee::World::from_legacy_phase_d(
+            phased::World::from_legacy_phase_c(
+                phasec::IntegratedWorld::from_legacy_phase_b(std::move(pop)))));
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R1","A");geo.seed_unit(1,"A","ROOT1");geo.seed_assignment(1,1);
+    geo.seed_province(2,"R2","A");geo.seed_unit(2,"A","ROOT2");geo.seed_assignment(2,2);
+    auto& c=geo.seed_core().seed_core();
+    const auto entry_wallet="HH:"+std::to_string(entry_household);
+    const auto retire_wallet="HH:"+std::to_string(retire_household);
+    for(const auto& wallet:{entry_wallet,retire_wallet,std::string("A")})
+        c.seed_actor(wallet,0);
+    c.seed_actor("HIRING_FIRM",100);c.seed_actor("RETIRING_FIRM",100);
+    phaseb::DemographyRules rates;
+    rates.fertility_ppm=rates.infant_death_ppm=rates.child_death_ppm=
+        rates.adult_death_ppm=rates.senior_death_ppm=rates.very_old_death_ppm=
+        rates.illness_incidence_ppm=rates.accident_ppm=0;
+    rates.primary_access_ppm=rates.secondary_access_ppm=rates.tertiary_access_ppm=
+        rates.adult_literacy_access_ppm=rates.training_ppm=0;
+    c.enable_demography(rates);
+    p0::Policies policies;
+    policies.daily_food_units_per_person=0;
+    policies.staffing.push_back({"HIRING_FIRM","R1",1,310,true});
+    p0::DailyGame game(daily::World::adopt(std::move(gh),322),policies);
+    const auto core=[](const p0::DailyGame& sim)->const phasec::IntegratedWorld& {
+        return sim.world().engine().base().core().core();
+    };
+    game.advance_day(); // Jan 1: both known birthdays are tomorrow.
+    const auto& first=core(game);
+    check(first.cash(entry_wallet)==0&&first.cash(retire_wallet)==9&&
+          first.cash("A")==1&&
+          first.phase_d_workforce("HIRING_FIRM")==0&&
+          first.phase_d_workforce("RETIRING_FIRM")==1&&first.people().population()==3,
+          "pre-birthday controls must preserve actual retirement and labor payroll");
+    const auto saved=daily::SnapshotCodec::encode(game.world());
+    // The saved calendar opens Jan 2, but employment is still valid as of
+    // the committed Jan 1 computation. Decoding must not treat it as age 75.
+    const auto restored=[&] {
+        try { return daily::SnapshotCodec::decode(saved); }
+        catch(const std::exception& e) {
+            throw std::runtime_error(std::string("pre-birthday snapshot rejected: ")+e.what());
+        }
+    }();
+    check(restored.date()==daily::Date{2000,1,2}&&
+          daily::SnapshotCodec::encode(restored)==saved&&
+          restored.engine().base().core().core().people().native_calendar_day()==1&&
+          restored.engine().base().core().core().people().exact_birth_day(retire)==2&&
+          restored.engine().base().core().core().phase_d_workforce("RETIRING_FIRM")==1,
+          "restoring before retirement must preserve effective date, identity and contract");
+}
+
 int main(){
     try{
+        known_birthdays_preserve_pre_transition_snapshot();
         automatic_sovereign_budget_uses_laws_effective_today();
         automatic_budget_retains_real_coupon_only_financing();
         refinance_only_matured_sovereign_principal_with_existing_cash();
