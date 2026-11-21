@@ -133,11 +133,26 @@ inline void Stage::terminate_treaty(const std::string& id,
         t.pending_termination=true;
     ++diplomacy_.revision;
 }
+inline bool Stage::commercial_trade_allowed(
+        const std::string& seller_country,const std::string& buyer_country) {
+    if(seller_country==buyer_country)return true;
+    // Ordinary commercial orders, not cargo already dispatched, Treaty
+    // Ports (unmodeled), diplomatic transfers, or physical freight.
+    auto& core=phase_c();
+    const auto isolated=[&](const std::string& country) {
+        return core.has_government(country) &&
+               core.p2_selected_law(country,"trade_policy")=="isolationism" &&
+               phasec::p2_catalog_raw_modifier("law_isolationism",
+                    "country_disallow_trade_bool")!=0;
+    };
+    return !isolated(seller_country)&&!isolated(buyer_country);
+}
 inline Quantity Stage::lawful_trade_quantity(
             const std::string& seller_country,
             const std::string& buyer_country,
             const std::string& good,Quantity requested) {
     require(requested>=0,"G_ERR_NEGATIVE_QUANTITY");
+    if(!commercial_trade_allowed(seller_country,buyer_country))return 0;
     Quantity allowed=requested;
     for(const auto& [treaty_id,t]:diplomacy_.treaties) {
         if(!t.active)continue;

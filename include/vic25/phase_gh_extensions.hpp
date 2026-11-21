@@ -73,6 +73,12 @@ inline void Stage::create_trade_contract(TradeContract c) {
             spatial_.spatial().provinces.contains(c.origin)&&
             spatial_.spatial().provinces.contains(c.destination),
             "G_ERR_INVALID_CONTRACT");
+    const auto& geo=spatial_.spatial();
+    auto& core=phase_c();
+    require(commercial_trade_allowed(
+                core.sovereignty(geo.provinces.at(c.origin).region),
+                core.sovereignty(geo.provinces.at(c.destination).region)),
+            "G_ERR_TRADE_PROHIBITED_BY_ISOLATIONISM");
     // Both legal counterparties must own real C financial identities.
     (void)phase_c().cash(c.seller);
     (void)phase_c().cash(c.buyer);

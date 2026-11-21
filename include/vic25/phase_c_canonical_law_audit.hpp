@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,131>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,132>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,131> evidence{{
+    static const std::array<CanonicalLawRowEvidence,132> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -460,7 +460,10 @@ inline const std::array<CanonicalLawRowEvidence,131>& canonical_law_row_evidence
          "test_politics_identity::military_peasant_levy_restricts_real_conscripts"},
         {{"law_warrior_caste","country_can_only_conscript_peasants_bool",1,true,false},
          "IntegratedWorld::mobilize / peacetime_military_staff (actual peasant-only draft)",
-         "test_politics_identity::military_peasant_levy_restricts_real_conscripts"}
+         "test_politics_identity::military_peasant_levy_restricts_real_conscripts"},
+        {{"law_isolationism","country_disallow_trade_bool",1,true,false},
+         "phasegh::Stage::commercial_trade_allowed (modeled ordinary new cross-sovereign commerce)",
+         "test_phase_gh_commerce::isolationism_blocks_only_new_cross_sovereign_commerce"}
     }};
     return evidence;
 }

@@ -501,6 +501,8 @@ class Stage {
     [[nodiscard]] std::optional<PathQuote> quote_path(
         Id from, Id to, Month month) const;
     void plan_contracts();
+    [[nodiscard]] bool commercial_trade_allowed(
+        const std::string& seller_country,const std::string& buyer_country);
     [[nodiscard]] Quantity lawful_trade_quantity(
         const std::string& seller_country,const std::string& buyer_country,
         const std::string& good,Quantity requested);
@@ -1833,6 +1835,7 @@ inline void Stage::plan_contracts() {
         const auto& dest=geo.provinces.at(agreement.destination).region;
         const auto& country_from=core.sovereignty(origin);
         const auto& country_to=core.sovereignty(dest);
+        if(!commercial_trade_allowed(country_from,country_to))continue;
         const auto duty_ppm=duty_rate(country_from,country_to,agreement.good);
         const auto path=quote_path(agreement.origin,agreement.destination,month);
         if(agreement.origin!=agreement.destination&&
@@ -1911,6 +1914,7 @@ inline void Stage::plan_autonomous_trade() {
         const auto& dest=geo.provinces.at(route.destination).region;
         const auto& from=core.sovereignty(origin);
         const auto& to=core.sovereignty(dest);
+        if(!commercial_trade_allowed(from,to))continue;
         const auto& source_quote=core.market(origin,route.good);
         const auto& target_quote=core.market(dest,route.good);
         const auto ppm=duty_rate(from,to,route.good);
@@ -1971,6 +1975,9 @@ inline void Stage::execute_autonomous_trade() {
     at(7);
     auto& core=phase_c();
     for(const auto& order:trade_.pending) {
+        require(commercial_trade_allowed(core.sovereignty(order.origin_region),
+                                         core.sovereignty(order.destination_region)),
+                "G_ERR_TRADE_PROHIBITED_BY_ISOLATIONISM");
         require(trade_.executed.insert(order.execution_id).second,
                 "G_ERR_DUPLICATE_EXECUTION");
         if(order.total_cost>0)

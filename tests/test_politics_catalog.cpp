@@ -356,7 +356,7 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==131,
+    check(canonical_law_row_evidence().size()==132,
           "expected 129 preserved witnesses and two peasant-only draft rows");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
@@ -720,6 +720,19 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(draft_sources==std::set<std::string_view>{"law_peasant_levies","law_warrior_caste"},
           "expected both exact national peasant-only conscription sources");
+
+    check(std::count_if(audit.begin(),audit.end(),[](const auto& row) {
+        return row.source.source_id=="law_isolationism" &&
+               row.source.key=="country_disallow_trade_bool" &&
+               row.source.boolean && !row.source.institution && !row.source.sponsor &&
+               row.normalized_value==1 && row.status==CanonicalLawRowStatus::verified_row &&
+               row.executor=="phasegh::Stage::commercial_trade_allowed (modeled ordinary new cross-sovereign commerce)" &&
+               row.behavior_test=="test_phase_gh_commerce::isolationism_blocks_only_new_cross_sovereign_commerce";
+    })==1 && std::none_of(audit.begin(),audit.end(),[](const auto& row) {
+        return (row.source.key=="country_disallow_trade_outside_canton_bool" ||
+                row.source.key=="country_disallow_trade_outside_kyushu_bool") &&
+               row.status==CanonicalLawRowStatus::verified_row;
+    }),"ordinary isolationism proof missing or leaked to undocumented gateways");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

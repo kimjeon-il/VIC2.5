@@ -1,4 +1,4 @@
-#include "vic25/phase_gh.hpp"
+#include "vic25/daily_time.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -169,13 +169,116 @@ static void network_capacity_shared_among_trade_routes() {
     verify(w.commerce().edge_usage.at({100,"edge"})==2,
            "network link capacity records actual one-month reservation");
 }
+static void isolationism_blocks_only_new_cross_sovereign_commerce() {
+    using namespace vic25::phasec;
+    const auto make=[](const std::string& country,const std::string& choice,bool domestic) {
+        auto w=fixture(!domestic);
+        auto& geo=w.seed_geography();
+        if(domestic) {
+            geo.seed_province(3,"RC","A");geo.seed_assignment(3,10);
+        }
+        auto& core=geo.seed_core().seed_core();
+        if(domestic) {
+            core.seed_market("RC","iron",150,1,250);
+            w.seed_route(Route{"domestic","SELLER","BUYER","iron",1,3,5,1});
+        }
+        if(!country.empty()) {
+            core.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+            core.p2_seed_base({"POLICY",country,"trade_policy","national",
+                               choice,"fixture:trade-law"});
+        }
+        return w;
+    };
+    const auto contract=[](int destination) {
+        World::Plan plan;
+        plan[9].push_back([destination](Stage& stage) {
+            TradeContract c;
+            c.id="NEW";c.seller="SELLER";c.buyer="BUYER";c.good="iron";
+            c.origin=1;c.destination=destination;c.contracted=2;c.monthly_limit=2;
+            c.unit_price=100;c.expires=120;
+            stage.create_trade_contract(c);
+        });
+        return plan;
+    };
+    for(const auto* country:{"A","B"}) {
+        auto w=make(country,"law_isolationism",false);
+        const auto before=w.base().core().core().journal();
+        verify(rejects([&]{w.advance(contract(2));}) &&
+               w.month()==100 && w.commerce().contracts.empty() &&
+               w.base().core().core().journal()==before,
+               "isolationism did not reject a new foreign commercial agreement with rollback");
+        w.advance();
+        const auto& core=w.base().core().core();
+        verify(w.commerce().fills.empty() && w.commerce().customs.empty() &&
+               w.commerce().daily_shipments.empty() && core.cash("BUYER")==3000 &&
+               core.cash("SELLER")==100 && core.stock("SELLER","RA","iron")==10,
+               "isolated import/export still dispatched or settled physical commercial trade");
+    }
+    const auto allowed=[&](const std::string& country,const std::string& choice,bool domestic) {
+        auto w=make(country,choice,domestic);
+        w.advance(contract(domestic?3:2));
+        const auto& core=w.base().core().core();
+        verify(w.commerce().contracts.contains("NEW") &&
+               w.commerce().fills.size()==1 && core.cash("BUYER")<3000 &&
+               core.cash("SELLER")>100 && core.stock("SELLER","RA","iron")==5,
+               "unrestricted or domestic commercial route failed to transfer real money and stock");
+    };
+    allowed("","",false);
+    allowed("A","law_mercantilism",false);
+    allowed("A","law_isolationism",true);
+
+    // A real native purchase clears before the law, then lands after it.
+    auto gh=fixture(false);
+    auto& setup=gh.seed_geography().seed_core().seed_core();
+    setup.seed_p1_constitution("B",{P1GovernancePrinciple::monarchy,
+        P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+    gh.seed_route(Route{"native","SELLER","BUYER","iron",1,2,150,1});
+    gh.seed_verified_geographic_link("verified-native-link",1,2,"rail");
+    gh.seed_transport_edge(TransportEdge{"native-rail","CARRIER",1,2,150,1,1,true,
+                                         2,"rail","fixture:verified-edge",100,120});
+    auto day=vic25::daily::World::adopt(std::move(gh),1001);
+    const auto effective=day.day_index()+1;
+    World::Plan change;
+    change[9].push_back([effective](Stage& stage) {
+        auto& core=stage.phase_c();
+        P2Bill bill;
+        bill.id="CLOSE";bill.country="B";bill.proposer="PM_B";
+        bill.action=P2BillAction::enact_or_replace_base;
+        bill.legal_basis="fixture:confirmed-trade-law";
+        bill.effective_day=effective;
+        bill.proposed_base={"CLOSED","B","trade_policy","national",
+                            "law_isolationism","fixture:confirmed-trade-law"};
+        core.p2_submit_bill(bill,effective-1);
+        core.p2_approve_bill("CLOSE",{});
+        core.p2_promulgate_bill("CLOSE","headB",effective-1);
+    });
+    day.advance_day(change);
+    const auto paid=day.engine().base().core().core().cash("BUYER");
+    const auto filled=day.engine().commerce().fills.at(0).quantity;
+    verify(filled>0 && day.engine().commerce().daily_shipments.size()==1,
+           "fixture had no real pre-law commercial dispatch");
+    day.advance_day();
+    verify(day.engine().base().core().core().p2_selected_law("B","trade_policy")=="isolationism" &&
+           day.engine().commerce().fills.size()==1 &&
+           day.engine().base().core().core().cash("BUYER")==paid,
+           "post-law market should not obtain a new paid foreign dispatch");
+    day.advance_day();
+    verify(day.engine().commerce().daily_shipments.empty() &&
+           day.engine().commerce().fills.size()==1 &&
+           day.engine().base().core().core().stock("BUYER","RB","iron")==2+filled &&
+           day.engine().base().core().core().cash("BUYER")==paid,
+           "isolationism stopped previously paid real goods from arriving");
+}
+
 int main() {
     try {
         foreign_contract_split_logistics_and_tariff();
         secured_credit_uses_C_bank_loan_and_repayment();
         insured_loss_compensated_from_real_insurer_cash();
         network_capacity_shared_among_trade_routes();
-        std::cout<<"Phase G extended trade: 4 independent integration scenarios PASS\n";
+        isolationism_blocks_only_new_cross_sovereign_commerce();
+        std::cout<<"Phase G extended trade: 5 independent integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e){
         std::cerr<<"Phase G extended trade FAIL: "<<e.what()<<"\n";

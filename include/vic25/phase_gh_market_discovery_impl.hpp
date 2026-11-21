@@ -65,6 +65,9 @@ inline void Stage::plan_market_discovery() {
             for(const auto& offer:offer_group) {
             if(offer.seller==merchant.trader||
                offer.region==merchant.market_region)continue;
+            const auto from=c.sovereignty(offer.region);
+            const auto to=c.sovereignty(merchant.market_region);
+            if(!commercial_trade_allowed(from,to))continue;
             const auto& source_price=c.market(offer.region,offer.good);
             if(source_price.price<=0||
                (need==production_input_needs_.end()&&
@@ -121,8 +124,6 @@ inline void Stage::plan_market_discovery() {
             const auto& first=trade_.transport_edges.at(candidate->edges.front());
             if(first.carrier==merchant.trader&&first.freight_per_unit>0)
                 continue; // no self-billed freight on existing G settlement
-            const auto from=c.sovereignty(offer.region);
-            const auto to=c.sovereignty(merchant.market_region);
             const Money rate=duty_rate(from,to,offer.good);
             const Money tax_per_unit=phaseb::add_checked(
                 phaseb::mul_checked(source_price.price/1'000'000,rate),
