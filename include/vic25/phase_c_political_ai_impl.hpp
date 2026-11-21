@@ -150,12 +150,13 @@ inline void IntegratedWorld::p1_autonomous_politics(std::int64_t today) {
                 events_.push_back("p1-ai-lawful-political-movement-response:"+crisis_id);
             }
         }
+        const auto tomorrow=p1_pending_.find(today+1);
         if(order.assembly_confidence_required&&
            country_elections_.contains(country)&&
            !p4_parliament_dissolved(country)&&
            (p1_coalitions_.at(country).caretaker||
             p1_legitimacy(country).score<30||election_changed)&&
-           !p1_pending_[today+1].contains(country)) {
+           (tomorrow==p1_pending_.end()||!tomorrow->second.contains(country))) {
             const auto& election=country_elections_.at(country);
             std::vector<std::pair<std::string,People>> parties;
             for(const auto& [id,seats]:election.seats)

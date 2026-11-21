@@ -530,6 +530,95 @@ static void effective_health_institution_and_flat_law_change_daily_mortality() {
           "dated flat mortality effect did not start on actual effective day or survive replay");
 }
 
+static void enacted_education_changes_real_daily_schooling() {
+    auto scenario=[](const std::string& law_choice,int legal_level,
+                     bool funded,const std::string& staff_region,
+                     phaseb::People expected_core,phaseb::People expected_other) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        const std::vector<std::string> regions={"SCHOOL","CORE","DEPENDENCY","UNKNOWN"};
+        geo.seed_unit(1,"A","ADMIN");
+        for(std::size_t i=0;i<regions.size();++i) {
+            geo.seed_province(i+1,regions[i],"A");
+            geo.seed_assignment(i+1,1);
+        }
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",funded?100:0);
+        c.seed_actor("TEACHERS",funded?100:0);
+        c.seed_government("A","HEAD","PRIME",5,3);
+        c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"scenario:school"});
+        c.p1_set_incorporation("SCHOOL",true);
+        c.p1_set_incorporation("CORE",true);
+        c.p1_set_incorporation("DEPENDENCY",false);
+        auto& pop=c.seed_population();
+        for(const auto& region:regions) {
+            const auto h=pop.household_profile({region,"mixed","shared",25'000});
+            const auto e=pop.economic_profile({region,"not_assigned","inactive",
+                                              "ineligible",pop.default_education()});
+            const auto d=pop.demographic_profile({region,23904,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),
+                phaseb::Service::civilian});
+            pop.seed_population(d,e,h,100'000);
+            if(region==staff_region) {
+                const auto paid=pop.economic_profile({region,"teacher","wage","employee",
+                                                     pop.default_education()});
+                const auto adult=pop.demographic_profile({region,23651,phaseb::Sex::male,
+                    "culture","faith","citizen","free",pop.default_health(),
+                    phaseb::Service::civilian});
+                const auto staff=pop.seed_population(adult,paid,h,10);
+                pop.hire(staff,10,"TEACHERS","teacher",10,{});
+            }
+        }
+        law(c,"A","education_system",law_choice);
+        if(legal_level>=0) {
+            c.seed_public_institution("SCHOOLS","TEACHERS","SCHOOL","paper",50,5);
+            c.seed_p1_institution("A","SCHOOLS",P1InstitutionKind::education,5);
+            c.p2_seed_amendment({"effective-school-budget","A:education_system",
+                "scenario:budget","",{{"approved-school-level","SCHOOLS",
+                    P2ClauseKind::public_institution_level,legal_level}}});
+        }
+        phaseb::DemographyRules rates;
+        rates.fertility_ppm=0;
+        rates.child_death_ppm=0;
+        rates.adult_death_ppm=0;
+        rates.illness_incidence_ppm=0;
+        rates.accident_ppm=0;
+        rates.training_ppm=0;
+        rates.primary_access_ppm=310'000;
+        c.enable_demography(rates);
+        auto world=daily::World::adopt(std::move(gh),43);
+        auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+        world.advance_day();
+        replay.advance_day();
+        check(daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+              "education law hazard was not reproducible after reload");
+        const auto& people=world.engine().base().core().core().people();
+        std::map<std::string,phaseb::People> primary;
+        for(const auto& [id,row]:people.slices()) {
+            (void)id;
+            const auto& dem=people.demographic(row.key.demographic);
+            const auto& economic=people.economic(row.key.economic);
+            if(dem.birth_month==23904&&
+               people.education(economic.education).school==phaseb::School::primary)
+                primary[dem.region]+=row.count;
+        }
+        check(primary["DEPENDENCY"]==expected_other&&primary["UNKNOWN"]==expected_other,
+              "education institution leaked outside incorporated areas or lost existing flat access");
+        check(primary["SCHOOL"]==expected_core&&primary["CORE"]==expected_core,
+              "effective national education law did not advance actual cohorts at its legal level");
+    };
+    scenario("no_schools",2,true,"SCHOOL",0,0);
+    scenario("religious_schools",2,true,"SCHOOL",1645,1000);
+    scenario("public_schools",2,true,"SCHOOL",1806,1000);
+    scenario("public_schools",0,true,"SCHOOL",1000,1000);
+    scenario("public_schools",-1,true,"SCHOOL",1000,1000);
+    scenario("public_schools",2,false,"SCHOOL",1000,1000);
+    scenario("public_schools",2,true,"",1000,1000);
+    scenario("public_schools",2,true,"CORE",1000,1000);
+    scenario("terakoya",2,true,"SCHOOL",1806,1806);
+}
+
 int main(){
     try{
         source_ideologies_laws_traits();
@@ -543,6 +632,7 @@ int main(){
         effective_workhouse_amendment_reduces_only_welfare_cost(
             "amendment_workhouse_regulations");
         effective_health_institution_and_flat_law_change_daily_mortality();
+        enacted_education_changes_real_daily_schooling();
         std::cout<<"VIC2.5 POLICY IDENTITY AND REFERENCE DATA PASS\n";
     }catch(const std::exception& e){
         std::cerr<<"POLITICS IDENTITY FAILURE: "<<e.what()<<"\n";

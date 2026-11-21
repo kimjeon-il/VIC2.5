@@ -396,6 +396,10 @@ if(BUILD_TESTING)
     add_executable(vic25_p1_judiciary_tests tests/test_p1_legislature_judiciary.cpp)
     target_link_libraries(vic25_p1_judiciary_tests PRIVATE vic25_core)
     add_test(NAME vic25_p1_judiciary_tests COMMAND vic25_p1_judiciary_tests)
+
+    add_executable(vic25_p1_cabinet_reform_lock_tests tests/test_p1_cabinet_reform_lock.cpp)
+    target_link_libraries(vic25_p1_cabinet_reform_lock_tests PRIVATE vic25_core)
+    add_test(NAME vic25_p1_cabinet_reform_lock_tests COMMAND vic25_p1_cabinet_reform_lock_tests)
 endif()
 
 # P3 and P5 opt-in daily politics: POP attitudes, institutional interest-group

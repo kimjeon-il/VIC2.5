@@ -3963,15 +3963,18 @@ public:
         // modifiers and activated interest-group traits are applied as
         // *rates*, not as extra births, students, jobs or migrants.
         struct PoliticalRates {
-            std::int64_t birth{},school{},migration{},mortality{},healthcare{};
+            std::int64_t birth{},school{},migration{},mortality{};
+            std::int64_t healthcare{},school_institution{};
             bool schools_allowed{true};
         };
         // In the absence of a separate national investment ledger, derive
-        // one real funded, staffed healthcare level per country. Multiple
-        // clinics are evidence of the same institution, not additive levels.
-        std::map<std::string,int> healthcare_levels;
+        // one real funded and staffed level per country and institution
+        // type. Multiple sites are evidence of one level, not additive.
+        using InstitutionKey=std::pair<std::string,P1InstitutionKind>;
+        std::map<InstitutionKey,int> institution_levels;
         for(const auto& [id,link]:p1_institutions_) {
-            if(link.kind!=P1InstitutionKind::healthcare)continue;
+            if(link.kind!=P1InstitutionKind::healthcare&&
+               link.kind!=P1InstitutionKind::education)continue;
             const auto& service=public_institutions_.at(id);
             const auto sovereign=sovereignty_.find(service.region);
             const auto incorporated=p1_incorporation_.find(service.region);
@@ -3979,7 +3982,7 @@ public:
                incorporated==p1_incorporation_.end()||!incorporated->second)
                 continue;
             // The generic capacity view counts all of the operator's
-            // workers. A clinic must have actual non-striking local staff
+            // workers. A service must have actual non-striking local staff
             // before it can evidence a functioning national institution.
             const auto& jobs=people_.jobs();
             const bool local_staff=std::any_of(jobs.begin(),jobs.end(),
@@ -3992,11 +3995,26 @@ public:
                 });
             if(!local_staff)continue;
             const auto active=p1_institution_capacity(id);
-            if(active.usable_slots>0)
-                healthcare_levels[link.country]=std::max(
-                    healthcare_levels[link.country],static_cast<int>(active.level));
+            if(active.usable_slots>0) {
+                auto& level=institution_levels[{link.country,link.kind}];
+                level=std::max(level,static_cast<int>(active.level));
+            }
         }
+        const auto institutional_ppm=[&](const std::string& country,
+                P1InstitutionKind kind,const std::optional<std::string>& law,
+                const char* key)->std::int64_t {
+            if(!law)return 0;
+            const auto level=institution_levels.find({country,kind});
+            if(level==institution_levels.end())return 0;
+            const auto canonical=p2_catalog_canonical_choice(*law);
+            // Direct laws and amendments are in the ordinary active rates.
+            // Only the incremental per-level source value belongs here.
+            const auto delta=p2_catalog_raw_modifier(canonical,key,level->second)-
+                             p2_catalog_raw_modifier(canonical,key,0);
+            return static_cast<std::int64_t>(std::llround(delta*1'000'000.0));
+        };
         constexpr const char* mortality_key="state_mortality_mult";
+        constexpr const char* school_key="state_education_access_add";
         std::map<std::string,PoliticalRates> rates;
         if(!p3_groups_.empty()||!p2_active_base_.empty()||
            !p1_active_mandates_.empty())
@@ -4009,26 +4027,16 @@ public:
                 };
                 const auto education=p2_selected_law(
                     country,"education_system");
-                std::int64_t healthcare=0;
-                if(const auto active=healthcare_levels.find(country);
-                   active!=healthcare_levels.end()) {
-                    if(const auto health_law=p2_selected_law(country,"health_system")) {
-                        const auto canonical=p2_catalog_canonical_choice(*health_law);
-                        // Only the per-level delta belongs here. Flat laws
-                        // and amendments are already included in the current
-                        // active modifier, even when there is no institution.
-                        const auto delta=p2_catalog_raw_modifier(
-                            canonical,mortality_key,active->second)-
-                            p2_catalog_raw_modifier(canonical,mortality_key,0);
-                        healthcare=static_cast<std::int64_t>(
-                            std::llround(delta*1'000'000.0));
-                    }
-                }
+                const auto healthcare=institutional_ppm(
+                    country,P1InstitutionKind::healthcare,
+                    p2_selected_law(country,"health_system"),mortality_key);
+                const auto school_institution=institutional_ppm(
+                    country,P1InstitutionKind::education,education,school_key);
                 rates.emplace(country,PoliticalRates{
                     effect("state_birth_rate_mult"),
-                    effect("state_education_access_add"),
+                    effect(school_key),
                     effect("state_migration_pull_mult"),
-                    p2_modifier_ppm(country,mortality_key),healthcare,
+                    p2_modifier_ppm(country,mortality_key),healthcare,school_institution,
                     education!=std::optional<std::string>("no_schools")});
             }
         phaseb::Engine::RateAdjustment adjustment;
@@ -4046,12 +4054,13 @@ public:
             const std::string metric(kind);
             if(metric=="school") {
                 if(!policy.schools_allowed)return 0;
+                auto access=phaseb::add_checked(policy.school,
+                    p1_local_decree_ppm(juris->second,dem.region,school_key));
+                const auto incorporated=p1_incorporation_.find(dem.region);
+                if(incorporated!=p1_incorporation_.end()&&incorporated->second)
+                    access=phaseb::add_checked(access,policy.school_institution);
                 const auto absolute=std::clamp<std::int64_t>(
-                    phaseb::add_checked(policy.school,
-                        p1_local_decree_ppm(
-                            juris->second,dem.region,
-                            "state_education_access_add")),
-                    -1'000'000,1'000'000);
+                    access,-1'000'000,1'000'000);
                 const auto daily=vic25::daily_budget::increment(
                     std::abs(absolute),day,days_in_month);
                 return static_cast<People>(

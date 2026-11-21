@@ -289,10 +289,36 @@ inline void IntegratedWorld::schedule_p1_cabinet_daily(
            !legal_basis.empty()&&!successor_prime.empty()&&
            governments_.at(country).head_of_state==incumbent_head,
            "P1 invalid cabinet formation");
-    const auto existing=p1_pending_[effective_day].find(country);
-    ensure(existing==p1_pending_[effective_day].end()||
-           !existing->second.replace_prime,
-           "P1 duplicate same-day cabinet transition");
+    if(p2_modifier_ppm(country,"country_block_government_reform_bool")!=0) {
+        const auto* prime=&governments_.at(country).prime_minister;
+        const auto* incumbent=&p1_coalition(country);
+        // Preserve previously authorized cabinets. Continuity is measured
+        // from the one that will hold office immediately before this dated
+        // action, not necessarily the one in office today.
+        auto prior=p1_pending_.lower_bound(effective_day);
+        while(prior!=p1_pending_.begin()) {
+            --prior;
+            const auto found=prior->second.find(country);
+            if(found==prior->second.end()||!found->second.replace_prime)continue;
+            prime=&found->second.new_prime;
+            incumbent=&found->second.coalition;
+            break;
+        }
+        const auto same_members=[](const auto& offered,const auto& current) {
+            return std::is_permutation(offered.begin(),offered.end(),
+                                       current.begin(),current.end());
+        };
+        // A caretaker flag alone cannot disguise a different cabinet.
+        ensure(successor_prime==*prime&&
+               same_members(coalition.ruling_groups,incumbent->ruling_groups)&&
+               same_members(coalition.ruling_parties,incumbent->ruling_parties),
+               "P1 government reform blocked by active law");
+    }
+    if(const auto day=p1_pending_.find(effective_day);day!=p1_pending_.end()) {
+        const auto existing=day->second.find(country);
+        ensure(existing==day->second.end()||!existing->second.replace_prime,
+               "P1 duplicate same-day cabinet transition");
+    }
     p1_check_coalition(coalition);
     const auto authority=p1_authority(country);
     if(authority.assembly_confidence_required) {
