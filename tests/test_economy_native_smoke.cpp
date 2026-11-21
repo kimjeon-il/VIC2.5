@@ -90,6 +90,96 @@ static void greenfield_from_real_cash() {
     check(game.world().engine().base().core().construction(id).accepted_work==1,
           "new private project did not spend real work and material");
 }
+static void greenfield_uses_yesterdays_solvent_demand(bool has_ore,bool solvent) {
+    phasegh::World gh(24000);
+    auto& spatial=gh.seed_geography();
+    spatial.seed_province(1,"R","A");
+    spatial.seed_unit(11,"A","ROOT");
+    spatial.seed_assignment(1,11);
+    auto& d=spatial.seed_core();
+    auto& c=d.seed_core();
+    c.seed_actor("A",10);
+    c.seed_actor("INVESTOR",500);
+    c.seed_actor("BUILDER",20);
+    c.seed_market("R","food",15,1,100,0);
+    c.seed_market("R","ore",2,1,100,0);
+    c.seed_market("R","steel",3,1,100,0);
+    c.seed_stock("BUILDER","R","steel",3);
+    if(has_ore)c.seed_stock("BUILDER","R","ore",4);
+    c.seed_government("A","HEAD","PRIME",5,3);
+    const auto slice=add_worker(gh);
+    auto& pop=c.seed_population();
+    const auto unemp_h=pop.household_profile({"R","unemployed","shared",1});
+    const auto unemp=pop.seed_population(pop.slice(slice).key.demographic,
+        pop.slice(slice).key.economic,unemp_h,1);
+    c.seed_actor("HH:"+std::to_string(pop.slice(unemp).key.household),0);
+    const auto household=pop.slice(slice).key.household;
+    c.seed_actor("HH:"+std::to_string(household),solvent?45:0);
+    pop.hire(slice,1,"BUILDER","worker",30,phaseb::JobRequirements{});
+    p0::Policies policy;
+    policy.monthly_clothing_units_per_person=0;
+    policy.allow_endogenous_investment_credit=false;
+    phased::ConstructionProject project;
+    project.id="APPROVED_FOOD";
+    project.target_site="FOOD_SITE";
+    project.client="INVESTOR";
+    project.contractor="BUILDER";
+    project.region="R";
+    project.material_good="steel";
+    project.work_required=2;
+    project.material_per_work=1;
+    project.workers_per_work=1;
+    project.cash_price_per_work=10;
+    project.target_capacity=50;
+    phased::IndustryRecipe recipe;
+    recipe.id="FOOD_RECIPE";
+    recipe.site=project.target_site;
+    recipe.inputs={{"ore",1}};
+    recipe.outputs={{"food",2}};
+    recipe.workers_per_batch=recipe.capacity_per_batch=1;
+    d.seed_construction(project);
+    d.seed_recipe(recipe);
+    p0::DailyGame game(daily::World::adopt(std::move(gh),9),policy);
+    const auto day1=game.world().day_index();
+    const auto opening=daily::SnapshotCodec::encode(game.world());
+    check(opening.find("VIC25_PHASEC_DAILY_UNMET_1")==std::string::npos,
+          "empty market observation changed the legacy snapshot");
+    game.advance_day();
+    const auto& id=project.id;
+    const auto& after=game.world().engine().base().core();
+    check(after.construction(id).accepted_work==0,
+          "unsold demand cannot start work before it is observed");
+    const auto& market=after.core();
+    check(market.market("R","food").unmet==0,
+          "previous demand leaked into today's live market");
+    check(market.previous_daily_solvent_unmet("R","food",day1+1)==(solvent?1:0),
+          "verified solvent demand did not survive market close");
+    check(market.previous_daily_solvent_unmet("R","food",day1)==0 &&
+          market.previous_daily_solvent_unmet("R","food",day1+2)==0 &&
+          market.previous_daily_solvent_unmet("R","food",0)==0,
+          "market observation escaped its one-day window");
+    const auto snapshot=daily::SnapshotCodec::encode(game.world());
+    check((snapshot.find("VIC25_PHASEC_DAILY_UNMET_1")!=std::string::npos)==solvent,
+          "only positive unmet demand should be stored in daily snapshots");
+    // No new food policy or orders on day two; the retained signal can
+    // guide construction but must never create a retroactive household sale.
+    policy.daily_food_units_per_person=0;
+    auto run_next=[&](daily::World next) {
+        p0::DailyGame replay(std::move(next),policy);
+        replay.advance_day();
+        const auto& final=replay.world().engine().base().core();
+        check(final.construction(id).accepted_work==(has_ore&&solvent?1:0),
+              "yesterday's demand did not authorize only feasible day-two work");
+        check(final.core().previous_daily_solvent_unmet("R","food",day1+2)==0,
+              "a zero-unmet day must expire the old observation");
+        const auto next_snapshot=daily::SnapshotCodec::encode(replay.world());
+        check(next_snapshot.find("VIC25_PHASEC_DAILY_UNMET_1")==std::string::npos,
+              "zero-unmet close persisted an obsolete observation");
+        return next_snapshot;
+    };
+    check(run_next(game.world())==run_next(daily::SnapshotCodec::decode(snapshot)),
+          "saving discarded previous-day investment demand");
+}
 static void priority_and_class_demand() {
     phaseb::World pop(24000);
     const auto h=pop.household_profile({"R","mixed","shared",2});
@@ -202,4 +292,7 @@ int main() {
     endogenous_hiring_production_and_payroll();
     intermediate_goods_are_purchased_not_created();
     greenfield_from_real_cash();
+    greenfield_uses_yesterdays_solvent_demand(true,true);
+    greenfield_uses_yesterdays_solvent_demand(false,true);
+    greenfield_uses_yesterdays_solvent_demand(true,false);
 }

@@ -115,7 +115,8 @@ inline Quote evaluate(const phasec::IntegratedWorld& c,
                       const phasegh::TradeState& trade,
                       const phased::IndustryRecipe& recipe,
                       int day=0,int days=0,
-                      const phased::ConstructionProject* planned=nullptr) {
+                      const phased::ConstructionProject* planned=nullptr,
+                      std::optional<std::int64_t> investment_today=std::nullopt) {
     Quote q;
     q.recipe=recipe.id;
     if(recipe.outputs.empty()||recipe.inputs.empty()||
@@ -153,9 +154,11 @@ inline Quote evaluate(const phasec::IntegratedWorld& c,
     const auto& primary=recipe.outputs.front();
     q.product=primary.good;
     const auto& output_quote=c.market(q.region,primary.good);
-    const Quantity shortage=std::max<Quantity>(
-        output_quote.unmet,std::max<Quantity>(
-            0,output_quote.target_stock-c.stock(q.owner,q.region,primary.good)));
+    const auto previous=investment_today?c.previous_daily_solvent_unmet(
+        q.region,primary.good,*investment_today):0;
+    const Quantity shortage=std::max({
+        output_quote.unmet,previous,
+        output_quote.target_stock-c.stock(q.owner,q.region,primary.good)});
     q.demand_batches=shortage/primary.per_unit+
                      (shortage%primary.per_unit?1:0);
     if(q.demand_batches<=0)return q;

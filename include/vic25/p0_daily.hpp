@@ -1030,6 +1030,11 @@ public:
                     regional_need[{facility.region,product.good}]))});
             autonomous_operating_recipes.insert(chosen);
         }
+        // Production selection (including explicit overrides) also owns
+        // hiring and replenishment. An installed alternative is not a plan.
+        std::set<std::string> planned_operating_recipes;
+        for(const auto& policy:decisions.manufacturers)
+            planned_operating_recipes.insert(policy.recipe);
         // Hire from real regional POP only where an operating recipe
         // demonstrates demand and a locally observed wage. No worker spawn.
         if(decisions.allow_autonomous_recipe_comparison) {
@@ -1082,8 +1087,8 @@ public:
             // employer deposit or labor contract is manufactured.
             std::map<std::tuple<std::string,std::string,std::string>,People> site_jobs;
             std::map<std::pair<std::string,std::string>,Money> regional_wages;
-            for(const auto& [id,recipe]:industry.recipes) {
-                (void)id;
+            for(const auto& recipe_id:planned_operating_recipes) {
+                const auto& recipe=industry.recipes.at(recipe_id);
                 if(!game_c.facilities().contains(recipe.site)||
                    recipe.outputs.empty()||recipe.workers_per_batch<=0||
                    recipe.capacity_per_batch<=0||
@@ -1186,7 +1191,8 @@ public:
                 if(recipe.site!=project.target_site||recipe.outputs.empty())continue;
                 const auto quote=enterprise_ai::evaluate(
                     game_c,industry,world_.engine().base().spatial(),
-                    world_.engine().commerce(),recipe,date.day,dim,&project);
+                    world_.engine().commerce(),recipe,date.day,dim,&project,
+                    world_.day_index());
                 if(!quote.valid || quote.demand_batches<=0)continue;
                 if(!game_c.has_market(project.region,quote.product))continue;
                 const Money capex=times(project.work_required,project.cash_price_per_work);
@@ -1641,7 +1647,7 @@ public:
         for(const auto& investment:decisions.investments) {
             auto work=std::make_shared<Quantity>(0);
             const bool generated=autonomous_projects.contains(investment.construction_project);
-            plan[1].push_back([investment,work,generated,date,dim,
+            plan[1].push_back([investment,work,generated,date,dim,today=world_.day_index(),
                 collateral_credit=decisions.allow_collateralized_enterprise_credit]
                 (phasegh::Stage& gh){
                 const auto& domain=gh.phase_d().state();
@@ -1659,7 +1665,7 @@ public:
                         if(recipe.site!=p.target_site)continue;
                         const auto q=enterprise_ai::evaluate(
                             c,domain,gh.geography().spatial(),
-                            gh.commerce(),recipe,date.day,dim,&p);
+                            gh.commerce(),recipe,date.day,dim,&p,today);
                         if(q.valid && q.product==investment.output_good) {
                             profitable=true;break;
                         }
@@ -2171,13 +2177,14 @@ public:
         // Household essential orders have already been processed first.
         if(decisions.allow_endogenous_input_procurement)
             plan[7].push_back(
-                [regional_need,date,dim](phasegh::Stage& gh) {
+                [regional_need,date,dim,recipes=std::move(planned_operating_recipes)]
+                (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 const auto& domain=gh.phase_d().state();
                 using GoodsKey=std::tuple<std::string,std::string,std::string>;
                 std::map<GoodsKey,Quantity> inputs_wanted;
-                for(const auto& [recipe_id,recipe]:domain.recipes) {
-                    (void)recipe_id;
+                for(const auto& recipe_id:recipes) {
+                    const auto& recipe=domain.recipes.at(recipe_id);
                     if(recipe.inputs.empty()||recipe.outputs.empty()||
                        recipe.needs_retrofit||
                        recipe.requires_same_stage_nonstorable_energy||

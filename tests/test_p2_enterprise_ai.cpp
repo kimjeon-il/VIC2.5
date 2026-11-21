@@ -12,7 +12,7 @@ static phaseb::Id worker(phasegh::World& gh,
                          const std::string& region,
                          const std::string& employer,
                          phaseb::People size=1,
-                         bool employed=true) {
+                         bool employed=true, phasec::Money monthly_wage=30) {
     auto& c=gh.seed_geography().seed_core().seed_core();
     auto& p=c.seed_population();
     const auto h=p.household_profile({region,"shared","shared",size});
@@ -25,7 +25,7 @@ static phaseb::Id worker(phasegh::World& gh,
                                      static_cast<phaseb::Id>(p.slices().size()+1));
     const auto wallet="HH:"+std::to_string(p.slice(id).key.household);
     if(!c.has_actor(wallet))c.seed_actor(wallet,0);
-    if(employed)p.hire(id,size,employer,"worker",30,phaseb::JobRequirements{});
+    if(employed)p.hire(id,size,employer,"worker",monthly_wage,phaseb::JobRequirements{});
     return id;
 }
 static void quote_requires_real_supply_and_verified_route() {
@@ -151,7 +151,7 @@ static void collateralized_autonomous_new_factory() {
           live_factory.outstanding_loan("OWNER")>=25,
           "new enterprise did not finance and consume physical working capital");
 }
-static void selects_best_compatible_factory_recipe() {
+static void selected_recipe_drives_production_hiring_and_restock(bool explicit_override) {
     phasegh::World gh{24000};
     auto& geo=gh.seed_geography();
     geo.seed_province(1,"R","STATE");
@@ -160,25 +160,30 @@ static void selects_best_compatible_factory_recipe() {
     auto& d=geo.seed_core();
     auto& c=d.seed_core();
     c.seed_actor("STATE",0);c.seed_actor("OWNER",150);
+    c.seed_actor("RANCH",0);
     c.seed_government("STATE","HEAD","PM",5,3);
     c.seed_market("R","groceries",30,1,100,10);
     c.seed_market("R","grain",2,1,10);
     c.seed_market("R","meat",20,1,50);
     c.seed_stock("OWNER","R","grain",10);
-    c.seed_stock("OWNER","R","meat",5);
+    c.seed_stock("RANCH","R","meat",5);
+    if(explicit_override)c.seed_stock("OWNER","R","meat",1);
     d.seed_standard_industries();
-    d.seed_building_facility("FOOD","OWNER","R",40,
+    d.seed_building_facility("FOOD","OWNER","R",31,
                             "vic3_115.urban.food_industries");
     phased::IndustryRecipe costly;
     costly.id="COSTLY";costly.site="FOOD";costly.industry_class="MANU";
     costly.inputs={{"grain",1},{"meat",1}};
-    costly.outputs={{"groceries",2}};costly.workers_per_batch=1;
+    costly.outputs={{"groceries",2}};costly.workers_per_batch=2;
     phased::IndustryRecipe cheap=costly;
-    cheap.id="CHEAP";cheap.inputs={{"grain",1}};
+    cheap.id="CHEAP";cheap.inputs={{"grain",1}};cheap.workers_per_batch=1;
     d.seed_building_recipe(costly);
     d.seed_building_recipe(cheap);
-    worker(gh,"R","OWNER");
-    p0::DailyGame game(daily::World::adopt(std::move(gh),9));
+    worker(gh,"R","OWNER",1,true,31);
+    worker(gh,"R","OWNER",2,false);
+    p0::Policies policy;
+    if(explicit_override)policy.manufacturers.push_back({"COSTLY",10});
+    p0::DailyGame game(daily::World::adopt(std::move(gh),9),policy);
     game.advance_day();
     bool cheap_produced=false,costly_produced=false;
     const auto& runs=game.world().engine().base().core().state().actual_production_runs;
@@ -186,8 +191,14 @@ static void selects_best_compatible_factory_recipe() {
         if(run.recipe=="CHEAP")cheap_produced=true;
         if(run.recipe=="COSTLY")costly_produced=true;
     }
-    check(cheap_produced&&!costly_produced,
-          "enterprise AI did not choose the more profitable installed recipe");
+    check(cheap_produced!=explicit_override && costly_produced==explicit_override,
+          explicit_override ? "explicit recipe was not produced" : "selected recipe was not produced");
+    const auto& ledger=game.world().engine().base().core().core();
+    check(ledger.stock("RANCH","R","meat")==(explicit_override?4:5) &&
+          ledger.cash("RANCH")==(explicit_override?20:0),
+          "market purchase did not follow the chosen recipe");
+    check(ledger.phase_d_workforce("OWNER")==(explicit_override?2:1),
+          "enterprise hired labor for an inactive recipe");
 }
 static void sales_fund_expansion_on_an_ordinary_day() {
     auto run = [](phasec::Money shopper_wage, bool funded,
@@ -300,7 +311,8 @@ int main() {
     try {
         quote_requires_real_supply_and_verified_route();
         collateralized_autonomous_new_factory();
-        selects_best_compatible_factory_recipe();
+        selected_recipe_drives_production_hiring_and_restock(false);
+        selected_recipe_drives_production_hiring_and_restock(true);
         sales_fund_expansion_on_an_ordinary_day();
         std::cout<<"P2 enterprise market/logistics/secured construction cases PASS\n";
         return 0;

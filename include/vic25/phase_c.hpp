@@ -2174,6 +2174,13 @@ public:
     // P0 native-day market close. The MonthClose compatibility path must not
     // reprice these same trades or count the same food shortage twice.
     // A small integer price moves no faster than its currency tick permits.
+    [[nodiscard]] Quantity previous_daily_solvent_unmet(
+            const std::string& region,const std::string& good,
+            std::int64_t today) const {
+        if(today<=0||last_positive_daily_unmet_day_!=today-1)return 0;
+        const auto it=previous_daily_unmet_.find({region,good});
+        return it==previous_daily_unmet_.end()?0:it->second;
+    }
     void phase_time_close_daily_markets(std::int64_t day_index) {
         require_stage({11});
         ensure(day_index>=0,"invalid absolute daily market date");
@@ -2195,7 +2202,9 @@ public:
                 unsold_supply[key]=phaseb::add_checked(
                     unsold_supply[key],quantity);
         }
+        previous_daily_unmet_.clear();
         for(auto& [key,m]:markets_) {
+            if(m.unmet>0)previous_daily_unmet_.emplace(key,m.unmet);
             m.stock_offered=std::max(m.stock_offered,
                 phaseb::add_checked(m.delivered,unsold_supply[key]));
             // Keep the native daily ceiling of ~1% instead of a volatile
@@ -2214,6 +2223,7 @@ public:
             m.unmet=0;
             m.stock_offered=0;
         }
+        last_positive_daily_unmet_day_=previous_daily_unmet_.empty()?-1:day_index;
         events_.push_back("daily-market-clearing-closed");
     }
     void household_produce(Id slice,const std::string& good,Quantity output,
@@ -4131,6 +4141,10 @@ public:
         return {start, month(), people_.population(), commit_id_};
     }
     void validate() const {
+        ensure(previous_daily_unmet_.empty()?last_positive_daily_unmet_day_==-1:
+                   last_positive_daily_unmet_day_>=0,"invalid daily market observation date");
+        for(const auto& [key,units]:previous_daily_unmet_)
+            ensure(units>0&&markets_.contains(key),"invalid daily market observation");
         ensure(people_.validate(), "invalid population registry");
         for(const auto& [key,id]:typed_entities_) {
             ensure(id.kind==key.first && id.id!=0 &&
@@ -5077,6 +5091,8 @@ private:
     std::map<std::string,ProductionFacility> facilities_;
     std::map<std::int64_t,std::map<std::string,Quantity>> scheduled_site_repairs_;
     std::map<std::pair<std::string,std::string>, MarketQuote> markets_;
+    std::map<std::pair<std::string,std::string>,Quantity> previous_daily_unmet_;
+    std::int64_t last_positive_daily_unmet_day_{-1};
     std::map<Id, Quantity> household_output_;
     std::map<std::pair<Id,std::string>, Quantity> household_consumed_;
     std::map<std::string, Id> person_anchors_;

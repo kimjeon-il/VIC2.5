@@ -670,6 +670,11 @@ struct SnapshotCodec {
             // The active regional penalty, the journal's incident identity
             // set and 7-day due index are all reconstructed on load.
         }
+        if(!w.previous_daily_unmet_.empty()) {
+            ar(std::string("VIC25_PHASEC_DAILY_UNMET_1"));
+            ar(w.last_positive_daily_unmet_day_);
+            ar(w.previous_daily_unmet_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -690,7 +695,7 @@ struct SnapshotCodec {
              seen_characters=false,seen_political_dynamics=false,
              seen_political_ai=false,seen_political_policies=false,
              seen_separation=false,seen_confidence=false,
-             seen_peacetime_military=false;
+             seen_peacetime_military=false,seen_daily_unmet=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -1023,6 +1028,13 @@ struct SnapshotCodec {
                     throw std::runtime_error(
                         "oversized P5-G regional guerrilla extension");
                 w.p5_guerrilla_rebuild_indexes();
+            } else if(extension=="VIC25_PHASEC_DAILY_UNMET_1"&&!seen_daily_unmet) {
+                seen_daily_unmet=true;
+                ar(w.last_positive_daily_unmet_day_);
+                ar(w.previous_daily_unmet_);
+                if(w.previous_daily_unmet_.empty()||
+                   w.previous_daily_unmet_.size()>w.markets_.size())
+                    throw std::runtime_error("invalid daily market observation extension");
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }
