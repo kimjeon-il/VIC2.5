@@ -1,5 +1,6 @@
 #include "vic25/daily_snapshot.hpp"
 #include "vic25/phase_c_politics_catalog.hpp"
+#include "vic25/phase_c_politics_effect_audit.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -324,6 +325,78 @@ static void military_peasant_levy_restricts_real_conscripts() {
           "military law actual conscripts failed checkpoint replay");
 }
 
+static void effective_workhouse_amendment_reduces_only_welfare_cost(
+        const std::string& amendment_id) {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(1,"A","ADMIN");
+    geo.seed_assignment(1,1);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_actor("A",1000);
+    c.seed_actor("SERVICES",1000);
+    c.seed_government("A","HEAD","PRIME",5,3);
+    c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+        P1PowerDistribution::autocracy,P1LegislatureKind::none,
+        "test:welfare-authority"});
+    c.p1_set_incorporation("R",true);
+    auto& pop=c.seed_population();
+    const auto hh=pop.household_profile({"R","mixed","shared",25'000});
+    const auto worker=pop.economic_profile({
+        "R","worker","wage","employee",pop.default_education()});
+    const auto dem=pop.demographic_profile({
+        "R",23650,phaseb::Sex::female,"culture","faith","citizen",
+        "free",pop.default_health(),phaseb::Service::civilian});
+    pop.seed_population(dem,worker,hh,100'000);
+    c.seed_public_institution("WELFARE","SERVICES","R","food",100,1);
+    c.seed_p1_institution("A","WELFARE",P1InstitutionKind::welfare,2);
+    c.seed_public_institution("POLICE","SERVICES","R","paper",100,1);
+    c.seed_p1_institution("A","POLICE",P1InstitutionKind::policing,1);
+    law(c,"A","welfare","poor_laws");
+    if(amendment_id=="amendment_religious_workhouses")
+        law(c,"A","health_system","charitable_health_system");
+    else
+        law(c,"A","labor_rights","regulatory_bodies");
+    auto world=daily::World::adopt(std::move(gh),42);
+    const auto state=[&]() -> const IntegratedWorld& {
+        return world.engine().base().core().core();
+    };
+    check(state().p1_bureaucracy("A").institution_cost==30,
+          "base welfare (20) and police (10) must be charged normally");
+    phasegh::World::Plan enact;
+    const auto start=world.day_index();
+    enact[9].push_back([&](phasegh::Stage& stage) {
+        auto& live=stage.phase_c();
+        P2Bill bill;
+        bill.id="WORKHOUSE-BILL";
+        bill.country="A";bill.proposer="PRIME";bill.legal_basis="test:workhouse";
+        bill.action=P2BillAction::attach_amendment;
+        bill.effective_day=start+2;
+        bill.proposed_amendment={amendment_id,"A:welfare",
+            "test:workhouse","",{{"welfare-level","WELFARE",
+                P2ClauseKind::public_institution_level,2}}};
+        live.p2_submit_bill(std::move(bill),start);
+        live.p2_approve_bill("WORKHOUSE-BILL",{});
+        live.p2_promulgate_bill("WORKHOUSE-BILL","HEAD",start);
+    });
+    world.advance_day(enact);
+    world.advance_day();
+    check(!state().p2_amendment_active(amendment_id)&&
+          state().p1_bureaucracy("A").institution_cost==30,
+          "not-yet-effective workhouse amendment changed bureaucracy");
+    world.advance_day();
+    static const std::string key=
+        "country_institution_cost_institution_social_security_mult";
+    check(state().p2_amendment_active(amendment_id)&&
+          state().p2_modifier_ppm("A",key)==-100'000,
+          "canonical amendment modifier did not become effective");
+    check(state().p1_bureaucracy("A").institution_cost==28,
+          "effective workhouse law must lower welfare cost to 18 and leave police at 10");
+    check(politics::wired_law_effects().at(key)==
+              "phasec::IntegratedWorld::p1_bureaucracy",
+          "welfare cost consumer missing from law coverage audit");
+}
+
 int main(){
     try{
         source_ideologies_laws_traits();
@@ -332,6 +405,10 @@ int main(){
         abolition_preserves_real_people_and_membership();
         economic_law_restricts_real_company_ownership();
         military_peasant_levy_restricts_real_conscripts();
+        effective_workhouse_amendment_reduces_only_welfare_cost(
+            "amendment_religious_workhouses");
+        effective_workhouse_amendment_reduces_only_welfare_cost(
+            "amendment_workhouse_regulations");
         std::cout<<"VIC2.5 POLICY IDENTITY AND REFERENCE DATA PASS\n";
     }catch(const std::exception& e){
         std::cerr<<"POLITICS IDENTITY FAILURE: "<<e.what()<<"\n";

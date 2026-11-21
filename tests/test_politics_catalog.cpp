@@ -3,6 +3,7 @@
 #include "vic25/phase_c_politics_effect_audit.hpp"
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -123,20 +124,41 @@ static void catalogued_laws_and_stances() {
               P2ClauseKind::peaceful_strike_allowed)==0,
           "anti-strike law must distinguish union association from strikes");
     const auto coverage=politics::audit_ig_traits();
-    std::set<std::string> traits;
-    std::size_t connected=0,unsupported=0;
-    for(const auto& entry:coverage) {
-        traits.insert(entry.trait);
-        if(entry.wired) {
-            ++connected;
-            check(!entry.executor.empty(),"wired trait has no native executor");
-        } else {
-            ++unsupported;
-            check(entry.executor.empty(),"unsupported trait pretends to execute");
+    std::set<std::pair<std::string,std::string>> expected;
+    std::size_t expected_supported=0,expected_unsupported=0;
+    const auto& routes=politics::wired_trait_effects();
+    for(const auto& rule:politics::ig_trait_rules()) {
+        std::istringstream input(rule.encoded);
+        for(std::string token;input>>token;) {
+            const auto colon=token.rfind(':');
+            check(colon!=std::string::npos,"invalid canonical trait modifier");
+            const auto key=token.substr(0,colon);
+            check(expected.emplace(rule.id,key).second,
+                  "duplicate canonical trait modifier");
+            if(routes.contains(key))++expected_supported;
+            else ++expected_unsupported;
         }
     }
-    check(traits.size()==24&&connected>0&&unsupported>0,
-          "trait coverage audit must expose 24 traits and incomplete routes");
+    std::set<std::pair<std::string,std::string>> emitted;
+    std::size_t connected=0,unsupported=0;
+    for(const auto& entry:coverage) {
+        check(emitted.emplace(entry.trait,entry.modifier).second,
+              "duplicate trait modifier audit row");
+        const auto route=routes.find(entry.modifier);
+        if(entry.wired) {
+            ++connected;
+            check(route!=routes.end() && !entry.executor.empty() &&
+                  entry.executor==route->second,
+                  "wired trait has no matching native executor");
+        } else {
+            ++unsupported;
+            check(route==routes.end() && entry.executor.empty(),
+                  "unsupported trait pretends to execute");
+        }
+    }
+    check(connected>0 && connected==expected_supported &&
+          unsupported==expected_unsupported && emitted==expected,
+          "trait audit must exactly cover canonical trait modifiers");
     const auto discontent=politics::active_ig_effects(
         P3GroupType::trade_unions,30,100);
     const auto stable=politics::active_ig_effects(
@@ -157,6 +179,27 @@ static void catalogued_laws_and_stances() {
           politics::default_ideologies(P3GroupType::custom).empty(),
           "non-historical custom IG must not be assigned invented ideology");
 }
+static void trait_only_hostility_does_not_claim_law_coverage() {
+    const auto traits=politics::audit_ig_traits();
+    for(const std::string key:{
+            "state_radicalism_increases_violent_hostility_mult",
+            "state_radicalism_increases_cultural_erasure_mult",
+            "state_radicalism_increases_open_prejudice_mult"}) {
+        check(std::any_of(p2_catalog_115().modifiers.begin(),
+                          p2_catalog_115().modifiers.end(),
+            [&](const auto& row) {
+                return row.source_id=="law_militarized_police" &&
+                       row.key==key && row.institution;
+            }),"militarized-police institution modifier missing from source metadata");
+        check(std::any_of(traits.begin(),traits.end(),[&](const auto& row) {
+                return row.trait=="ig_trait_xenophobia" && row.modifier==key &&
+                       row.wired && !row.executor.empty();
+            }),"xenophobia trait lost its native hostility route");
+        check(!politics::wired_law_effects().contains(key),
+              "trait-only hostility route was reported as law execution");
+    }
+}
+
 static void legal_policies_and_override_priority() {
     auto gh=make_world("laissez_faire");
     auto& c=gh.seed_geography().seed_core().seed_core();
@@ -285,6 +328,7 @@ static void no_new_fictional_leader_or_dynamic_ideology() {
 }
 int main() {
     try {
+        trait_only_hostility_does_not_claim_law_coverage();
         catalogued_laws_and_stances();
         legal_policies_and_override_priority();
         observed_clout_ideology_and_legitimacy();

@@ -244,6 +244,9 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
             case P1InstitutionKind::policing:
                 law_key="country_institution_cost_institution_home_affairs_mult";
                 break;
+            case P1InstitutionKind::welfare:
+                law_key="country_institution_cost_institution_social_security_mult";
+                break;
             default:break;
         }
         auto cost=phaseb::mul_checked(rate,level);

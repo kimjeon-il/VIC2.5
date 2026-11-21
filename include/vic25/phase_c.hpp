@@ -2564,6 +2564,12 @@ public:
         const std::string&,const std::string&,const std::string&,
         Quantity,Money);
     void p1_set_incorporation(const std::string&,bool);
+    [[nodiscard]] std::optional<bool> p1_region_incorporated(
+            const std::string& region) const {
+        const auto found=p1_incorporation_.find(region);
+        if(found==p1_incorporation_.end())return std::nullopt;
+        return found->second;
+    }
     void p1_register_office(P1OfficeEvidence);
     void phase_time_consume_administration_inputs();
     void p1_register_national_building_level(const std::string&,std::uint32_t);

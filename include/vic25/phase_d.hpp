@@ -469,6 +469,32 @@ inline Quantity law_verified_yield(Quantity before,Quantity produced,
     };
     return adjusted(cumulative)-adjusted(before);
 }
+// Only an explicit territorial status and a typed recipe may activate
+// colonial manufacturing modifiers. Raw ResourceSite extraction is separate.
+inline std::int64_t law_unincorporated_recipe_throughput_ppm(
+        const DomainState& state,const phasec::IntegratedWorld& c,
+        const IndustryRecipe& recipe) {
+    const auto& facility=c.facility(recipe.site);
+    if(c.p1_region_incorporated(facility.region).value_or(true))return 0;
+    const auto& country=c.sovereignty(facility.region);
+    if(!c.has_government(country))return 0;
+    const auto lookup=[&](std::string_view sector) {
+        return c.p2_modifier_ppm(country,"building_group_bg_"+
+            std::string(sector)+"_unincorporated_throughput_add");
+    };
+    std::string current=recipe.industry_class;
+    for(int depth=0;depth<12&&!current.empty();++depth) {
+        const auto declared=state.industry_classes.find(current);
+        if(declared==state.industry_classes.end())break;
+        auto sector=std::string_view(current);
+        if(sector.starts_with("bg_"))sector.remove_prefix(3);
+        if(sector=="MANU"||sector=="manufacture")sector="manufacturing";
+        if(sector=="manufacturing"||sector=="plantations"||sector=="rubber"||
+           sector=="logging"||sector=="mining")return lookup(sector);
+        current=declared->second.parent;
+    }
+    return 0;
+}
 // Industry-class parents are explicit Phase D taxonomy: do not assign a
 // plantation/farm law to an unknown mine from the name of its output good.
 inline double law_industry_throughput(const DomainState& state,
@@ -477,11 +503,8 @@ inline double law_industry_throughput(const DomainState& state,
     const auto& country=c.sovereignty(facility.region);
     std::string current=recipe.industry_class;
     std::set<std::string> visited;
-    double bonus=0;
-    const bool unincorporated=false; // no region-level incorporation evidence in current E
-    if(unincorporated)
-        bonus+=c.p2_region_modifier_value(facility.region,
-            "building_unincorporated_throughput_add");
+    double bonus=static_cast<double>(
+        law_unincorporated_recipe_throughput_ppm(state,c,recipe))/1'000'000.0;
     for(int depth=0;depth<12&&!current.empty()&&
             visited.insert(current).second;++depth) {
         const auto alias=current=="manufacture"?"manufacturing":
@@ -495,16 +518,6 @@ inline double law_industry_throughput(const DomainState& state,
         if(alias=="arts")
             bonus+=c.p2_region_modifier_value(facility.region,
                 "building_art_academy_throughput_add");
-        if(unincorporated) {
-            // Every law effect applies to a concrete, verified industry
-            // class; no automatic bonus for an untyped factory.
-            const auto kind=alias=="extraction"?"mining":alias;
-            if(kind=="manufacturing"||kind=="plantations"||
-               kind=="logging"||kind=="mining"||kind=="rubber")
-                bonus+=c.p2_region_modifier_value(facility.region,
-                    "building_group_bg_"+kind+
-                    "_unincorporated_throughput_add");
-        }
         const auto parent=state.industry_classes.find(current);
         if(parent==state.industry_classes.end())break;
         current=parent->second.parent;
@@ -1075,21 +1088,26 @@ public:
                 return "building_group_bg_mining_throughput_add";
             return "";
         }();
-        std::int64_t multiplier=1'000'000;
+        const auto colonial=law_unincorporated_recipe_throughput_ppm(d_,c_,r);
+        auto bonus=colonial;
         if(!production_group.empty()) {
             const auto country=c_.sovereignty(f.region);
             if(c_.has_government(country))
-                multiplier=std::clamp<std::int64_t>(
-                    1'000'000+phaseb::add_checked(
-                        c_.p2_modifier_ppm(country,production_group),
-                        c_.p3_trait_modifier_ppm(country,production_group)),
-                    0,2'000'000);
+                bonus=phaseb::add_checked(bonus,phaseb::add_checked(
+                    c_.p2_modifier_ppm(country,production_group),
+                    c_.p3_trait_modifier_ppm(country,production_group)));
         }
+        const auto multiplier=std::clamp<std::int64_t>(
+            phaseb::add_checked(1'000'000,bonus),0,2'000'000);
         const auto adjusted=[&](Quantity per_unit)->Quantity {
             const auto normal=product(batches,per_unit);
-            return phaseb::add_checked(
+            const auto rounded=phaseb::add_checked(
                 phaseb::mul_checked(normal/1'000'000,multiplier),
                 phaseb::mul_checked(normal%1'000'000,multiplier)/1'000'000);
+            // Whole-unit granularity: a debuff may not invalidate a real
+            // one-unit process the existing transform requires to be positive.
+            return colonial<0&&multiplier>0&&normal>0?
+                std::max<Quantity>(1,rounded):rounded;
         };
         for(const auto& x:r.outputs)outputs.emplace_back(x.good,adjusted(x.per_unit));
         for(const auto& x:r.byproducts)

@@ -75,6 +75,7 @@ inline const std::map<std::string,std::string>& wired_law_effects() {
         {"country_institution_cost_institution_health_system_mult","phasec::IntegratedWorld::p1_bureaucracy"},
         {"country_institution_cost_institution_schools_mult","phasec::IntegratedWorld::p1_bureaucracy"},
         {"country_institution_cost_institution_home_affairs_mult","phasec::IntegratedWorld::p1_bureaucracy"},
+        {"country_institution_cost_institution_social_security_mult","phasec::IntegratedWorld::p1_bureaucracy"},
         {"country_military_tech_research_speed_mult","p0_daily::research"},
         {"country_production_tech_research_speed_mult","p0_daily::research"},
         {"country_society_tech_research_speed_mult","p0_daily::research"},
@@ -104,10 +105,12 @@ inline const std::map<std::string,std::string>& wired_law_effects() {
         {"building_group_bg_agriculture_throughput_add","phase_d::run_recipe"},
         {"building_group_bg_plantations_throughput_add","phase_d::run_recipe"},
         {"building_group_bg_ranching_throughput_add","phase_d::run_recipe"},
-        {"state_infrastructure_mult","phasegh::Stage::effective_edge_capacity"},
-        {"state_radicalism_increases_violent_hostility_mult","phase_c::p3_daily_react"},
-        {"state_radicalism_increases_cultural_erasure_mult","phase_c::p3_daily_react"},
-        {"state_radicalism_increases_open_prejudice_mult","phase_c::p3_daily_react"}
+        {"building_group_bg_manufacturing_unincorporated_throughput_add","phased::Stage::manufacture (typed recipes only)"},
+        {"building_group_bg_plantations_unincorporated_throughput_add","phased::Stage::manufacture (typed recipes only)"},
+        {"building_group_bg_rubber_unincorporated_throughput_add","phased::Stage::manufacture (typed recipes only)"},
+        {"building_group_bg_logging_unincorporated_throughput_add","phased::Stage::manufacture (typed recipes only)"},
+        {"building_group_bg_mining_unincorporated_throughput_add","phased::Stage::manufacture (typed recipes only)"},
+        {"state_infrastructure_mult","phasegh::Stage::effective_edge_capacity"}
     };
     return routes;
 }
