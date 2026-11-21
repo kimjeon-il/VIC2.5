@@ -27,13 +27,18 @@ static void greenfield_from_real_cash() {
     c.seed_actor("A",10);
     c.seed_actor("INVESTOR",500);
     c.seed_actor("BUILDER",20);
-    c.seed_market("R","food",15,1,100,0);
+    c.seed_market("R","food",15,1,100,1);
     c.seed_market("R","ore",2,1,100,0);
     c.seed_market("R","steel",3,1,100,0);
     c.seed_stock("BUILDER","R","steel",3);
+    c.seed_stock("BUILDER","R","ore",4);
     c.seed_government("A","HEAD","PRIME",5,3);
     const auto slice=add_worker(gh);
     auto& pop=c.seed_population();
+    const auto unemp_h=pop.household_profile({"R","unemployed","shared",1});
+    const auto unemp=pop.seed_population(pop.slice(slice).key.demographic,
+        pop.slice(slice).key.economic,unemp_h,1);
+    c.seed_actor("HH:"+std::to_string(pop.slice(unemp).key.household),0);
     const auto household=pop.slice(slice).key.household;
     c.seed_actor("HH:"+std::to_string(household),45);
     pop.hire(slice,1,"BUILDER","worker",10,phaseb::JobRequirements{});
@@ -170,15 +175,27 @@ static void intermediate_goods_are_purchased_not_created() {
     game.advance_day();
     const auto& day1=game.world().engine().base().core().core();
     check(day1.people().employed(slice)==1,"industry did not hire real labor");
-    check(day1.stock("FACTORY","R","ore")==1 &&
-          day1.stock("MINE","R","ore")==4,
-          "same-region input procurement created or lost ore");
+    // The first purchase supplies today's run; the late purchase restocks
+    // one input that can be used tomorrow. Both must reach the real seller.
+    const auto verify_procurement = [&](Quantity expected_batches) {
+        const auto& industrial=game.world().engine().base().core();
+        const auto& ledger=industrial.core();
+        Quantity used_ore=0;
+        for(const auto& run:industrial.state().actual_production_runs)
+            if(run.recipe=="PROCESS")used_ore+=run.batches;
+        const auto factory_ore=ledger.stock("FACTORY","R","ore");
+        const auto mine_ore=ledger.stock("MINE","R","ore");
+        check(used_ore==expected_batches,"purchased ore did not feed real production");
+        check(factory_ore+mine_ore+used_ore==5,
+              "same-region input procurement created or lost ore");
+        check(ledger.cash("MINE")==5-mine_ore,
+              "mine did not receive actual payment for the ore sold");
+    };
+    check(day1.stock("FACTORY","R","ore")==1 && day1.stock("MINE","R","ore")==3,
+          "same-day production and replenishment did not each buy one input");
+    verify_procurement(1);
     game.advance_day();
-    const auto& day2=game.world().engine().base().core().core();
-    check(!game.world().engine().base().core().state().actual_production_runs.empty(),
-          "input bought yesterday could not enter real production");
-    check(day2.stock("MINE","R","ore")<=4,
-          "industrial materials were multiplied by procurement");
+    verify_procurement(2);
 }
 int main() {
     priority_and_class_demand();

@@ -5,6 +5,7 @@
 #include "vic25/p2_enterprise_ai.hpp"
 #include "vic25/day_budget.hpp"
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <limits>
 #include <iterator>
@@ -13,6 +14,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -3187,7 +3189,7 @@ public:
         // blueprint instead of blindly cloning the first recipe. A new
         // project has no site or output until the original D-C ledger
         // finances and commissions it on subsequent days.
-        if(decisions.allow_endogenous_factory_expansion && date.day==1)
+        if(decisions.allow_endogenous_factory_expansion)
             plan[9].push_back([reserve=decisions.autonomous_factory_cash_reserve,
                               credit=decisions.allow_collateralized_enterprise_credit,
                               date,dim,today=world_.day_index()](phasegh::Stage& gh) {
@@ -3197,9 +3199,53 @@ public:
                     std::string project,recipe;
                     Money score{},approved_credit{},operating_reserve{};
                 };
+                // The saved ID carries the proposal date and original owner;
+                // sale or nationalization can change the construction client.
+                constexpr std::string_view prefix="AUTO:PROJECT:";
+                constexpr std::string_view version="DAILY:";
+                const auto month_start=today-(date.day-1);
+                std::set<std::string> owners_already_proposed;
+                for(auto it=domain.constructions.lower_bound(std::string(prefix));
+                    it!=domain.constructions.end() && it->first.starts_with(prefix);++it) {
+                    const auto& id=it->first;
+                    const auto last_colon=id.rfind(':');
+                    if(last_colon<prefix.size())continue;
+                    daily::DayIndex proposed{};
+                    const auto* end=id.data()+id.size();
+                    const auto parsed=std::from_chars(id.data()+last_colon+1,end,proposed);
+                    if(parsed.ec!=std::errc{} || parsed.ptr!=end ||
+                       proposed<month_start || proposed>today)continue;
+                    const std::string_view key(id.data()+prefix.size(),
+                                               id.size()-prefix.size());
+                    if(!key.starts_with(version)) {
+                        // Existing monthly saves only recorded the project ID.
+                        owners_already_proposed.insert(it->second.client);
+                        continue;
+                    }
+                    const auto colon=key.find(':',version.size());
+                    if(colon==key.npos)continue;
+                    std::size_t owner_size{};
+                    const auto size=std::from_chars(key.data()+version.size(),
+                                                    key.data()+colon,owner_size);
+                    if(size.ec!=std::errc{} || size.ptr!=key.data()+colon ||
+                       owner_size==0 || owner_size>=key.size()-colon-1 ||
+                       key[colon+1+owner_size]!=':')continue;
+                    owners_already_proposed.emplace(key.substr(colon+1,owner_size));
+                }
+                // Build the live recipe index once, rather than scanning
+                // every recipe for every factory on every calendar day.
+                using RecipeEntry=decltype(domain.recipes)::value_type;
+                std::map<std::string_view,std::vector<const RecipeEntry*>> recipes_by_site;
+                for(const auto& entry:domain.recipes) {
+                    const auto& r=entry.second;
+                    if(!r.tech_id.empty()||r.outputs.empty()||r.needs_retrofit||
+                       r.requires_same_stage_nonstorable_energy)continue;
+                    recipes_by_site[r.site].push_back(&entry);
+                }
                 std::map<std::string,Candidate> best_by_owner;
                 for(const auto& [id,p]:domain.constructions) {
-                    if(!p.commissioned||p.permit_required||p.inspection_required||
+                    if(owners_already_proposed.contains(p.client)||
+                       !p.commissioned||p.permit_required||p.inspection_required||
                        p.allow_accrued_invoice_commission||
                        c.firm_bankrupt(p.client)||c.firm_bankrupt(p.contractor)||
                        p.work_required<=0||p.cash_price_per_work<=0||
@@ -3215,16 +3261,17 @@ public:
                             c,gh.commerce(),p.client):0;
                     if(phaseb::add_checked(cash,unused_credit)<
                        phaseb::add_checked(capex,reserve))continue;
-                    for(const auto& [rid,r]:domain.recipes) {
-                        if(r.site!=p.target_site||r.tech_id.size()||
-                           r.needs_retrofit||r.requires_same_stage_nonstorable_energy)
-                            continue;
+                    const auto recipes=recipes_by_site.find(p.target_site);
+                    if(recipes==recipes_by_site.end())continue;
+                    for(const auto* entry:recipes->second) {
+                        const auto& [rid,r]=*entry;
+                        const auto& product=r.outputs.front().good;
+                        if(!c.has_market(p.region,product)||
+                           c.market(p.region,product).unmet<=0)continue;
                         const auto quote=enterprise_ai::evaluate(
                             c,domain,gh.geography().spatial(),gh.commerce(),
                             r,date.day,dim);
-                        if(!quote.valid || !c.has_market(p.region,quote.product) ||
-                           c.market(p.region,quote.product).unmet<=0)
-                            continue;
+                        if(!quote.valid)continue;
                         const Quantity candidate_batches=std::min({
                             quote.feasible_supply_batches,quote.demand_batches,
                             p.target_capacity/r.capacity_per_batch});
@@ -3259,8 +3306,8 @@ public:
                 // tie break. Credit remains a FUTURE draw, never a Stage9
                 // deposit or a fabricated construction WIP balance.
                 for(const auto& [owner,choice]:best_by_owner) {
-                    (void)owner;
-                    const auto key=choice.project+":"+std::to_string(today);
+                    const auto key=std::string(version)+std::to_string(owner.size())+
+                        ":"+owner+":"+choice.project+":"+std::to_string(today);
                     (void)gh.phase_d().propose_firm_expansion(
                         choice.project,choice.recipe,key,
                         choice.operating_reserve,choice.approved_credit);

@@ -189,11 +189,119 @@ static void selects_best_compatible_factory_recipe() {
     check(cheap_produced&&!costly_produced,
           "enterprise AI did not choose the more profitable installed recipe");
 }
+static void sales_fund_expansion_on_an_ordinary_day() {
+    auto run = [](phasec::Money shopper_wage, bool funded,
+                  const std::string& proposer, const std::string& current_owner) {
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","STATE");
+        geo.seed_unit(11,"STATE","STATE-ROOT");
+        geo.seed_assignment(1,11);
+        auto& d=geo.seed_core();
+        auto& c=d.seed_core();
+        c.seed_actor("STATE",0);
+        c.seed_government("STATE","HEAD","PM",5,3);
+        c.seed_actor("OWNER",20);
+        c.seed_actor("BUILDER",1000);
+        c.seed_market("R","food",10,10,10);
+        c.seed_market("R","ore",1,1,1);
+        c.seed_market("R","steel",1,1,1);
+        c.seed_production_facility("FARM","OWNER","R",31);
+        c.seed_stock("OWNER","R","ore",31);
+        c.seed_stock("BUILDER","R","steel",8);
+        auto add_worker = [&](const std::string& employer, phasec::Money wage) {
+            auto& pop=c.seed_population();
+            const auto h=pop.household_profile({"R",employer,"shared",1});
+            const auto e=pop.economic_profile({"R","worker","wage","employee",
+                                               pop.default_education()});
+            const auto dem=pop.demographic_profile({"R",23700,phaseb::Sex::female,
+                "culture","faith","citizen","free",pop.default_health(),
+                phaseb::Service::civilian});
+            const auto slice=pop.seed_population(dem,e,h,1);
+            const auto wallet="HH:"+std::to_string(h);
+            c.seed_actor(wallet,0);
+            pop.hire(slice,1,employer,"worker",wage,phaseb::JobRequirements{});
+            return wallet;
+        };
+        add_worker("OWNER",3*31);
+        const auto shopper=add_worker("BUILDER",shopper_wage*31);
+        phased::ConstructionProject p;
+        p.id="BUILT_FARM";p.client="OWNER";p.contractor="BUILDER";
+        p.region="R";p.target_site="FARM";p.material_good="steel";
+        p.work_required=p.material_per_work=p.workers_per_work=1;
+        p.cash_price_per_work=30;p.target_capacity=31;
+        p.accepted_work=p.paid_work=p.capitalized_work=1;
+        p.capitalized_value=30;p.commissioned=true;
+        d.seed_construction(p);
+        if(!current_owner.empty()) {
+            // A commissioned project still uses the owner's monthly allowance.
+            const auto day=daily::to_day_index(daily::from_legacy_month(gh.month()));
+            auto prior=p;
+            const auto legacy_key="OLDER_TEMPLATE:"+std::to_string(day);
+            prior.id="AUTO:PROJECT:"+(proposer.empty()?legacy_key:
+                "DAILY:"+std::to_string(proposer.size())+":"+proposer+":"+legacy_key);
+            prior.client=current_owner;
+            prior.target_site="ALREADY_EXPANDED";
+            c.seed_production_facility(prior.target_site,prior.client,"R",31);
+            d.seed_construction(prior);
+        }
+        const auto initial_projects=current_owner.empty()?1u:2u;
+        phased::IndustryRecipe recipe;
+        recipe.id="MAKE_FOOD";recipe.site="FARM";
+        recipe.inputs={{"ore",1}};recipe.outputs={{"food",1}};
+        recipe.workers_per_batch=recipe.capacity_per_batch=1;
+        d.seed_recipe(recipe);
+        p0::Policies policy;
+        policy.daily_food_units_per_person=3;
+        policy.monthly_clothing_units_per_person=0;
+        policy.allow_endogenous_input_procurement=false;
+        policy.allow_endogenous_investment_credit=false;
+        policy.allow_collateralized_enterprise_credit=false;
+        p0::DailyGame game(daily::World::adopt(std::move(gh),19),policy);
+        game.advance_day();
+        const auto& day1=game.world().engine().base().core();
+        check(day1.state().constructions.size()==initial_projects,
+              "unfunded expansion proposed on day one");
+        check(day1.core().cash("OWNER")== (funded?27:17),
+              "day-one paid wage and real sale did not balance");
+        check(game.world().date().day==2,"test did not reach an ordinary day");
+        const auto proposal_day=game.world().day_index();
+        game.advance_day();
+        const auto& day2=game.world().engine().base().core();
+        check(day2.core().stock("OWNER","R","ore")==29,
+              "the existing farm did not consume physical inputs on both days");
+        check(day2.core().cash(shopper)==(funded?10:6),
+              "empty household wallet did not receive payroll and pay for consumption");
+        check(day2.core().cash("OWNER")== (funded?34:14),
+              "actual sales did not reach the enterprise cash balance");
+        const auto count=day2.state().constructions.size();
+        const bool owner_used_quota=proposer=="OWNER" ||
+            (proposer.empty()&&current_owner=="OWNER");
+        if(funded&&!owner_used_quota) {
+            check(count==initial_projects+1,
+                  "cash-backed expansion on day two did not follow real household sales");
+            const auto id="AUTO:PROJECT:DAILY:5:OWNER:BUILT_FARM:"+
+                std::to_string(proposal_day);
+            const auto& proposal=day2.construction(id);
+            check(proposal.accepted_work==0 && proposal.capitalized_value==0 &&
+                  !day2.core().facilities().contains(proposal.target_site),
+                  "a proposal granted unearned WIP or a free factory");
+        } else
+            check(count==initial_projects,
+                  "expansion ignored actual funds or the one-proposal monthly limit");
+    };
+    run(3,false,"","");
+    run(16,true,"","");
+    run(16,true,"","OWNER"); // proposal saved by the old monthly scheduler
+    run(16,true,"OWNER","BUILDER"); // the due allowance stays with the proposer
+    run(16,true,"BUILDER","OWNER"); // buying a factory does not spend an allowance
+}
 int main() {
     try {
         quote_requires_real_supply_and_verified_route();
         collateralized_autonomous_new_factory();
         selects_best_compatible_factory_recipe();
+        sales_fund_expansion_on_an_ordinary_day();
         std::cout<<"P2 enterprise market/logistics/secured construction cases PASS\n";
         return 0;
     }catch(const std::exception& e) {
