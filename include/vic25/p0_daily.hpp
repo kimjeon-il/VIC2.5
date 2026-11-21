@@ -2174,6 +2174,9 @@ public:
         for(const auto& credit:decisions.debt_service)
             plan[8].push_back([credit](phasegh::Stage& gh){
                 auto& c=gh.phase_c();
+                // A scheduled payment cannot divert fresh Stage7 receipts
+                // while the borrower's earned payroll remains unpaid.
+                if(c.outstanding_worker_wages(credit.borrower)>0)return;
                 const Money debt=c.outstanding_loan(credit.borrower);
                 const Money available=c.phase_d_cash_available(credit.borrower);
                 if(debt<=0||available<=credit.minimum_cash_reserve)return;
@@ -3114,8 +3117,8 @@ public:
                     }
                     if(pledged_credit)continue;
                     const auto view=c.firm_finance(f.owner);
-                    if(view.outstanding_bank_loan<=0||view.book_surplus<=0||
-                       view.available_cash<=2)continue;
+                    if(view.outstanding_wages>0||view.outstanding_bank_loan<=0||
+                       view.book_surplus<=0||view.available_cash<=2)continue;
                     const Money reserve=std::max<Money>(
                         view.expenses/30,view.available_cash/2);
                     if(view.available_cash<=reserve)continue;

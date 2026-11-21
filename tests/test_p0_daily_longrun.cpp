@@ -786,11 +786,108 @@ static void refinance_only_matured_sovereign_principal_with_existing_cash() {
     verify_unpaid(capped);
 }
 
+static void late_sale_cash_pays_earned_wages_before_bank_service() {
+    using namespace phasec;
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(1,"A","ROOT");
+    geo.seed_assignment(1,1);
+    auto& ledger=geo.seed_core().seed_core();
+    ledger.seed_government("A","HEAD","PM",5,3);
+    ledger.seed_actor("A",0);
+    ledger.seed_actor("FIRM",0);
+    ledger.seed_actor("SUPPLIER",0);
+    ledger.seed_actor("CUSTOMER",500);
+    ledger.seed_market("R","widgets",500,500,500);
+    ledger.seed_stock("FIRM","R","widgets",1);
+    ledger.seed_production_facility("SITE","FIRM","R",1);
+    ledger.seed_annual_bank_interest_ppm(1'000'000);
+    auto& pop=ledger.seed_population();
+    const auto hh=pop.household_profile({"R","mixed","shared",3});
+    const auto wallet="HH:"+std::to_string(hh);
+    ledger.seed_actor(wallet,0);
+    const auto econ=pop.economic_profile({"R","worker","wage","employee",
+        pop.default_education()});
+    const auto demo=pop.demographic_profile({"R",24000-300,
+        phaseb::Sex::female,"culture","faith","citizen","free",
+        pop.default_health(),phaseb::Service::civilian});
+    const auto worker=pop.seed_population(demo,econ,hh,3,1);
+    pop.hire(worker,1,"FIRM","worker",310,{});
+    auto opening=daily::World::adopt(std::move(gh),319);
+    phasegh::World::Plan origin;
+    origin[1].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().lend("FIRM",365);
+    });
+    origin[5].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().pay("FIRM","SUPPLIER",365);
+    });
+    opening.advance_day(origin);
+    const auto saved=daily::SnapshotCodec::encode(opening);
+    phasegh::World::Plan late_sale;
+    late_sale[7].push_back([](phasegh::Stage& stage) {
+        auto& c=stage.phase_c();
+        check(c.cash("FIRM")==0&&c.outstanding_worker_wages("FIRM")==10,
+              "the real job must earn unpaid wages before the late cash arrives");
+        check(c.clear_consumer_market("FIRM","CUSTOMER","R","widgets",1)==1,
+              "late revenue must transfer existing goods and cash");
+    });
+    const auto core=[](const p0::DailyGame& game)->const IntegratedWorld& {
+        return game.world().engine().base().core().core();
+    };
+    std::string failures;
+    for(const std::string_view mode:{"manual-principal","endogenous-principal","interest"}) {
+        p0::Policies policy;
+        policy.daily_food_units_per_person=0;
+        policy.allow_endogenous_debt_repayment=mode=="endogenous-principal";
+        if(mode=="manual-principal")policy.debt_service.push_back({"FIRM",0,50});
+        p0::DailyGame game(daily::SnapshotCodec::decode(saved),policy);
+        game.advance_day(late_sale);
+        const auto& held=core(game);
+        check(held.cash(wallet)==0&&held.cash("CUSTOMER")==0&&
+              held.stock("CUSTOMER","R","widgets")==1&&
+              held.outstanding_worker_wages("FIRM")==10&&
+              held.financial().balanced(),
+              "sale, unpaid wage and balanced accounting must remain physical and exact");
+        if(held.outstanding_loan("FIRM")!=365||held.cash("FIRM")!=500||
+           held.financial().balance("BANK:interest_receivable")!=2) {
+            failures+=std::string(mode)+" [principal="+
+                std::to_string(held.outstanding_loan("FIRM"))+
+                ", cash="+std::to_string(held.cash("FIRM"))+
+                ", booked unpaid interest="+std::to_string(
+                    held.financial().balance("BANK:interest_receivable"))+"]; ";
+            continue;
+        }
+        bool wages_paid_before_credit=false;
+        phasegh::World::Plan observe;
+        observe[7].push_back([&](phasegh::Stage& stage) {
+            const auto& c=stage.phase_c();
+            // Two gross 10 wages use the actual default 10% withholding.
+            wages_paid_before_credit=c.cash(wallet)==18&&c.cash("A")==2&&
+                c.cash("FIRM")==480&&
+                c.outstanding_worker_wages("FIRM")==0&&
+                c.outstanding_loan("FIRM")==365&&
+                c.financial().balance("BANK:interest_receivable")==2;
+        });
+        game.advance_day(observe);
+        const auto& next=core(game);
+        check(wages_paid_before_credit&&next.cash(wallet)==18&&next.cash("A")==2&&
+              (mode=="interest"?next.outstanding_loan("FIRM")==365:
+                                next.outstanding_loan("FIRM")<365)&&
+              next.financial().balance("BANK:interest_receivable")==0&&
+              next.cash("FIRM")<480&&next.financial().balanced(),
+              "next Stage5 must actually pay earned wages before ordinary loan service resumes");
+    }
+    if(!failures.empty())
+        throw std::runtime_error("late-sale cash bypassed unpaid earned wages: "+failures);
+}
+
 int main(){
     try{
         automatic_sovereign_budget_uses_laws_effective_today();
         automatic_budget_retains_real_coupon_only_financing();
         refinance_only_matured_sovereign_principal_with_existing_cash();
+        late_sale_cash_pays_earned_wages_before_bank_service();
         public_health_budget_and_treatment_require_eligible_clinics();
         std::string failures;
         for(const auto* extra:{"seeded-closed","law-closed","self-recipient"})

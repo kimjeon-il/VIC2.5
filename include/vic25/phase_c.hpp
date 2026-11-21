@@ -3230,7 +3230,16 @@ public:
                 {"BANK:interest_revenue",0,interest}}});
             events_.push_back("daily-bank-interest-accrued");
         }
+        // Sales occurring after Stage5 can leave real cash but still-unpaid
+        // earned wages. Keep the interest claim accrued, not paid ahead of
+        // payroll; the next lawful wage settlement retains priority.
+        std::set<std::string> wage_arrears_employers;
+        for(const auto& [id,claim]:wage_arrears_) {
+            (void)id;
+            if(claim.outstanding>0)wage_arrears_employers.insert(claim.employer);
+        }
         for(const auto& debtor:actors_) {
+            if(wage_arrears_employers.contains(debtor))continue;
             const auto payable=account(debtor,"interest_payable");
             if(!money_.has_account(payable))continue;
             const Money due=-money_.balance(payable);
