@@ -393,8 +393,25 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
         ++lawful_order_ceiling;
     }
     check(lawful_order_ceiling==8,"expected exactly eight paid private order ceiling sources");
-    check(canonical_law_row_evidence().size()==444,
-          "expected all exact sources including the eight paid private order ceilings");
+    std::size_t original_paid_research=0;
+    for(const auto& row:audit) {
+        if(row.source.key!="country_tech_research_speed_mult")continue;
+        check(row.source.source_id=="law_terakoya"&&row.normalized_value==-100'000&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="p0::DailyGame (paid original laboratory work)"&&
+              row.behavior_test=="test_p0_daily::enacted_terakoya_slows_actual_paid_original_research"&&
+              !row.source.institution&&!row.source.sponsor&&!row.source.boolean,
+              "general research evidence must be the exact law and original lab");
+        auto wrong=row.source;
+        wrong.sponsor=true;
+        check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).status==
+              CanonicalLawRowStatus::no_recorded_path,
+              "direct original research evidence leaked to sponsor");
+        ++original_paid_research;
+    }
+    check(original_paid_research==1,"expected exactly one unqualified research-speed law");
+    check(canonical_law_row_evidence().size()==445,
+          "expected exact sources including national original paid research");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
         "state_shopkeepers_investment_pool_efficiency_mult",

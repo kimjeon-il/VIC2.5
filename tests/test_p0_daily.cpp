@@ -713,87 +713,182 @@ static void native_autonomous_extraction_physical_flow() {
 }
 
 
-static void production_research_speed_requires_actual_economic_law() {
-    enum class Scope { actual, local, custom, foreign, none };
-    const auto run=[](Scope scope,const char* discipline,int first,int days,bool trait=false) {
-        using namespace phasec;
-        auto gh=fixture();
-        auto& geo=gh.seed_geography();
-        geo.seed_province(88,"FOREIGN","B");geo.seed_unit(88,"B","Root B");geo.seed_assignment(88,88);
-        auto& d=geo.seed_core();auto& core=d.seed_core();
-        core.seed_actor("B",100);core.seed_government("B","HB","PB",5,3);
-        for(const auto* nat:{"A","B"})
-            core.seed_p1_constitution(nat,{P1GovernancePrinciple::monarchy,
-                P1PowerDistribution::autocracy,P1LegislatureKind::none,"test:constitution"});
-        if(scope!=Scope::none) {
-            const bool fake=scope==Scope::local||scope==Scope::custom;
-            P2BaseLaw law{"INDUSTRY",scope==Scope::foreign?"B":"A",
-                fake?"legacy_industry":"economic_system",scope==Scope::local?"R":"national",
-                "law_industry_banned","test:source"};
-            if(scope==Scope::local)law.tier=P2NormTier::local_ordinance;
-            core.p2_seed_base(law);
-        }
-        const auto scientist=people(gh,"R",40,"scientist");
-        core.seed_population().hire(scientist,40,"FIRM","scientist",1,{});
-        core.seed_production_facility("RESEARCH-LAB","FIRM","R",1240);
-        phased::TechnologyDefinition tech;tech.id="SOURCED";d.seed_technology(tech);
-        phased::ResearchProject p;p.id="RESEARCH";p.holder="FIRM";p.sponsor="A";
-        p.lab_site="RESEARCH-LAB";p.region="R";p.material_good="ore";p.tech_id=tech.id;
-        p.required_evidence=40;p.material_per_work=1;p.workers_per_work=1;p.cash_cost_per_work=5;
-        d.seed_research(p);
-        if(trait) {
-            core.seed_interest_group("INDUSTRIALISTS");
-            core.p3_seed_group({"A","INDUSTRIALISTS","","","",P3GroupType::industrialists,0,0});
-            core.p3_set_ideologies("A","INDUSTRIALISTS",{"luddite"});
-        }
-        auto world=daily::World::adopt(std::move(gh),56);
-        phasegh::World::Plan establish;
-        if(trait)establish[9].push_back([scientist](phasegh::Stage& stage) {
-            stage.phase_c().join_interest_group(scientist,"INDUSTRIALISTS",40);
-        });
-        world.advance_day(establish);
-        if(trait)require_test(world.engine().base().core().core().p3_trait_modifier_ppm(
-                               "A","country_production_tech_research_speed_mult")==100'000,
-                             "fixture lacks actual active Industrialist trait");
-        p0::Policies policies;policies.researches.push_back({"RESEARCH",20,discipline});
-        p0::DailyGame game(std::move(world),policies);
-        const auto progress=[&]() -> const phased::ResearchProject& {
-            return game.world().engine().base().core().state().researches.at("RESEARCH");
-        };
-        const auto cash=c(game).cash("A"),firm=c(game).cash("FIRM"),inputs=c(game).stock("FIRM","R","ore");
-        for(int step=1;step<=days;++step) {
-            game.advance_day();
-            if(step==1) {
-                const std::string why="wrong actual funded research speed (scope "+
-                    std::to_string(static_cast<int>(scope))+", "+discipline+")";
-                require_test(progress().verified_work==first&&progress().paid_work==first,why.c_str());
-            }
-            require_test(progress().reviewed==(step==days),"research review ran on the wrong game date");
-        }
-        phaseb::People evidence=0;
-        for(const auto& e:game.world().engine().base().core().state().research_evidence)
-            if(e.project=="RESEARCH")evidence+=e.units;
-        require_test(c(game).cash("A")==cash-200&&c(game).cash("FIRM")==firm+200&&
-                     c(game).stock("FIRM","R","ore")==inputs-40&&evidence==40&&
-                     progress().paid_work==40&&progress().verified_work==40,
-                     "effective speed invented paid research, funds, or inputs");
-        while(game.world().date()<daily::Date{2000,2,1})game.advance_day();
-        require_test(game.world().engine().base().core().knowledge("FIRM","SOURCED")!=
-                     phased::KnowledgeLevel::usable,"research bypassed monthly knowledge date");
-        game.advance_day();
-        require_test(game.world().engine().base().core().knowledge("FIRM","SOURCED")==
-                     phased::KnowledgeLevel::usable&&c(game).cash("A")==cash-200&&
-                     c(game).stock("FIRM","R","ore")==inputs-40,
-                     "funded research failed dated promotion or spent twice");
+enum class ResearchLawScope { actual, local, custom, foreign, none, other, dated };
+static void paid_laboratory_research_speed(
+        ResearchLawScope scope,const char* discipline,int first,int days,bool trait=false,
+        bool education=false,bool stack_economic=false,bool low_daily_limit=false,
+        int paid_after_twenty_days=-1) {
+    using Scope=ResearchLawScope;
+    using namespace phasec;
+    auto gh=fixture();
+    auto& geo=gh.seed_geography();
+    geo.seed_province(88,"FOREIGN","B");geo.seed_unit(88,"B","Root B");geo.seed_assignment(88,88);
+    auto& d=geo.seed_core();auto& core=d.seed_core();
+    core.seed_actor("B",100);core.seed_government("B","HB","PB",5,3);
+    for(const auto* nat:{"A","B"})
+        core.seed_p1_constitution(nat,{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"test:constitution"});
+    if(scope!=Scope::none) {
+        const bool fake=scope==Scope::local||scope==Scope::custom;
+        P2BaseLaw law{"LAB-LAW",scope==Scope::foreign?"B":"A",
+            fake?"legacy_research_evidence":(education?"education_system":"economic_system"),
+            scope==Scope::local?"R":"national",
+            education?(scope==Scope::other||scope==Scope::dated?
+                         "law_private_schools":"law_terakoya"):"law_industry_banned",
+            "test:source"};
+        if(scope==Scope::local)law.tier=P2NormTier::local_ordinance;
+        core.p2_seed_base(law);
+    }
+    if(stack_economic)
+        core.p2_seed_base({"INDUSTRY","A","economic_system","national",
+                           "law_industry_banned","test:industry"});
+    const auto scientist=people(gh,"R",40,"scientist");
+    core.seed_population().hire(scientist,40,"FIRM","scientist",1,{});
+    core.seed_production_facility("RESEARCH-LAB","FIRM","R",1240);
+    phased::TechnologyDefinition tech;tech.id="SOURCED";d.seed_technology(tech);
+    phased::ResearchProject p;p.id="RESEARCH";p.holder="FIRM";p.sponsor="A";
+    p.lab_site="RESEARCH-LAB";p.region="R";p.tech_id=tech.id;
+    const bool explicit_micro_order=paid_after_twenty_days>=0;
+    const int required=low_daily_limit?10:explicit_micro_order?18:40;
+    const std::string research_material=low_daily_limit?"lab-paper":"ore";
+    p.material_good=research_material;
+    if(low_daily_limit) {
+        core.seed_actor("PAPER-MERCHANT",0);
+        core.seed_stock("PAPER-MERCHANT","R",research_material,required);
+    }
+    p.required_evidence=required;p.material_per_work=1;p.workers_per_work=1;p.cash_cost_per_work=5;
+    d.seed_research(p);
+    if(trait) {
+        core.seed_interest_group("INDUSTRIALISTS");
+        core.p3_seed_group({"A","INDUSTRIALISTS","","","",P3GroupType::industrialists,0,0});
+        core.p3_set_ideologies("A","INDUSTRIALISTS",{"luddite"});
+    }
+    auto world=daily::World::adopt(std::move(gh),56);
+    phasegh::World::Plan establish;
+    if(trait)establish[9].push_back([scientist](phasegh::Stage& stage) {
+        stage.phase_c().join_interest_group(scientist,"INDUSTRIALISTS",40);
+    });
+    const auto submitted=world.day_index();
+    if(scope==Scope::dated)establish[9].push_back([submitted](phasegh::Stage& stage) {
+        auto& core=stage.phase_c();
+        P2Bill bill;
+        bill.id="TERAKOYA-BILL";bill.country="A";bill.proposer="PM_A";
+        bill.legal_basis="test:legislation";bill.effective_day=submitted+2;
+        bill.action=P2BillAction::enact_or_replace_base;
+        bill.proposed_base={"TERAKOYA","A","education_system","national",
+                            "law_terakoya","test:effective education law"};
+        core.p2_submit_bill(std::move(bill),submitted);
+        core.p2_approve_bill("TERAKOYA-BILL",{});
+        core.p2_promulgate_bill("TERAKOYA-BILL","headA",submitted);
+    });
+    world.advance_day(establish);
+    if(trait)require_test(world.engine().base().core().core().p3_trait_modifier_ppm(
+                           "A","country_production_tech_research_speed_mult")==100'000,
+                         "fixture lacks actual active Industrialist trait");
+    p0::Policies policies;
+    if(!low_daily_limit)
+        policies.researches.push_back({"RESEARCH",explicit_micro_order?1:20,discipline});
+    // No policy override in the low case: use P0's own one-unit daily order.
+    p0::DailyGame game(std::move(world),policies);
+    const auto progress=[&]() -> const phased::ResearchProject& {
+        return game.world().engine().base().core().state().researches.at("RESEARCH");
     };
-    run(Scope::actual,"production",15,3);
-    run(Scope::actual,"production",17,3,true);
-    run(Scope::foreign,"production",20,2);
-    run(Scope::none,"production",20,2);
-    run(Scope::actual,"military",20,2);
-    run(Scope::actual,"society",20,2);
-    run(Scope::local,"production",20,2);
-    run(Scope::custom,"production",20,2);
+    if(low_daily_limit) {
+        const auto starting_cash=c(game).cash("A");
+        for(int i=0;i<3;++i)game.advance_day();
+        phasegh::World::Plan deliver;
+        deliver[3].push_back([&](phasegh::Stage& stage) {
+            stage.phase_c().trade("PAPER-MERCHANT","FIRM","R",research_material,required,1);
+        });
+        game.advance_day(deliver); // Stage 1 could not reserve before delivery.
+        require_test(progress().paid_work==0&&c(game).cash("A")==starting_cash&&
+                     c(game).stock("FIRM","R",research_material)==required&&
+                     c(game).cash("PAPER-MERCHANT")==required,
+                     "missing lab material caused unbacked research or purchase");
+    }
+    const auto cash=c(game).cash("A"),firm=c(game).cash("FIRM"),
+        inputs=c(game).stock("FIRM","R",research_material);
+    for(int step=1;step<=days;++step) {
+        game.advance_day();
+        if(step==1&&!low_daily_limit&&!explicit_micro_order) {
+            const std::string why="wrong actual funded research speed (scope "+
+                std::to_string(static_cast<int>(scope))+", "+discipline+
+                ", education="+std::to_string(education)+")";
+            require_test(progress().verified_work==first&&progress().paid_work==first,why.c_str());
+        }
+        if(scope==Scope::dated&&step<=2) {
+            require_test(c(game).p2_selected_law("A","education_system")==
+                         (step==1?"private_schools":"terakoya"),
+                         "Terakoya changed a lab outside its lawful effective date");
+            require_test(progress().paid_work==(step==1?20:38),
+                         "effective Terakoya did not reduce today's paid work, or changed prior work");
+        }
+        if(low_daily_limit&&step==10)
+            require_test(progress().paid_work==9&&progress().verified_work==9,
+                         "fractional Terakoya research rate stalled or rounded away");
+        if(explicit_micro_order&&step==20)
+            require_test(progress().paid_work==paid_after_twenty_days&&
+                         progress().verified_work==paid_after_twenty_days,
+                         "fractional production research rate stalled or a second penalty accelerated it");
+        require_test(c(game).cash("A")==cash-5*progress().paid_work&&
+                     c(game).cash("FIRM")==firm+5*progress().paid_work&&
+                     c(game).stock("FIRM","R",research_material)==inputs-progress().paid_work,
+                     "daily paid evidence did not match actual lab money and material");
+        if(!low_daily_limit&&!explicit_micro_order)
+            require_test(progress().reviewed==(step==days),"research review ran on the wrong game date");
+    }
+    phaseb::People evidence=0;
+    for(const auto& e:game.world().engine().base().core().state().research_evidence)
+        if(e.project=="RESEARCH")evidence+=e.units;
+    require_test(c(game).cash("A")==cash-5*required&&c(game).cash("FIRM")==firm+5*required&&
+                 c(game).stock("FIRM","R",research_material)==inputs-required&&evidence==required&&
+                 progress().paid_work==required&&progress().verified_work==required&&
+                 progress().required_evidence==required&&progress().reviewed,
+                 "effective speed invented paid research, funds, or inputs");
+    while(game.world().date()<daily::Date{2000,2,1})game.advance_day();
+    require_test(game.world().engine().base().core().knowledge("FIRM","SOURCED")!=
+                 phased::KnowledgeLevel::usable,"research bypassed monthly knowledge date");
+    game.advance_day();
+    require_test(game.world().engine().base().core().knowledge("FIRM","SOURCED")==
+                 phased::KnowledgeLevel::usable&&c(game).cash("A")==cash-5*required&&
+                 c(game).stock("FIRM","R",research_material)==inputs-required,
+                 "funded research failed dated promotion or spent twice");
+}
+static void production_research_speed_requires_actual_economic_law() {
+    using Scope=ResearchLawScope;
+    paid_laboratory_research_speed(Scope::actual,"production",15,3);
+    paid_laboratory_research_speed(Scope::actual,"production",17,3,true);
+    paid_laboratory_research_speed(Scope::foreign,"production",20,2);
+    paid_laboratory_research_speed(Scope::none,"production",20,2);
+    paid_laboratory_research_speed(Scope::actual,"military",20,2);
+    paid_laboratory_research_speed(Scope::actual,"society",20,2);
+    paid_laboratory_research_speed(Scope::local,"production",20,2);
+    paid_laboratory_research_speed(Scope::custom,"production",20,2);
+}
+
+static void enacted_terakoya_slows_actual_paid_original_research() {
+    using Scope=ResearchLawScope;
+    const auto run=[](Scope scope,const char* discipline,int first,int days,
+                      bool stack_economic=false,bool low_daily_limit=false) {
+        paid_laboratory_research_speed(
+            scope,discipline,first,days,false,true,stack_economic,low_daily_limit);
+    };
+    run(Scope::actual,"",18,3);
+    run(Scope::actual,"military",18,3);
+    run(Scope::actual,"society",18,3);
+    run(Scope::actual,"production",13,4,true);
+    // Twenty dates schedule 15 whole units at 75% and 13 at 65%.
+    // Adding the education penalty must not restart a stalled 1-unit lab.
+    paid_laboratory_research_speed(Scope::actual,"production",0,30,
+                                   false,false,false,false,15);
+    paid_laboratory_research_speed(Scope::actual,"production",0,30,
+                                   false,true,true,false,13);
+    run(Scope::actual,"",0,12,false,true);
+    run(Scope::foreign,"",20,2);
+    run(Scope::local,"",20,2);
+    run(Scope::custom,"",20,2);
+    run(Scope::other,"",20,2);
+    run(Scope::dated,"",20,3);
 }
 
 static void native_autonomous_funded_research_and_day_lab_limit() {
@@ -1940,6 +2035,7 @@ int main(){
         native_autonomous_extraction_physical_flow();
         native_autonomous_funded_research_and_day_lab_limit();
         production_research_speed_requires_actual_economic_law();
+        enacted_terakoya_slows_actual_paid_original_research();
         national_elections_are_independent_and_persistent();
         p1_parliamentary_cabinet_next_day_and_save();
         p1_autocracy_uses_real_institution_and_rejects_false_votes();

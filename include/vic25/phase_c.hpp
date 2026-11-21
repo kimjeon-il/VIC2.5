@@ -1363,19 +1363,41 @@ public:
         events_.push_back("public-right-next-month");
     }
     [[nodiscard]] bool has_public_healthcare_right() const {return healthcare_right_;}
+    // The original untyped seeder was for clinics. Once a service has a
+    // P1 type, only an actual healthcare link may use clinical routes.
+    [[nodiscard]] bool public_clinic_entitled(
+            const std::string& institution,std::string_view expected_country={}) const {
+        const auto facility=public_institutions_.find(institution);
+        if(facility==public_institutions_.end())return false;
+        const auto sovereign=sovereignty_.find(facility->second.region);
+        if(sovereign==sovereignty_.end()||
+           (!expected_country.empty()&&sovereign->second!=expected_country))return false;
+        const auto link=p1_institutions_.find(institution);
+        if(link!=p1_institutions_.end()&&
+           (link->second.kind!=P1InstitutionKind::healthcare||
+            link->second.country!=sovereign->second))return false;
+        return p2_rule(sovereign->second,sovereign->second,
+            P2ClauseKind::public_healthcare_right)
+            .value_or(healthcare_right_?1:0)!=0;
+    }
+    [[nodiscard]] People public_clinic_fundable_slots(
+            const std::string& institution,const std::string& country) const {
+        if(!has_country_treasury(country)||
+           !public_clinic_entitled(institution,country))return 0;
+        const auto& facility=public_institutions_.at(institution);
+        if(facility.operator_id==country_treasury(country))return 0;
+        // A legal investment level constrains demand before an appropriation.
+        // Do not require cash-backed usable slots: funding can enable delivery.
+        return p1_institutions_.contains(institution)?
+            p1_institution_legal_capacity(institution).second:facility.monthly_slots;
+    }
     void provide_public_healthcare(const std::string& institution,Id patient_slice,People patients) {
         require_stage({7});
-        ensure(public_institutions_.contains(institution)&&
-               people_.has_slice(patient_slice)&&patients>0,
-               "missing clinical institution or population");
+        ensure(people_.has_slice(patient_slice)&&patients>0,
+               "missing clinical population");
+        ensure(public_clinic_entitled(institution),
+               "public healthcare needs an entitled clinical institution");
         auto& service=public_institutions_.at(institution);
-        const auto sovereign=sovereignty_.find(service.region);
-        ensure(sovereign!=sovereignty_.end(),
-               "public healthcare requires real sovereign jurisdiction");
-        const bool entitled=p2_rule(sovereign->second,sovereign->second,
-             P2ClauseKind::public_healthcare_right)
-             .value_or(healthcare_right_?1:0)!=0;
-        ensure(entitled,"public healthcare lacks current legal entitlement");
         ensure(patients<=people_.slice(patient_slice).count &&
                service.provided+patients<=service.monthly_slots &&
                patients<=positive_product(employed_by(service.operator_id),
@@ -2717,6 +2739,8 @@ public:
         const std::string&)const;
     void seed_p1_institution(const std::string&,const std::string&,
                              P1InstitutionKind,std::uint8_t);
+    [[nodiscard]] std::pair<std::uint8_t,People> p1_institution_legal_capacity(
+        const std::string& institution_id) const;
     [[nodiscard]] P1InstitutionView p1_institution_capacity(
                              const std::string&)const;
     [[nodiscard]] bool has_due_p1_government(std::int64_t)const;

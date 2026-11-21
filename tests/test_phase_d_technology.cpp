@@ -226,6 +226,8 @@ static void enacted_recipient_laws_change_actual_paid_technology_diffusion(){
     run("free_speech","law_censorship",112);
     run("economic_system","law_industry_banned",134,true);
     run("economic_system","law_industry_banned",100);
+    // The education law slows original labs, not a foreign donor class.
+    run("education_system","law_terakoya",100,true);
     run("free_speech","law_protected_speech",100,false,true,true);
     run("free_speech","law_protected_speech",100,false,false,false,true);
     run("free_speech","law_protected_speech",100,false,false,false,false,true);

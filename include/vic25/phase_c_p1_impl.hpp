@@ -238,17 +238,25 @@ inline void IntegratedWorld::seed_p1_institution(
         P1Institution{country,institution_id,kind,level});
 }
 
-inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
+inline std::pair<std::uint8_t,People> IntegratedWorld::p1_institution_legal_capacity(
         const std::string& institution_id)const {
     const auto& link=p1_institutions_.at(institution_id);
     const auto& service=public_institutions_.at(institution_id);
-    const People staff=employed_by(service.operator_id);
     const auto law_level=p2_rule(link.country,institution_id,
          P2ClauseKind::public_institution_level);
     const auto level=law_level?
         static_cast<std::uint8_t>(*law_level):link.level;
     const People slots=(service.monthly_slots/5)*level+
                        ((service.monthly_slots%5)*level)/5;
+    return {level,slots};
+}
+
+inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
+        const std::string& institution_id)const {
+    const auto& link=p1_institutions_.at(institution_id);
+    const auto& service=public_institutions_.at(institution_id);
+    const People staff=employed_by(service.operator_id);
+    const auto [level,slots]=p1_institution_legal_capacity(institution_id);
     People staff_capacity=positive_product(
         staff,service.patients_per_worker);
     if(link.kind==P1InstitutionKind::administration) {

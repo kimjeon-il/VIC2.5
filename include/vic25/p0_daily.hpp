@@ -1234,23 +1234,21 @@ public:
                         country))continue;
                 const auto fiscal=game_c.country_fiscal(country);
                 Money real_need=0;
-                if(game_c.has_public_healthcare_right())
-                    for(const auto& [id,svc]:game_c.public_institutions()) {
-                        (void)id;
-                        if(game_c.sovereignty(svc.region)!=country||
-                           !game_c.has_market(svc.region,svc.good)||
-                           game_c.phase_d_workforce(svc.operator_id)<=0)
-                            continue;
-                        const Quantity throughput=daily_budget::increment(
-                            svc.monthly_slots,date.day,dim);
-                        const Quantity on_hand=game_c.stock(
-                            svc.operator_id,svc.region,svc.good);
-                        const Quantity units=std::min(throughput,on_hand);
-                        if(units>0)
-                            real_need=phaseb::add_checked(real_need,
-                                times(units,game_c.market(
-                                    svc.region,svc.good).price));
-                    }
+                for(const auto& [id,svc]:game_c.public_institutions()) {
+                    const auto slots=game_c.public_clinic_fundable_slots(id,country);
+                    if(slots<=0||!game_c.has_market(svc.region,svc.good)||
+                       game_c.phase_d_workforce(svc.operator_id)<=0)
+                        continue;
+                    const Quantity throughput=daily_budget::increment(
+                        slots,date.day,dim);
+                    const Quantity on_hand=game_c.stock(
+                        svc.operator_id,svc.region,svc.good);
+                    const Quantity units=std::min(throughput,on_hand);
+                    if(units>0)
+                        real_need=phaseb::add_checked(real_need,
+                            times(units,game_c.market(
+                                svc.region,svc.good).price));
+                }
                 for(const auto& public_program:decisions.public_budget)
                     if(public_program.country==country)
                         real_need=phaseb::add_checked(real_need,
@@ -2011,7 +2009,7 @@ public:
         // with manufacturing and geological extraction.
         for(const auto& research:decisions.researches) {
             auto work=std::make_shared<Quantity>(0);
-            plan[1].push_back([research,date,dim,work](phasegh::Stage& gh) {
+            plan[1].push_back([research,date,dim,work,today=world_.day_index()](phasegh::Stage& gh) {
                 const auto& ds=gh.phase_d().state();
                 const auto& p=ds.researches.at(research.project);
                 if(p.reviewed||p.verified_work>=p.required_evidence)return;
@@ -2032,7 +2030,16 @@ public:
                 if(funds<=0)return;
                 Quantity budget=research.maximum_daily_work;
                 const auto country=c.sovereignty(p.region);
-                if(c.has_government(country)&&!research.discipline.empty()) {
+                if(c.has_government(country)) {
+                    // Terakoya is a genuine national education choice that
+                    // affects original lab work, including unclassified labs.
+                    // Contacts use Phase D's separate instruction receipt.
+                    static const auto terakoya_speed=static_cast<std::int64_t>(
+                        std::llround(phasec::p2_catalog_raw_modifier(
+                            "law_terakoya","country_tech_research_speed_mult")*1'000'000.0));
+                    const bool terakoya=
+                        c.p2_selected_law(country,"education_system")=="terakoya";
+                    auto bonus=terakoya?terakoya_speed:std::int64_t{0};
                     std::string key;
                     if(research.discipline=="military")
                         key="country_military_tech_research_speed_mult";
@@ -2056,13 +2063,23 @@ public:
                                 legal=industry_banned;
                             }
                         } else legal=c.p2_modifier_ppm(country,key);
-                        const auto bonus=phaseb::add_checked(
-                            legal,c.p3_trait_modifier_ppm(country,key));
+                        bonus=phaseb::add_checked(bonus,phaseb::add_checked(
+                            legal,c.p3_trait_modifier_ppm(country,key)));
+                    }
+                    if(bonus!=0) {
+                        constexpr std::int64_t scale=1'000'000;
                         const auto ppm=std::clamp<std::int64_t>(
-                            1'000'000+bonus,0,2'000'000);
+                            phaseb::add_checked(scale,bonus),0,2*scale);
+                        const auto tail=phaseb::mul_checked(budget%scale,ppm);
+                        // Use one calendar rounding rule for every net rate.
+                        // Today's fractional quantum is not banked if missed.
+                        const auto index=today%scale;
+                        const auto remainder=tail%scale;
+                        const auto fractional_quota=tail/scale+
+                            phaseb::mul_checked(remainder,index+1)/scale-
+                            phaseb::mul_checked(remainder,index)/scale;
                         budget=phaseb::add_checked(
-                            phaseb::mul_checked(budget/1'000'000,ppm),
-                            phaseb::mul_checked(budget%1'000'000,ppm)/1'000'000);
+                            phaseb::mul_checked(budget/scale,ppm),fractional_quota);
                     }
                 }
                 const Quantity n=std::min({budget,
@@ -3160,16 +3177,13 @@ public:
             plan[5].push_back([budget,date,dim,budget_spent_today]
                               (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
-                if(!c.has_country_treasury(budget.country)||
-                   !c.has_public_healthcare_right())return;
+                if(!c.has_country_treasury(budget.country))return;
                 const auto& treasury=c.country_treasury(budget.country);
                 for(const auto& [id,svc]:c.public_institutions()) {
-                    (void)id;
-                    if(c.sovereignty(svc.region)!=budget.country ||
-                       svc.operator_id==treasury||
-                       !c.has_market(svc.region,svc.good))continue;
+                    const auto slots=c.public_clinic_fundable_slots(id,budget.country);
+                    if(slots<=0||!c.has_market(svc.region,svc.good))continue;
                     const auto available_slots=daily_budget::remaining(
-                        svc.monthly_slots,svc.provided,date.day,dim);
+                        slots,svc.provided,date.day,dim);
                     if(available_slots<=0||c.phase_d_workforce(
                             svc.operator_id)<=0||
                        c.stock(svc.operator_id,svc.region,svc.good)<=0)

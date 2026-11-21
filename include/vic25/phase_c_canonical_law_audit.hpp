@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,444>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,445>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,444> evidence{{
+    static const std::array<CanonicalLawRowEvidence,445> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -1399,7 +1399,10 @@ inline const std::array<CanonicalLawRowEvidence,444>& canonical_law_row_evidence
          "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"},
         {{"law_command_economy","country_private_construction_allocation_mult",0.1,false,false},
          "p0::DailyGame (VIC2.5 paid private order ceiling)",
-         "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"}
+         "test_p0_daily::economic_laws_adjust_only_paid_private_order_ceiling"},
+        {{"law_terakoya","country_tech_research_speed_mult",-0.1,false,false},
+         "p0::DailyGame (paid original laboratory work)",
+         "test_p0_daily::enacted_terakoya_slows_actual_paid_original_research"}
     }};
     return evidence;
 }
