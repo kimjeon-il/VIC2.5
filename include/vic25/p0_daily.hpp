@@ -1241,7 +1241,8 @@ public:
             for(const auto& b:decisions.sovereign_financing)
                 managed.insert(b.country);
             plan[1].push_back([national_day,managed=std::move(managed),
-                               programs=decisions.public_budget,date,dim]
+                               programs=decisions.public_budget,date,dim,
+                               today=world_.day_index()]
                               (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 for(const auto& [country,government]:c.governments()) {
@@ -1269,7 +1270,12 @@ public:
                         if(public_program.country==country)
                             real_need=phaseb::add_checked(real_need,
                                 public_program.daily_spending_limit);
-                    if(real_need<=0&&fiscal.unpaid_coupons<=0)continue;
+                    // Opening contractual principal is a funding requirement,
+                    // not new gross borrowing headroom (C-E4-4 / E4-5).
+                    const auto debt_service=phaseb::add_checked(
+                        fiscal.unpaid_coupons,
+                        c.matured_sovereign_bond_principal(country,today));
+                    if(real_need<=0&&debt_service<=0)continue;
                     const Money observed_receipts=std::max<Money>(
                         0,fiscal.realized_revenue);
                     // The cumulative borrowing ceiling is anchored to
@@ -1279,12 +1285,12 @@ public:
                     const Money unsecured_ceiling=std::max<Money>(
                         1,observed_receipts);
                     const Money daily_financing_need=phaseb::add_checked(
-                        real_need,fiscal.unpaid_coupons);
+                        real_need,debt_service);
                     NationalBudgetEnvelope envelope;
                     envelope.country=country;
                     envelope.reserve_cash=0;
                     envelope.maximum_daily_spending=real_need;
-                    envelope.target_cash=fiscal.unpaid_coupons;
+                    envelope.target_cash=debt_service;
                     envelope.maximum_daily_new_bonds=
                         std::max<Money>(1,daily_financing_need);
                     envelope.maximum_total_bond_principal=

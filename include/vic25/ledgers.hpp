@@ -208,6 +208,11 @@ public:
         if(holding->second==0)shares_.erase(holding);
         // Keep zero-issued asset identity to reject duplicate future issues.
     }
+    // Current issued quantity after actual redemptions; ownership transfers
+    // do not change the outstanding total.
+    [[nodiscard]] std::int64_t outstanding_units(const std::string& asset) const {
+        return issued_.at(asset);
+    }
     [[nodiscard]] std::map<std::string,std::int64_t> holders(
             const std::string& asset)const {
         std::map<std::string,std::int64_t> result;

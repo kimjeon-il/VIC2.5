@@ -1189,6 +1189,16 @@ public:
         }
         return total;
     }
+    [[nodiscard]] Money matured_sovereign_bond_principal(
+            const std::string& country,std::int64_t today) const {
+        Money due=0;
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            if(bond.country!=country||bond.maturity_day>today)continue;
+            // Read the same conserved total that actual redemption reduces.
+            due=phaseb::add_checked(due,ownership_.outstanding_units("bond:"+id));
+        }
+        return due;
+    }
     [[nodiscard]] const std::map<std::string,SovereignBond>& sovereign_bonds()const {
         return sovereign_bonds_;
     }

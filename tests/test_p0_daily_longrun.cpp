@@ -642,10 +642,155 @@ static void automatic_budget_retains_real_coupon_only_financing() {
           "coupon-only automatic envelope must fund actual dated coupon cash");
 }
 
+static void refinance_only_matured_sovereign_principal_with_existing_cash() {
+    using namespace phasec;
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    auto& c=geo.seed_core().seed_core();
+    for(const auto* country:{"A","B"}) {
+        const std::string tag=country;
+        const int id=tag=="A"?1:2;
+        geo.seed_province(id,"R"+tag,tag);
+        geo.seed_unit(id,tag,"ROOT");
+        geo.seed_assignment(id,id);
+        c.seed_government(tag,tag+"_HEAD",tag+"_PM",5,3);
+        c.seed_actor(tag+"_TREASURY",0);
+        c.seed_country_treasury(tag,tag+"_TREASURY");
+    }
+    c.seed_actor("ORIGINAL_SELLER",100);
+    c.seed_actor("CURRENT_HOLDER",100);
+    c.seed_actor("FUTURE_HOLDER",30);
+    c.seed_actor("FOREIGN_HOLDER",80);
+    c.seed_actor("STANDING_BIDDER",1'000);
+    c.seed_actor("RECEIPT_DONOR",500);
+    c.seed_actor("PAID_RECIPIENT",0);
+    auto opening=daily::World::adopt(std::move(gh),318);
+    const auto today=opening.day_index();
+    const auto open_bonds=[today](Money receipts) {
+        phasegh::World::Plan plan;
+        plan[1].push_back([today](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            live.issue_sovereign_bond("MATURITY","A","A_PM","ORIGINAL_SELLER",
+                100,0,today,today+1);
+            live.issue_sovereign_bond("FUTURE","A","A_PM","FUTURE_HOLDER",
+                30,0,today,today+40);
+            live.issue_sovereign_bond("FOREIGN","B","B_PM","FOREIGN_HOLDER",
+                80,0,today,today+1);
+        });
+        plan[5].push_back([receipts](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            live.pay("RECEIPT_DONOR","A_TREASURY",receipts);
+            live.spend_country_budget("A","PAID_RECIPIENT",130+receipts);
+            live.spend_country_budget("B","PAID_RECIPIENT",80);
+        });
+        plan[7].push_back([](phasegh::Stage& stage) {
+            stage.phase_c().exchange_sovereign_bond("MATURITY",
+                "ORIGINAL_SELLER","CURRENT_HOLDER",100,1'000'000);
+        });
+        return plan;
+    };
+    p0::Policies bidder;
+    bidder.daily_food_units_per_person=0;
+    bidder.bond_buyer_orders.push_back({"A","STANDING_BIDDER",1'000,0,0});
+    const auto core=[](const p0::DailyGame& game)->const IntegratedWorld& {
+        return game.world().engine().base().core().core();
+    };
+    p0::DailyGame original(opening,bidder);
+    original.advance_day(open_bonds(500));
+    check(core(original).sovereign_bond_principal("A")==130&&
+          core(original).sovereign_bond_principal("B")==80&&
+          core(original).shares("bond:MATURITY","CURRENT_HOLDER")==100&&
+          core(original).cash("CURRENT_HOLDER")==0&&
+          core(original).cash("A_TREASURY")==0&&
+          core(original).cash("STANDING_BIDDER")==1'000&&
+          core(original).country_fiscal("A").unpaid_coupons==0,
+          "newly issued bonds and actual secondary title must exist before maturity");
+    const auto saved=daily::SnapshotCodec::encode(original.world());
+    const auto verify_paid=[&](const p0::DailyGame& game,std::int64_t date) {
+        const auto& live=core(game);
+        const auto replacement="P0:AUCTION:A:"+std::to_string(date)+
+                               ":STANDING_BIDDER";
+        check(live.shares("bond:MATURITY","CURRENT_HOLDER")==0&&
+              live.cash("CURRENT_HOLDER")==100&&live.cash("ORIGINAL_SELLER")==100&&
+              live.cash("STANDING_BIDDER")==900&&live.cash("A_TREASURY")==0&&
+              live.country_fiscal("A").realized_revenue==500&&
+              live.shares("bond:"+replacement,"STANDING_BIDDER")==100&&
+              live.shares("bond:FUTURE","FUTURE_HOLDER")==30&&
+              live.shares("bond:FOREIGN","FOREIGN_HOLDER")==80&&
+              live.cash("FUTURE_HOLDER")==0&&live.cash("FOREIGN_HOLDER")==0&&
+              live.sovereign_bond_principal("A")==130&&
+              live.sovereign_bond_principal("B")==80&&
+              live.cash("B_TREASURY")==0&&live.financial().balanced(),
+              "real standing bid must refinance exactly mature title now owned by claimant");
+    };
+    original.advance_day();
+    verify_paid(original,today+1);
+    original.advance_day();
+    verify_paid(original,today+1); // A redeemed original face must not be refinanced again.
+
+    auto no_bid=bidder;
+    no_bid.bond_buyer_orders.clear();
+    const auto verify_unpaid=[&](const p0::DailyGame& game) {
+        const auto& live=core(game);
+        check(live.sovereign_bond_principal("A")==130&&
+              live.shares("bond:MATURITY","CURRENT_HOLDER")==100&&
+              live.cash("CURRENT_HOLDER")==0&&live.cash("A_TREASURY")==0&&
+              live.cash("STANDING_BIDDER")==1'000&&live.financial().balanced(),
+              "unfunded maturity must stay unpaid, never create cash or bypass approval");
+    };
+    p0::DailyGame overdue(daily::SnapshotCodec::decode(saved),no_bid);
+    overdue.advance_day();
+    verify_unpaid(overdue);
+    p0::DailyGame delayed(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(overdue.world())),bidder);
+    delayed.advance_day();
+    verify_paid(delayed,today+2);
+
+    // A genuine partial redemption reduces the outstanding mature face.
+    p0::DailyGame partial(daily::SnapshotCodec::decode(saved),no_bid);
+    phasegh::World::Plan extra_cash;
+    extra_cash[5].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().pay("STANDING_BIDDER","A_TREASURY",40);
+    });
+    partial.advance_day(extra_cash);
+    check(core(partial).shares("bond:MATURITY","CURRENT_HOLDER")==60&&
+          core(partial).cash("CURRENT_HOLDER")==40&&
+          core(partial).sovereign_bond_principal("A")==90,
+          "first actual partial redemption must update current title and principal");
+    p0::DailyGame remaining(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(partial.world())),bidder);
+    remaining.advance_day();
+    const auto& after_partial=core(remaining);
+    const auto replacement="bond:P0:AUCTION:A:"+std::to_string(today+2)+
+                           ":STANDING_BIDDER";
+    check(after_partial.shares(replacement,"STANDING_BIDDER")==60&&
+          after_partial.shares("bond:MATURITY","CURRENT_HOLDER")==0&&
+          after_partial.cash("CURRENT_HOLDER")==100&&
+          after_partial.cash("STANDING_BIDDER")==900&&
+          after_partial.cash("A_TREASURY")==0&&
+          after_partial.sovereign_bond_principal("A")==90,
+          "partially redeemed maturity may refinance only its remaining held face");
+
+    auto explicit_freeze=bidder;
+    explicit_freeze.national_budget_envelopes.push_back({
+        "A",0,0,0,1,1,0,0,365,false,true});
+    p0::DailyGame explicit_budget(daily::SnapshotCodec::decode(saved),explicit_freeze);
+    explicit_budget.advance_day();
+    verify_unpaid(explicit_budget);
+
+    // Receipt ceiling equals actual gross debt. An expected redemption is
+    // not prepayment and must not lend the budget more headroom.
+    p0::DailyGame capped(std::move(opening),bidder);
+    capped.advance_day(open_bonds(130));
+    capped.advance_day();
+    verify_unpaid(capped);
+}
+
 int main(){
     try{
         automatic_sovereign_budget_uses_laws_effective_today();
         automatic_budget_retains_real_coupon_only_financing();
+        refinance_only_matured_sovereign_principal_with_existing_cash();
         public_health_budget_and_treatment_require_eligible_clinics();
         std::string failures;
         for(const auto* extra:{"seeded-closed","law-closed","self-recipient"})
