@@ -42,9 +42,17 @@ inline Money Stage::military_procurement_price(
     if(!core.has_government(country)||
        !core.has_country_treasury(country)||
        core.country_treasury(country)!=buyer)return quoted;
+    // Use only the two canonical effects from a genuinely selected army
+    // model. The general law projection can include custom-domain
+    // lookalikes, which cannot set the national purchase price.
+    constexpr auto key="country_military_goods_cost_mult";
+    std::int64_t legal=0;
+    if(const auto law=core.p2_selected_law(country,"army_model");
+       law&&(*law=="peasant_levies"||*law=="warrior_caste"))
+        legal=static_cast<std::int64_t>(std::llround(
+            phasec::p2_catalog_raw_modifier("law_"+*law,key)*1'000'000.0));
     const auto adjustment=phaseb::add_checked(
-        core.p2_modifier_ppm(country,"country_military_goods_cost_mult"),
-        core.p3_trait_modifier_ppm(country,"country_military_goods_cost_mult"));
+        legal,core.p3_trait_modifier_ppm(country,key));
     const auto ppm=std::clamp<std::int64_t>(
         1'000'000+adjustment,0,2'000'000);
     // The charged amount is still funded by actual buyer cash at Stage 1

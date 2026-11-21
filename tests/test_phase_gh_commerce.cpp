@@ -271,6 +271,83 @@ static void isolationism_blocks_only_new_cross_sovereign_commerce() {
            "isolationism stopped previously paid real goods from arriving");
 }
 
+static void authorized_treasury_goods_adjustment_settles_real_cash() {
+    using namespace vic25::phasec;
+    const auto run=[](const std::string& law,const std::string& buyer,
+                      const std::string& good,int expected,bool forged=false,
+                      bool trait=false) {
+        World world(24000);
+        auto& e=world.seed_geography();
+        e.seed_province(1,"RB","B");e.seed_province(2,"RA","A");
+        e.seed_border(1,2);
+        e.seed_unit(1,"B","B-ROOT");e.seed_unit(2,"A","A-ROOT");
+        e.seed_assignment(1,1);e.seed_assignment(2,2);
+        auto& c=e.seed_core().seed_core();
+        c.seed_actor("SELLER",0);
+        c.seed_actor("TA",500);c.seed_actor("TB",500);c.seed_actor("PRIVATE",500);
+        for(const std::string side:{"A","B"}) {
+            c.seed_government(side,"HEAD","PRIME",5,3);
+            c.seed_country_treasury(side,"T"+side);
+            c.seed_p1_constitution(side,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture"});
+        }
+        c.p2_seed_base({"A:ARMY","A","lawgroup_army_model","",law,"fixture"});
+        if(forged) {
+            c.p2_seed_base({"A:FAKE","A","unrelated_national_rule","national",
+                            "law_warrior_caste","fixture"});
+            P2BaseLaw local{"A:LOCAL","A","unrelated_local_ordinance","RA",
+                            "law_peasant_levies","fixture"};
+            local.tier=P2NormTier::local_ordinance;
+            c.p2_seed_base(local);
+        }
+        World::Plan enroll;
+        if(trait) {
+            c.seed_interest_group("Actual group");
+            c.p3_seed_group({"A","Actual group","","","",P3GroupType::armed_forces,0,0});
+            c.p3_set_ideologies("A","Actual group",{"disciplinarian"});
+            auto& p=c.seed_population();
+            const auto h=p.household_profile({"RA","shared","shared",100});
+            const auto econ=p.economic_profile({"RA","worker","wage","employee",p.default_education()});
+            const auto d=p.demographic_profile({"RA",23600,vic25::phaseb::Sex::male,
+                "culture","faith","citizen","free",p.default_health(),vic25::phaseb::Service::civilian});
+            const auto cohort=p.seed_population(d,econ,h,100);
+            enroll[9].push_back([cohort](Stage& stage) {
+                stage.phase_c().join_interest_group(cohort,"Actual group",100);
+            });
+        }
+        c.seed_market("RB",good,100,1,200);
+        c.seed_market("RA",good,200,1,300);
+        c.seed_stock("SELLER","RB",good,2);
+        world.seed_route(Route{"genuine","SELLER",buyer,good,1,2,1,1});
+        world.advance(enroll);
+        const auto check_fill=[&](int price,Money old_seller,Money old_buyer) {
+            const auto& fill=world.commerce().fills.back();
+            const auto& ledger=world.base().core().core();
+            if(!(fill.quantity==1&&fill.shipped&&fill.duty_paid==0&&fill.freight_paid==0&&
+                 fill.goods_value==price&&ledger.cash("SELLER")==old_seller+price&&
+                 ledger.cash(buyer)==old_buyer-price))
+                throw std::runtime_error("tariff-free authorized game trade cash mismatch: "+law+
+                    (forged?" (custom/local lookalikes)":""));
+        };
+        check_fill(expected,0,500);
+        if(trait) {
+            verify(world.base().core().core().p3_trait_modifier_ppm(
+                       "A","country_military_goods_cost_mult")==150'000,
+                   "existing positive procurement cost trait did not independently activate");
+            world.advance();
+            check_fill(105,expected,500-expected);
+        }
+    };
+    run("law_peasant_levies","TA","small_arms",90);
+    run("law_warrior_caste","TA","small_arms",90);
+    run("law_peasant_levies","PRIVATE","small_arms",100);
+    run("law_peasant_levies","TA","iron",100);
+    run("law_peasant_levies","TB","small_arms",100);
+    run("law_mass_conscription","TA","small_arms",100);
+    run("law_mass_conscription","TA","small_arms",100,true);
+    run("law_peasant_levies","TA","small_arms",90,false,true);
+}
+
 int main() {
     try {
         foreign_contract_split_logistics_and_tariff();
@@ -278,7 +355,8 @@ int main() {
         insured_loss_compensated_from_real_insurer_cash();
         network_capacity_shared_among_trade_routes();
         isolationism_blocks_only_new_cross_sovereign_commerce();
-        std::cout<<"Phase G extended trade: 5 independent integration scenarios PASS\n";
+        authorized_treasury_goods_adjustment_settles_real_cash();
+        std::cout<<"Phase G extended trade: 6 independent integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e){
         std::cerr<<"Phase G extended trade FAIL: "<<e.what()<<"\n";

@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,181>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,183>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,181> evidence{{
+    static const std::array<CanonicalLawRowEvidence,183> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -610,7 +610,13 @@ inline const std::array<CanonicalLawRowEvidence,181>& canonical_law_row_evidence
          "test_phase_d::commissioned_nationalization_requires_available_statutory_compensation"},
         {{"law_industry_banned","state_aristocrats_investment_pool_contribution_add",0.25,false,false},
          "IntegratedWorld::p2_invest_from_aristocratic_shareholders (modeled monthly household-to-company capital only)",
-         "test_p0_daily::aristocratic_shareholders_inject_only_lawful_monthly_capital"}
+         "test_p0_daily::aristocratic_shareholders_inject_only_lawful_monthly_capital"},
+        {{"law_peasant_levies","country_military_goods_cost_mult",-0.1,false,false},
+         "phasegh::Stage::military_procurement_price (funded sovereign treasury commercial order)",
+         "test_phase_gh_commerce::authorized_treasury_goods_adjustment_settles_real_cash"},
+        {{"law_warrior_caste","country_military_goods_cost_mult",-0.1,false,false},
+         "phasegh::Stage::military_procurement_price (funded sovereign treasury commercial order)",
+         "test_phase_gh_commerce::authorized_treasury_goods_adjustment_settles_real_cash"}
     }};
     return evidence;
 }

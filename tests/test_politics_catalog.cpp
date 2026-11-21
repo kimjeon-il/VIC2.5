@@ -356,8 +356,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==181,
-          "expected exact canonical witness count including 30 more paid-order rows");
+    check(canonical_law_row_evidence().size()==183,
+          "expected 181 preserved witnesses and two scoped treasury purchase rows");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
         "state_shopkeepers_investment_pool_efficiency_mult",
@@ -848,6 +848,29 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
                row.executor=="IntegratedWorld::p2_invest_from_aristocratic_shareholders (modeled monthly household-to-company capital only)" &&
                row.behavior_test=="test_p0_daily::aristocratic_shareholders_inject_only_lawful_monthly_capital";
     })==1,"specific paid monthly aristocratic capital witness missing");
+
+    constexpr std::string_view goods_receipt_fixture="test_phase_gh_commerce::authorized_treasury_goods_adjustment_settles_real_cash";
+    std::set<std::string_view> procurement_sources;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=goods_receipt_fixture)continue;
+        check(row.source.key=="country_military_goods_cost_mult"&&
+              !row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.normalized_value==-100'000&&row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="phasegh::Stage::military_procurement_price (funded sovereign treasury commercial order)"&&
+              procurement_sources.insert(row.source.source_id).second,
+              "ineligible source appeared as a funded treasury goods witness");
+        for(int alternative=0;alternative<3;++alternative) {
+            auto mismatch=row.source;
+            if(alternative==0)mismatch.institution=true;
+            if(alternative==1)mismatch.sponsor=true;
+            if(alternative==2)mismatch.key="country_can_only_conscript_peasants_bool";
+            check(classify_canonical_law_row(mismatch,canonical_law_row_evidence()).behavior_test
+                      !=goods_receipt_fixture,
+                  "commercial receipt evidence leaked to a trait, qualifier, or draft");
+        }
+    }
+    check(procurement_sources==std::set<std::string_view>{"law_peasant_levies","law_warrior_caste"},
+          "expected both exact national treasury goods cost sources");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.
