@@ -163,7 +163,8 @@ private:
             const auto hp=w.health(d.health);
             const auto ed=w.education(econ.education);
             const auto age=w.age_months_slice(id);
-            const auto deaths=w.allocate_rate(id,"mortality",initial.count,death_rate(w,initial));
+            const auto deaths=w.allocate_rate(id,"mortality",initial.count,
+                adjusted_rate(w,id,"mortality",death_rate(w,initial)));
             if(deaths){w.death(id,deaths,job_allocation(w,id,deaths));report.deaths=add_checked(report.deaths,deaths);}
             if(d.sex==Sex::female && age>=18*12 && age<45*12){
                 // Birth cohort must join a NONWORKER economic profile, never mother's profession.

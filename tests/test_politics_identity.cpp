@@ -397,6 +397,139 @@ static void effective_workhouse_amendment_reduces_only_welfare_cost(
           "welfare cost consumer missing from law coverage audit");
 }
 
+static daily::World mortality_fixture(
+        const std::string& health_law,int legal_level,bool funded,
+        bool staffed,bool blasphemy=false,bool empty_scope=false,
+        bool staff_outside_clinic=false) {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    const std::vector<std::string> regions={"CLINIC","CORE","DEPENDENCY","UNKNOWN"};
+    geo.seed_unit(1,"A","ADMIN");
+    for(std::size_t i=0;i<regions.size();++i) {
+        geo.seed_province(i+1,regions[i],"A");
+        geo.seed_assignment(i+1,1);
+    }
+    auto& c=geo.seed_core().seed_core();
+    c.seed_actor("A",funded?100:0);
+    c.seed_actor("HOSPITAL",funded?100:0);
+    c.seed_government("A","HEAD","PRIME",5,3);
+    c.seed_p1_constitution("A",{P1GovernancePrinciple::theocracy,
+        P1PowerDistribution::autocracy,P1LegislatureKind::none,"scenario:law"});
+    c.p1_set_incorporation("CLINIC",true);
+    c.p1_set_incorporation("CORE",true);
+    c.p1_set_incorporation("DEPENDENCY",false);
+    auto& pop=c.seed_population();
+    for(const auto& region:regions) {
+        const auto h=pop.household_profile({region,"mixed","shared",25'000});
+        const auto e=pop.economic_profile({region,"worker","wage","employee",
+                                         pop.default_education()});
+        const auto d=pop.demographic_profile({region,23650,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto slice=pop.seed_population(d,e,h,100'000);
+        if(staffed&&region==(staff_outside_clinic?"CORE":"CLINIC"))
+            pop.hire(slice,10,"HOSPITAL","worker",10,{});
+    }
+    law(c,"A","governance_principles","theocracy");
+    law(c,"A","church_and_state","state_religion");
+    if(!health_law.empty()) {
+        if(empty_scope)
+            c.p2_seed_base({"A:health_system","A","lawgroup_health_system","",
+                "law_"+health_law,"scenario:constitution"});
+        else law(c,"A","health_system",health_law);
+    }
+    if(legal_level>=0) {
+        c.seed_public_institution("HEALTH","HOSPITAL","CLINIC","medicine",50,5);
+        c.seed_p1_institution("A","HEALTH",P1InstitutionKind::healthcare,5);
+        if(health_law!="")
+            c.p2_seed_amendment({"effective-health-funding","A:health_system",
+                "scenario:budget","",{{"approved-health-level","HEALTH",
+                    P2ClauseKind::public_institution_level,legal_level}}});
+    }
+    if(blasphemy)
+        c.p2_seed_amendment({"amendment_draconian_blasphemy_laws",
+            "A:church_and_state","scenario:law","",{{"civil-law","A",
+                P2ClauseKind::political_association_allowed,1}}});
+    phaseb::DemographyRules rates;
+    rates.fertility_ppm=0;
+    rates.adult_death_ppm=310'000; // January: exactly 10,000 ppm/day.
+    rates.illness_incidence_ppm=0;
+    rates.accident_ppm=0;
+    rates.migration_ppm=0;
+    c.enable_demography(rates);
+    return daily::World::adopt(std::move(gh),42);
+}
+static phaseb::People residents(const daily::World& world,const std::string& region) {
+    const auto& pop=world.engine().base().core().core().people();
+    phaseb::People total=0;
+    for(const auto& [id,slice]:pop.slices()) {
+        (void)id;
+        if(pop.demographic(slice.key.demographic).region==region)
+            total+=slice.count;
+    }
+    return total;
+}
+static void effective_health_institution_and_flat_law_change_daily_mortality() {
+    const auto fixture=[](const std::string& law,int level,bool funded,bool staffed,
+                          bool flat,phaseb::People expected_core,
+                          phaseb::People expected_outside) {
+        auto world=mortality_fixture(law,level,funded,staffed,flat);
+        world.advance_day();
+        check(residents(world,"DEPENDENCY")==100'000-expected_outside &&
+              residents(world,"UNKNOWN")==100'000-expected_outside,
+              "health institution leaked outside known incorporated territory or flat law was lost");
+        check(residents(world,"CLINIC")==100'000-expected_core &&
+              residents(world,"CORE")==100'000-expected_core,
+              "effective national health law did not change actual mortality at its legal level");
+    };
+    fixture("no_health_system",2,true,true,false,1000,1000);
+    fixture("charitable_health_system",2,true,true,false,940,1000);
+    fixture("public_health_insurance",2,true,true,false,900,1000);
+    fixture("public_health_insurance",0,true,true,false,1000,1000);
+    fixture("public_health_insurance",2,false,true,false,1000,1000);
+    fixture("public_health_insurance",2,true,false,false,1000,1000);
+    fixture("public_health_insurance",-1,true,true,false,1000,1000);
+    fixture("",-1,false,false,true,1020,1020);
+    fixture("public_health_insurance",2,true,true,true,920,1020);
+    auto implicit_national=mortality_fixture("public_health_insurance",2,
+        true,true,false,true);
+    implicit_national.advance_day();
+    check(residents(implicit_national,"CORE")==99'100,
+          "supported empty national scope lost healthcare mortality benefit");
+    auto nonlocal_staff=mortality_fixture("public_health_insurance",2,
+        true,true,false,false,true);
+    nonlocal_staff.advance_day();
+    check(residents(nonlocal_staff,"CORE")==99'000 &&
+          residents(nonlocal_staff,"CLINIC")==99'000,
+          "a clinic without local effective staff certified national healthcare");
+
+    auto world=mortality_fixture("",-1,false,false);
+    const auto start=world.day_index();
+    phasegh::World::Plan enact;
+    enact[9].push_back([start](phasegh::Stage& stage) {
+        auto& c=stage.phase_c();
+        P2Bill bill;
+        bill.id="BLASPHEMY";bill.country="A";bill.proposer="PRIME";
+        bill.legal_basis="scenario:act";bill.action=P2BillAction::attach_amendment;
+        bill.effective_day=start+2;
+        bill.proposed_amendment={"amendment_draconian_blasphemy_laws",
+            "A:church_and_state","scenario:act","",{{"civil-law","A",
+                P2ClauseKind::political_association_allowed,1}}};
+        c.p2_submit_bill(std::move(bill),start);
+        c.p2_approve_bill("BLASPHEMY",{});
+        c.p2_promulgate_bill("BLASPHEMY","HEAD",start);
+    });
+    world.advance_day(enact);
+    world.advance_day();
+    check(residents(world,"UNKNOWN")==98'010,
+          "pending flat amendment changed mortality before legal effect");
+    auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+    world.advance_day();replay.advance_day();
+    check(residents(world,"UNKNOWN")==97'011 &&
+          daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+          "dated flat mortality effect did not start on actual effective day or survive replay");
+}
+
 int main(){
     try{
         source_ideologies_laws_traits();
@@ -409,6 +542,7 @@ int main(){
             "amendment_religious_workhouses");
         effective_workhouse_amendment_reduces_only_welfare_cost(
             "amendment_workhouse_regulations");
+        effective_health_institution_and_flat_law_change_daily_mortality();
         std::cout<<"VIC2.5 POLICY IDENTITY AND REFERENCE DATA PASS\n";
     }catch(const std::exception& e){
         std::cerr<<"POLITICS IDENTITY FAILURE: "<<e.what()<<"\n";

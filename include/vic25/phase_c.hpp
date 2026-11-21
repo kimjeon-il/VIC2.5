@@ -3963,9 +3963,40 @@ public:
         // modifiers and activated interest-group traits are applied as
         // *rates*, not as extra births, students, jobs or migrants.
         struct PoliticalRates {
-            std::int64_t birth{},school{},migration{};
+            std::int64_t birth{},school{},migration{},mortality{},healthcare{};
             bool schools_allowed{true};
         };
+        // In the absence of a separate national investment ledger, derive
+        // one real funded, staffed healthcare level per country. Multiple
+        // clinics are evidence of the same institution, not additive levels.
+        std::map<std::string,int> healthcare_levels;
+        for(const auto& [id,link]:p1_institutions_) {
+            if(link.kind!=P1InstitutionKind::healthcare)continue;
+            const auto& service=public_institutions_.at(id);
+            const auto sovereign=sovereignty_.find(service.region);
+            const auto incorporated=p1_incorporation_.find(service.region);
+            if(sovereign==sovereignty_.end()||sovereign->second!=link.country||
+               incorporated==p1_incorporation_.end()||!incorporated->second)
+                continue;
+            // The generic capacity view counts all of the operator's
+            // workers. A clinic must have actual non-striking local staff
+            // before it can evidence a functioning national institution.
+            const auto& jobs=people_.jobs();
+            const bool local_staff=std::any_of(jobs.begin(),jobs.end(),
+                [&](const auto& entry) {
+                    const auto& [slice,job]=entry;
+                    return job.employer==service.operator_id&&
+                        people_.demographic(people_.slice(slice).key.demographic)
+                            .region==service.region&&
+                        job.count>currently_striking(slice);
+                });
+            if(!local_staff)continue;
+            const auto active=p1_institution_capacity(id);
+            if(active.usable_slots>0)
+                healthcare_levels[link.country]=std::max(
+                    healthcare_levels[link.country],static_cast<int>(active.level));
+        }
+        constexpr const char* mortality_key="state_mortality_mult";
         std::map<std::string,PoliticalRates> rates;
         if(!p3_groups_.empty()||!p2_active_base_.empty()||
            !p1_active_mandates_.empty())
@@ -3978,10 +4009,26 @@ public:
                 };
                 const auto education=p2_selected_law(
                     country,"education_system");
+                std::int64_t healthcare=0;
+                if(const auto active=healthcare_levels.find(country);
+                   active!=healthcare_levels.end()) {
+                    if(const auto health_law=p2_selected_law(country,"health_system")) {
+                        const auto canonical=p2_catalog_canonical_choice(*health_law);
+                        // Only the per-level delta belongs here. Flat laws
+                        // and amendments are already included in the current
+                        // active modifier, even when there is no institution.
+                        const auto delta=p2_catalog_raw_modifier(
+                            canonical,mortality_key,active->second)-
+                            p2_catalog_raw_modifier(canonical,mortality_key,0);
+                        healthcare=static_cast<std::int64_t>(
+                            std::llround(delta*1'000'000.0));
+                    }
+                }
                 rates.emplace(country,PoliticalRates{
                     effect("state_birth_rate_mult"),
                     effect("state_education_access_add"),
                     effect("state_migration_pull_mult"),
+                    p2_modifier_ppm(country,mortality_key),healthcare,
                     education!=std::optional<std::string>("no_schools")});
             }
         phaseb::Engine::RateAdjustment adjustment;
@@ -4014,7 +4061,12 @@ public:
             }
             std::int64_t factor=0;
             if(metric=="fertility")factor=policy.birth;
-            else if(metric=="migration") {
+            else if(metric=="mortality") {
+                factor=policy.mortality;
+                const auto incorporated=p1_incorporation_.find(dem.region);
+                if(incorporated!=p1_incorporation_.end()&&incorporated->second)
+                    factor=phaseb::add_checked(factor,policy.healthcare);
+            } else if(metric=="migration") {
                 const auto dest=demographic_rules_.destination_by_region.find(
                     dem.region);
                 if(dest==demographic_rules_.destination_by_region.end()||

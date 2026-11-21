@@ -66,6 +66,7 @@ inline const std::map<std::string,std::string>& wired_law_effects() {
         {"country_influence_mult","phasegh::World::diplomatic_capacity"},
         {"country_prestige_mult","phasec::IntegratedWorld::p1_prestige"},
         {"state_birth_rate_mult","phase_c::phase_time_auto_demography"},
+        {"state_mortality_mult","phase_c::phase_time_auto_demography"},
         {"state_education_access_add","phase_c::phase_time_auto_demography"},
         {"state_migration_pull_mult","phase_c::phase_time_auto_demography"},
         {"country_loan_interest_rate_mult","phase_c::phase_time_accrue_and_settle_interest"},
