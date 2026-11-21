@@ -1171,7 +1171,7 @@ public:
         const auto& asset=c_.facility(site);
         const auto& country=c_.sovereignty(asset.region);
         if(!c_.has_country_treasury(country)||
-           c_.p2_catalog_modifier_value(
+           c_.p2_factory_nationalization_ppm(
                country,"country_disable_nationalization_bool")>0)return false;
         const auto& treasury=c_.country_treasury(country);
         if(asset.owner==treasury||c_.firm_bankrupt(asset.owner))return false;
@@ -1221,7 +1221,7 @@ public:
         price+=tail;
         if(price<=0)return false;
         const bool can_pay=c_.phase_d_cash_available(treasury)>=price;
-        const bool compensation_required=c_.p2_catalog_modifier_value(
+        const bool compensation_required=c_.p2_factory_nationalization_ppm(
             country,"country_disable_nationalization_without_compensation_bool")>0;
         if(!can_pay&&compensation_required)return false;
         if(can_pay)

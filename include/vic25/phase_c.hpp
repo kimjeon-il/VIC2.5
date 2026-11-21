@@ -1486,7 +1486,7 @@ public:
         const auto& sovereign=sovereignty_.at(f.region);
         if(has_country_treasury(sovereign)&&
            buyer==country_treasury(sovereign))
-            ensure(p2_catalog_modifier_value(sovereign,
+            ensure(p2_factory_nationalization_ppm(sovereign,
                        "country_disable_nationalization_bool")<=0,
                    "P2 economic-system law disallows state nationalization");
         // The only permitted non-cash transfer is state nationalization
@@ -1497,7 +1497,7 @@ public:
             ensure(project_book_value>0&&
                    has_country_treasury(country)&&
                    buyer==country_treasury(country)&&
-                   p2_catalog_modifier_value(country,
+                   p2_factory_nationalization_ppm(country,
                        "country_disable_nationalization_without_compensation_bool")<=0,
                    "P2 law forbids uncompensated state acquisition");
         }

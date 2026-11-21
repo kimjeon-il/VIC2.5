@@ -96,7 +96,8 @@ static void commissioned_nationalization_requires_available_statutory_compensati
     const auto run=[](const std::string& law,Money government_cash,
                       bool accepted,bool paid,Money exact=-1,
                       std::string amendment="",bool wrong_parent=false,
-                      bool forged=false,bool foreign=false,Money work_price=20) {
+                      bool forged=false,bool foreign=false,Money work_price=20,
+                      bool forged_ban=false) {
         World w{1000};
         auto& c=w.seed_core();
         c.seed_actor("CLIENT",200);
@@ -125,6 +126,9 @@ static void commissioned_nationalization_requires_available_statutory_compensati
             c.p2_seed_amendment({amendment,parent,"fixture:numeric effect","",
                 {{"association",owner,P2ClauseKind::political_association_allowed,1}}});
         }
+        if(forged_ban)
+            c.p2_seed_base({"A:FICTIVE_BAN","A","custom_ban_scope","national",
+                            "law_laissez_faire","fixture:unrelated choice"});
         if(forged) {
             c.p2_seed_base({"A:FICTIVE", "A","custom_economic_scope","national",
                             "law_command_economy","fixture:unrelated choice"});
@@ -169,10 +173,18 @@ static void commissioned_nationalization_requires_available_statutory_compensati
         if(accepted) {
             auto rollback=w;
             World::Plan candidate;
-            candidate[7].push_back([](Stage& stage) {
-                check(stage.nationalize_commissioned_factory("NEW_MILL")&&
-                      stage.phase_c().shares("FACILITY:NEW_MILL","GOV")==1,
-                      "rollback control never reached real acquired title");
+            candidate[7].push_back([&](Stage& stage) {
+                auto& live=stage.phase_c();
+                if(forged_ban)
+                    live.phase_d_transfer_factory_paid("NEW_MILL","GOV",exact,book);
+                else if(forged&&!paid)
+                    live.phase_d_transfer_factory_uncompensated("NEW_MILL","GOV",book);
+                else
+                    check(stage.nationalize_commissioned_factory("NEW_MILL"),
+                          "rollback control never reached real acquired title");
+                check(live.shares("FACILITY:NEW_MILL","GOV")==1&&
+                      live.facility("NEW_MILL").owner=="GOV",
+                      "acquisition control did not reach real title transfer");
             });
             candidate[8].push_back([](Stage&) {
                 throw std::runtime_error("abort after both owner journals");
@@ -266,6 +278,8 @@ static void commissioned_nationalization_requires_available_statutory_compensati
     run("interventionism",60,true,true,60);
     run("laissez_faire",200,false,false,0);
     run("command_economy",0,true,false,0);
+    run("command_economy",0,true,false,0,"",false,true);
+    run("interventionism",60,true,true,60,"",false,false,false,20,true);
     run("command_economy",20,true,true,20);
     run("command_economy",20,true,true,20,"",false,true);
     run("interventionism",45,true,true,45,"amendment_industrial_socialization");
