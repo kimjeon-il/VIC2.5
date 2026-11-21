@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,63>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,64>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,63> evidence{{
+    static const std::array<CanonicalLawRowEvidence,64> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -196,6 +196,9 @@ inline const std::array<CanonicalLawRowEvidence,63>& canonical_law_row_evidence(
         {{"law_restricted_child_labor","state_peasants_mortality_mult",0.02,false,false},
          "IntegratedWorld::phase_time_auto_demography (exact occupation mortality)",
          "test_politics_identity::childrens_rights_changes_only_exact_profession_mortality"},
+        {{"law_no_colonial_affairs","country_acceptance_homeland_add",10,false,false},
+         "IntegratedWorld::p2_acceptance (explicit verified homeland)",
+         "test_politics_identity::no_colonial_affairs_adds_only_verified_homeland_acceptance"},
         {{"amendment_reinstated_fueros","country_basque_cultural_acceptance_add",20,false,false},
          "IntegratedWorld::p2_acceptance (exact verified named culture)",
          "test_politics_identity::canonical_named_acceptance_changes_only_verified_pop_and_country"},

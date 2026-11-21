@@ -97,6 +97,16 @@ inline std::optional<P2AcceptanceView> IntegratedWorld::p2_acceptance(
         found=true;
     }
     if(!found)return std::nullopt;
+    // The colonization row is independent of the citizenship homeland
+    // points above. Use the same verified POP-region evidence, including
+    // when a different country evaluates a migration candidate.
+    if(evidence.homelands.contains(pop.region)&&
+       p2_selected_law(country,"colonization")==
+           std::optional<std::string>("no_colonial_affairs")) {
+        score=phaseb::add_checked(score,static_cast<std::int64_t>(std::llround(
+            p2_catalog_raw_modifier("law_no_colonial_affairs",
+                                    "country_acceptance_homeland_add"))));
+    }
     if(auto religion_law=p2_selected_law(country,"church_and_state")) {
         if(national->second.state_religions.contains(pop.religion))
             score+=source_modifier(*religion_law,

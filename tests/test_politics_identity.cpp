@@ -928,10 +928,127 @@ static void canonical_named_acceptance_changes_only_verified_pop_and_country() {
     run("polish","HAI","cultural_exclusion","amendment_haiti_polish_naturalization",20,80,2);
 }
 
+static void no_colonial_affairs_adds_only_verified_homeland_acceptance() {
+    phasegh::World gh{24000};
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"SOURCE","ORIGIN");
+    geo.seed_province(2,"TARGET","DEST");
+    geo.seed_province(3,"OTHER","ORIGIN");
+    geo.seed_unit(1,"ORIGIN","HOME");
+    geo.seed_unit(2,"DEST","DEST-UNIT");
+    geo.seed_assignment(1,1);geo.seed_assignment(2,2);geo.seed_assignment(3,1);
+    auto& c=geo.seed_core().seed_core();
+    for(const auto* tag:{"ORIGIN","DEST"}) {
+        c.seed_actor(tag,0);
+        c.seed_government(tag,"HEAD","PRIME",5,3);
+        c.seed_p1_constitution(tag,{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,
+            "fixture:constitution"});
+        law(c,tag,"citizenship","subjecthood");
+        law(c,tag,"colonization","colonial_exploitation");
+        law(c,tag,"migration",std::string(tag)=="DEST"?
+                            "migration_controls":"no_migration_controls");
+    }
+    c.p2_seed_culture({"primary",{"primary-H"},{"primary-HG"},
+                        {"primary-L"},{"primary-LG"},{},{}});
+    c.p2_seed_culture({"homeland",{"H"},{"HG"},{"L"},{"LG"},{},{"SOURCE"}});
+    c.p2_seed_culture({"elsewhere",{"H"},{"HG"},{"L"},{"LG"},{},{"OTHER"}});
+    c.p2_seed_culture({"unverified-home",{"H"},{"HG"},{"L"},{"LG"},{},{}});
+    c.p2_seed_national_identity({"ORIGIN",{"primary"},{}});
+    c.p2_seed_national_identity({"DEST",{"primary"},{}});
+    auto& pop=c.seed_population();
+    const auto h=pop.household_profile({"SOURCE","mixed","shared",100'000});
+    const auto e=pop.economic_profile({"SOURCE","worker","wage","employee",
+                                       pop.default_education()});
+    const auto seed=[&](const std::string& culture) {
+        const auto d=pop.demographic_profile({"SOURCE",23640,phaseb::Sex::male,
+            culture,"faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        return pop.seed_population(d,e,h,100'000);
+    };
+    const auto home=seed("homeland"), other=seed("elsewhere");
+    const auto no_home=seed("unverified-home"), unknown=seed("missing-traits");
+    phaseb::DemographyRules rules;
+    rules.fertility_ppm=rules.infant_death_ppm=rules.child_death_ppm=0;
+    rules.adult_death_ppm=rules.senior_death_ppm=rules.very_old_death_ppm=0;
+    rules.illness_incidence_ppm=rules.accident_ppm=0;
+    rules.primary_access_ppm=rules.secondary_access_ppm=rules.tertiary_access_ppm=0;
+    rules.adult_literacy_access_ppm=rules.training_ppm=0;
+    rules.migration_ppm=310'000;
+    rules.destination_by_region["SOURCE"]="TARGET";
+    c.enable_demography(rules);
+    auto world=daily::World::adopt(std::move(gh),21);
+    const auto snapshot_counts=[&](int expected,bool allowed) {
+        const auto& live=view(world);
+        const auto score=[&](const std::string& tag,Id id) {
+            const auto evaluated=live.p2_acceptance(tag,id);
+            return evaluated?evaluated->score:-1;
+        };
+        check(score("DEST",home)==expected&&score("ORIGIN",home)==30&&
+              score("DEST",other)==0&&score("DEST",no_home)==0&&
+              score("DEST",unknown)==-1,
+              "colonization law did not add only verified homeland points in its own country");
+        check(live.p2_migration_permitted(home,"TARGET")==allowed&&
+              !live.p2_migration_permitted(other,"TARGET")&&
+              !live.p2_migration_permitted(no_home,"TARGET")&&
+              !live.p2_migration_permitted(unknown,"TARGET"),
+              "colonization acceptance did not preserve actual migration control scope");
+    };
+    const auto arrived=[&] {
+        phaseb::People count=0;
+        const auto& people=view(world).people();
+        for(const auto& [id,row]:people.slices()) {
+            (void)id;
+            const auto& dem=people.demographic(row.key.demographic);
+            if(dem.region!="TARGET")continue;
+            check(dem.culture=="homeland","an unverified homeland passed migration control");
+            count+=row.count;
+        }
+        return count;
+    };
+    const auto replace=[&](const std::string& choice,const std::string& id) {
+        const auto start=world.day_index();
+        phasegh::World::Plan act;
+        act[9].push_back([&](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            P2Bill bill;
+            bill.id=id;bill.country="DEST";bill.proposer="PRIME";
+            bill.legal_basis="fixture:enactment";bill.effective_day=start+2;
+            bill.action=P2BillAction::enact_or_replace_base;
+            bill.proposed_base.id=id+":LAW";bill.proposed_base.country="DEST";
+            bill.proposed_base.domain="lawgroup_colonization";
+            bill.proposed_base.scope="national";bill.proposed_base.base_choice=choice;
+            bill.proposed_base.legal_basis="fixture:colonization";
+            live.p2_submit_bill(std::move(bill),start);
+            live.p2_approve_bill(id,{});
+            live.p2_promulgate_bill(id,"HEAD",start);
+        });
+        world.advance_day(act);
+        world.advance_day();
+    };
+    snapshot_counts(30,false);
+    replace("law_no_colonial_affairs","ADOPT");
+    snapshot_counts(30,false);
+    check(arrived()==0,"pending colonization law affected movement early");
+    world.advance_day();
+    snapshot_counts(40,true);
+    check(arrived()==1000,"verified homeland POP did not actually move under the enacted law");
+    const auto saved=daily::SnapshotCodec::encode(world);
+    world=daily::SnapshotCodec::decode(saved);
+    snapshot_counts(40,true);
+    replace("law_colonial_exploitation","REPLACE");
+    const auto previous=arrived();
+    world.advance_day();
+    snapshot_counts(30,false);
+    check(arrived()==previous&&view(world).people().population()==400'000,
+          "replaced colonization law retained a stale effect on real migration");
+}
+
 int main(){
     try{
         chiefs_aid_uses_only_effective_welfare_bureaucracy();
         source_ideologies_laws_traits();
+        no_colonial_affairs_adds_only_verified_homeland_acceptance();
         canonical_named_acceptance_changes_only_verified_pop_and_country();
         acceptance_and_five_tier_rights();
         physical_migration_and_law_block();

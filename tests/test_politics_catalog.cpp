@@ -356,8 +356,38 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==63,
-          "expected exact total after adding three Austrian review speed witnesses");
+    check(canonical_law_row_evidence().size()==64,
+          "expected exact total after adding the single homeland witness");
+
+    std::size_t homeland=0,other_homeland_rows=0;
+    for(const auto& row:audit) {
+        if(row.source.key!="country_acceptance_homeland_add")continue;
+        if(row.source.source_id!="law_no_colonial_affairs") {
+            check(row.status!=CanonicalLawRowStatus::verified_row,
+                  "different same-key source inherited the colonial homeland witness");
+            ++other_homeland_rows;
+            continue;
+        }
+        check(!row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.normalized_value==10'000'000&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="IntegratedWorld::p2_acceptance (explicit verified homeland)"&&
+              row.behavior_test=="test_politics_identity::no_colonial_affairs_adds_only_verified_homeland_acceptance",
+              "homeland evidence lost exact source, value, actor or scope");
+        auto qualifier=row.source;
+        qualifier.institution=true;
+        check(classify_canonical_law_row(qualifier,canonical_law_row_evidence()).status!=
+                  CanonicalLawRowStatus::verified_row,
+              "flat homeland proof leaked to an institutional row");
+        qualifier.institution=false;
+        qualifier.sponsor=true;
+        check(classify_canonical_law_row(qualifier,canonical_law_row_evidence()).status!=
+                  CanonicalLawRowStatus::verified_row,
+              "flat homeland proof leaked to a sponsor row");
+        ++homeland;
+    }
+    check(homeland==1&&other_homeland_rows==2,
+          "homeland audit did not distinguish all three canonical sources");
 
     constexpr std::string_view named_culture_fixture=
         "test_politics_identity::canonical_named_acceptance_changes_only_verified_pop_and_country";
