@@ -356,7 +356,7 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==71,
+    check(canonical_law_row_evidence().size()==73,
           "expected exact witness count including only two new internal migration rows");
     std::size_t serfdom_internal=0,tenant_internal=0,serfdom_mass=0;
     for(const auto& row:audit) {
@@ -536,6 +536,26 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
               "flat authority cost proof leaked into a sponsor row");
     }
     check(authority_proven.size()==5,"missing exact direct continuing authority commitments");
+
+    std::size_t institution_commitments=0;
+    for(const auto& row:audit) {
+        if(row.behavior_test!="test_politics_identity::institutional_bureaucracy_prices_ongoing_commitments")
+            continue;
+        check(row.source.key=="country_bureaucracy_investment_cost_factor_mult" &&
+              !row.source.boolean && !row.source.institution && !row.source.sponsor &&
+              row.executor=="IntegratedWorld::p1_bureaucracy (ongoing institutional commitments)" &&
+              row.status==CanonicalLawRowStatus::verified_row &&
+              ((row.source.source_id=="law_elected_bureaucrats" && row.normalized_value==-150'000) ||
+               (row.source.source_id=="amendment_bourgeois_specialists" && row.normalized_value==-50'000)),
+              "general institution cost witness lost exact row or scope");
+        auto mismatch=row.source;
+        mismatch.institution=true;
+        check(classify_canonical_law_row(mismatch,canonical_law_row_evidence()).status==
+                  CanonicalLawRowStatus::no_recorded_path,
+              "flat institution cost evidence leaked to a per-level row");
+        ++institution_commitments;
+    }
+    check(institution_commitments==2,"expected two exact bureaucratic institution cost witnesses");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

@@ -228,6 +228,38 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
            link.kind==P1InstitutionKind::elections)continue;
         institutions[link.kind]=std::max(institutions[link.kind],link.level);
     }
+    // Here "investment" means the recurring bureaucracy committed by the
+    // existing institution level, not an upgrade fee or a treasury outlay.
+    std::int64_t general_institution_cost_ppm=0;
+    if(!institutions.empty()) {
+        constexpr std::string_view key=
+            "country_bureaucracy_investment_cost_factor_mult";
+        constexpr const char* specialists="amendment_bourgeois_specialists";
+        const auto raw_ppm=[](std::string_view source,std::string_view effect) {
+            return static_cast<std::int64_t>(std::llround(
+                p2_catalog_raw_modifier(source,effect)*1'000'000.0));
+        };
+        for(const auto& [slot,id]:p2_active_base_) {
+            (void)slot;
+            const auto& law=p2_laws_.at(id);
+            if(law.country!=country||law.tier==P2NormTier::local_ordinance||
+               (!law.scope.empty()&&law.scope!="national")||
+               politics::bare_group(law.domain)!="bureaucracy"||
+               !politics::catalogue().has(law.domain,law.base_choice))
+                continue;
+            const auto choice=p2_catalog_canonical_choice(law.base_choice);
+            if(choice=="law_elected_bureaucrats")
+                general_institution_cost_ppm=raw_ppm(choice,key);
+            if(p2_active_amendments_.contains(specialists)&&
+               p2_amendments_.at(specialists).law_id==id) {
+                const auto* source=p2_catalog_amendment(specialists);
+                if(source&&p2_catalog_amendment_applies(*source,choice))
+                    general_institution_cost_ppm=phaseb::add_checked(
+                        general_institution_cost_ppm,raw_ppm(specialists,key));
+            }
+            break; // Only one recognized active national bureaucracy slot.
+        }
+    }
     for(const auto& [kind,level]:institutions) {
         const auto rate=phaseb::add_checked(
             phaseb::mul_checked(v.incorporated_population/100'000,10),
@@ -250,11 +282,15 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
             default:break;
         }
         auto cost=phaseb::mul_checked(rate,level);
-        if(law_key) {
+        if(law_key||general_institution_cost_ppm!=0) {
+            const auto specific=law_key?phaseb::add_checked(
+                p2_modifier_ppm(country,law_key),
+                p3_trait_modifier_ppm(country,law_key)):0;
+            // VIC2.5 adds same-cost percentage points before its existing
+            // clamp and integer rounding, not sequential rounded discounts.
             const auto factor=std::clamp<std::int64_t>(
                 phaseb::add_checked(1'000'000,phaseb::add_checked(
-                    p2_modifier_ppm(country,law_key),
-                    p3_trait_modifier_ppm(country,law_key))),
+                    general_institution_cost_ppm,specific)),
                 0,5'000'000);
             cost=phaseb::add_checked(
                 phaseb::mul_checked(cost/1'000'000,factor),

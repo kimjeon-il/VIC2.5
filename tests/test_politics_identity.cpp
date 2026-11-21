@@ -397,6 +397,79 @@ static void effective_workhouse_amendment_reduces_only_welfare_cost(
           "welfare cost consumer missing from law coverage audit");
 }
 
+static void institutional_bureaucracy_prices_ongoing_commitments() {
+    const auto scenario=[](std::string bureaucracy,bool attach,
+                           int expected,const char* mismatch) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");
+        geo.seed_unit(1,"A","ADMIN");
+        geo.seed_assignment(1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",1000);
+        c.seed_actor("SERVICES",1000);
+        c.seed_government("A","HEAD","PRIME",5,3);
+        c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,
+            "scenario:law"});
+        c.p1_set_incorporation("R",true);
+        auto& pop=c.seed_population();
+        const auto hh=pop.household_profile({"R","mixed","shared",25'000});
+        const auto worker=pop.economic_profile({
+            "R","worker","wage","employee",pop.default_education()});
+        const auto dem=pop.demographic_profile({
+            "R",23650,phaseb::Sex::female,"culture","faith","citizen",
+            "free",pop.default_health(),phaseb::Service::civilian});
+        const auto slice=pop.seed_population(dem,worker,hh,1'000'000);
+        pop.hire(slice,10,"SERVICES","worker",10,{});
+        c.seed_public_institution("SCHOOL","SERVICES","R","paper",100,1);
+        c.seed_p1_institution("A","SCHOOL",P1InstitutionKind::education,3);
+        c.seed_public_institution("CLINIC","SERVICES","R","food",100,1);
+        c.seed_p1_institution("A","CLINIC",P1InstitutionKind::healthcare,1);
+        law(c,"A","education_system","private_schools");
+        law(c,"A","bureaucracy",bureaucracy);
+        const std::string amendment="amendment_bourgeois_specialists";
+        if(attach)
+            c.p2_seed_amendment({amendment,"A:bureaucracy","scenario:law","",
+                {{"unchanged-school-level","SCHOOL",
+                  P2ClauseKind::public_institution_level,3}}});
+        auto world=daily::World::adopt(std::move(gh),42);
+        const auto state=[&]() -> const IntegratedWorld& {
+            return world.engine().base().core().core();
+        };
+        const auto verify=[&] {
+            const auto v=state().p1_bureaucracy("A");
+            const auto svc=state().p1_institution_capacity("SCHOOL");
+            check(v.institution_cost==expected,mismatch);
+            check(v.capacity.committed==v.state_cost+expected&&
+                  v.office_output==0&&v.nationalized_cost==0&&
+                  v.commander_cost==0&&
+                  svc.level==3&&svc.employed_staff==10&&svc.cash_backed,
+                  "institution price altered unrelated commitments or staffing");
+            return v.state_cost;
+        };
+        const auto state_cost=verify();
+        const auto snap=daily::SnapshotCodec::encode(world);
+        world=daily::SnapshotCodec::decode(snap);
+        check(daily::SnapshotCodec::encode(world)==snap&&verify()==state_cost,
+              "institution bureaucracy did not retain canonical source on reload");
+        return state_cost;
+    };
+    const auto baseline=scenario("appointed_bureaucrats",false,280,
+        "private-school specific cost must precede the test");
+    check(scenario("elected_bureaucrats",false,220,
+                   "elected bureaucrats must reduce ongoing institution cost")==
+          baseline,"national institution discount changed independent state cost");
+    check(scenario("appointed_bureaucrats",true,280,
+                   "authored origin is not the allowed Bourgeois parent")==
+          baseline,"invalid Bourgeois parent altered state cost");
+    const auto communal=scenario("communal_administration",false,280,
+        "communal population discount must not reduce institution cost");
+    check(scenario("communal_administration",true,260,
+                   "compatible Bourgeois amendment must reduce institution cost")==
+          communal,"Bourgeois institution discount changed independent state cost");
+}
+
 static daily::World mortality_fixture(
         const std::string& health_law,int legal_level,bool funded,
         bool staffed,bool blasphemy=false,bool empty_scope=false,
@@ -1152,6 +1225,7 @@ int main(){
         abolition_preserves_real_people_and_membership();
         economic_law_restricts_real_company_ownership();
         military_peasant_levy_restricts_real_conscripts();
+        institutional_bureaucracy_prices_ongoing_commitments();
         effective_workhouse_amendment_reduces_only_welfare_cost(
             "amendment_religious_workhouses");
         effective_workhouse_amendment_reduces_only_welfare_cost(
