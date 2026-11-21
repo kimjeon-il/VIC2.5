@@ -356,7 +356,7 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
-    check(canonical_law_row_evidence().size()==64,
+    check(canonical_law_row_evidence().size()==69,
           "expected exact total after adding the single homeland witness");
 
     std::size_t homeland=0,other_homeland_rows=0;
@@ -473,6 +473,34 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     }
     check(austrian_speed==3 && staged_review_success==7,
           "expected three review cadence witnesses separate from seven success witnesses");
+
+    constexpr std::string_view authority_cost_fixture=
+        "test_p2_advanced::political_concessions_commit_real_national_authority";
+    const std::map<std::string_view,std::int64_t> authority_costs={
+        {"amendment_generic_sponsor_polstr_increase",50'000'000},
+        {"amendment_generic_sponsor_polstr_approval_increase",50'000'000},
+        {"amendment_generic_sponsor_polstr_increase_negotiation_1",50'000'000},
+        {"amendment_generic_sponsor_polstr_increase_negotiation_2",100'000'000},
+        {"amendment_generic_sponsor_polstr_increase_negotiation_3",150'000'000}};
+    std::set<std::string_view> authority_proven;
+    for(const auto& row:audit) {
+        if(row.behavior_test!=authority_cost_fixture)continue;
+        check(row.source.key=="country_authority_cost_add"&&
+              !row.source.boolean&&!row.source.institution&&!row.source.sponsor&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="IntegratedWorld::p1_authority_capacity (direct continuing law commitment)",
+              "authority cost evidence must be flat and direct, not a sponsor benefit");
+        const auto expected=authority_costs.find(row.source.source_id);
+        check(expected!=authority_costs.end()&&expected->second==row.normalized_value&&
+              authority_proven.insert(row.source.source_id).second,
+              "wrong source or magnitude inherited continuing authority cost proof");
+        auto wrong=row.source;
+        wrong.sponsor=true;
+        check(classify_canonical_law_row(wrong,canonical_law_row_evidence()).status==
+                  CanonicalLawRowStatus::no_recorded_path,
+              "flat authority cost proof leaked into a sponsor row");
+    }
+    check(authority_proven.size()==5,"missing exact direct continuing authority commitments");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.

@@ -25,6 +25,31 @@ inline P1FlowCapacity IntegratedWorld::p1_authority_capacity(
         0,5'000'000);
     const auto generated=phaseb::mul_checked(base,multiplier)/1'000'000;
     std::int64_t committed=0;
+    // These exact concessions reserve national authority while the law is
+    // effective. Their separate sponsor-only benefits need proof of an IG;
+    // the source's direct authority cost does not. Do not alter generation
+    // or charge the cost again inside either existing mandate path.
+    for(const auto* id:{
+            "amendment_generic_sponsor_polstr_increase",
+            "amendment_generic_sponsor_polstr_approval_increase",
+            "amendment_generic_sponsor_polstr_increase_negotiation_1",
+            "amendment_generic_sponsor_polstr_increase_negotiation_2",
+            "amendment_generic_sponsor_polstr_increase_negotiation_3"}) {
+        if(!p2_active_amendments_.contains(id))continue;
+        const auto& amendment=p2_amendments_.at(id);
+        const auto& parent=p2_laws_.at(amendment.law_id);
+        const auto* source=p2_catalog_amendment(id);
+        if(parent.country!=country||parent.tier==P2NormTier::local_ordinance||
+           (!parent.scope.empty()&&parent.scope!="national")||
+           !p2_is_active_base(amendment.law_id)||
+           !politics::catalogue().has(parent.domain,parent.base_choice)||
+           !source||!source->generic_sponsor||
+           !p2_catalog_amendment_applies(*source,parent.base_choice)||
+           (!source->possible_country_tags.empty()&&
+            !p2_catalog_list_contains(source->possible_country_tags,country)))continue;
+        committed=phaseb::add_checked(committed,static_cast<std::int64_t>(
+            std::llround(p2_catalog_raw_modifier(id,"country_authority_cost_add"))));
+    }
     for(const auto& [id,policy]:p1_active_mandates_) {
         (void)id;
         if(policy.country==country)

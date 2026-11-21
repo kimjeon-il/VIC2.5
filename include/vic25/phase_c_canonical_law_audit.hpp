@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,64>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,69>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,64> evidence{{
+    static const std::array<CanonicalLawRowEvidence,69> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -258,7 +258,22 @@ inline const std::array<CanonicalLawRowEvidence,64>& canonical_law_row_evidence(
          "test_p2_advanced::austrian_law_speed_changes_only_new_review_intervals"},
         {{"amendment_geheime_staatskonferenz","country_law_enactment_speed_mult",-0.2,false,false},
          "IntegratedWorld::p2_scaled_new_review_days (fixed checkpoint reciprocal ceiling)",
-         "test_p2_advanced::austrian_law_speed_changes_only_new_review_intervals"}
+         "test_p2_advanced::austrian_law_speed_changes_only_new_review_intervals"},
+        {{"amendment_generic_sponsor_polstr_increase","country_authority_cost_add",50,false,false},
+         "IntegratedWorld::p1_authority_capacity (direct continuing law commitment)",
+         "test_p2_advanced::political_concessions_commit_real_national_authority"},
+        {{"amendment_generic_sponsor_polstr_approval_increase","country_authority_cost_add",50,false,false},
+         "IntegratedWorld::p1_authority_capacity (direct continuing law commitment)",
+         "test_p2_advanced::political_concessions_commit_real_national_authority"},
+        {{"amendment_generic_sponsor_polstr_increase_negotiation_1","country_authority_cost_add",50,false,false},
+         "IntegratedWorld::p1_authority_capacity (direct continuing law commitment)",
+         "test_p2_advanced::political_concessions_commit_real_national_authority"},
+        {{"amendment_generic_sponsor_polstr_increase_negotiation_2","country_authority_cost_add",100,false,false},
+         "IntegratedWorld::p1_authority_capacity (direct continuing law commitment)",
+         "test_p2_advanced::political_concessions_commit_real_national_authority"},
+        {{"amendment_generic_sponsor_polstr_increase_negotiation_3","country_authority_cost_add",150,false,false},
+         "IntegratedWorld::p1_authority_capacity (direct continuing law commitment)",
+         "test_p2_advanced::political_concessions_commit_real_national_authority"}
     }};
     return evidence;
 }

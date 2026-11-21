@@ -838,6 +838,124 @@ static void austrian_law_speed_changes_only_new_review_intervals() {
         900'000,100,true);
 }
 
+static void political_concessions_commit_real_national_authority() {
+    const auto run=[](const std::string& id,int expected,bool bad_parent=false) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");geo.seed_province(2,"S","B");
+        geo.seed_unit(1,"A","AA");geo.seed_unit(2,"B","BB");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& c=geo.seed_core().seed_core();
+        for(const auto* country:{"A","B"}) {
+            c.seed_actor(country,100);
+            c.seed_government(country,"HEAD","PM",5,3);
+            c.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:authority"});
+            c.p2_seed_base({std::string(country)+":POWER",country,
+                "distribution_of_power","","law_autocracy","fixture:power"});
+        }
+        if(bad_parent)c.p2_seed_base({"unrecognized","A","fictional_local_finance","national",
+            "not-a-canonical-law","fixture:invalid-parent"});
+        c.seed_interest_group("Members");
+        c.p3_seed_group({"A","Members","","","",P3GroupType::custom,0,0});
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"R","mixed","shared",25});
+        const auto e=pop.economic_profile({"R","worker","wage","employee",
+                                          pop.default_education()});
+        const auto d=pop.demographic_profile({"R",23651,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto resident=pop.seed_population(d,e,h,100);
+        c.p3_seed_movement({"ACTUAL","A","fixture-cause","reform","R",
+            P3MovementGoal::legal_reform,{"Members"},{},300'000,100'000,true});
+        auto world=daily::World::adopt(std::move(gh),31);
+        const auto start=world.day_index();
+        phasegh::World::Plan attach;
+        attach[9].push_back([&](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            live.join_interest_group(resident,"Members",10);
+            live.p1_activate_mandate({"REGIONAL","A","R",
+                P1PoliticalMandateKind::regional_decree,P1DecreeKind::construction_drive,100},start);
+            P2Bill bill;
+            bill.id="ATTACH";bill.country="A";bill.proposer="PM";
+            bill.legal_basis="fixture:cost";bill.effective_day=start+2;
+            bill.action=P2BillAction::attach_amendment;
+            bill.proposed_amendment={id,bad_parent?"unrecognized":"A:POWER",
+                "fixture:cost","",{{"association","A",
+                P2ClauseKind::political_association_allowed,1}}};
+            live.p2_submit_bill(std::move(bill),start);
+            live.p2_approve_bill("ATTACH",{});
+            live.p2_promulgate_bill("ATTACH","HEAD",start);
+        });
+        world.advance_day(attach);
+        const auto check_budget=[&](int cost) {
+            const auto a=ledger(world).p1_authority_budget("A");
+            const auto b=ledger(world).p1_authority_budget("B");
+            const auto flow=ledger(world).p1_authority_capacity("A");
+            ok(a.supply==300&&a.reserved==100+cost&&a.available==200-cost&&
+               flow.generated==300&&flow.committed==100+cost&&flow.balance==200-cost&&
+               b.supply==300&&b.reserved==0&&b.available==300,
+               "authored concession did not reserve exact continuing authority once");
+        };
+        check_budget(0);
+        world.advance_day();
+        check_budget(0);
+        auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+        world.advance_day();replay.advance_day();
+        ok(ledger(world).p2_amendment_active(id)&&ledger(world).p2_negotiated().empty()&&
+           daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+           "cost fixture did not enact direct concession safely through native replay");
+        check_budget(expected);
+
+        const auto try_movement=[&]() {
+            const auto day=world.day_index();
+            phasegh::World::Plan action;
+            action[9].push_back([day](phasegh::Stage& stage) {
+                stage.phase_c().p1_activate_mandate({"MOVEMENT","A","ACTUAL",
+                    P1PoliticalMandateKind::bolster_movement,
+                    P1DecreeKind::construction_drive,200},day);
+            });
+            world.advance_day(action);
+        };
+        if(expected>0) {
+            const auto before=daily::SnapshotCodec::encode(world);
+            bool rejected=false;
+            try { try_movement(); }
+            catch(const std::invalid_argument& e) {
+                rejected=std::string(e.what()).find("insufficient unreserved national authority")!=std::string::npos;
+            }
+            ok(rejected&&daily::SnapshotCodec::encode(world)==before,
+               "real mandate escaped the concession's reserved capacity or modified the live state");
+        }
+        const auto repeal_day=world.day_index();
+        phasegh::World::Plan repeal;
+        repeal[9].push_back([&](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            P2Bill bill;
+            bill.id="REPEAL";bill.country="A";bill.proposer="PM";
+            bill.legal_basis="fixture:repeal";bill.effective_day=repeal_day+1;
+            bill.action=P2BillAction::repeal_amendment;bill.target_id=id;
+            live.p2_submit_bill(std::move(bill),repeal_day);
+            live.p2_approve_bill("REPEAL",{});
+            live.p2_promulgate_bill("REPEAL","HEAD",repeal_day);
+        });
+        world.advance_day(repeal);
+        check_budget(expected);
+        world.advance_day();
+        ok(!ledger(world).p2_amendment_active(id),"concession repeal not legally effective");
+        check_budget(0);
+        try_movement();
+        ok(ledger(world).p1_authority_budget("A").reserved==300,
+           "lawful new mandate did not spend the released capacity");
+    };
+    run("amendment_generic_sponsor_polstr_increase",50);
+    run("amendment_generic_sponsor_polstr_approval_increase",50);
+    run("amendment_generic_sponsor_polstr_increase_negotiation_1",50);
+    run("amendment_generic_sponsor_polstr_increase_negotiation_2",100);
+    run("amendment_generic_sponsor_polstr_increase_negotiation_3",150);
+    run("amendment_generic_sponsor_polstr_increase_negotiation_3",0,true);
+}
+
 int main(){
     try{
         actual_upper_house_personal_terms_and_replay();
@@ -848,7 +966,8 @@ int main(){
         direct_named_group_approval_tracks_law_not_the_coalition();
         canonical_enactment_success_changes_real_review_outcome();
         austrian_law_speed_changes_only_new_review_intervals();
-        std::cout<<"P2 advanced politics: eight focused scenarios PASS\n";
+        political_concessions_commit_real_national_authority();
+        std::cout<<"P2 advanced politics: nine focused scenarios PASS\n";
         return 0;
     }catch(const std::exception& ex){
         std::cerr<<"P2 ADVANCED POLITICS FAILED: "<<ex.what()<<"\n";
