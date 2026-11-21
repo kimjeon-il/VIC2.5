@@ -297,13 +297,82 @@ static void legal_concession_resolves_without_armed_conflict() {
          "P5 legal reform should settle crisis without creating arms or people");
 }
 
+static void shinsengumi_changes_movement_risk_without_altering_pop() {
+    const auto run=[](const std::string& choice,int expected_reduction) {
+        PoliticalFixture fixture;
+        auto& geo=fixture.gh.seed_geography();
+        geo.seed_province(2,"FOREIGN","B");geo.seed_unit(101,"B","Foreign district");
+        geo.seed_assignment(2,101);
+        auto& core=geo.seed_core().seed_core();
+        core.seed_actor("B",1000);
+        core.seed_government("B","B_HEAD","B_PM",5,3);
+        core.seed_p1_constitution("B",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"test:constitution"});
+        core.seed_interest_group("FOREIGNERS");
+        core.p3_seed_group({"B","FOREIGNERS","","political_reform","reform",
+            P3GroupType::trade_unions,800'000,0});
+        core.p3_seed_movement({"FOREIGN_MOV","B","political_reform","reform","",
+            P3MovementGoal::legal_reform,{"FOREIGNERS"},{},1'000'000,1'000'000,true});
+        core.p3_seed_movement({"LOW","A","political_reform","reform","",
+            P3MovementGoal::legal_reform,{"WORKERS"},{},250'000,30'000,true});
+        auto& pop=core.seed_population();
+        const auto h=pop.household_profile({"FOREIGN","mixed","shared",50});
+        const auto e=pop.economic_profile({"FOREIGN","worker","wage","employee",
+                                           pop.default_education()});
+        const auto d=pop.demographic_profile({"FOREIGN",23640,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+        const auto foreign=pop.seed_population(d,e,h,50);
+        core.p3_set_stance(foreign,"political_reform",{900'000,900'000});
+        if(!choice.empty())
+            core.p2_seed_base({"SECURITY","A","internal_security","national",
+                               "law_"+choice,"test:effective-security-law"});
+        auto world=daily::World::adopt(std::move(fixture.gh),309);
+        need(c(world).p3_movement_view("LOW").radical_ppm==
+                 std::max(0,30'000-expected_reduction),
+             "Shinsengumi low movement radicalism did not clamp correctly");
+        need(rejects([&]{(void)c(world).p3_movement_view("NOT-REGISTERED");}),
+             "unknown movement acquired a policy score");
+        phasegh::World::Plan join;
+        join[9].push_back([worker=fixture.workers,foreign](phasegh::Stage& gh) {
+            gh.phase_c().join_interest_group(worker,"WORKERS",30);
+            gh.phase_c().join_interest_group(foreign,"FOREIGNERS",30);
+        });
+        world.advance_day(join);
+        const auto& live=c(world);
+        const auto& raw=live.p3_movements().at("MOV");
+        const auto home=live.p3_movement_view("MOV");
+        const auto away=live.p3_movement_view("FOREIGN_MOV");
+        const auto risk=live.p5_risk("MOV");
+        const auto attitude=live.p3_attitudes().at(fixture.workers).radical_ppm;
+        need(raw.radical_ppm==1'000'000 && home.supporters>=30 && away.supporters>=30 &&
+             home.radical_ppm==1'000'000-expected_reduction &&
+             away.radical_ppm==1'000'000 && risk.radical_ppm==home.radical_ppm,
+             "effective security-law radicalism failed to reach only its real movement risk");
+        auto saved=daily::SnapshotCodec::encode(world);
+        auto loaded=daily::SnapshotCodec::decode(saved);
+        need(c(loaded).p3_movement_view("MOV").radical_ppm==home.radical_ppm &&
+             daily::SnapshotCodec::encode(loaded)==saved,
+             "movement law changed persisted radicalism instead of deriving the view");
+        need(live.people().population()==100 && live.cash("A")==1000 && live.cash("B")==1000,
+             "movement radicalism changed underlying people or cash");
+        return std::pair{attitude,risk.pressure_ppm};
+    };
+    const auto [no_law_attitude,no_law_pressure]=run("",0);
+    const auto [shinsengumi_attitude,shinsengumi_pressure]=run("shinsengumi",50'000);
+    const auto [institution_attitude,institution_pressure]=run("secret_police",0);
+    need(no_law_attitude==shinsengumi_attitude && no_law_attitude==institution_attitude &&
+         shinsengumi_pressure<no_law_pressure && institution_pressure==no_law_pressure,
+         "movement law should change real pressure without modifying POP radicalism");
+}
+
 int main() {
     try {
         real_pop_attitudes_and_national_clout();
+        shinsengumi_changes_movement_risk_without_altering_pop();
         actual_next_day_strike_and_no_double_participants();
         armed_conflict_requires_real_deployments_and_verified_control();
         legal_concession_resolves_without_armed_conflict();
-        std::cout<<"P3/P5 politics: four real-ledger integration scenarios PASS\n";
+        std::cout<<"P3/P5 politics: five real-ledger integration scenarios PASS\n";
         return 0;
     } catch(const std::exception& error) {
         std::cerr<<"P3/P5 POLITICS FAILED: "<<error.what()<<"\n";

@@ -532,9 +532,19 @@ inline P3MovementView IntegratedWorld::p3_movement_view(
         }
     // Persistent organizational ideology defines a floor, not a fixed
     // national radicalism tag. Observed POP hardship can exceed that floor.
-    view.radical_ppm=std::max(movement.radical_ppm,
-        static_cast<std::int32_t>(
-            std::clamp<std::int64_t>(observed_radical,0,1'000'000)));
+    const auto underlying_radicalism=std::max<std::int64_t>(
+        movement.radical_ppm,std::clamp<std::int64_t>(observed_radical,0,1'000'000));
+    // The flat law affects this movement's derived score, not supporters'
+    // POP attitudes or the persisted organizational floor.
+    std::int64_t radicalism_add=0;
+    if(p2_selected_law(movement.country,"internal_security")=="shinsengumi") {
+        static const auto flat=static_cast<std::int64_t>(std::llround(
+            p2_catalog_raw_modifier("law_shinsengumi","political_movement_radicalism_add")*
+            1'000'000.0));
+        radicalism_add=flat;
+    }
+    view.radical_ppm=static_cast<std::int32_t>(std::clamp<std::int64_t>(
+        phaseb::add_checked(underlying_radicalism,radicalism_add),0,1'000'000));
     view.activism_ppm=std::max(movement.activism_ppm,
         static_cast<std::int32_t>(
             std::clamp<std::int64_t>(observed_engagement,0,1'000'000)));

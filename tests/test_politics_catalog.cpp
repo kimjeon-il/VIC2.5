@@ -354,8 +354,10 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
               "direct named group approval proof leaked to a sponsored row");
         ++direct_named_approval;
     }
-    check(direct_named_approval==7 && canonical_law_row_evidence().size()==59,
+    check(direct_named_approval==7,
           "exact evidence did not preserve all direct named witnesses");
+    check(canonical_law_row_evidence().size()==60,
+          "expected exact total after adding only the flat Shinsengumi witness");
 
     constexpr std::string_view named_culture_fixture=
         "test_politics_identity::canonical_named_acceptance_changes_only_verified_pop_and_country";
@@ -410,6 +412,19 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
         canonical_law_row_evidence());
     check(untested_speed.status!=CanonicalLawRowStatus::verified_row,
           "success witness credited unrelated review speed");
+
+    check(std::count_if(audit.begin(),audit.end(),[](const auto& row) {
+        return row.source.source_id=="law_shinsengumi" &&
+               row.source.key=="political_movement_radicalism_add" &&
+               !row.source.boolean && !row.source.institution && !row.source.sponsor &&
+               row.normalized_value==-50'000 &&
+               row.status==CanonicalLawRowStatus::verified_row &&
+               row.executor=="IntegratedWorld::p3_movement_view (flat derived radicalism)" &&
+               row.behavior_test=="test_p3_p5_politics::shinsengumi_changes_movement_risk_without_altering_pop";
+    })==1 && std::none_of(audit.begin(),audit.end(),[](const auto& row) {
+        return row.source.key=="political_movement_radicalism_add" && row.source.institution &&
+               row.status==CanonicalLawRowStatus::verified_row;
+    }),"flat movement law proof missing or leaked to institutional variants");
 
     // Synthetic evidence: three flat source rows share a key with an
     // institutional row. This does not assert unresolved migration behavior.
