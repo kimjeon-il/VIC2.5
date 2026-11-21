@@ -278,7 +278,7 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
                entry.normalized_value==-100'000 &&
                entry.status==CanonicalLawRowStatus::verified_row &&
                entry.executor=="IntegratedWorld::household_produce (explicit Stage 4 own-account ceiling)" &&
-               entry.behavior_test=="test_phase_c::D4-T49";
+               entry.behavior_test=="test_phase_c::colonial_subsistence_ceiling";
     })==1,"explicit Stage 4 subsistence proof missing");
 
     check(std::count_if(audit.begin(),audit.end(),[](const auto& entry) {

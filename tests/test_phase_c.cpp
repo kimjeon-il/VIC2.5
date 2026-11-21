@@ -191,6 +191,64 @@ static void integration_logistics_occupation() {
     verify(w.stock("A-UNIT","X","medicine")==48,"bad treatment stock");
     verify(w.military_control("X")=="A" && w.sovereignty("X")=="B","occupation overwrote sovereign");
 }
+static void colonial_subsistence_ceiling() {
+    const auto run=[](int incorporation,bool foreign,bool alternate,
+                      bool self_employed,bool expected_limit) {
+        F f;
+        if(foreign)f.w.seed_region("X","B");
+        const std::string region=foreign?"X":"R";
+        if(incorporation>=0)f.w.p1_set_incorporation(region,incorporation>0);
+        f.w.seed_government("A","HEAD","PM",5,3);
+        f.w.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+        P2BaseLaw law;
+        law.id="COL";law.country="A";law.domain="colonization";law.scope="national";
+        law.base_choice=alternate?"law_frontier_colonization":"law_colonial_exploitation";
+        law.legal_basis="fixture:colonial-subsistence";
+        f.w.p2_seed_base(law);
+        auto& pop=f.w.seed_population();
+        auto demographic=pop.demographic(pop.slice(f.civ).key.demographic);
+        demographic.region=region;
+        const auto group=pop.demographic_profile(demographic);
+        const auto e=pop.economic_profile({region,"farmer",
+            self_employed?"self_employed":"subsistence","self_employed",pop.default_education()});
+        const auto hh=pop.household_profile({region,"test-subsistence","shared",10});
+        const auto own=pop.seed_population(group,e,hh,2,999);
+        const auto before=SnapshotCodec::encode(f.w);
+        const auto cash=f.w.cash("H");
+        const auto holder="HH:"+std::to_string(hh);
+        IntegratedWorld::Plan too_much;
+        too_much[4].push_back([own](auto& w){
+            w.household_produce(own,"food",5,5);
+            w.household_produce(own,"food",5,5);
+        });
+        too_much[7].push_back([own](auto& w){w.household_consume(own,"food",4);});
+        if(expected_limit) {
+            verify(rejected([&]{f.w.advance(too_much);}),
+                   "colonial exploitation did not reduce the cumulative own-account ceiling");
+            verify(SnapshotCodec::encode(f.w)==before,"rejected household output did not roll back");
+            IntegratedWorld::Plan valid;
+            valid[4].push_back([own](auto& w){
+                w.household_produce(own,"food",5,5);
+                w.household_produce(own,"food",4,5);
+            });
+            valid[7]=too_much[7];
+            f.w.advance(valid);
+        } else {
+            f.w.advance(too_much);
+        }
+        verify(f.w.stock(holder,region,"food")== (expected_limit?5:6) &&
+               f.w.actual_household_consumption(hh,"food")==4 && f.w.cash("H")==cash,
+               "subsistence law changed real receipt/consumption or household cash unexpectedly");
+    };
+    run(0,false,false,false,true);
+    run(1,false,false,false,false);
+    run(-1,false,false,false,false);
+    run(0,true,false,false,false);
+    run(0,false,true,false,false);
+    run(0,false,false,true,false);
+}
+
 int main() {
     Suite test;
     test.run(1, []{ F f;verify(f.w.people().population()==600,"duplicated population"); });
@@ -924,68 +982,18 @@ int main() {
         // test does NOT certify the complete CE/CP/CM feature backlog.
     });
 
-    test.run(49, []{
-        const auto run=[](int incorporation,bool foreign,bool alternate,
-                          bool self_employed,bool expected_limit) {
-            F f;
-            if(foreign)f.w.seed_region("X","B");
-            const std::string region=foreign?"X":"R";
-            if(incorporation>=0)f.w.p1_set_incorporation(region,incorporation>0);
-            f.w.seed_government("A","HEAD","PM",5,3);
-            f.w.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
-                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
-            P2BaseLaw law;
-            law.id="COL";law.country="A";law.domain="colonization";law.scope="national";
-            law.base_choice=alternate?"law_frontier_colonization":"law_colonial_exploitation";
-            law.legal_basis="fixture:colonial-subsistence";
-            f.w.p2_seed_base(law);
-            auto& pop=f.w.seed_population();
-            auto demographic=pop.demographic(pop.slice(f.civ).key.demographic);
-            demographic.region=region;
-            const auto group=pop.demographic_profile(demographic);
-            const auto e=pop.economic_profile({region,"farmer",
-                self_employed?"self_employed":"subsistence","self_employed",pop.default_education()});
-            const auto hh=pop.household_profile({region,"test-subsistence","shared",10});
-            const auto own=pop.seed_population(group,e,hh,2,999);
-            const auto before=SnapshotCodec::encode(f.w);
-            const auto cash=f.w.cash("H");
-            const auto holder="HH:"+std::to_string(hh);
-            IntegratedWorld::Plan too_much;
-            too_much[4].push_back([own](auto& w){
-                w.household_produce(own,"food",5,5);
-                w.household_produce(own,"food",5,5);
-            });
-            too_much[7].push_back([own](auto& w){w.household_consume(own,"food",4);});
-            if(expected_limit) {
-                verify(rejected([&]{f.w.advance(too_much);}),
-                       "colonial exploitation did not reduce the cumulative own-account ceiling");
-                verify(SnapshotCodec::encode(f.w)==before,"rejected household output did not roll back");
-                IntegratedWorld::Plan valid;
-                valid[4].push_back([own](auto& w){
-                    w.household_produce(own,"food",5,5);
-                    w.household_produce(own,"food",4,5);
-                });
-                valid[7]=too_much[7];
-                f.w.advance(valid);
-            } else {
-                f.w.advance(too_much);
-            }
-            verify(f.w.stock(holder,region,"food")== (expected_limit?5:6) &&
-                   f.w.actual_household_consumption(hh,"food")==4 && f.w.cash("H")==cash,
-                   "subsistence law changed real receipt/consumption or household cash unexpectedly");
-        };
-        run(0,false,false,false,true);
-        run(1,false,false,false,false);
-        run(-1,false,false,false,false);
-        run(0,true,false,false,false);
-        run(0,false,true,false,false);
-        run(0,false,false,true,false);
-    });
-
     for (const auto& s : test.status) std::cout << s << '\n';
     std::cout << "D4 integration runnable subset: PASS=" << test.pass
               << " BLOCKED=" << test.blocked << " FAIL=" << test.failed
-              << " TOTAL=" << test.status.size() << "/49\n";
-    verify(test.status.size()==49,"missing test IDs");
+              << " TOTAL=" << test.status.size() << "/48\n";
+    verify(test.status.size()==48,"missing test IDs");
+    // This regression is outside the frozen 48 designed D4 cases.
+    try {
+        colonial_subsistence_ceiling();
+        std::cout << "colonial_subsistence_ceiling PASS\n";
+    } catch (const std::exception& ex) {
+        std::cerr << "colonial_subsistence_ceiling FAIL: " << ex.what() << '\n';
+        return 1;
+    }
     return test.failed ? 1 : 0;
 }

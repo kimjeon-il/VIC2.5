@@ -144,7 +144,7 @@ inline const std::array<CanonicalLawRowEvidence,43>& canonical_law_row_evidence(
          "test_politics_catalog::enacted_national_laws_change_only_calculated_legitimacy"},
         {{"law_colonial_exploitation","building_unincorporated_subsistence_output_mult",-0.1,false,false},
          "IntegratedWorld::household_produce (explicit Stage 4 own-account ceiling)",
-         "test_phase_c::D4-T49"},
+         "test_phase_c::colonial_subsistence_ceiling"},
         {{"amendment_generic_sponsor_polstr_increase","interest_group_pol_str_mult",0.2,false,false,true},
          "IntegratedWorld::p3_group_view (verified same-country negotiated sponsor)",
          "test_p2_advanced::negotiated_sponsor_uses_actual_same_country_group"},
