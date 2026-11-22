@@ -113,24 +113,41 @@ inline void IntegratedWorld::phase_time_consume_administration_inputs() {
     }
 }
 
+inline IntegratedWorld::P1PopulationTotals IntegratedWorld::p1_population_totals(
+        const std::string* country)const {
+    P1PopulationTotals totals;
+    for(const auto& [id,row]:people_.slices()) {
+        (void)id;
+        const auto& dem=people_.demographic(row.key.demographic);
+        if(country) {
+            const auto owner=sovereignty_.find(dem.region);
+            if(owner==sovereignty_.end()||owner->second!=*country)continue;
+        }
+        auto& total=totals[dem.region];
+        total=phaseb::add_checked(total,row.count);
+    }
+    return totals;
+}
 inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
         const std::string& country)const {
     ensure(governments_.contains(country),
            "P1 bureaucracy requires an actual sovereign government");
+    return p1_bureaucracy_with_population(country,p1_population_totals(&country));
+}
+inline P1BureaucracyView IntegratedWorld::p1_bureaucracy_for_batch(
+        const std::string& country,std::optional<P1PopulationTotals>& population)const {
+    ensure(governments_.contains(country),
+           "P1 bureaucracy requires an actual sovereign government");
+    if(!population)population=p1_population_totals();
+    return p1_bureaucracy_with_population(country,*population);
+}
+inline P1BureaucracyView IntegratedWorld::p1_bureaucracy_with_population(
+        const std::string& country,const P1PopulationTotals& actual_population)const {
     P1BureaucracyView v;
     v.country=country;
     bool known=true;
     // E assigns geographical regions; C is sovereign and owns their
     // incorporation law. Unknown incorporation is not assumed true or false.
-    std::map<std::string,People> actual_population;
-    for(const auto& [id,row]:people_.slices()) {
-        (void)id;
-        const auto& dem=people_.demographic(row.key.demographic);
-        if(auto owner=sovereignty_.find(dem.region);
-           owner!=sovereignty_.end()&&owner->second==country)
-            actual_population[dem.region]=phaseb::add_checked(
-                actual_population[dem.region],row.count);
-    }
     // Base administrative cost per incorporated POP is law-sensitive.
     // The flat state overhead is unchanged; hereditary/local bureaucracy
     // and other enacted policy modifiers affect only population base cost.
@@ -157,7 +174,8 @@ inline P1BureaucracyView IntegratedWorld::p1_bureaucracy(
             continue;
         }
         if(!it->second)continue;
-        const People population=actual_population[region];
+        const auto observed=actual_population.find(region);
+        const People population=observed==actual_population.end()?0:observed->second;
         v.incorporated_population=phaseb::add_checked(
             v.incorporated_population,population);
         ++v.incorporated_regions;

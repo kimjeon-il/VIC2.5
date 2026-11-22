@@ -65,6 +65,47 @@ static phasegh::World fixture() {
     gh.validate();
     return gh;
 }
+static void automatic_wage_withholding_rereads_office_funding() {
+    using namespace phasec;
+    auto gh=fixture();
+    auto& d=gh.seed_geography().seed_core();
+    auto& core=d.seed_core();
+    core.seed_actor("OFFICE",0);
+    core.p1_set_incorporation("R",true);
+    core.seed_country_treasury("A","TREASURY");
+    core.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+        P1PowerDistribution::autocracy,P1LegislatureKind::none,"test:office"});
+    const auto administrators=people(gh,"R",2'500'000,"bureaucrat");
+    auto& pop=core.seed_population();
+    pop.hire(administrators,2,"OFFICE","bureaucrat",1,{});
+    pop.hire(pop.slices().begin()->first,4,"FIRM","worker",1,{});
+    core.seed_public_institution("ADMIN","OFFICE","R","paper",5,1);
+    core.seed_p1_institution("A","ADMIN",P1InstitutionKind::administration,1);
+    core.seed_production_facility("PUBLIC_OFFICE","OFFICE","R",2);
+    core.p1_register_office({"ADMIN","PUBLIC_OFFICE",P1OfficeMethod::simple,2,1});
+    core.seed_production_facility("FARM2","FIRM","R",31);
+    core.seed_market("R","textiles",200,1,300,0);
+    phased::IndustryRecipe recipe;
+    recipe.id="SECOND_RECIPE";recipe.site="FARM2";recipe.inputs={{"ore",1}};
+    recipe.outputs={{"textiles",1}};recipe.workers_per_batch=1;recipe.capacity_per_batch=1;
+    d.seed_recipe(recipe);
+    const auto opening=core.p1_bureaucracy("A");
+    require_test(opening.capacity.complete&&opening.capacity.committed==111&&
+                 opening.office_output==0&&opening.tax_waste_ppm==110'000,
+                 "fixture needs a staffed but unfunded office and real uncovered tax waste");
+    p0::Policies policy;
+    policy.auto_national_budgets_from_actual_services=false;
+    policy.manufacturers.push_back({"FOOD_RECIPE",2,"WORKERS","TREASURY",100});
+    policy.manufacturers.push_back({"SECOND_RECIPE",1,"WORKERS","TREASURY",100});
+    p0::DailyGame game(daily::World::adopt(std::move(gh),82),policy);
+    game.advance_day();
+    const auto& state=c(game);
+    require_test(state.stock("FIRM","R","food")==2&&state.stock("FIRM","R","textiles")==1&&
+                 state.cash("WORKERS")==182&&state.cash("TREASURY")==18&&
+                 state.p1_bureaucracy("A").office_output==20,
+                 "tax source reused stale office funding across two real automatic wages");
+}
+
 static void country_tariff_ai_respects_each_sovereigns_current_law() {
     const auto run=[](bool dated_free_trade) {
         using namespace phasec;
@@ -2437,6 +2478,7 @@ static void automatic_naval_air_and_real_blockade() {
 
 int main(){
     try{
+        automatic_wage_withholding_rereads_office_funding();
         country_tariff_ai_respects_each_sovereigns_current_law();
         tariff_ai_skips_stale_or_delegated_authority();
         daily_production_trade_ai_investment_replay();

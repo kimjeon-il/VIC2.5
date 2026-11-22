@@ -37,6 +37,7 @@
 #include <vector>
 
 namespace vic25::phasegh { class Stage; }
+namespace vic25::p0 { class DailyGame; }
 
 namespace vic25::phasec {
 using Id = phaseb::Id;
@@ -3816,6 +3817,23 @@ public:
                          const std::string& treasury,Money gross,
                          const std::string& country="",
                          const std::string& source_industry="") {
+        wages_under_law_impl(payer,worker,treasury,gross,country,source_industry,nullptr);
+    }
+private:
+    friend class vic25::p0::DailyGame;
+    using P1PopulationTotals=std::map<std::string,People>;
+    [[nodiscard]] P1PopulationTotals p1_population_totals(
+        const std::string* country=nullptr)const;
+    [[nodiscard]] P1BureaucracyView p1_bureaucracy_with_population(
+        const std::string& country,const P1PopulationTotals& population)const;
+    [[nodiscard]] P1BureaucracyView p1_bureaucracy_for_batch(
+        const std::string& country,std::optional<P1PopulationTotals>& population)const;
+
+    void wages_under_law_impl(const std::string& payer,const std::string& worker,
+                              const std::string& treasury,Money gross,
+                              const std::string& country,
+                              const std::string& source_industry,
+                              std::optional<P1PopulationTotals>* population) {
         require_stage({5});
         ensure(gross>0,"invalid gross wage");
         std::string authority=country;
@@ -3867,13 +3885,15 @@ public:
         }
         Money withholding=positive_product(gross,effective_rate)/1'000'000;
         if(!authority.empty()&&governments_.contains(authority)) {
-            const auto admin=p1_bureaucracy(authority);
+            const auto admin=population?p1_bureaucracy_for_batch(authority,*population):
+                                         p1_bureaucracy(authority);
             if(admin.capacity.complete)
                 withholding=phaseb::mul_checked(withholding,
                     1'000'000-admin.tax_waste_ppm)/1'000'000;
         }
         wages(payer,worker,treasury,gross,withholding);
     }
+public:
     void enact_voting_age(int new_age) {
         require_stage({9});
         ensure(governments_.empty(), "constitutional government requires authorized policy procedure");

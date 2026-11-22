@@ -1664,10 +1664,15 @@ public:
         // another order in this Stage1, so reuse the owner/jurisdiction quote.
         auto investment_rates=std::make_shared<
             std::map<std::pair<std::string,std::string>,std::int64_t>>();
+        // Only the built-in Stage1 construction callbacks share this
+        // regional headcount. Each order rereads legal/financial/staff data.
+        auto construction_population=std::make_shared<
+            std::optional<phasec::IntegratedWorld::P1PopulationTotals>>();
         for(const auto& investment:decisions.investments) {
             auto work=std::make_shared<Quantity>(0);
             const bool generated=autonomous_projects.contains(investment.construction_project);
             plan[1].push_back([investment,work,generated,date,dim,investment_rates,
+                construction_population,
                 today=world_.day_index(),
                 collateral_credit=decisions.allow_collateralized_enterprise_credit]
                 (phasegh::Stage& gh){
@@ -1714,7 +1719,8 @@ public:
                 }
                 // 1.15: excess Bureaucracy increases feasible paid
                 // construction speed, without manufacturing inputs or cash.
-                const auto administration=c.p1_bureaucracy(country);
+                const auto administration=c.p1_bureaucracy_for_batch(
+                    country,*construction_population);
                 if(administration.capacity.complete&&
                    administration.construction_bonus_ppm>0) {
                     const auto rate=static_cast<std::int64_t>(
@@ -1923,6 +1929,11 @@ public:
             plan[2].push_back([staffing](phasegh::Stage& gh){
                 hire_available(gh.phase_c(),staffing);
             });
+        // Stage5 automatic wage operations share headcounts with each
+        // other, never the earlier Stage1 quote or supplemental commands.
+        // Actual office funding, current tax rules and commitments stay live.
+        auto wage_population=std::make_shared<
+            std::optional<phasec::IntegratedWorld::P1PopulationTotals>>();
         for(const auto& firm:decisions.manufacturers) {
             auto workers=std::make_shared<People>(0);
             plan[4].push_back([firm,date,dim,workers,
@@ -1938,15 +1949,15 @@ public:
                 *workers=times(batches,r.workers_per_batch);
             });
             if(firm.wage_per_worker_per_day>0)
-                plan[5].push_back([firm,workers](phasegh::Stage& gh){
+                plan[5].push_back([firm,workers,wage_population](phasegh::Stage& gh){
                     if(*workers<=0)return;
                     const auto& r=gh.phase_d().state().recipes.at(firm.recipe);
                     const auto& f=gh.phase_c().facility(r.site);
                     const Money gross=times(*workers,firm.wage_per_worker_per_day);
-                    gh.phase_c().wages_under_law(f.owner,firm.employee_wallet,
+                    gh.phase_c().wages_under_law_impl(f.owner,firm.employee_wallet,
                                                   firm.treasury_wallet,gross,
                                                   gh.phase_c().sovereignty(f.region),
-                                                  r.industry_class);
+                                                  r.industry_class,wage_population.get());
                 });
         }
         // A site operator chooses a real output quantity from target stock,
@@ -2009,14 +2020,14 @@ public:
                 *completed=available;
             });
             if(policy.wage_per_unit>0)
-                plan[5].push_back([policy,completed](phasegh::Stage& gh){
+                plan[5].push_back([policy,completed,wage_population](phasegh::Stage& gh){
                     if(*completed<=0)return;
                     const auto& src=gh.phase_d().state().resource_sites.at(
                                               policy.resource_site);
-                    gh.phase_c().wages_under_law(src.owner,policy.employee_wallet,
+                    gh.phase_c().wages_under_law_impl(src.owner,policy.employee_wallet,
                                   policy.treasury_wallet,
                                   times(*completed,policy.wage_per_unit),
-                                  gh.phase_c().sovereignty(src.region));
+                                  gh.phase_c().sovereignty(src.region),{},wage_population.get());
                 });
         }
         // Funded, self-scheduling research is an actual D work order:
@@ -2176,16 +2187,16 @@ public:
                 *completed=work;
             });
             if(maintenance.wage_per_worker_per_day>0)
-                plan[5].push_back([maintenance,completed](phasegh::Stage& gh) {
+                plan[5].push_back([maintenance,completed,wage_population](phasegh::Stage& gh) {
                     if(*completed<=0)return;
                     const auto& site=gh.phase_c().facility(maintenance.facility);
                     const Money gross=times(times(*completed,
                           maintenance.workers_per_unit),
                           maintenance.wage_per_worker_per_day);
-                    gh.phase_c().wages_under_law(site.owner,
+                    gh.phase_c().wages_under_law_impl(site.owner,
                           maintenance.employee_wallet,
                           maintenance.treasury_wallet,gross,
-                          gh.phase_c().sovereignty(site.region));
+                          gh.phase_c().sovereignty(site.region),{},wage_population.get());
                 });
         }
         for(const auto& credit:decisions.debt_service)
