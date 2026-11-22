@@ -1400,6 +1400,79 @@ static void explicit_and_automatic_dues_keep_live_payment_priority() {
 }
 
 
+static void producer_import_counts_real_on_site_and_inbound_stock_once() {
+    p0::Policies options;
+    options.daily_food_units_per_person=0;
+    options.monthly_clothing_units_per_person=0;
+    options.allow_endogenous_investment_credit=false;
+    options.allow_collateralized_enterprise_credit=false;
+    auto first_order=options;
+    first_order.allow_endogenous_input_procurement=false;
+    first_order.merchant_offices.push_back({"TRADER","PORT",1,0,0});
+    phasegh::World opening_world(24000);
+    auto& geo=opening_world.seed_geography();
+    geo.seed_province(1,"SOURCE","A");geo.seed_unit(1,"A","DISTRICT_A");
+    geo.seed_province(2,"PORT","B");geo.seed_unit(2,"B","DISTRICT_B");
+    geo.seed_border(1,2);geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+    auto& industry=geo.seed_core();
+    auto& c=industry.seed_core();
+    for(const auto* actor:{"A","B","SELLER","TRADER","CARRIER"})
+        c.seed_actor(actor,std::string_view(actor)=="TRADER"?1000:0);
+    c.seed_government("A","HEAD_A","PM_A",5,3);
+    c.seed_government("B","HEAD_B","PM_B",5,3);
+    c.seed_market("SOURCE","ore",4,4,4,0);
+    // Day one can fill one unit of genuine merchant demand. The
+    // production order must cover its entire uncovered batch on day two.
+    c.seed_market("PORT","ore",9,9,9,2);
+    c.seed_market("PORT","fuel",6,1,100,0);
+    c.seed_market("PORT","tools",35,1,100,2);
+    c.seed_stock("SELLER","SOURCE","ore",20);
+    c.seed_stock("TRADER","PORT","fuel",2);
+    c.seed_stock("TRADER","PORT","ore",1);
+    opening_world.seed_verified_geographic_link("verified-link",1,2,"rail");
+    phasegh::TransportEdge edge;
+    edge.id="documented-freight";edge.carrier="CARRIER";edge.mode="rail";
+    edge.from=1;edge.to=2;edge.monthly_capacity=62;edge.freight_per_unit=2;
+    edge.transit_days=2;edge.evidence_id="real-rail-rate";
+    edge.valid_from_month=23999;edge.valid_through_month=24012;
+    opening_world.seed_transport_edge(edge);
+    c.seed_production_facility("WORKS","TRADER","PORT",31);
+    phased::IndustryRecipe recipe;
+    recipe.id="MAKE_TOOLS";recipe.site="WORKS";recipe.inputs={{"ore",4},{"fuel",2}};
+    recipe.outputs={{"tools",2}};recipe.workers_per_batch=recipe.capacity_per_batch=1;
+    industry.seed_recipe(recipe);
+    const auto worker=people(opening_world,"PORT",1,"worker");
+    c.seed_actor("HH:"+std::to_string(c.people().slice(worker).key.household),0);
+    c.seed_population().hire(worker,1,"TRADER","worker",93,{});
+    p0::DailyGame initial(daily::World::adopt(std::move(opening_world),6),first_order);
+    initial.advance_day();
+    const auto& opening=initial.world().engine().commerce();
+    require_test(opening.fills.size()==1&&opening.fills[0].quantity==1&&
+           opening.daily_shipments.size()==1,
+           "fixture must start the second day with precisely one physical unit inbound");
+    const auto first_saved=daily::SnapshotCodec::encode(initial.world());
+    p0::DailyGame game(daily::SnapshotCodec::decode(first_saved),options);
+    p0::DailyGame replay(daily::SnapshotCodec::decode(first_saved),options);
+    const auto core=[&]() -> const phasec::IntegratedWorld& {
+        return game.world().engine().base().core().core();
+    };
+    const auto& commerce=game.world().engine().commerce();
+    game.advance_day();replay.advance_day();
+    require_test(commerce.fills.size()==2&&commerce.fills.back().quantity==2&&
+           commerce.daily_shipments.size()==2&&
+           core().stock("TRADER","PORT","ore")==1&&core().stock("TRADER","PORT","tools")==0,
+           "four required minus one live stock and one inbound must dispatch exactly two");
+    game.advance_day();replay.advance_day();
+    require_test(core().stock("TRADER","PORT","ore")==2&&core().stock("TRADER","PORT","tools")==0&&
+           commerce.fills.size()==2,
+           "an incomplete shipment set was consumed or substituted by a duplicate order");
+    game.advance_day();replay.advance_day();
+    require_test(core().stock("TRADER","PORT","ore")==0&&core().stock("TRADER","PORT","tools")==2&&
+           commerce.fills.size()==2&&core().stock("SELLER","SOURCE","ore")==17&&
+           daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+           "only delivered input must feed the real batch, with exact snapshot replay");
+}
+
 static void autonomous_f_two_hop_freight_and_save_replay() {
     phasegh::World gh(24000);
     auto& geo=gh.seed_geography();
@@ -2584,6 +2657,7 @@ int main(){
         p1_autocracy_uses_real_institution_and_rejects_false_votes();
         native_autonomous_h_crisis_and_organization_funding();
         explicit_and_automatic_dues_keep_live_payment_priority();
+        producer_import_counts_real_on_site_and_inbound_stock_once();
         autonomous_f_two_hop_freight_and_save_replay();
         autonomous_daily_facility_maintenance_with_real_inputs();
         autonomous_h_treaty_risk_and_institutional_vote();

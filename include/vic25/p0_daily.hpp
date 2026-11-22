@@ -783,6 +783,15 @@ inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
     }
 }
 
+// The current local gap uses unreserved material, not raw stock or cargo
+// en route. The calling stage still owns its procurement decision and timing.
+inline Quantity local_material_shortfall(const phasec::IntegratedWorld& c,
+        const std::string& buyer,const std::string& region,
+        const std::string& good,Quantity target) {
+    const Quantity available=c.phase_d_material_available(buyer,region,good);
+    return target>available?target-available:0;
+}
+
 inline Quantity available_production(const phased::Stage& d,
                                       const phasec::IntegratedWorld& c,
                                       const Manufacturer& policy,
@@ -1860,18 +1869,18 @@ public:
                    day_budget-used<r.capacity_per_batch)return;
                 Money purchasing=0;
                 for(const auto& input:r.inputs) {
-                    const Quantity have=c.phase_d_material_available(
-                        f.owner,f.region,input.good);
-                    if(have>=input.per_unit)continue;
+                    const Quantity gap=local_material_shortfall(
+                        c,f.owner,f.region,input.good,input.per_unit);
+                    if(gap==0)continue;
                     if(!c.has_market(f.region,input.good))return;
                     Quantity local=0;
                     for(const auto& [key,qty]:c.physical_inventory())
                         if(key.region_id==f.region && key.good_id==input.good &&
                            key.holder_id!=f.owner && c.has_actor(key.holder_id))
                             local=phaseb::add_checked(local,qty);
-                    if(local<input.per_unit-have)return;
+                    if(local<gap)return;
                     purchasing=phaseb::add_checked(purchasing,
-                        times(input.per_unit-have,c.market(f.region,input.good).price));
+                        times(gap,c.market(f.region,input.good).price));
                 }
                 const Money observed=enterprise_ai::observed_wage(
                     c,f.owner,f.region,date.day,dim);
@@ -1901,8 +1910,8 @@ public:
                 for(const auto& input:r.inputs) {
                     if(!c.has_market(f.region,input.good))continue;
                     const Money price=c.market(f.region,input.good).price;
-                    Quantity need=std::max<Quantity>(0,input.per_unit-
-                        c.phase_d_material_available(f.owner,f.region,input.good));
+                    Quantity need=local_material_shortfall(
+                        c,f.owner,f.region,input.good,input.per_unit);
                     if(need<=0)continue;
                     std::vector<std::string> sellers;
                     for(const auto& [key,available_stock]:c.physical_inventory())
@@ -2361,13 +2370,12 @@ public:
                 for(const auto& [key,target]:inputs_wanted) {
                     const auto& [buyer,region,good]=key;
                     if(!c.has_market(region,good))continue;
-                    const Quantity current=c.phase_d_material_available(
-                        buyer,region,good);
-                    if(current>=target)continue;
+                    const Quantity gap=local_material_shortfall(c,buyer,region,good,target);
+                    if(gap==0)continue;
                     auto it=sellers.find({region,good});
                     if(it==sellers.end())continue;
                     (void)c.clear_household_market(
-                        buyer,region,good,target-current,it->second);
+                        buyer,region,good,gap,it->second);
                 }
             });
         for(const auto& p:decisions.political_reactions) {
@@ -3587,14 +3595,16 @@ public:
                             input_units[input.good],input.per_unit);
                     std::string missing;
                     Quantity needed=0;
+                    Quantity still_wanted=0;
                     bool valid=true;
                     for(const auto& [good,units]:input_units) {
                         if(!c.has_market(f.region,good)) {valid=false;break;}
-                        const auto have=c.phase_d_material_available(f.owner,f.region,good);
-                        if(have<units) {
+                        const auto gap=local_material_shortfall(c,f.owner,f.region,good,units);
+                        if(gap>0) {
                             if(!missing.empty()) {valid=false;break;}
                             missing=good;
                             needed=units;
+                            still_wanted=gap;
                         } else {
                             const auto expense=times(units,c.market(f.region,good).price);
                             if(expense>=remaining) {valid=false;break;}
@@ -3606,8 +3616,6 @@ public:
                     // all other inputs, not just a cheap raw commodity.
                     const Money ceiling=(remaining-1)/needed;
                     if(ceiling<c.market(f.region,missing).price)continue;
-                    Quantity still_wanted=needed-
-                        c.phase_d_material_available(f.owner,f.region,missing);
                     for(const auto& [key,stock]:c.physical_inventory()) {
                         if(stock<=0||key.good_id!=missing||key.region_id!=f.region||
                            key.holder_id==f.owner||key.holder_id.starts_with("HH:")||
