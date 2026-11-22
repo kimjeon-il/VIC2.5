@@ -410,8 +410,19 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
         ++original_paid_research;
     }
     check(original_paid_research==1,"expected exactly one unqualified research-speed law");
-    check(canonical_law_row_evidence().size()==445,
-          "expected exact sources including national original paid research");
+    std::size_t monopoly=0;
+    for(const auto& row:audit) {
+        if(row.source.key!="country_forbid_monopoly_bool")continue;
+        check(row.source.source_id=="law_laissez_faire"&&row.normalized_value==1&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="p0::DailyGame (existing regional manufacturing expansion)"&&
+              row.behavior_test=="test_p2_enterprise_ai::sales_fund_expansion_on_an_ordinary_day"&&
+              row.source.boolean&&!row.source.institution&&!row.source.sponsor,
+              "manufacturing expansion evidence is not the exact national law");
+        ++monopoly;
+    }
+    check(monopoly==1&&canonical_law_row_evidence().size()==446,
+          "expected one new exact manufacturing expansion law source");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
         "state_shopkeepers_investment_pool_efficiency_mult",

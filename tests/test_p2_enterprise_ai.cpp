@@ -202,16 +202,46 @@ static void selected_recipe_drives_production_hiring_and_restock(bool explicit_o
 }
 static void sales_fund_expansion_on_an_ordinary_day() {
     auto run = [](phasec::Money shopper_wage, bool funded,
-                  const std::string& proposer, const std::string& current_owner) {
+                  const std::string& proposer, const std::string& current_owner,
+                  int law=0, int rival_capacity=-1, bool manufacturing=true,
+                  bool different_good=false, bool coproduct=false,
+                  bool different_region=false, bool retrofit=false,
+                  int byproduct_case=0) {
         phasegh::World gh{24000};
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"R","STATE");
         geo.seed_unit(11,"STATE","STATE-ROOT");
         geo.seed_assignment(1,11);
+        if(different_region) {
+            geo.seed_province(2,"OTHER_REGION","STATE");
+            geo.seed_assignment(2,11);
+        }
+        if(law==3) {
+            geo.seed_province(3,"FOREIGN_REGION","OTHER");
+            geo.seed_unit(13,"OTHER","OTHER-ROOT");
+            geo.seed_assignment(3,13);
+        }
         auto& d=geo.seed_core();
         auto& c=d.seed_core();
         c.seed_actor("STATE",0);
         c.seed_government("STATE","HEAD","PM",5,3);
+        if(law!=0) {
+            const std::string authority=law==3?"OTHER":"STATE";
+            if(law==3) {
+                c.seed_actor(authority,0);
+                c.seed_government(authority,"HEAD","PM",5,3);
+            }
+            c.seed_p1_constitution(authority,{phasec::P1GovernancePrinciple::monarchy,
+                phasec::P1PowerDistribution::autocracy,
+                phasec::P1LegislatureKind::none,"fixture:constitution"});
+            phasec::P2BaseLaw act;
+            act.id=authority+":economy";act.country=authority;
+            act.domain=law==2||law==4?"custom_economy":"economic_system";
+            act.scope=law==2?"R":"national";
+            if(law==2)act.tier=phasec::P2NormTier::local_ordinance;
+            act.base_choice="law_laissez_faire";act.legal_basis="fixture:economy";
+            c.p2_seed_base(act);
+        }
         c.seed_actor("OWNER",20);
         c.seed_actor("BUILDER",1000);
         c.seed_market("R","food",10,10,10);
@@ -261,7 +291,32 @@ static void sales_fund_expansion_on_an_ordinary_day() {
         recipe.id="MAKE_FOOD";recipe.site="FARM";
         recipe.inputs={{"ore",1}};recipe.outputs={{"food",1}};
         recipe.workers_per_batch=recipe.capacity_per_batch=1;
+        if(rival_capacity>=0 && manufacturing) {
+            d.seed_industry_class({"manufacturing","","Fixture manufacturing"});
+            recipe.industry_class="manufacturing";
+        }
+        if(coproduct) {
+            c.seed_market("R","tools",10,10,10);
+            recipe.outputs.push_back({"tools",1});
+        }
+        if(byproduct_case!=0) {
+            c.seed_market("R","tools",10,10,10);
+            if(byproduct_case==1)recipe.byproducts={{"tools",1}};
+        }
         d.seed_recipe(recipe);
+        if(rival_capacity>0) {
+            c.seed_actor("RIVAL",0);
+            c.seed_production_facility("RIVAL_SITE","RIVAL",
+                different_region?"OTHER_REGION":"R",rival_capacity);
+            recipe.site="RIVAL_SITE";recipe.id="RIVAL_METHOD_1";
+            recipe.outputs={{different_good||byproduct_case==2?"tools":"food",1}};
+            recipe.byproducts.clear();
+            if(byproduct_case==2)recipe.byproducts={{"food",1}};
+            recipe.needs_retrofit=retrofit;
+            d.seed_recipe(recipe);
+            recipe.id="RIVAL_METHOD_2";
+            d.seed_recipe(recipe); // alternative procedure, never a second installation
+        }
         p0::Policies policy;
         policy.daily_food_units_per_person=3;
         policy.monthly_clothing_units_per_person=0;
@@ -285,10 +340,19 @@ static void sales_fund_expansion_on_an_ordinary_day() {
               "empty household wallet did not receive payroll and pay for consumption");
         check(day2.core().cash("OWNER")== (funded?34:14),
               "actual sales did not reach the enterprise cash balance");
+        if(byproduct_case==1)
+            check(day2.core().stock("OWNER","R","tools")==2,
+                  "fixture failed to produce actual marketed byproduct");
         const auto count=day2.state().constructions.size();
         const bool owner_used_quota=proposer=="OWNER" ||
             (proposer.empty()&&current_owner=="OWNER");
-        if(funded&&!owner_used_quota) {
+        const bool dominant=law==1 && manufacturing &&
+            rival_capacity>=0 && (rival_capacity<31 || different_good ||
+                coproduct || different_region || retrofit || byproduct_case==1);
+        if(dominant)
+            check(count==initial_projects,
+                  "active laissez-faire failed to reject majority same-good manufacturing expansion");
+        else if(funded&&!owner_used_quota) {
             check(count==initial_projects+1,
                   "cash-backed expansion on day two did not follow real household sales");
             const auto id="AUTO:PROJECT:DAILY:5:OWNER:BUILT_FARM:"+
@@ -306,6 +370,22 @@ static void sales_fund_expansion_on_an_ordinary_day() {
     run(16,true,"","OWNER"); // proposal saved by the old monthly scheduler
     run(16,true,"OWNER","BUILDER"); // the due allowance stays with the proposer
     run(16,true,"BUILDER","OWNER"); // buying a factory does not spend an allowance
+    run(16,true,"","",0,20); // unchanged baseline; an actual funded project
+    run(16,true,"","",1,20); // 31/51; two rival recipes, one physical facility
+    run(16,true,"","",1,31); // exactly 50%, not dominant
+    run(16,true,"","",1,40); // minority
+    run(16,true,"","",1,40,true,true); // other good cannot dilute dominance
+    run(16,true,"","",1,20,false); // uncategorized production remains unchanged
+    run(16,true,"","",2,20); // local lookalike
+    run(16,true,"","",3,20); // foreign law
+    run(16,true,"","",4,20); // custom national group lookalike
+    run(16,true,"","",0,31,true,false,true); // both outputs allowed without law
+    run(16,true,"","",1,31,true,false,true); // dominant in a real secondary output
+    run(16,true,"","",1,40,true,false,false,true); // different market region
+    run(16,true,"","",1,40,true,false,false,false,true); // unusable recipe
+    run(16,true,"","",0,31,true,false,false,false,false,1); // baseline marketed byproduct
+    run(16,true,"","",1,31,true,false,false,false,false,1); // incumbent leads marketed byproduct
+    run(16,true,"","",1,31,true,false,false,false,false,2); // rival byproduct ties food capacity
 }
 int main() {
     try {

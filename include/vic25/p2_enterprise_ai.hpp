@@ -3,11 +3,14 @@
 #include "vic25/phase_gh.hpp"
 #include "vic25/day_budget.hpp"
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <tuple>
+#include <vector>
 
 namespace vic25::enterprise_ai {
 using Money=phasec::Money;
@@ -19,6 +22,102 @@ struct Quote {
     Money freight_per_batch{}, margin_per_batch{};
     Quantity demand_batches{}, feasible_supply_batches{};
     bool valid{};
+};
+// Snapshot-free, Stage9-only view of existing operational manufacturing
+// capacity. Each facility contributes its undamaged installed capacity
+// once per marketed output, irrespective of how many methods can make it.
+// This is a physical-capacity rule, not a sales-volume/market-share rule.
+class ExpansionCapacityGuard {
+public:
+    ExpansionCapacityGuard(const phasec::IntegratedWorld& c,
+                           const phased::DomainState& d):c_(c),d_(d) {}
+    bool forbids(const phased::IndustryRecipe& recipe) {
+        const auto* site=operational_site(recipe);
+        if(!site || !applies(site->region))return false;
+        if(!built_)build();
+        // The copied recipe expands physical outputs and byproducts, not
+        // just the first good used by the opportunity's demand quote.
+        for(const auto* goods:physical_outputs(recipe))
+            for(const auto& out:*goods) {
+                const auto market=capacity_.find({site->region,out.good});
+                if(market==capacity_.end())continue;
+                const auto self=market->second.by_owner.find(site->owner);
+                if(self!=market->second.by_owner.end()&&
+                   self->second>market->second.total-self->second)return true;
+            }
+        return false;
+    }
+private:
+    struct Capacity {
+        Quantity total{};
+        std::map<std::string,Quantity> by_owner;
+    };
+    const phasec::IntegratedWorld& c_;
+    const phased::DomainState& d_;
+    std::map<std::string,bool> regulated_regions_,regulated_countries_;
+    std::map<std::pair<std::string,std::string>,Capacity> capacity_;
+    bool built_{};
+
+    static auto physical_outputs(const phased::IndustryRecipe& recipe)
+            -> std::array<const std::vector<phased::Input>*,2> {
+        return {&recipe.outputs,&recipe.byproducts};
+    }
+    bool applies(const std::string& region) {
+        auto [regional,inserted]=regulated_regions_.try_emplace(region,false);
+        if(inserted) {
+            const auto* country=c_.sovereignty_if_known(region);
+            if(country) {
+                auto [national,new_country]=regulated_countries_.try_emplace(*country,false);
+                if(new_country)
+                    national->second=c_.p2_forbids_manufacturing_monopoly(*country);
+                regional->second=national->second;
+            }
+        }
+        return regional->second;
+    }
+    const phasec::ProductionFacility* operational_site(
+            const phased::IndustryRecipe& recipe)const {
+        const auto f=c_.facilities().find(recipe.site);
+        if(f==c_.facilities().end()||recipe.capacity_per_batch<=0||
+           f->second.capacity-f->second.damaged<recipe.capacity_per_batch||
+           recipe.needs_retrofit||recipe.requires_same_stage_nonstorable_energy||
+           c_.firm_bankrupt(f->second.owner))return nullptr;
+        if(!recipe.tech_id.empty()) {
+            const auto tech=d_.active_site_tech.find(recipe.site);
+            if(tech==d_.active_site_tech.end()||tech->second!=recipe.tech_id)
+                return nullptr;
+        }
+        const auto bound=d_.site_archetypes.find(recipe.site);
+        if(bound!=d_.site_archetypes.end()) {
+            const auto* archetype=building::find(bound->second);
+            if(!archetype||archetype->industry!=recipe.industry_class||
+               archetype->throughput_modifier!=
+                   "building_group_bg_manufacturing_throughput_add")return nullptr;
+        } else if(recipe.industry_class!="manufacturing"&&
+                  recipe.industry_class!="bg_manufacturing") {
+            return nullptr;
+        }
+        return &f->second;
+    }
+    void build() {
+        std::set<std::pair<std::string,std::string>> counted;
+        for(const auto& [id,recipe]:d_.recipes) {
+            (void)id;
+            const auto* site=operational_site(recipe);
+            if(!site||!applies(site->region))continue;
+            const auto units=site->capacity-site->damaged;
+            for(const auto* goods:physical_outputs(recipe))
+                for(const auto& out:*goods) {
+                    if(!c_.has_market(site->region,out.good)||
+                       !counted.emplace(recipe.site,out.good).second)continue;
+                    auto& market=capacity_[{site->region,out.good}];
+                    market.total=phaseb::add_checked(market.total,units);
+                    auto& owner=market.by_owner[site->owner];
+                    owner=phaseb::add_checked(owner,units);
+                }
+        }
+        built_=true;
+    }
 };
 inline Money positive_mult(Money a,Quantity b) {
     return phaseb::mul_checked(a,b);

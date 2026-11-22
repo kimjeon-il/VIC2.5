@@ -469,6 +469,23 @@ inline std::int64_t IntegratedWorld::p2_private_construction_order_modifier_ppm(
     }
     return 0;
 }
+inline bool IntegratedWorld::p2_forbids_manufacturing_monopoly(
+        const std::string& country)const {
+    if(!has_government(country))return false;
+    for(const auto& [slot,id]:p2_active_base_) {
+        (void)slot;
+        const auto& law=p2_laws_.at(id);
+        if(law.country!=country||law.tier==P2NormTier::local_ordinance||
+           (!law.scope.empty()&&law.scope!="national")||
+           politics::bare_group(law.domain)!="economic_system")continue;
+        const auto* authored=p2_catalog_law(law.base_choice);
+        if(authored&&authored->id=="law_laissez_faire"&&
+           authored->group=="economic_system"&&
+           p2_catalog_raw_modifier(authored->id,"country_forbid_monopoly_bool")>0)
+            return true;
+    }
+    return false;
+}
 inline std::int64_t IntegratedWorld::p2_national_influence_ppm(
         const std::string& country)const {
     const auto recognized_national=[&](const P2BaseLaw& row)

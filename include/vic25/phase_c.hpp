@@ -339,6 +339,12 @@ public:
         return sovereignty_.at(region);
     }
 
+    [[nodiscard]] const std::string* sovereignty_if_known(
+            const std::string& region)const {
+        const auto found=sovereignty_.find(region);
+        return found==sovereignty_.end()?nullptr:&found->second;
+    }
+
     [[nodiscard]] bool has_actor(const std::string& who)const {
         return actors_.contains(who);
     }
@@ -2849,6 +2855,8 @@ public:
     [[nodiscard]] std::int64_t p2_modifier_ppm(
         const std::string& country,const std::string& effect_key)const;
     [[nodiscard]] std::int64_t p2_private_construction_order_modifier_ppm(
+        const std::string& country)const;
+    [[nodiscard]] bool p2_forbids_manufacturing_monopoly(
         const std::string& country)const;
     [[nodiscard]] std::int64_t p2_national_influence_ppm(
         const std::string& country)const;
