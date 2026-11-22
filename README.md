@@ -47,6 +47,33 @@ ctest --test-dir build --output-on-failure
 
 CMake 3.20+, C++20 컴파일러가 필요합니다. Linux/GCC 14 환경에서 빌드·CTest 1개가 통과했습니다. 다른 운영체제의 빌드/성능 검증은 별도입니다.
 
+### 지도 없이 국가 운영 화면 실행
+
+먼저 `cmake --build build --target vic25_play --config Release`로 엔진을
+빌드한 뒤, Python에 Tk가 이미 포함돼 있는 환경에서 아래와 같이 엽니다.
+`python -m tkinter`로 Tk 사용 여부를 확인할 수 있습니다.
+
+```bash
+# Linux (실제 빌드 경로에 맞게 조정)
+python scripts/play_panel.py ./build/vic25_play
+```
+
+```powershell
+# Windows (Visual Studio 다중 구성 빌드)
+python scripts/play_panel.py .\build\Release\vic25_play.exe
+```
+
+A 또는 B를 골라 날짜를 진행하고 국고·법률·시장·전쟁 상태를 확인할
+수 있습니다. 광석 관세는 적용되는 법정 한도 안에서만 바뀌며, 바뀐
+관세 수입은 실제 거래가 발생할 때 누적 세입에 포함됩니다. 이미
+출발한 화물과 도착한 재고를 구분해서 보여줍니다. 저장은 새 파일에
+만들고, 불러올 때는 저장한 나라를 선택합니다. Tk가 없으면 기존
+텍스트 실행은 계속 쓸 수 있습니다:
+`vic25_play --trial tariff-v1 --country A`.
+
+화면은 로컬에서만 실행되며 인터넷이나 지도 파일이 필요 없습니다.
+두 나라는 가상 검증 시나리오로, 역사 지도나 캠페인이 아닙니다.
+
 ### 텍스트 튜토리얼 실행
 
 `cmake --build build --target vic25_play` 후 `./build/vic25_play`를 실행하면

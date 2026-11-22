@@ -35,6 +35,24 @@ if (BUILD_TESTING)
                          ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_terminal_tutorial.py
                          $<TARGET_FILE:vic25_play>)
         set_tests_properties(vic25_terminal_tutorial PROPERTIES TIMEOUT 90)
+
+        # Native gameplay stays independent of Tk. The visual acceptance
+        # actually starts a Tk window and drives the built C++ executable.
+        set(VIC25_PANEL_TEST
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_play_panel.py
+            $<TARGET_FILE:vic25_play>)
+        if (WIN32)
+            add_test(NAME vic25_play_panel COMMAND ${VIC25_PANEL_TEST})
+        elseif (UNIX AND NOT APPLE)
+            find_program(VIC25_PANEL_XVFB_EXECUTABLE xvfb-run)
+            if (VIC25_PANEL_XVFB_EXECUTABLE)
+                add_test(NAME vic25_play_panel
+                         COMMAND "${VIC25_PANEL_XVFB_EXECUTABLE}" -a ${VIC25_PANEL_TEST})
+            endif()
+        endif()
+        if (TEST vic25_play_panel)
+            set_tests_properties(vic25_play_panel PROPERTIES TIMEOUT 90)
+        endif()
     endif()
 endif()
 

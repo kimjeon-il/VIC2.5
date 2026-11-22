@@ -4,7 +4,9 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -238,6 +240,168 @@ void save_new(const daily::World& world,const fs::path& destination) {
     cleanup();
 }
 
+void set_trial_tariff(p0::DailyGame& game,const std::string& tag,int percent) {
+    const auto ppm=percent*10'000;
+    const auto key="TRIAL-TARIFF:"+std::to_string(game.world().day_index());
+    phasegh::World::Plan order;
+    order[0].push_back([tag,ppm,key](phasegh::Stage& stage){
+        stage.adopt_tariff_daily(key,tag,trial_good,ppm,
+            stage.phase_c().government(tag).prime_minister);
+    });
+    game.advance_day(order);
+}
+
+daily::World open_trial(const std::string& tag,const std::optional<fs::path>& resume) {
+    if(resume&&(!fs::is_regular_file(*resume)||fs::file_size(*resume)>850'000'000))
+        throw std::invalid_argument("resume must use a regular file within the native save limit");
+    auto world=resume?daily::SnapshotCodec::load(*resume):trial_world(tag);
+    verify_trial(world,tag);
+    return world;
+}
+
+std::string json_string(std::string_view value) {
+    std::string result="\"";
+    constexpr auto hex="0123456789abcdef";
+    for(unsigned char ch:value) {
+        if(ch=='"'||ch=='\\') {result+='\\';result+=static_cast<char>(ch);}
+        else if(ch<32) {
+            result+="\\u00";result+=hex[ch>>4];result+=hex[ch&15];
+        } else result+=static_cast<char>(ch);
+    }
+    return result+'"';
+}
+
+std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
+    const auto& world=game.world();
+    const auto& engine=world.engine();
+    const auto& core=engine.base().core().core();
+    const auto& commerce=engine.commerce();
+    const auto& tariffs=engine.diplomacy().tariffs;
+    const auto fiscal=core.country_fiscal(tag);
+    const auto date=world.date();
+    const auto region=trial_region(tag);
+    const auto cap=core.p2_rule(tag,tag,
+        phasec::P2ClauseKind::maximum_import_tariff_ppm).value_or(1'000'000);
+    const auto rate=tariffs.find({tag,trial_good});
+    const auto law=core.p2_laws().find("TRIAL-CUSTOMS-"+tag);
+    const auto law_label=law!=core.p2_laws().end()&&core.p2_is_active_base(law->first)
+        ?law->first:"";
+    phasec::Money duty=0;
+    for(const auto& receipt:commerce.customs)
+        if(receipt.importer==tag&&receipt.good==trial_good)
+            duty=phaseb::add_checked(duty,receipt.paid);
+    Quantity transit=0;
+    for(const auto& [id,cargo]:commerce.daily_shipments)
+        if(cargo.buyer==trial_buyer&&cargo.destination==region&&cargo.good==trial_good)
+            transit=phaseb::add_checked(transit,cargo.quantity);
+    std::ostringstream out;
+    out<<"{\"country\":"<<json_string(tag)<<",\"date\":\""
+       <<std::setfill('0')<<std::setw(4)<<date.year<<'-'<<std::setw(2)<<date.month
+       <<'-'<<std::setw(2)<<date.day<<"\""
+       <<",\"commit\":"<<engine.commit_id()
+       <<",\"treasury\":"<<fiscal.cash
+       <<",\"revenue\":"<<fiscal.realized_revenue
+       <<",\"expenditure\":"<<fiscal.realized_expenditure
+       <<",\"debt\":"<<phaseb::add_checked(fiscal.bank_debt,
+            phaseb::add_checked(fiscal.bond_principal,fiscal.unpaid_coupons))
+       <<",\"tariff_ppm\":"<<(rate==tariffs.end()?0:rate->second.ppm)
+       <<",\"max_tariff_ppm\":"<<cap
+       <<",\"law\":"<<json_string(law_label)
+       <<",\"ore_price\":"<<core.market(region,trial_good).price
+       <<",\"paid_duty\":"<<duty
+       <<",\"delivered_ore\":"<<core.stock(trial_buyer,region,trial_good)
+       <<",\"in_transit_ore\":"<<transit<<",\"wars\":[";
+    bool first=true;
+    for(const auto& [id,war]:engine.diplomacy().wars) {
+        if((!war.active&&!war.armistice)||(war.attacker!=tag&&war.defender!=tag))continue;
+        if(!first)out<<',';
+        first=false;
+        out<<"{\"opponent\":"<<json_string(war.attacker==tag?war.defender:war.attacker)
+           <<",\"state\":"<<json_string(war.armistice?"armistice":"active")<<'}';
+    }
+    out<<"]}";
+    return out.str();
+}
+
+std::pair<std::string_view,std::string_view> panel_token(std::string_view line) {
+    const auto split=line.find_first_of(" \t");
+    return {line.substr(0,split),split==line.npos?std::string_view{}:trim(line.substr(split+1))};
+}
+
+fs::path panel_path(std::string_view value) {
+    if(value.empty()||value.find('\0')!=value.npos)
+        throw std::invalid_argument("enter a nonempty checkpoint path");
+    return fs::path(std::u8string(value.begin(),value.end()));
+}
+
+void run_panel() {
+    struct Session {
+        std::string tag;
+        p0::DailyGame game;
+    };
+    std::unique_ptr<Session> session;
+    std::string last_status="null";
+    constexpr std::size_t max_line=32768;
+    std::string input;
+    for(;;) {
+        input.clear();
+        bool too_long=false;
+        int ch;
+        while((ch=std::cin.get())!=EOF&&ch!='\n') {
+            if(input.size()<max_line)input+=static_cast<char>(ch);
+            else too_long=true;
+        }
+        if(ch==EOF&&input.empty())break;
+        bool quit=false;
+        try {
+            if(too_long)throw std::invalid_argument("panel command exceeds line limit");
+            const auto [command,arg]=panel_token(trim(input));
+            if(command=="quit"&&arg.empty())quit=true;
+            else if(command=="status"&&arg.empty()) {}
+            else if(command=="new"||command=="load") {
+                const auto [tag,path]=panel_token(arg);
+                if((tag!="A"&&tag!="B")||(command=="new"&&!path.empty()))
+                    throw std::invalid_argument("select trial country A or B");
+                const auto resume=command=="load"?std::optional{panel_path(path)}:std::nullopt;
+                auto next=open_trial(std::string(tag),resume);
+                auto replacement=std::make_unique<Session>(Session{std::string(tag),
+                    p0::DailyGame(std::move(next),trial_policies())});
+                last_status=panel_status(replacement->game,replacement->tag);
+                session=std::move(replacement);
+            } else if(command=="step"||command=="tariff"||command=="save") {
+                if(!session)throw std::invalid_argument("start or load a trial first");
+                if(command=="step") {
+                    const auto days=command_number(arg,1,366);
+                    try {
+                        for(int i=0;i<days;++i)session->game.advance_day();
+                    } catch(...) {
+                        // Keep any earlier successful daily commits visible
+                        // even if a later day in this command is rejected.
+                        last_status=panel_status(session->game,session->tag);
+                        throw;
+                    }
+                } else if(command=="tariff")
+                    set_trial_tariff(session->game,session->tag,command_number(arg,0,100));
+                else save_new(session->game.world(),panel_path(arg));
+            } else throw std::invalid_argument("unknown or malformed panel command");
+            if(session&&(command=="step"||command=="tariff"))
+                last_status=panel_status(session->game,session->tag);
+            const auto reply="{\"ok\":true,\"status\":"+last_status+'}';
+            std::cout<<reply<<std::endl;
+        } catch(const fs::filesystem_error&) {
+            // Avoid writing locale-dependent native path/error bytes into UTF-8 JSON.
+            const auto reply="{\"ok\":false,\"error\":\"checkpoint filesystem operation failed\",\"status\":"
+                +last_status+'}';
+            std::cout<<reply<<std::endl;
+        } catch(const std::exception& e) {
+            const auto reply="{\"ok\":false,\"error\":"+json_string(e.what())
+                +",\"status\":"+last_status+'}';
+            std::cout<<reply<<std::endl;
+        }
+        if(quit||ch==EOF)break;
+    }
+}
+
 void buy(p0::DailyGame& game,int quantity) {
     phasegh::World::Plan order;
     order[7].push_back([quantity](phasegh::Stage& stage) {
@@ -276,14 +440,7 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={}) {
                 buy(game,command_number(arg,1,1'000'000));
                 show_status();
             } else if(selected&&command=="tariff"&&!arg.empty()) {
-                const auto ppm=command_number(arg,0,100)*10'000;
-                const auto key="TRIAL-TARIFF:"+std::to_string(game.world().day_index());
-                phasegh::World::Plan order;
-                order[0].push_back([tag=*selected,ppm,key](phasegh::Stage& stage){
-                    stage.adopt_tariff_daily(key,tag,trial_good,ppm,
-                        stage.phase_c().government(tag).prime_minister);
-                });
-                game.advance_day(order);
+                set_trial_tariff(game,*selected,command_number(arg,0,100));
                 std::cout<<"Tariff set within the current legal ceiling. Duty is collected only on actual trade.\n";
                 show_status();
             } else if(command=="save"&&!arg.empty()) {
@@ -299,6 +456,7 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={}) {
 
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--panel-stdio") {run_panel(); return 0;}
         std::optional<fs::path> resume;
         bool explicit_tutorial=false,explicit_trial=false;
         std::optional<std::string> selected;
@@ -333,8 +491,7 @@ int main(int argc,char** argv) {
         if(resume&&(!fs::is_regular_file(*resume)||fs::file_size(*resume)>850'000'000))
             throw std::invalid_argument("resume must use a regular file within the native save limit");
         if(selected) {
-            auto world=resume?daily::SnapshotCodec::load(*resume):trial_world(*selected);
-            verify_trial(world,*selected);
+            auto world=open_trial(*selected,resume);
             run(p0::DailyGame(std::move(world),trial_policies()),selected);
             return 0;
         }

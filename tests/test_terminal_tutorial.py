@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Black-box smoke and deterministic checkpoint checks for the native tutorial."""
+import json
 from pathlib import Path
 import struct
 import subprocess
@@ -38,7 +39,7 @@ def main():
 
     def run(commands, *flags, success=True):
         out = subprocess.run(
-            [str(binary), *map(str, flags)], input=commands, text=True,
+            [str(binary), *map(str, flags)], input=commands, encoding="utf-8",
             capture_output=True, timeout=30, check=False,
         )
         require((out.returncode == 0) == success,
@@ -157,6 +158,50 @@ def main():
         run("", *flags, "A", "--resume", start, success=False)
         run("", "--tutorial", "market-v1", "--resume", a_split, success=False)
         run("", "--trial", "tariff-v1", success=False)
+        panel_save = d / "한글 checkpoint.sav"
+        panel_final = d / "panel final.sav"
+        corrupt = d / "corrupt.sav"
+        corrupt.write_bytes(b"not a snapshot")
+
+        def panel(*commands):
+            result = run("\n".join(commands) + "\n", "--panel-stdio")
+            require(not result.stderr, result.stderr)
+            replies = [json.loads(line) for line in result.stdout.splitlines()]
+            require(len(replies) == len(commands), f"unexpected panel replies: {replies}")
+            return replies
+
+        replies = panel("status", "new A", "status", "tariff 21",
+                        "tariff 10", "step 30", f"save {panel_save}",
+                        f"load B {panel_save}", f"load A {corrupt}",
+                        f"save {panel_save}", "step 61", f"save {panel_final}", "quit")
+        require(replies[0] == {"ok": True, "status": None}, "empty panel status")
+        opening = replies[1]["status"]
+        require(opening["country"] == "A" and opening["date"] == "2000-01-01"
+                and opening["treasury"] == 100 and opening["revenue"] == 0
+                and opening["expenditure"] == 0 and opening["debt"] == 0
+                and opening["max_tariff_ppm"] == 200000 and opening["law"] == "TRIAL-CUSTOMS-A"
+                and opening["ore_price"] == 30 and opening["wars"] == [],
+                f"unexpected opening panel projection: {opening}")
+        require(replies[2] == replies[1] and not replies[3]["ok"]
+                and replies[3]["status"] == opening, "status or rejected tariff advanced")
+        split = replies[5]["status"]
+        require(all(not r["ok"] and r["status"] == split and r["error"]
+                    for r in replies[7:10]), "failed load or save replaced live state")
+        finish = replies[10]["status"]
+        require(finish["date"] == "2000-04-02" and finish["treasury"] == 194
+                and finish["revenue"] == finish["paid_duty"] == 94
+                and finish["delivered_ore"] == 93
+                and finish["tariff_ppm"] == 100000 and finish["in_transit_ore"] > 0
+                and finish["commit"] > opening["commit"],
+                f"unexpected final panel projection: {finish}")
+        require(panel_save.read_bytes() == a_split.read_bytes()
+                and panel_final.read_bytes() == a_full.read_bytes(),
+                "panel and CLI native save bytes differ")
+        resumed = panel(f"load A {panel_save}", "step 61", "quit")
+        require(resumed[0]["status"] == split and resumed[1]["status"] == finish,
+                "panel resume differs from uninterrupted native simulation")
+        require(panel("new B", "quit")[0]["status"]["max_tariff_ppm"] == 400000,
+                "panel second country does not get its own statute")
     print("Native terminal tutorial: launch, real purchase, rollback and exact replay PASS")
 
 
