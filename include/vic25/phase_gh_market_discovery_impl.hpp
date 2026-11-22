@@ -11,6 +11,8 @@ inline void Stage::plan_market_discovery() {
     }
     auto& c=phase_c();
     const auto& geo=spatial_.spatial();
+    const std::function<bool(const TransportEdge&)> available=
+        [this](const TransportEdge& e) {return !naval_blockaded_edge(e);};
     // Merchant offices may be scenario-specified, but never need a registered
     // Route, origin market, good, supplier or freight carrier in advance.
     std::map<std::pair<std::string,std::string>,MerchantOffice> offices;
@@ -105,7 +107,8 @@ inline void Stage::plan_market_discovery() {
                 cached_path=path_quotes.emplace(
                     offer.region,quote_daily_freight_path(
                         trade_,geo.regions.at(offer.region),destination,c.month(),
-                        day_of_month_,days_in_month_,nullptr,true,nullptr,nullptr,true))
+                        day_of_month_,days_in_month_,nullptr,true,nullptr,nullptr,true,
+                        1,&available))
                     .first;
             const auto& candidate=cached_path->second;
             if(!candidate||candidate->edges.empty()||

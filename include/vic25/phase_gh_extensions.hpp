@@ -67,9 +67,14 @@ inline std::optional<PathQuote> Stage::quote_path(
         [this](const TransportEdge& e) {
             return effective_edge_capacity(e);
         };
+    // Stage1 authorizes newly booked departures; existing booked/sailing
+    // cargo is not canceled. Unbooked hub departures recheck in Stage7.
+    const std::function<bool(const TransportEdge&)> available=
+        [this](const TransportEdge& e) {return !naval_blockaded_edge(e);};
     return quote_daily_freight_path(
         trade_,from,to,month,day_of_month_,days_in_month_,
-        nullptr,day_of_month_>0,nullptr,&cap);
+        nullptr,day_of_month_>0,nullptr,&cap,false,1,
+        day_of_month_>0?&available:nullptr);
 }
 inline void Stage::create_trade_contract(TradeContract c) {
     at(9);

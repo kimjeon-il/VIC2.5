@@ -2714,7 +2714,9 @@ static void peacetime_military_unfunded_and_nonland_are_bounded() {
 
 // P2/P3 integration: claims, war, fronts, fleet and aviation all operate
 // through the same actual C/E/H day engine; no separate synthetic war ledger.
-static p0::DailyGame autonomous_war_fixture(bool combined_arms) {
+enum class CivilianSeaTrade { none, preset, discovered };
+static p0::DailyGame autonomous_war_fixture(
+        bool combined_arms,CivilianSeaTrade commerce=CivilianSeaTrade::none) {
     phasegh::World gh(24000); // Gregorian 2000-01-01
     auto& e=gh.seed_geography();
     e.seed_province(1,"RA","A");
@@ -2795,7 +2797,20 @@ static p0::DailyGame autonomous_war_fixture(bool combined_arms) {
         lift.evidence_id="fixture-verified-amphibious-lift";
         gh.seed_transport_edge(lift);
     }
+    if(commerce!=CivilianSeaTrade::none) {
+        core.seed_actor("CIVILIAN-SUPPLIER",0);
+        core.seed_actor("CIVILIAN-IMPORTER",10'000);
+        core.seed_market("RB","ore",10,10,10);
+        core.seed_market("RA","ore",30,30,30,
+                         commerce==CivilianSeaTrade::discovered?350:0);
+        core.seed_stock("CIVILIAN-SUPPLIER","RB","ore",400);
+        if(commerce==CivilianSeaTrade::preset)
+            gh.seed_route({"CIVILIAN-ORE-ROUTE","CIVILIAN-SUPPLIER",
+                "CIVILIAN-IMPORTER","ore",2,1,100,1});
+    }
     p0::Policies config;
+    if(commerce==CivilianSeaTrade::discovered)
+        config.merchant_offices.push_back({"CIVILIAN-IMPORTER","RA",4,0,50'000});
     config.allow_autonomous_army_resupply=false;
     config.allow_autonomous_peacetime_military_ai=false;
     config.allow_autonomous_war_peace=false;
@@ -2909,6 +2924,87 @@ static void automatic_naval_air_and_real_blockade() {
                  "naval superiority did not restrict a documented sea route");
 }
 
+static void real_naval_blockade_stops_new_commerce_and_armistice_restores_it(
+        CivilianSeaTrade kind) {
+    auto game=autonomous_war_fixture(true,kind);
+    p0::Policies quiet=game.policies();
+    quiet.allow_autonomous_naval_air_ai=false;
+    game=p0::DailyGame(game.world(),quiet);
+    const auto flows=[](const p0::DailyGame& g) {
+        return g.world().engine().commerce().fills.size();
+    };
+    const auto paid=[](const p0::DailyGame& g) {
+        return c(g).cash("CIVILIAN-SUPPLIER");
+    };
+    const auto source_stock=[](const p0::DailyGame& g) {
+        return c(g).stock("CIVILIAN-SUPPLIER","RB","ore");
+    };
+    const auto delivered=[](const p0::DailyGame& g) {
+        return c(g).stock("CIVILIAN-IMPORTER","RA","ore");
+    };
+    constexpr auto war="WAR:P2:CRISIS";
+    const auto& trade=game.world().engine().commerce();
+    const auto opening_flows=flows(game);
+    require_test(opening_flows>10&&
+                 (kind==CivilianSeaTrade::preset?
+                  trade.fills.back().route_id=="CIVILIAN-ORE-ROUTE":
+                  (trade.routes.empty()&&
+                   trade.fills.back().route_id.starts_with("G:DISCOVERY:")&&
+                   trade.fills.back().physical_path==std::vector<std::string>{"SEA_FROM_B"})),
+                 "fixture must show the requested actual commercial path");
+    const auto opening_pay=paid(game),opening_cash=c(game).cash("CIVILIAN-IMPORTER");
+    const auto opening_stock=source_stock(game),opening_delivery=delivered(game);
+    require_test(opening_flows>10&&opening_pay>0&&
+                 opening_stock<400&&opening_delivery>0&&
+                 !game.world().engine().commerce().daily_shipments.empty()&&
+                 game.world().engine().diplomacy().wars.at(war).active,
+                 "fixture must establish actual peacetime trade and paid ore already underway");
+    bool blockaded=false;
+    phasegh::World::Plan probe;
+    probe[1].push_back([&](phasegh::Stage& stage) {
+        blockaded=stage.naval_blockaded_edge(
+            stage.commerce().transport_edges.at("SEA_FROM_B"));
+    });
+    game.advance_day(probe);
+    require_test(blockaded&&delivered(game)>opening_delivery,
+                 "real fleet blockade must not confiscate previously departed civilian ore");
+    if(flows(game)!=opening_flows||paid(game)!=opening_pay||
+       c(game).cash("CIVILIAN-IMPORTER")!=opening_cash||
+       source_stock(game)!=opening_stock)
+        throw std::runtime_error("blockaded ordinary route made a new commercial departure: fills "+
+            std::to_string(opening_flows)+"->"+std::to_string(flows(game))+
+            ", supplier paid "+std::to_string(opening_pay)+"->"+std::to_string(paid(game))+
+            ", source inventory "+std::to_string(opening_stock)+"->"+std::to_string(source_stock(game)));
+
+    auto still_at_war=game;
+    phasegh::World::Plan consent;
+    consent[9].push_back([&](phasegh::Stage& stage) {
+        phasegh::TreatyClause term;
+        term.id="civilian-armistice";term.kind=phasegh::ClauseKind::ceasefire;
+        term.obligor="B";term.beneficiary="A";term.war_id=war;
+        stage.propose_treaty_package("CIVILIAN-TRUCE",{"A","B"},{term},"A","PM_A");
+        stage.ratify_package_member("CIVILIAN-TRUCE","B","PM_B");
+    });
+    game.advance_day(consent);still_at_war.advance_day();
+    while(game.world().date()<daily::Date{2000,4,1}) {
+        game.advance_day();still_at_war.advance_day();
+    }
+    require_test(flows(game)==opening_flows&&flows(still_at_war)==opening_flows&&
+                 !game.world().engine().diplomacy().wars.at(war).armistice,
+                 "ratification must not remove a military blockade before its effective month");
+    game.advance_day();still_at_war.advance_day();
+    require_test(game.world().engine().diplomacy().wars.at(war).armistice&&
+                 still_at_war.world().engine().diplomacy().wars.at(war).active&&
+                 flows(game)>opening_flows&&paid(game)>opening_pay&&
+                 source_stock(game)<opening_stock&&flows(still_at_war)==opening_flows,
+                 "only the effective actual armistice should restore new paid commercial departures");
+    const auto control_delivery=delivered(still_at_war);
+    game.advance_day();still_at_war.advance_day();
+    require_test(delivered(game)>control_delivery&&delivered(still_at_war)==control_delivery,
+                 "restored trade must physically deliver rather than only create a quote");
+}
+
+
 int main(){
     try{
         automatic_wage_withholding_rereads_office_funding();
@@ -2928,6 +3024,10 @@ int main(){
         peacetime_military_unfunded_and_nonland_are_bounded();
         automatic_frontline_uses_adjacent_real_troops();
         automatic_naval_air_and_real_blockade();
+        real_naval_blockade_stops_new_commerce_and_armistice_restores_it(
+            CivilianSeaTrade::discovered);
+        real_naval_blockade_stops_new_commerce_and_armistice_restores_it(
+            CivilianSeaTrade::preset);
         automatic_peace_repatriates_and_pays_actual_debt();
         additional_active_cohorts_do_not_block_combat();
         duplicate_pop_demand_is_rejected();

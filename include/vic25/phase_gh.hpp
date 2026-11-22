@@ -171,7 +171,8 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         const std::function<Quantity(const TransportEdge&)>*
             effective_capacity=nullptr,
         bool documented_services_only=false,
-        Quantity minimum_due_capacity=1) {
+        Quantity minimum_due_capacity=1,
+        const std::function<bool(const TransportEdge&)>* edge_available=nullptr) {
     if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
     if(trade.transport_edges.empty())return std::nullopt;
     using Item=std::tuple<Money,Month,Id>;
@@ -208,6 +209,9 @@ inline std::optional<PathQuote> quote_daily_freight_path(
                 continue;
             if(edge.valid_from_month>=0 && month<edge.valid_from_month)continue;
             if(edge.valid_through_month>=0 && month>edge.valid_through_month)continue;
+            // Availability applies to every segment; capacity below applies
+            // only to the segment that physically departs today.
+            if(edge_available&&!(*edge_available)(edge))continue;
             const Quantity committed=trade.edge_usage.contains({month,edge_id})?
                                      trade.edge_usage.at({month,edge_id}):0;
             const Quantity pending=(provisional_edges&&
@@ -674,7 +678,7 @@ public:
     // never an independent invented embargo or naval-strength stock. Without
     // documented E coastal seas and commissioned, fueled, supplied hulls,
     // an ordinary trade lane cannot be blocked.
-    [[nodiscard]] bool naval_blockaded_edge(const TransportEdge& edge) {
+    [[nodiscard]] bool naval_blockaded_edge(const TransportEdge& edge) const {
         if(edge.mode!="sea"&&edge.mode!="maritime")return false;
         const auto& geo=spatial_.spatial();
         if(!geo.provinces.contains(edge.from)||
@@ -684,7 +688,7 @@ public:
         zones.insert(geo.provinces.at(edge.to).coastal_seas.begin(),
                      geo.provinces.at(edge.to).coastal_seas.end());
         if(zones.empty())return false;
-        const auto& c=phase_c();
+        const auto& c=spatial_.phase_c();
         const auto& from_country=c.sovereignty(
             geo.provinces.at(edge.from).region);
         const auto& to_country=c.sovereignty(
@@ -1157,6 +1161,8 @@ public:
         if(day_index_<0||day_of_month_<=0)return;
         const auto& geo=spatial_.spatial();
         auto& c=phase_c();
+        const std::function<bool(const TransportEdge&)> available=
+            [this](const TransportEdge& e) {return !naval_blockaded_edge(e);};
         for(auto& [id,cargo]:trade_.daily_shipments) {
             if(!cargo.at_hub||cargo.path_edges.empty()||
                cargo.hop_index+1>=cargo.path_edges.size())continue;
@@ -1171,7 +1177,7 @@ public:
                     (edge.valid_from_month<0||
                         c.month()>=edge.valid_from_month)&&
                     (edge.valid_through_month<0||
-                        c.month()<=edge.valid_through_month);
+                        c.month()<=edge.valid_through_month)&&available(edge);
             };
             if(!ready(trade_.transport_edges.at(edge_id))) {
                 if(!geo.regions.contains(cargo.hub_region)||
@@ -1184,7 +1190,7 @@ public:
                     trade_,geo.regions.at(cargo.hub_region),
                     geo.regions.at(cargo.destination),c.month(),
                     day_of_month_,days_in_month_,nullptr,true,nullptr,&cap,
-                    false,cargo.quantity);
+                    false,cargo.quantity,&available);
                 if(!alternate||alternate->edges.empty()||
                    alternate->capacity<cargo.quantity)continue;
                 cargo.path_edges.resize(cargo.hop_index+1);
