@@ -65,6 +65,88 @@ static phasegh::World fixture() {
     gh.validate();
     return gh;
 }
+static void country_tariff_ai_respects_each_sovereigns_current_law() {
+    const auto run=[](bool dated_free_trade) {
+        using namespace phasec;
+        auto gh=fixture();
+        auto& geo=gh.seed_geography();
+        geo.seed_province(88,"FOREIGN","B");
+        geo.seed_unit(88,"B","ROOT-B");geo.seed_assignment(88,88);
+        auto& core=geo.seed_core().seed_core();
+        core.seed_actor("B",200);core.seed_actor("B-SELLER",0);
+        core.seed_government("B","HEAD_B","PM_B",5,3);
+        core.seed_country_treasury("A","TREASURY");
+        for(const auto* tag:{"A","B"})
+            core.seed_p1_constitution(tag,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"test:constitution"});
+        core.p2_seed_base({"A-TRADE","A","trade_policy","national",
+                           "law_protectionism","test:enacted trade law"});
+        core.p2_seed_base({"B-TRADE","B","trade_policy","national",
+                           dated_free_trade?"law_protectionism":"law_free_trade",
+                           "test:enacted trade law"});
+        core.seed_market("FOREIGN","food",100,1,200,0);
+        core.seed_stock("FIRM","R","food",2);
+        core.seed_stock("B-SELLER","FOREIGN","food",2);
+        const auto worker=core.seed_population().slices().begin()->first;
+        core.seed_population().hire(worker,4,"FIRM","worker",10,{});
+        p0::Policies policy;
+        policy.manufacturers.push_back({"FOOD_RECIPE",15,"WORKERS","TREASURY",1});
+        policy.countries.push_back({"A","PM_A","R","food","FIRM",120,2,100'000});
+        policy.countries.push_back({"B","PM_B","FOREIGN","food","B-SELLER",120,2,100'000});
+        p0::DailyGame game(daily::World::adopt(std::move(gh),82),policy);
+        const auto today=game.world().day_index();
+        const auto tariff=[&](const char* tag) {
+            return game.world().engine().diplomacy().tariffs.at({tag,"food"}).ppm;
+        };
+        const auto advance=[&](const phasegh::World::Plan& commands) {
+            const auto opening=c(game).stock("FIRM","R","ore");
+            game.advance_day(commands);
+            require_test(c(game).stock("FIRM","R","ore")==opening-2,
+                         "lawful country failed to commit real daily industry");
+            require_test(tariff("A")==100'000&&
+                         c(game).stock("B-SELLER","FOREIGN","food")==2,
+                         "independent lawful protection or actual foreign stock changed");
+        };
+        phasegh::World::Plan enact;
+        if(dated_free_trade)enact[9].push_back([today](phasegh::Stage& stage) {
+            auto& state=stage.phase_c();
+            P2Bill bill;
+            bill.id="B-FREE-TRADE";bill.country="B";bill.proposer="PM_B";
+            bill.legal_basis="test:bill";bill.effective_day=today+1;
+            bill.action=P2BillAction::enact_or_replace_base;
+            bill.proposed_base={"B-TRADE-FREE","B","trade_policy","national",
+                                "law_free_trade","test:effective trade law"};
+            state.p2_submit_bill(std::move(bill),today);
+            state.p2_approve_bill("B-FREE-TRADE",{});
+            state.p2_promulgate_bill("B-FREE-TRADE","HEAD_B",today);
+        });
+        advance(enact);
+        require_test(tariff("B")==(dated_free_trade?100'000:0),
+                     "automatic tariff ignored the second country's opening law");
+        if(dated_free_trade) {
+            advance({}); // Stage0 applies the new P2 ceiling, before tariff AI.
+            require_test(c(game).p2_selected_law("B","trade_policy")=="free_trade"&&
+                         tariff("B")==0,
+                         "automatic tariff reimposed a duty after lawful free trade took effect");
+        }
+        const auto before=daily::SnapshotCodec::encode(game.world());
+        phasegh::World::Plan forbidden;
+        forbidden[0].push_back([](phasegh::Stage& stage) {
+            stage.adopt_tariff_daily("MANUAL-OVER-CAP","B","food",100'000,"PM_B");
+        });
+        bool legally_rejected=false;
+        try { game.advance_day(forbidden); }
+        catch(const std::exception& e) {
+            legally_rejected=std::string_view(e.what()).find(
+                "P2 current tariff law forbids excessive import duties")!=std::string_view::npos;
+        }
+        require_test(legally_rejected&&daily::SnapshotCodec::encode(game.world())==before,
+                     "manual H setter no longer strictly rejects illegal duties atomically");
+    };
+    run(false);
+    run(true);
+}
+
 static void daily_production_trade_ai_investment_replay() {
     auto w=fixture();
     const auto& pop=w.base().core().core().people().slices();
@@ -2013,6 +2095,7 @@ static void automatic_naval_air_and_real_blockade() {
 
 int main(){
     try{
+        country_tariff_ai_respects_each_sovereigns_current_law();
         daily_production_trade_ai_investment_replay();
         economic_laws_adjust_only_paid_private_order_ceiling();
         household_shareholder_efficiency_changes_paid_daily_construction_orders();

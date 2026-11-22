@@ -1623,9 +1623,13 @@ public:
                 if(c.sovereignty(ai.domestic_region)!=ai.country)return;
                 const auto& quote=c.market(ai.domestic_region,ai.good);
                 const auto available=c.stock(ai.domestic_seller,ai.domestic_region,ai.good);
-                const auto duty=(quote.price<ai.protect_below_price &&
-                                 available>=ai.surplus_stock_threshold)?
-                                 ai.protective_tariff_ppm:std::int64_t{0};
+                const auto desired=(quote.price<ai.protect_below_price &&
+                                    available>=ai.surplus_stock_threshold)?
+                                    ai.protective_tariff_ppm:std::int64_t{0};
+                // A policy preference is not legal authority. Stage0 has
+                // already applied effective laws for this importing country.
+                const auto duty=std::min(desired,
+                    gh.legal_import_tariff_ceiling(ai.country));
                 const auto key=std::make_pair(ai.country,ai.good);
                 auto prior=gh.diplomacy().tariffs.find(key);
                 if(prior!=gh.diplomacy().tariffs.end()&&prior->second.ppm==duty)return;

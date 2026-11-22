@@ -792,16 +792,20 @@ public:
         approval=true;
         ++diplomacy_.revision;
     }
+    [[nodiscard]] std::int64_t legal_import_tariff_ceiling(
+            const std::string& importer) {
+        const auto& c=phase_c();
+        return c.p2_rule(importer,importer,
+            phasec::P2ClauseKind::maximum_import_tariff_ppm)
+            .value_or(1'000'000);
+    }
     // When an effective P2 statute lowers the legal ceiling, pre-existing
     // tariff commands remain historical but cannot keep applying an unlawful
     // higher rate. This is a policy projection, not tax revenue creation.
     void enforce_p2_tariff_ceiling() {
         at(0);
         for(auto& [key,tariff]:diplomacy_.tariffs) {
-            const auto limit=phase_c().p2_rule(
-                key.first,key.first,
-                phasec::P2ClauseKind::maximum_import_tariff_ppm)
-                .value_or(1'000'000);
+            const auto limit=legal_import_tariff_ceiling(key.first);
             if(tariff.ppm>limit) {
                 tariff.ppm=limit;
                 ++diplomacy_.revision;
@@ -821,10 +825,7 @@ public:
                 "H_ERR_DAILY_TARIFF_POLICY");
         leader(phase_c(),importer,authorized_prime);
         allow_foreign_policy(importer);
-        require(ppm<=phase_c().p2_rule(
-                   importer,importer,
-                   phasec::P2ClauseKind::maximum_import_tariff_ppm)
-                   .value_or(1'000'000),
+        require(ppm<=legal_import_tariff_ceiling(importer),
                 "P2 current tariff law forbids excessive import duties");
         diplomacy_.commands.insert("DAY_TARIFF:"+command);
         diplomacy_.tariffs[{importer,good}]={importer,good,ppm};
@@ -839,10 +840,7 @@ public:
                 "H_ERR_TARIFF_POLICY");
         leader(phase_c(), importer, authorized_prime);
         allow_foreign_policy(importer);
-        require(ppm<=phase_c().p2_rule(
-                   importer,importer,
-                   phasec::P2ClauseKind::maximum_import_tariff_ppm)
-                   .value_or(1'000'000),
+        require(ppm<=legal_import_tariff_ceiling(importer),
                 "P2 legal tariff ceiling exceeded");
         // A tariff adopted now has no effect on earlier trades. Pilot policies
         // are carried as next-month schedule by the pending tariff table.
