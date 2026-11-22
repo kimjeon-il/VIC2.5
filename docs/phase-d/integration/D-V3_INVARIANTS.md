@@ -44,8 +44,8 @@
 
 | ID | 검증할 명제 |
 |---|---|
-| **DV-INV-19** | `WorkPackage` 선행 DAG·실제 투입/검수·기간·`0<=accepted_work<=required_work`/품질·손상/재시공 대응; 건설점수만으로 진행도 증가 금지 |
-| **DV-INV-20** | `stage4 m` 시공 완료·`stage11 ready`는 생산·운송/의료/교육·군사시설의 동월 무료 가동을 의미하지 않으며 `m+1 stage0`에 유효 검사/설비·권한·피해 대조 후 활성 |
+| **DV-INV-19** | 실제 작업·투입·기간·`0<=accepted_work<=required_work`·손상 정합; 선택 시나리오의 `WorkPackage` DAG·검수·품질·재시공 대응; 건설점수만으로 진행도 증가 금지 |
+| **DV-INV-20** | `stage4 m` 시공 완료·`stage11 ready`는 생산·운송/의료/교육·군사시설의 동월 무료 가동을 의미하지 않으며 `m+1 stage0`에 설비·권한·피해 및 설정된 시나리오 검사 조건을 대조한 뒤 활성 |
 | **DV-INV-21** | `CapitalAsset` 설치·가동·감가/마모·교체/폐기/전투 피해가 C-E1/D-C5의 단일 상태원본과 Inventory/Finance/Ownership을 교차 검증; 자산상품·설비 이중 존재 금지 |
 | **DV-INV-22** | `KnowledgeState`는 holder/tech/유효 기간/`KnowledgeEvent` 증빙, 실연구량 `ResearchWorkEvent` 집계로만 진척 조회; 기술·연구/확산점수의 독립 무상원본 없음 |
 | **DV-INV-23** | `KnowledgeTransfer`는 접촉/학습·법/권리/실제 수용능력·다음 달 유효사건 필요. 송신 지식 자동감소/접촉 없는 전국기술 즉시공유/특허=이해 처리 금지 |

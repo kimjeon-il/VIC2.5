@@ -4,6 +4,8 @@
 > 계약: `phase-d-integration/1.0` · 2026-11-04 · 브랜치: `work/phase-d-design`  
 > 선행: [Phase D 공통 계약](../D-D0_COMMON_CONTRACT.md) · [건설 C1~C5](../construction/README.md) · [산업 I1~I5](../industry/README.md) · [기술 T1~T5](../technology/README.md) · [Phase C-D4 통합](../../phase-c/integration/README.md).
 
+> **기본 플레이와 별개:** 이 문서는 선택 건설 시나리오까지 포함한 전체 상세 교차 검증과 기존 월 단위 인수 예시입니다. 허가·검수·재시공 관련 항목은 그 조건을 선택한 시나리오의 시험이며, [현행 일간 기본 건설](../construction/README.md)이나 자동 증설의 필수 구현·릴리스 게이트가 아닙니다.
+
 ## 핵심 문서
 
 | 설계 | 파일 | 확정 범위 |

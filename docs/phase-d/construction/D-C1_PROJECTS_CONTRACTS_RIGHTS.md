@@ -3,6 +3,8 @@
 > **설계 확정 / C++ 구현·회귀 미실행** · `phase-d-construction/1.0` · 2026-11-04  
 > 상위 계약: [D-D0](../D-D0_COMMON_CONTRACT.md), [C-D0](../../phase-c/C-D0_COMMON_CONTRACT.md), C-E1/E3/E4/E5 및 C-P1~P5. [건설 색인](README.md)
 
+> **적용 범위:** 기본 프로젝트는 발주·집행 권한과 실제 자재·노동·재원을 검증하되 별도의 허가 신청이나 검수 명령을 요구하지 않는다. 아래 PermitRecord·감리·검수 조건은 명시한 시나리오에만 적용한다.
+
 ## C1-1. 범위와 단일 정본
 
 건설사업은 기존 `Firm` / `ProductionSite` / `CapitalAsset` / `EmploymentLedger` / `InventoryLedger` / `FinancialLedger` / `OwnershipLedger` / `PoliticalRegistry`를 참조한다. `ConstructionProjectRegistry`만이 **사업의 승인/계획·실제 공정 상태·검수/준공의 도메인 기록**을 소유한다. 기업·토지·인구·재고·돈·법적 권리를 건설 원장에 복제하여 쓰기 금지.
@@ -26,12 +28,12 @@
 
 ### 상태 축 (단일 enum으로 뭉개지 않음)
 
-- 법/행정: `proposed -> submitted -> authorized / denied / revoked`. 현대 허가제가 없는 시대·시설은 `not_required`를 **적법 법률 룰셋**에 의해 판정.
+- 법/행정: 기본 공사의 별도 허가 단계는 `not_required`다. 허가를 명시한 시나리오만 유효 법률 룰셋에 따라 `proposed -> submitted -> authorized / denied / revoked`를 적용한다.
 - 금융: `unfunded -> partially_funded -> fundable -> delinquent / insolvent`. 계획·예산 승인이 실제 현금은 아님.
-- 물리: `unstarted -> mobilizing -> in_progress -> suspended -> physically_complete -> inspected -> ready_for_commission -> commissioned / dismantled`. 결함/사고 시 `rework_required`.
+- 물리: `unstarted -> mobilizing -> in_progress -> suspended -> physically_complete -> ready_for_commission -> commissioned / dismantled`. 검수를 명시한 시나리오에서만 `physically_complete`와 `ready_for_commission` 사이에 `inspected`를 두고, 품질·재시공 조건을 설정한 경우에만 `rework_required`를 사용한다.
 - 계약: `negotiating -> active -> completed / terminated / breached`. 계약 종료는 공정완료와 같지 않음.
 
-각 축의 **파생 상태/검증 캐시**는 원천 이벤트/원장 참조에서 계산한다. 부적법한 조합은 `StateTransitionGuard`가 거부(예: 권리 없이 임의 착공, 무허가·무검수 자동 `commissioned`).
+각 축의 **파생 상태/검증 캐시**는 원천 이벤트/원장 참조에서 계산한다. 부적법한 조합은 `StateTransitionGuard`가 거부(예: 권리 없이 임의 착공, 설정된 허가·검수를 생략한 `commissioned`).
 
 ## C1-3. 사업·발주·운영·소유자 구별
 

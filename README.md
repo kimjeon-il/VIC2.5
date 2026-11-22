@@ -68,7 +68,7 @@ CMake 3.20+, C++20 컴파일러가 필요합니다. Linux/GCC 14 환경에서 �
 - [관계 원장·회계·재고](docs/LEDGERS.md)
 - [월별 12단계 및 계산식](docs/MONTHLY_RULES.md)
 - [테스트 및 불변조건](docs/TEST_PLAN.md)
-- [구현 단계](docs/ROADMAP.md)
+- [현행 기본 플레이 범위와 초기 구현 로드맵](docs/ROADMAP.md)
 - [참고 문헌과 인용 한계](docs/REFERENCES.md)
 
 ## 개발 원칙

@@ -20,7 +20,7 @@
 | `C-M1~M5` | `phase-c-military/1.0` — 동원/군수·장비/부대·전투·점령/재건 |
 | `C-D4` | `phase-c-integration/1.0` — 12단계·9a~9e/10a~10f, 전체 World 커밋·48 프로토타입 시험 |
 | `D-D0` | `phase-d-common/1.0` — 건설/산업/기술 추가 계약·14 불변식/24 시험 |
-| `D-C1~C5` | `phase-d-construction/1.0` — 실제 시공·WIP/계약·검수·차월 가동·25 불변식/45 시험 |
+| `D-C1~C5` | `phase-d-construction/1.0` — 실제 시공·WIP/계약·준공, 선택 시나리오 검수 및 월간 인수 예시의 차월 가동·25 불변식/45 시험 |
 | `D-I1~I5` | `phase-d-industry/1.0` — 자원/레시피·설비·입지·기계화/기업생멸·25 불변식/45 시험 |
 | `D-T1~T5` | `phase-d-technology/1.0` — 지식·연구/전파·권리/훈련·사업장 도입·25 불변식/45 시험 |
 
@@ -38,7 +38,7 @@
 | 법적 소유·주식·특허/실시권·토지권 | `OwnershipLedger`와 유효 법적 권한 C-P | 기술 보유≠특허권, 계약자≠최종 자산 소유자 |
 | 세금/예산 의무·지출 근거 | `FiscalLedger` / C-P 정책 | 정책 채택≠현금 지출 |
 | 관할/선거/법/기관/군사 | C-D0/P/M 고유 정본 | 시설·연구/군수에 대해 권한 참조, 주권≠점령/사용권 |
-| 실제 공사·검수/미완공 상태 | D-C `ConstructionProjectRegistry` | 돈·상품·설비/사람 원본 복제 금지 |
+| 실제 공사·미완공 상태(검수는 설정 시) | D-C `ConstructionProjectRegistry` | 돈·상품·설비/사람 원본 복제 금지 |
 | 산업 분류·기술/레시피 정의 | D-I `IndustryCatalog`, D-D0 `TechniqueCatalog`/C-E1 `ProductionRecipe` | 규칙/관계이지 별도의 경제 잔액 아님 |
 | 기관별 지식/연구 수행 증빙·도입 관계 | D-T `KnowledgeRegistry`/`ResearchProject`/`SiteTechniqueAssignment` | 지식은 Inventory 자산·사람·설비/즉시 전국 생산성 아님 |
 | 지질 탐사·채굴 현장의 월 유량·재생 생물량 | J-R1 `ResourceSite/ExplorationState/RenewablePool`, C-E1 생산/재고 | 지하 총매장량·잔량 저장 금지, 생산된 상품은 실제 Inventory 원장 |

@@ -34,19 +34,19 @@
   "source_documents": [
     {
       "path": "docs/phase-d/integration/README.md",
-      "git_blob_sha": "aac82be49d787c1c74c7d4286333c882ea9ccdf2"
+      "git_blob_sha": "2587bff1028611eaa0925effc9aee70b2dc4cbaf"
     },
     {
       "path": "docs/phase-d/integration/D-V1_ARCHITECTURE_SCOPE.md",
-      "git_blob_sha": "6b66cb206e835cf757108ec3a68f3947959218fc"
+      "git_blob_sha": "371efe5c62c7e5297889744d04b934b030501215"
     },
     {
       "path": "docs/phase-d/integration/D-V2_EXECUTION_DAG.md",
-      "git_blob_sha": "e4ee9abaac024f1eb197377637ffec13284e74ad"
+      "git_blob_sha": "e8ebd5137d82127d165e9a4dfa53ce4e363545b0"
     },
     {
       "path": "docs/phase-d/integration/D-V3_INVARIANTS.md",
-      "git_blob_sha": "3f246abd4b185b1835cec6d42c8b460db6a0ae18"
+      "git_blob_sha": "8bf7deb09abdeb84952a04ffab3e73cece2835c4"
     },
     {
       "path": "docs/phase-d/integration/D-V4_SCENARIOS_ORACLES.md",
@@ -54,7 +54,7 @@
     },
     {
       "path": "docs/phase-d/integration/D-V5_TEST_MATRIX.md",
-      "git_blob_sha": "c8ee98c790e0c9909c4488b1b110f935a487883a"
+      "git_blob_sha": "856c4664910d68886b781479fcc84c7bf23edc92"
     },
     {
       "path": "docs/phase-d/integration/D-V6_DETERMINISM_RECOVERY_PERFORMANCE.md",
@@ -62,7 +62,7 @@
     },
     {
       "path": "docs/phase-d/integration/D-V7_GATES_ADRS.md",
-      "git_blob_sha": "e1997a679416da06ee0f09a2afd3edf5d619a126"
+      "git_blob_sha": "5e0814c71ffd34a5ba354d2a07e47d2008fec60d"
     },
     {
       "path": "docs/phase-d/integration/examples/industry_construction_research_chain.json",
@@ -84,23 +84,23 @@
   "upstream_source_baselines": [
     {
       "path": "docs/phase-d/D-D0_COMMON_CONTRACT.md",
-      "git_blob_sha": "d3cb46c19d9e47e0c0e22354f7df0dffe24faa8a",
-      "ref": "work/phase-d-design"
+      "git_blob_sha": "f2308d535af11120a1346c0e2855b7fdcd830c60",
+      "ref": "main"
     },
     {
       "path": "docs/phase-d/contract_manifest.json",
-      "git_blob_sha": "639de556cff1a987cba541b8db093e63d1952dd4",
-      "ref": "work/phase-d-design"
+      "git_blob_sha": "b78e079429dc97b44c784bab565ff8b815f6e864",
+      "ref": "main"
     },
     {
       "path": "docs/phase-d/construction/README.md",
-      "git_blob_sha": "a0628676ae470a1c5c1327f8bc0f97b69aa07c15",
-      "ref": "work/phase-d-design"
+      "git_blob_sha": "84669cf1dd0469b4ea9ed2e8c372b75a06e408ca",
+      "ref": "main"
     },
     {
       "path": "docs/phase-d/construction/verification_manifest.json",
-      "git_blob_sha": "69bde00f05e9cb776c7958f57a037830da6a3592",
-      "ref": "work/phase-d-design"
+      "git_blob_sha": "cb512f52bc76330d54db4324b996768e73cdaa52",
+      "ref": "main"
     },
     {
       "path": "docs/phase-d/industry/README.md",
@@ -119,8 +119,8 @@
     },
     {
       "path": "docs/phase-d/technology/verification_manifest.json",
-      "git_blob_sha": "2ac24bce8e8bdb2ef3c0e4d013f36005328c9483",
-      "ref": "work/phase-d-design"
+      "git_blob_sha": "e901b88c95fc7349afd37cf1a57e8b4cfc9d7ecf",
+      "ref": "main"
     },
     {
       "path": "docs/phase-c/integration/README.md",

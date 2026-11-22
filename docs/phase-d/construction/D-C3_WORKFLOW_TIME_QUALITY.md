@@ -3,6 +3,8 @@
 > **설계 확정 / C++ 연산 미실행** · `phase-d-construction/1.0` · 2026-11-04  
 > 상위: [D-D0](../D-D0_COMMON_CONTRACT.md), [D-C1](D-C1_PROJECTS_CONTRACTS_RIGHTS.md), [D-C2](D-C2_LABOR_MATERIALS_CAPACITY.md), C-E1~E5, C-D4 월별 12단계. [색인](README.md)
 
+> **적용 범위:** 기본 공사의 유효 진도는 실제 작업·자재·노동과 지급·자본화 결과다. 아래 WorkPackage DAG, 양생, 품질검사, 재시공과 검수 명령은 명시한 시나리오에서만 적용한다. 기본 일간 자동 증축은 이 작업 흐름을 요구하지 않는다.
+
 ## C3-1. 세 가지 진행 개념
 
 1. **작업 시도량(`performed_work`)**: 노동·설비·자재를 실제 소비해 실행한 공정 작업량. 실패한 시공도 물자·임금은 사용했을 수 있음.

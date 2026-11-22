@@ -3,6 +3,8 @@
 > **설계 확정 / 실제 통합 C++ 구현·72개 인수시험 미실행** · `phase-d-integration/1.0` · 2026-11-04
 > 상위: [V1 아키텍처](D-V1_ARCHITECTURE_SCOPE.md)·[V2 시간/DAG](D-V2_EXECUTION_DAG.md)·[V3 36 불변식](D-V3_INVARIANTS.md)·[V4 예제](D-V4_SCENARIOS_ORACLES.md)·[V5 72개](D-V5_TEST_MATRIX.md)·[V6 복구/성능](D-V6_DETERMINISM_RECOVERY_PERFORMANCE.md).
 
+> 이 표는 구형 월간 예시와 선택 건설 시나리오까지 포함한 전체 상세 설계의 인수 목표다. 기본 플레이 게이트와 구분하고, 허가·검수·재시공 인수 항목은 해당 선택 조건이 명시된 경우에만 적용한다.
+
 ## V7-1. 설계 완료와 실제 엔진 통과 구분
 
 | Gate | 합격에 반드시 필요한 증빙 | 현 상태 |
@@ -49,7 +51,7 @@ known unsupported/omitted features & migration, final recommendation
 | **DV-ADR-001** | 기존 POP-D0~D3·C-D0/E/P/M/D4·D-D0/DC/DI/DT의 데이터 원본·시간 계약을 상위 고정, 새 월 단계/독립 시뮬레이션 World 금지 | V1/V2 |
 | **DV-ADR-002** | Phase D 구현은 하나의 C-D4 통합 StagingWorld에 부가하고 장기 main/작업 브랜치의 이중 원본을 병행 운영하지 않음 | V1/V7-L0 |
 | **DV-ADR-003** | PopulationSlice/Employment/Financial/Inventory/Ownership/Fiscal/CapitalAsset/Knowledge/Construction/Political/Military의 영역별 유일한 writer 보장 | V1/V3 |
-| **DV-ADR-004** | 계획·허가·계약/예약과 실제 시공·인도/임금 지급·연구·검증/설비 활성 상태 구분 | V1/V2 |
+| **DV-ADR-004** | 계획·계약/예약(허가는 설정 시)과 실제 시공·인도/임금 지급·연구·검증/설비 활성 상태 구분 | V1/V2 |
 | **DV-ADR-005** | 계좌·노동/군역·상품·장비서비스/운송·토지/특허 권한의 공통 예약 우선순위와 stable ID tie break | V2 |
 | **DV-ADR-006** | 기존 C-D4 Stage0..11/9a..9e/10a..10f 공개 순서, stage4 내부에만 유효 공정 DAG 인정 | V2 |
 | **DV-ADR-007** | 당월 생산된 중간재를 이미 끝난 Stage3에 소급 입력하지 못하며 Stage7 신구매는 이전 Stage4를 늘리지 못함 | V2 |

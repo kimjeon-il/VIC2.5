@@ -1,5 +1,7 @@
 # Phase D C++ 통합 엔진 — 구현 및 실측 인수 현황
 
+> **현행 범위 안내:** 아래는 2026-11-04의 실행 결과와 당시 과제 기록입니다. 현재 기본 플레이에서 요구하는 범위는 [건설 정본](construction/README.md)과 [학교 정본](../phase-i/I-E1_EDUCATION_SERVICES_ATTAINMENT.md)을 따릅니다. 시나리오의 허가·검수·재시공이나 학교 등록·출결·누적 수업량은 기본 플레이의 남은 구현 항목이 아닙니다.
+
 > **2026-11-04 신규 I/J 작업 브랜치 주의:** 아래는 과거 Phase D 원본 구현/검증 보고서다. `work/phase-i-j-detail`에서는 자원 모델 `ResourceDeposit.remaining`을 `ResourceSite.monthly_capacity/cumulative_output` 및 재생 생물량으로 **교체**하고 Phase D 세이브를 `phase-d-cpp/0.6`으로 올렸다. 아래의 이전 CI 실행 결과는 이 신규 자원 모델을 검증하지 않았으며, 새로운 회귀는 별도 CI가 필요하다. 근거: [J-R1](../phase-j/J-R1_RESOURCE_EXPLORATION_FLOW.md) / [교체 내역](../phase-j/RESOURCE_MODEL_REPLACEMENT.md).
 
 > **상태: PARTIAL_IMPLEMENTATION — 제한적 C++ 통합 세로슬라이스 구현 및 실제 CI 검증 완료. 전체 D-V 인수 미완료.**  

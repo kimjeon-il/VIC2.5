@@ -16,10 +16,10 @@
 
 ## Phase D-C1~C5 건설 상세 설계
 
-- [**건설 설계 색인**](construction/README.md): 프로젝트·자금·시공/재료·공정/품질·준공/보수·철거 및 시간계약.
-- [**건설 인수시험**](construction/CONSTRUCTION_ACCEPTANCE_TESTS.md): 25개 불변조건, 45개 개별 수락 시나리오(명세 확정/실제 C++ 실행 전).
+- [**건설 설계 색인**](construction/README.md): 기본 발주·자금·노동·자재·준공과, 명시 시나리오에만 쓰는 허가·검수·세부 공정.
+- [**건설 인수시험**](construction/CONSTRUCTION_ACCEPTANCE_TESTS.md): 25개 불변조건, 45개 전체 상세 인수 항목. 시나리오 선택 조건의 시험은 기본 플레이 인수에 요구하지 않는다.
 - [**건설 ADR**](construction/CONSTRUCTION_ADRS.md): 35개 결정. [검증 매니페스트](construction/verification_manifest.json)와 [3개월 공장 공사 fixture](construction/examples/three_month_factory.json), [전시피해 복구 fixture](construction/examples/war_damage_repair.json).
-- **상태:** `phase-d-construction/1.0` 설계 확정; `work/phase-d-design`에서만 문서 추가; C++ 건설 엔진/인수시험 `NOT_RUN`, `main` 미병합.
+- **상태:** 기본 건설과 준공은 일간 C++ 경로에서 실행한다. 선택 공정은 일부 구현이며, 전체 45개 상세 인수는 별도다.
 
 ## Phase D-I1~I5 산업 상세 설계
 
@@ -60,7 +60,7 @@
 |---|---|---|---|
 | D-C1 | 건설 | 건설사업·주체·시공·토지/소유/계약 | **설계 확정** |
 | D-C2 | 건설 | 건설인력·자재·건설업/시공장비·가용용량 | **설계 확정** |
-| D-C3 | 건설 | 공정·공사기간·실제 작업·하자/재시공 | **설계 확정** |
+| D-C3 | 건설 | 실제 작업·기간; 선택 시나리오의 하자/재시공 | **설계 확정** |
 | D-C4 | 건설 | 공사 금융·민간/공공투자·WIP/기성고 | **설계 확정** |
 | D-C5 | 건설 | 준공·개축·보수·철거·노후·피해복구 | **설계 확정** |
 | D-I1 | 산업 | 산업분류·기업/사업장·산업구조 | **설계 확정** |

@@ -10,7 +10,7 @@
 |---|---|---|
 | 문화별 인구 | POP DemographicCohortKey.culture_id / PopulationSlice.count | 인원 가중 집계, 드문 실제 전이는 POP-D2 |
 | 대표·보조 언어 | CultureDefinition.primary_language_id / optional other_language_ids | **문화의 정적 하위 메타데이터**. 언어별 인구/숙련도 원장 없음 |
-| 공용어·학교 교육언어 | C-P 법률 / I-E1 EducationProgram.instruction_language | 행정·교육 접근조건의 정책 입력. 개별 언어 학습·진도 계산 없음 |
+| 공용어·학교 교육언어 | C-P 법률 / I-E1 교육 접근 정책 | 행정·교육 접근조건의 정책 입력. 개별 언어 학습·진도 계산 없음 |
 | 종교별 인구 | POP DemographicCohortKey.religion_id | 구성비 조회 및 종교 관련 법률의 대상 판단 |
 | 종교 관련 특권·차별·중립 | C-P2 LegalNorm / PolicyProvision / RuleEvaluation / 유효 관할·집행 | 해당 법률과 실제 집행을 통해서만 사회적 차등효과 발생 |
 | 실제 고용·수입·학력·정치 | C-E/C-P/I-E1 및 실제 운영기관·시설 원장 | I-C1이 별도 보너스·재무·정치 원장을 생성하지 않음 |

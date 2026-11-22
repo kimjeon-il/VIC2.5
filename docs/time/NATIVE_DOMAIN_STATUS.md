@@ -14,7 +14,7 @@
 - B POP: `Phase C::phase_time_birth/death`가 Phase B 단일 `PopulationSlice` 원본을 사건으로 실제 변경. 날짜는 `daily::World::journal`에 저장. `birth_month`은 기존 월별 분류로 남아 있고 일별 자동 확률·정확한 `birth_day`는 아직 전면 구현되지 않음.
 - C 생산: `Kind::production`에서 Phase C 고용·원자재·상품 원장의 실제 투입·산출 실행. 공유 일별 노동 예약으로 같은 작업자의 중복 이용을 방지.
 - D 산업: `Kind::manufacture`에서 D의 실제 `IndustryRecipe`, 시설·재고·노동·부산물을 사용하고 **월간 설비용량을 그날까지의 누적 가용량으로 환산**하여 일별 단위 반복으로 증식하지 않도록 제한. 수치는 정수식 `floor(monthly_capacity * elapsed_day / days_in_month)` 기반 월간 누적 예산임.
-- D 건설: `Kind::construction` 실제 계획→시공→대금 지급→WIP 자본화→다음날 자산 준공. 실물 재고·고용·현금·시설에 원자 적용. 복잡한 Package curing/inspection/기술 도입은 추후.
+- D 건설: `Kind::construction` 실제 계획→시공→대금 지급→WIP 자본화→다음날 자산 준공. 실물 재고·고용·현금·시설에 원자 적용. 허가·검수·재시공은 [명시적 시나리오 범위](../phase-d/construction/README.md)이며 기본 건설·자동 증설의 필수 절차가 아니다.
 - G/F 물류: `Kind::cargo_dispatch`에서 G가 등록한 실제 운송 간선의 `edge_usage[month,edge]` 공유 월간 용량을 사용하며 C의 실제 `TRANSIT:DAY:<id>` 재고로 운송. 실물 자산 소유권과 운송계약은 임의 변경하지 않음. 특정 날짜의 자동 도착/분실은 C Inventory Ledger의 실제 정산. F 완성형 독립 C++ 엔진은 아직 없음.
 - H 외교: `Kind::treaty_offer/ratify`는 H `DiplomacyState.daily_treaties`의 유효·법적 정부 권한을 검증하고 지정한 일자에 자동 발효. 해당 쌍·상품의 G 관세 면제 판정에 실제 반영. 전체 H 다자 조약/국제기구/위기·전쟁 개입의 일별화는 미구현.
 - **2026-11-06 변경:** 실제 `daily::World` 진행 경로는 월말에 구형 12단계 월간 엔진을 호출하지 않음. 날짜별 C/D/E/G/H 작업 후 **같은 일별 스테이징 트랜잭션의 Stage 10에서 POP 월령·노동자격을 갱신**하고 단일 원자적 커밋으로 마감. 구형 월간 전용 엔진은 일별 경로와 별개인 회귀시험·구형 저장 자료 처리용으로만 남아 있음. 새로운 월간 자동 계산 경로를 추가하면 실패로 판정.
@@ -51,7 +51,7 @@ Stage 11: 전원장·날짜·예약 검증
 
 1. 자동 POP 출생·사망·질병·이주율을 실제 `day` 기반 **하루별 hazard/carry와 정확한 출생일 코호트**로 변경. 월말 B `DemographyRules`에 중복 적용되지 않게 원장 마이그레이션.
 2. C/E/G/H의 일별 수요·가격·생산 결정, 조세·금융·외교 위기/모든 조약 조항 전체와 AI의 실제 일별 행동.
-3. D 산업 모든 현장/시설 단위의 정확한 일일 노동시간·생산량 제한, 공사 인허가·검수·기술 채택·교육/연구 흐름의 전면 일별화.
+3. D 산업의 현장·시설별 일일 노동시간·생산량과 기술 채택·연구 흐름의 일별화. 기본 건설은 자재·인력·공사비·준공을 기준으로 하며, 학교는 [운영 인력·정원·교육법과 집계 교육 효과](../phase-i/I-E1_EDUCATION_SERVICES_ATTAINMENT.md)를 기준으로 한다. 시나리오 공사 상세나 보류된 학생별 절차의 일별화는 기본 작업에 포함하지 않는다.
 4. F 물류의 다중 간선 최적경로·지연·혼잡·운임/보험·세계 30k Province 정확한 지리·저사양 GPU 성능.
 5. I/J 실제 C++ 분야 런타임·일별 정기 및 사건 전이. J는 지하 전체 자원매장량을 쓰지 않는 설계 유지.
 6. 액티브 데이 `World` 깊은 복사를 30k Province/100만 POP에서 copy-on-write 또는 변경집합 journal로 최적화; CPU/RAM, 월별/일별 1,200개월 장기 성능과 결정론 검증.
