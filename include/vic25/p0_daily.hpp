@@ -2769,6 +2769,7 @@ public:
                         continue;
                     phasegh::TreatyClause term;
                     term.id="end-hostilities";
+                    term.war_id=id;
                     term.obligor=war.attacker;
                     term.beneficiary=war.defender;
                     term.kind=war.armistice?

@@ -143,17 +143,20 @@ template<class A>void tariff(A& a,Tariff& x) {
 template<class A>void pending_tariff(A& a,PendingTariff& x) {
     a(x.effective);a(x.importer);a(x.good);a(x.ppm);
 }
-template<class A>void clause(A& a,TreatyClause& x) {
+template<class A>void clause(A& a,TreatyClause& x,bool include_scope) {
     a(x.id);a(x.obligor);a(x.beneficiary);a(x.good);
     a(x.kind);a(x.province);a(x.receiving_admin);
     a(x.amount);a(x.fulfilled);a(x.effective);a(x.expires);a(x.queued);
+    if(include_scope)a(x.war_id);
 }
-template<class A>void treaty(A& a,Treaty& x) {
+template<class A>void treaty(A& a,Treaty& x,bool include_scope) {
     a(x.id);a(x.country_a);a(x.country_b);a(x.good);
     a(x.agreed_month);a(x.effective_month);
     a(x.ratified_a);a(x.ratified_b);a(x.active);
     a(x.parties);a(x.ratifications);
-    checked_vector(a,x.clauses,clause<A>);
+    checked_vector(a,x.clauses,[&](A& ar,TreatyClause& term){
+        clause(ar,term,include_scope);
+    });
     a(x.pending_termination);a(x.termination_approvals);
 }
 template<class A>void governance(A& a,OrganizationRule& x) {
@@ -227,10 +230,10 @@ template<class A>void infamy_event(A& a,InfamyEvent& x) {
     a(x.id);a(x.country);a(x.source);a(x.amount_ppm);a(x.day);
 }
 template<class A>void h_state(A& a,DiplomacyState& x,bool include_daily=true,
-                              bool include_wars=false) {
+                              bool include_wars=false,bool include_scope=false) {
     checked_map(a,x.tariffs,tariff<A>);
     checked_vector(a,x.scheduled_tariffs,pending_tariff<A>);
-    checked_map(a,x.treaties,treaty<A>);
+    checked_map(a,x.treaties,[&](A& ar,Treaty& pact){treaty(ar,pact,include_scope);});
     checked_map(a,x.organizations,organization<A>);
     checked_map(a,x.protectorates,protectorate<A>);
     checked_map(a,x.crises,crisis<A>);
@@ -242,11 +245,44 @@ template<class A>void h_state(A& a,DiplomacyState& x,bool include_daily=true,
     if(include_daily)checked_map(a,x.daily_treaties,daily_treaty<A>);
     if(include_wars)checked_map(a,x.wars,war<A>);
 }
+// These exact old P0 layouts already encoded a war ID in their treaty
+// names. Historic ordinary treaties contain no equivalent authority; never
+// infer their war from matching countries, month, or a name fragment.
+inline void restore_legacy_automatic_war_terms(DiplomacyState& state) {
+    for(auto& [id,pact]:state.treaties) {
+        constexpr std::string_view peace="AUTO:PEACE:", truce="AUTO:CEASEFIRE:";
+        const std::string_view name=id;
+        const auto kind=name.starts_with(peace)?ClauseKind::peace_settlement:
+                        name.starts_with(truce)?ClauseKind::ceasefire:
+                                               ClauseKind::financial_aid;
+        if(!is_war_treaty_term(kind)||pact.clauses.empty())continue;
+        const auto prefix=kind==ClauseKind::peace_settlement?peace:truce;
+        const auto war=state.wars.find(std::string(name.substr(prefix.size())));
+        if(war==state.wars.end()||pact.parties.size()!=2||
+           !pact.parties.contains(war->second.attacker)||
+           !pact.parties.contains(war->second.defender)||
+           pact.country_a!=*pact.parties.begin()||
+           pact.country_b!=*pact.parties.rbegin()||
+           !pact.ratified_a||!pact.ratified_b||
+           pact.ratifications!=pact.parties)continue;
+        auto& term=pact.clauses.front();
+        if(term.id!="end-hostilities"||term.kind!=kind||
+           term.obligor!=war->second.attacker||term.beneficiary!=war->second.defender||
+           !term.good.empty()||term.province!=0||term.receiving_admin!=0||
+           term.amount!=0||term.fulfilled!=0||term.expires!=-1||!term.queued||
+           (kind==ClauseKind::ceasefire&&pact.clauses.size()!=1)||
+           !std::all_of(std::next(pact.clauses.begin()),pact.clauses.end(),
+             [](const TreatyClause& other){return other.kind==ClauseKind::territorial_cession;}))
+            continue;
+        term.war_id=war->first;
+    }
+}
 } // namespace persisted
 
 struct SnapshotCodec {
     static constexpr const char* magic="VIC25_PHASE_GH_SNAPSHOT_1";
-    static constexpr const char* version="phase-gh-cpp/0.8";
+    static constexpr const char* version="phase-gh-cpp/0.9";
+    static constexpr const char* verified_transport_version="phase-gh-cpp/0.8";
     static constexpr const char* intermodal_version="phase-gh-cpp/0.7";
     static constexpr const char* war_version="phase-gh-cpp/0.6";
     static constexpr const char* multimodal_version="phase-gh-cpp/0.5";
@@ -273,25 +309,30 @@ struct SnapshotCodec {
         const bool verified=std::any_of(
             w.trade_.transport_edges.begin(),w.trade_.transport_edges.end(),
             [](const auto& row){return !row.second.evidence_id.empty();});
-        a(std::string(verified?version:
-                      (intermodal?intermodal_version:
-                       (has_wars?war_version:
-                       (multimodal?multimodal_version:
-                        (native_transport?daily_transport_version:
-                         (upgraded?daily_treaty_version:legacy_version)))))));
+        const bool scoped_terms=std::any_of(w.diplomacy_.treaties.begin(),
+            w.diplomacy_.treaties.end(),[](const auto& row){
+                return std::any_of(row.second.clauses.begin(),row.second.clauses.end(),
+                    [](const TreatyClause& term){return !term.war_id.empty();});
+            });
+        const auto layout=scoped_terms?version:verified?verified_transport_version:
+                          intermodal?intermodal_version:has_wars?war_version:
+                          multimodal?multimodal_version:native_transport?daily_transport_version:
+                          upgraded?daily_treaty_version:legacy_version;
+        a(std::string(layout));
         a(std::string(g_version));
         a(std::string(h_version));
         const std::string existing=phasee::SnapshotCodec::encode(w.core_);
         a(existing);
         auto g=w.trade_;
         auto h=w.diplomacy_;
+        const bool verified_layout=verified||scoped_terms;
         persisted::g_state(a,g,
-                           native_transport||multimodal||has_wars||intermodal||verified,
-                           multimodal||has_wars||intermodal||verified,
-                           intermodal||verified,verified);
+                           native_transport||multimodal||has_wars||intermodal||verified_layout,
+                           multimodal||has_wars||intermodal||verified_layout,
+                           intermodal||verified_layout,verified_layout);
         persisted::h_state(a,h,
-                           upgraded||native_transport||multimodal||has_wars||intermodal||verified,
-                           has_wars||intermodal||verified);
+                           upgraded||native_transport||multimodal||has_wars||intermodal||verified_layout,
+                           has_wars||intermodal||verified_layout,scoped_terms);
         if(!h.infamy.empty()||!h.infamy_events.empty()) {
             a(std::string("VIC25_PHASE_GH_INFAMY_1"));
             persisted::checked_map(a,h.infamy,persisted::infamy_record<decltype(a)>);
@@ -310,7 +351,8 @@ struct SnapshotCodec {
         persisted::Reader a{in};
         std::string m,v,g,h,base;
         a(m);a(v);a(g);a(h);
-        if(m!=magic||(v!=version&&v!=intermodal_version&&v!=war_version&&
+        if(m!=magic||(v!=version&&v!=verified_transport_version&&
+             v!=intermodal_version&&v!=war_version&&
              v!=multimodal_version&&v!=daily_transport_version&&
              v!=daily_treaty_version&&
              v!=legacy_version)||
@@ -319,15 +361,16 @@ struct SnapshotCodec {
         a(base);
         World next;
         next.core_=phasee::SnapshotCodec::decode(base);
+        const bool scoped_terms=v==version;
+        const bool verified_layout=scoped_terms||v==verified_transport_version;
         persisted::g_state(a,next.trade_,
-                           v==version||v==intermodal_version||v==war_version||
+                           verified_layout||v==intermodal_version||v==war_version||
                            v==multimodal_version||v==daily_transport_version,
-                           v==version||v==intermodal_version||v==war_version||
+                           verified_layout||v==intermodal_version||v==war_version||
                            v==multimodal_version,
-                           v==version||v==intermodal_version,
-                           v==version);
+                           verified_layout||v==intermodal_version,verified_layout);
         persisted::h_state(a,next.diplomacy_,v!=legacy_version,
-                           v==version||v==intermodal_version||v==war_version);
+                           verified_layout||v==intermodal_version||v==war_version,scoped_terms);
         const auto digest_offset=static_cast<std::streamoff>(
             bytes.size()-sizeof(std::uint64_t));
         if(in.tellg()<digest_offset) {
@@ -347,6 +390,15 @@ struct SnapshotCodec {
            crc!=phasec::persistence_detail::checksum(
                     bytes.substr(0,bytes.size()-sizeof(std::uint64_t))))
             throw std::runtime_error("G/H snapshot checksum mismatch");
+        if(!scoped_terms)persisted::restore_legacy_automatic_war_terms(next.diplomacy_);
+        // Older builds could reactivate a terminated treaty using its initial
+        // signatures. Restore its terminal legal state only when the distinct
+        // complete termination evidence actually survives in the save.
+        for(auto& [id,pact]:next.diplomacy_.treaties) {
+            (void)id;
+            if(!pact.pending_termination&&jointly_approved_treaty_termination(pact))
+                pact.active=false;
+        }
         next.validate();
         return next;
     }

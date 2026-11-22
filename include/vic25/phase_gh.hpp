@@ -288,6 +288,7 @@ struct TreatyClause {
     Money amount{}, fulfilled{};
     Month effective{}, expires{-1};
     bool queued{};
+    std::string war_id; // exact existing conflict, only for a ceasefire or peace term
 };
 enum class VoteChoice : std::uint8_t { yes, no, abstain };
 struct OrganizationRule {
@@ -339,6 +340,9 @@ struct Treaty {
     bool pending_termination{};
     std::set<std::string> termination_approvals;
 };
+[[nodiscard]] inline bool jointly_approved_treaty_termination(const Treaty& pact) {
+    return pact.parties.size()>=2&&pact.termination_approvals==pact.parties;
+}
 struct Organization {
     std::string id;
     std::set<std::string> members;
@@ -391,6 +395,15 @@ struct WarState {
     std::int64_t started_day{},last_combat_day{-1},ended_day{-1};
     bool active{true},armistice{};
 };
+[[nodiscard]] inline bool is_war_treaty_term(ClauseKind kind) {
+    return kind==ClauseKind::ceasefire||kind==ClauseKind::peace_settlement;
+}
+[[nodiscard]] inline bool war_term_signatories_match(
+        const TreatyClause& clause,const WarState& war) {
+    return (clause.obligor==war.attacker&&clause.beneficiary==war.defender)||
+           (clause.obligor==war.defender&&clause.beneficiary==war.attacker);
+}
+
 enum class InfamyTier:std::uint8_t {
     reputable,infamous,notorious,pariah
 };
@@ -1369,23 +1382,16 @@ public:
             if(war.ended_day>=0)continue;
             bool ceasefire=false,peace=false;
             for(const auto& [treaty_id,t]:diplomacy_.treaties) {
+                (void)treaty_id;
                 if(!t.active)continue;
-                // Automated settlements are scoped to the war that caused
-                // them. An old peace treaty cannot close a distinct later war.
-                if(treaty_id.starts_with("AUTO:PEACE:")&&
-                   treaty_id!="AUTO:PEACE:"+war.id)continue;
-                if(treaty_id.starts_with("AUTO:CEASEFIRE:")&&
-                   treaty_id!="AUTO:CEASEFIRE:"+war.id)continue;
+                // Ratified older unbound terms cannot grant scope by country
+                // pair alone. Only this known conflict may be paused or ended.
                 for(const auto& clause:t.clauses) {
-                    if(clause.effective>phase_c().month()||
+                    if(clause.war_id!=war.id||
+                       !war_term_signatories_match(clause,war)||
+                       clause.effective>phase_c().month()||
                        (clause.expires>=0&&clause.expires<phase_c().month()))
                         continue;
-                    const bool matches=
-                        (clause.obligor==war.attacker&&
-                         clause.beneficiary==war.defender)||
-                        (clause.obligor==war.defender&&
-                         clause.beneficiary==war.attacker);
-                    if(!matches)continue;
                     if(clause.kind==ClauseKind::ceasefire)ceasefire=true;
                     if(clause.kind==ClauseKind::peace_settlement)peace=true;
                 }
@@ -1420,10 +1426,15 @@ public:
         });
         for(auto& [id,t]:diplomacy_.treaties) {
             (void)id;
-            if(t.pending_termination){
-                t.active=false;
-                t.pending_termination=false;
-                ++diplomacy_.revision;
+            if(jointly_approved_treaty_termination(t)) {
+                // The distinct unanimous termination signatures persist after
+                // consuming the pending flag. Original ratification is not a
+                // new offer and must never reactivate this treaty.
+                if(t.active||t.pending_termination) {
+                    t.active=false;
+                    t.pending_termination=false;
+                    ++diplomacy_.revision;
+                }
                 continue;
             }
             const bool fully_ratified=t.parties.empty()?
@@ -1494,11 +1505,27 @@ private:
                     s.spatial().provinces.contains(r.destination),
                     "G_ERR_INVALID_ROUTE");
         }
-        for(const auto& [id,t]:h.treaties)
+        for(const auto& [id,t]:h.treaties) {
             require(id==t.id && t.country_a!=t.country_b &&
                     t.effective_month>t.agreed_month &&
-                    (!t.active || (t.ratified_a&&t.ratified_b)),
+                    (!t.active || (t.ratified_a&&t.ratified_b))&&
+                    (!t.pending_termination||
+                        (t.active&&jointly_approved_treaty_termination(t)))&&
+                    (!t.active||t.pending_termination||
+                        !jointly_approved_treaty_termination(t)),
                     "H_ERR_TREATY_INVARIANT");
+            for(const auto& clause:t.clauses) {
+                if(clause.war_id.empty())continue; // older unbound terms are inert
+                const auto war=h.wars.find(clause.war_id);
+                require(is_war_treaty_term(clause.kind)&&war!=h.wars.end()&&
+                        war_term_signatories_match(clause,war->second)&&
+                        t.parties.contains(clause.obligor)&&
+                        t.parties.contains(clause.beneficiary)&&
+                        (!t.active||std::all_of(t.parties.begin(),t.parties.end(),
+                             [&](const auto& party){return t.ratifications.contains(party);})),
+                        "H_ERR_WAR_TREATY_SCOPE");
+            }
+        }
         for(const auto& [id,o]:h.organizations)
             require(id==o.id && (!o.active||o.members.size()>=2) &&
                     o.dues_per_member>=0,"H_ERR_ORGANIZATION_INVARIANT");

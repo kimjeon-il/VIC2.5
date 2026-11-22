@@ -76,6 +76,12 @@ inline void Stage::propose_treaty_package(
         c.effective=std::max(c.effective,phase_c().month()+1);
         require(c.expires<0||c.expires>=c.effective,
                 "H_ERR_INVALID_CLAUSE_PERIOD");
+        if(is_war_treaty_term(c.kind)) {
+            const auto war=diplomacy_.wars.find(c.war_id);
+            require(war!=diplomacy_.wars.end()&&war->second.ended_day<0&&
+                    war_term_signatories_match(c,war->second),
+                    "H_ERR_WAR_TREATY_SCOPE");
+        } else require(c.war_id.empty(),"H_ERR_WAR_TREATY_SCOPE");
         if(c.kind==ClauseKind::territorial_cession)
             require(c.province>0&&c.receiving_admin>0,
                     "H_ERR_MISSING_PROVINCE_OR_NEW_ADMIN");
@@ -129,7 +135,7 @@ inline void Stage::terminate_treaty(const std::string& id,
     // ratified the treaty; old ratification must NOT count as new consent.
     require(t.termination_approvals.insert(requesting_country).second,
             "H_ERR_DUPLICATE_TERMINATION_CONSENT");
-    if(t.termination_approvals.size()==t.parties.size())
+    if(jointly_approved_treaty_termination(t))
         t.pending_termination=true;
     ++diplomacy_.revision;
 }

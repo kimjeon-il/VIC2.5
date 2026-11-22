@@ -1,6 +1,7 @@
 #include "vic25/phase_gh.hpp"
 #include "vic25/daily_snapshot.hpp"
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 using namespace vic25::phasegh;
 static void verify(bool ok,const char* why){if(!ok)throw std::runtime_error(why);}
@@ -41,6 +42,331 @@ static TreatyClause clause(const std::string& id,ClauseKind kind,
     t.beneficiary=beneficiary;t.good=good;t.amount=amount;
     return t;
 }
+static vic25::daily::World two_recorded_wars_between_the_same_countries() {
+    using namespace vic25;
+    auto gh=fixture(false,24000);
+    auto& c=gh.seed_geography().seed_core().seed_core();
+    for(const auto& [actor,region]:std::array<std::pair<const char*,const char*>,2>{{
+                        {"A","RA1"},{"B","RB2"}}}) {
+        const std::string unit=std::string("TREATY-EXAMPLE-UNIT-")+actor;
+        c.seed_unit(unit);
+        c.seed_army_deployment(unit,actor,region);
+        c.seed_stock(unit,region,"ammunition",2);
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({region,"shared","shared",2});
+        const auto e=pop.economic_profile({region,"soldier","wage","employee",
+                                          pop.default_education()});
+        const auto d=pop.demographic_profile({region,23640,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),phaseb::Service::active});
+        c.seed_active(unit,pop.seed_population(d,e,h,2));
+    }
+    auto world=daily::World::adopt(std::move(gh),21);
+    World::Plan claim;
+    claim[9].push_back([](Stage& h) {
+        h.geography().queue_claim("DISPUTED-TITLE",2,"A",true);
+    });
+    world.advance_day(claim);
+    while(world.date()<daily::Date{2000,2,1})world.advance_day();
+    World::Plan disputes;
+    disputes[9].push_back([](Stage& h) {
+        h.open_crisis("OLD-CONFLICT",2,"A","B","PM_A");
+        h.open_crisis("OTHER-CONFLICT",2,"A","B","PM_A");
+    });
+    world.advance_day(disputes);
+    while(world.date()<daily::Date{2000,3,1})world.advance_day();
+    World::Plan go;
+    go[9].push_back([](Stage& h) {
+        verify(h.begin_war_from_crisis("OLD-CONFLICT","A","PM_A")&&
+               h.begin_war_from_crisis("OTHER-CONFLICT","A","PM_A"),
+               "fixture could not create two real active conflict records");
+    });
+    world.advance_day(go);
+    return world;
+}
+
+enum class LegacyTermination { none, partial, pending, applied };
+static std::string legacy_war_treaty_checkpoint(
+        const World& world,const std::string& treaty_id,ClauseKind kind,
+        LegacyTermination termination=LegacyTermination::none) {
+    // Old approved terms lacked a conflict field. Encode their exact 0.6 shape,
+    // using the live two-war journal and unchanged underlying C/D/E checkpoint.
+    auto h=world.diplomacy();
+    auto g=world.commerce();
+    Treaty old;
+    old.id=treaty_id;old.country_a="A";old.country_b="B";
+    old.parties={"A","B"};old.ratifications=old.parties;
+    old.ratified_a=old.ratified_b=old.active=true;
+    if(termination==LegacyTermination::partial)old.termination_approvals={"A"};
+    if(termination==LegacyTermination::pending||termination==LegacyTermination::applied)
+        old.termination_approvals=old.parties;
+    old.pending_termination=termination==LegacyTermination::pending;
+    old.agreed_month=world.month()-1;old.effective_month=world.month();
+    const bool automatic=treaty_id.starts_with("AUTO:");
+    auto war=clause("end-hostilities",kind,automatic?"A":"B",automatic?"B":"A");
+    war.effective=old.effective_month;war.queued=true;
+    old.clauses={war};
+    if(!automatic) {
+        auto aid=clause("independent-aid",ClauseKind::financial_aid,"A","B","",3);
+        aid.effective=old.effective_month;aid.queued=true;
+        old.clauses.push_back(aid);
+    }
+    h.treaties.emplace(old.id,std::move(old));
+    std::ostringstream out(std::ios::binary|std::ios::out);
+    persisted::Writer a{out};
+    a(std::string(SnapshotCodec::magic));a(std::string(SnapshotCodec::war_version));
+    a(std::string(g_version));a(std::string(h_version));
+    a(vic25::phasee::SnapshotCodec::encode(world.base()));
+    persisted::g_state(a,g,true,true,false,false);
+    persisted::h_state(a,h,true,true);
+    if(!h.infamy.empty()||!h.infamy_events.empty()) {
+        a(std::string("VIC25_PHASE_GH_INFAMY_1"));
+        persisted::checked_map(a,h.infamy,persisted::infamy_record<decltype(a)>);
+        persisted::checked_vector(a,h.infamy_events,persisted::infamy_event<decltype(a)>);
+    }
+    const auto payload=out.str();
+    a(vic25::phasec::persistence_detail::checksum(payload));
+    return out.str();
+}
+
+static void old_unbound_ordinary_treaty_cannot_suspend_or_end_a_real_war() {
+    auto source=two_recorded_wars_between_the_same_countries();
+    for(const auto kind:{ClauseKind::ceasefire,ClauseKind::peace_settlement}) {
+        auto replay=SnapshotCodec::decode(
+            legacy_war_treaty_checkpoint(source.engine(),"ORDINARY-UNBOUND",kind));
+        World::Plan next;
+        const auto before=replay.base().core().core().cash("B");
+        next[5].push_back([](Stage& h) {
+            h.disburse_treaty_aid("ORDINARY-UNBOUND","independent-aid",3);
+        });
+        replay.advance_daily(next,source.day_index(),false,source.date().day,31,false,366);
+        verify(replay.base().core().core().cash("B")==before+3,
+               "historic war term incorrectly discarded an independent financial obligation");
+        for(const auto& [id,war]:replay.diplomacy().wars) {
+            (void)id;
+            verify(war.active&&!war.armistice&&war.ended_day<0,
+                   "legacy unbound ordinary treaty wrongly controlled a real war between the same countries");
+        }
+    }
+}
+
+static void legacy_automatic_war_scope_is_preserved_without_guessing() {
+    auto source=two_recorded_wars_between_the_same_countries();
+    const auto run=[&](const std::string& name,ClauseKind kind,bool trusted) {
+        auto restored=SnapshotCodec::decode(
+            legacy_war_treaty_checkpoint(source.engine(),name,kind));
+        verify(restored.diplomacy().treaties.at(name).clauses.front().war_id==
+               (trusted?"WAR:OLD-CONFLICT":""),
+               "legacy automatic treaty resolved an unproven conflict identity");
+        restored.advance_daily({},source.day_index(),false,source.date().day,31,false,366);
+        const auto& selected=restored.diplomacy().wars.at("WAR:OLD-CONFLICT");
+        const auto& other=restored.diplomacy().wars.at("WAR:OTHER-CONFLICT");
+        verify(other.active&&!other.armistice&&other.ended_day<0,
+               "legacy automatic treaty spilled into another conflict");
+        verify(selected.active==!trusted&&
+               selected.armistice==(trusted&&kind==ClauseKind::ceasefire)&&
+               (selected.ended_day>=0)==(trusted&&kind==ClauseKind::peace_settlement),
+               "old proven automatic settlement failed to reconcile its recorded war");
+        auto check=SnapshotCodec::decode(SnapshotCodec::encode(restored));
+        verify(check.diplomacy().treaties.at(name).clauses.front().war_id==
+                   (trusted?"WAR:OLD-CONFLICT":""),
+               "automatic migration scope did not roundtrip");
+    };
+    run("AUTO:CEASEFIRE:WAR:OLD-CONFLICT",ClauseKind::ceasefire,true);
+    run("AUTO:PEACE:WAR:OLD-CONFLICT",ClauseKind::peace_settlement,true);
+    run("AUTO:PEACE:WAR:OLD-CONFLICT",ClauseKind::ceasefire,false);
+    run("AUTO:PEACE:WAR:DOES-NOT-EXIST",ClauseKind::peace_settlement,false);
+}
+
+static void signed_and_dated_war_terms_bind_only_the_named_conflict() {
+    using namespace vic25;
+    auto world=two_recorded_wars_between_the_same_countries();
+    constexpr auto war_id="WAR:OLD-CONFLICT";
+    constexpr auto truce_id="MANUAL-TRUCE";
+    constexpr auto peace_id="MANUAL-PEACE";
+    World::Plan observe_only;
+    observe_only[9].push_back([](Stage& h) {
+        verify(h.diplomacy().wars.size()==2,"fixture lost a recorded conflict");
+    });
+    const auto until=[&](daily::Date date) {
+        while(world.date()<date)world.advance_day(observe_only);
+        verify(world.date()==date,"fixture advanced past the legal date");
+    };
+    const auto other=[&]() -> const WarState& {
+        return world.engine().diplomacy().wars.at("WAR:OTHER-CONFLICT");
+    };
+    const auto selected=[&]() -> const WarState& {
+        return world.engine().diplomacy().wars.at(war_id);
+    };
+    const auto unaffected=[&] {
+        verify(other().active&&!other().armistice&&other().ended_day<0,
+               "treaty changed another conflict with the same states");
+    };
+    const auto assert_rejected=[&](World::Task task) {
+        const auto save=daily::SnapshotCodec::encode(world);
+        World::Plan plan;
+        plan[9].push_back(std::move(task));
+        verify(rejected([&]{world.advance_day(plan);})&&
+               daily::SnapshotCodec::encode(world)==save,
+               "invalid war treaty or signature accepted, or left partial effects");
+    };
+    assert_rejected([](Stage& h) {
+        auto c=clause("unbound",ClauseKind::peace_settlement,"B","A");
+        h.propose_treaty_package("UNBOUND",{"A","B"},{c},"A","PM_A");
+    });
+    assert_rejected([](Stage& h) {
+        auto c=clause("unknown",ClauseKind::ceasefire,"B","A");
+        c.war_id="WAR:UNKNOWN";
+        h.propose_treaty_package("UNKNOWN",{"A","B"},{c},"A","PM_A");
+    });
+    assert_rejected([&](Stage& h) {
+        auto c=clause("wrong-country",ClauseKind::ceasefire,"C","A");
+        c.war_id=war_id;
+        h.propose_treaty_package("WRONG-COUNTRY",{"A","C"},{c},"A","PM_A");
+    });
+    assert_rejected([&](Stage& h) {
+        auto c=clause("wrong-kind",ClauseKind::financial_aid,"B","A","",10);
+        c.war_id=war_id;
+        h.propose_treaty_package("WRONG-KIND",{"A","B"},{c},"A","PM_A");
+    });
+    World::Plan offer;
+    offer[9].push_back([&](Stage& h) {
+        auto c=clause("specific-ceasefire",ClauseKind::ceasefire,"B","A");
+        c.war_id=war_id;c.expires=24004; // through May
+        h.propose_treaty_package(truce_id,{"A","B"},{c},"A","PM_A");
+    });
+    world.advance_day(offer);
+    until({2000,4,1});world.advance_day();
+    verify(!world.engine().diplomacy().treaties.at(truce_id).active&&selected().active,
+           "a single signatory activated a ceasefire");
+    assert_rejected([&](Stage& h){h.ratify_package_member(truce_id,"B","PM_A");});
+    World::Plan consent;consent[9].push_back([&](Stage& h) {
+        h.ratify_package_member(truce_id,"B","PM_B");
+    });
+    world.advance_day(consent);
+    until({2000,5,1});
+    verify(selected().active&&!selected().armistice,
+           "lawful ratification applied prior to its effective month");
+    auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+    world.advance_day();replay.advance_day();
+    verify(daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay)&&
+           !selected().active&&selected().armistice&&selected().ended_day<0,
+           "current conflict ceasefire failed on its effective date or replay");
+    unaffected();
+    until({2000,6,1});
+    verify(selected().armistice,"ceasefire expired too early");
+    World::Plan peace;
+    peace[9].push_back([&](Stage& h) {
+        auto c=clause("specific-peace",ClauseKind::peace_settlement,"B","A");
+        c.war_id=war_id;
+        h.propose_treaty_package(peace_id,{"A","B"},{c},"B","PM_B");
+    });
+    world.advance_day(peace);
+    verify(selected().active&&!selected().armistice&&selected().ended_day<0,
+           "expiry did not resume the underlying war");
+    World::Plan consent_a;consent_a[9].push_back([&](Stage& h) {
+        h.ratify_package_member(peace_id,"A","PM_A");
+    });
+    world.advance_day(consent_a);
+    until({2000,7,1});
+    const auto effect=world.day_index();
+    auto resume=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+    world.advance_day();resume.advance_day();
+    verify(daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(resume)&&
+           !selected().active&&!selected().armistice&&selected().ended_day==effect&&
+           world.engine().base().sovereign(2)=="B",
+           "scoped ratified peace failed on due date, or transferred sovereignty");
+    unaffected();
+    assert_rejected([&](Stage& h) {
+        auto c=clause("ended-war",ClauseKind::ceasefire,"A","B");
+        c.war_id=war_id;
+        h.propose_treaty_package("ENDED-WAR",{"A","B"},{c},"A","PM_A");
+    });
+}
+
+static void jointly_terminated_war_term_stays_terminated_after_monthly_rollover() {
+    using namespace vic25;
+    auto world=two_recorded_wars_between_the_same_countries();
+    constexpr auto named="WAR:OLD-CONFLICT";
+    constexpr auto distinct="WAR:OTHER-CONFLICT";
+    constexpr auto pact="JOINT-TRUCE";
+    World::Plan observe;
+    observe[9].push_back([](Stage& h) {
+        verify(h.diplomacy().wars.size()==2,"termination fixture lost real conflicts");
+    });
+    const auto reach=[&](daily::Date date) {
+        while(world.date()<date)world.advance_day(observe);
+        verify(world.date()==date,"termination fixture skipped its legal date");
+    };
+    const auto assess=[&](bool paused) {
+        const auto& d=world.engine().diplomacy();
+        const auto& named_war=d.wars.at(named);
+        verify(d.treaties.at(pact).active==paused&&named_war.active==!paused&&
+               named_war.armistice==paused&&named_war.ended_day<0,
+               "signed termination or renewal did not control the actual named war");
+        const auto& other=d.wars.at(distinct);
+        verify(other.active&&!other.armistice&&other.ended_day<0,
+               "joint termination controlled a different war with the same countries");
+    };
+    const auto propose=[&](const std::string& id) {
+        World::Plan action;
+        action[9].push_back([&](Stage& h) {
+            auto term=clause("truce",ClauseKind::ceasefire,"A","B");
+            term.war_id=named;
+            h.propose_treaty_package(id,{"A","B"},{term},"A","PM_A");
+        });
+        world.advance_day(action);
+    };
+    const auto ratify=[&](const std::string& id) {
+        World::Plan action;
+        action[9].push_back([&](Stage& h){h.ratify_package_member(id,"B","PM_B");});
+        world.advance_day(action);
+    };
+    const auto terminate=[&](const char* country,const char* prime) {
+        World::Plan action;
+        action[9].push_back([&](Stage& h){h.terminate_treaty(pact,country,prime);});
+        world.advance_day(action);
+    };
+    propose(pact);ratify(pact);
+    reach({2000,4,1});world.advance_day(observe);assess(true);
+    terminate("A","PM_A");assess(true);
+    terminate("B","PM_B");assess(true); // no retroactive same-day effect
+    const std::set<std::string> parties={"A","B"};
+    reach({2000,5,1});world.advance_day(observe);assess(false);
+    reach({2000,6,1});
+    auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+    world.advance_day(observe);replay.advance_day(observe);assess(false);
+    const auto& old=world.engine().diplomacy().treaties.at(pact);
+    verify(daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay)&&
+           old.termination_approvals==parties&&old.ratifications==parties,
+           "termination signature history could not replay unchanged");
+    propose("VALID-RENEWAL");ratify("VALID-RENEWAL");
+    reach({2000,7,1});world.advance_day(observe);
+    const auto& d=world.engine().diplomacy();
+    verify(!d.treaties.at(pact).active&&d.treaties.at("VALID-RENEWAL").active&&
+           d.wars.at(named).armistice&&d.wars.at(distinct).active,
+           "new independent consent did not renew the specifically named war term");
+}
+
+static void old_saves_keep_only_proven_termination_state() {
+    const auto source=two_recorded_wars_between_the_same_countries();
+    constexpr auto pact="AUTO:CEASEFIRE:WAR:OLD-CONFLICT";
+    for(const auto state:{LegacyTermination::none,LegacyTermination::partial,
+                          LegacyTermination::pending,LegacyTermination::applied}) {
+        auto world=SnapshotCodec::decode(legacy_war_treaty_checkpoint(
+            source.engine(),pact,ClauseKind::ceasefire,state));
+        const auto& saved=world.diplomacy().treaties.at(pact);
+        const bool terminal=state==LegacyTermination::applied;
+        verify(saved.active==!terminal&&
+               saved.pending_termination==(state==LegacyTermination::pending)&&
+               saved.ratifications==std::set<std::string>{"A","B"},
+               "legacy termination was inferred without complete dated evidence");
+        world.advance_daily({},source.day_index(),false,source.date().day,31,false,366);
+        verify(world.diplomacy().wars.at("WAR:OLD-CONFLICT").active==terminal&&
+               world.diplomacy().wars.at("WAR:OTHER-CONFLICT").active,
+               "legacy authority changed the wrong war or overrode genuine terms");
+    }
+}
+
 static void national_influence_laws_change_real_daily_infamy() {
     using namespace vic25::phasec;
     struct Case { const char* law; const char* group; int generated; int scope; };
@@ -377,6 +703,11 @@ static void sakoku_blocks_only_new_claimant_initiation() {
 
 int main(){
     try{
+        old_unbound_ordinary_treaty_cannot_suspend_or_end_a_real_war();
+        legacy_automatic_war_scope_is_preserved_without_guessing();
+        signed_and_dated_war_terms_bind_only_the_named_conflict();
+        jointly_terminated_war_term_stays_terminated_after_monthly_rollover();
+        old_saves_keep_only_proven_termination_state();
         sakoku_blocks_only_new_claimant_initiation();
         national_influence_laws_change_real_daily_infamy();
         multilateral_treaty_and_trade_restrictions();
