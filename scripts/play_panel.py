@@ -46,6 +46,12 @@ class NativeEngine:
 
 
 class PlayPanel:
+    FACTORY = "공장 시범판"
+
+    @classmethod
+    def _protocol_tag(cls, choice):
+        return "TUT" if choice == cls.FACTORY else choice
+
     def __init__(self, root, executable):
         self.root = root
         self.current = None
@@ -59,8 +65,8 @@ class PlayPanel:
         self.policy = tk.StringVar(root, "법률과 관세 정보 없음")
         self.market = tk.StringVar(root, "시장 정보 없음")
         self.diplomacy = tk.StringVar(root, "외교 정보 없음")
-        self.notice = tk.StringVar(root, "국가 A 또는 B를 선택한 뒤 시작하거나 저장본을 불러오세요.")
-        root.title("VIC2.5 | 두 국가 관세 시범판")
+        self.notice = tk.StringVar(root, "국가 또는 공장 시범판을 선택한 뒤 시작하거나 저장본을 불러오세요.")
+        root.title("VIC2.5 | 시범판")
         root.geometry("740x520")
         root.minsize(540, 440)
         root.columnconfigure(0, weight=1)
@@ -69,14 +75,14 @@ class PlayPanel:
         frame = ttk.Frame(root, padding=(18, 14))
         frame.grid(sticky="nsew")
         frame.columnconfigure(0, weight=1)
-        ttk.Label(frame, text="두 국가 관세 시범판",
+        ttk.Label(frame, text="VIC2.5 시범판",
                   font=("TkDefaultFont", 16, "bold")).grid(row=0, sticky="w")
         ttk.Label(frame, text="가상 시나리오 · 실제 역사 지도 없음").grid(row=1, sticky="w")
         setup = ttk.Frame(frame, padding=(0, 10))
         setup.grid(row=2, sticky="ew")
-        ttk.Label(setup, text="플레이 국가:").grid(row=0, column=0, padx=(0, 6))
-        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B"),
-                                     width=4, state="readonly")
+        ttk.Label(setup, text="국가·시나리오:").grid(row=0, column=0, padx=(0, 6))
+        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY),
+                                     width=13, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
         self.new_button = ttk.Button(setup, text="새로 시작", command=self.new)
         self.load_button = ttk.Button(setup, text="불러오기…", command=self.load)
@@ -90,11 +96,13 @@ class PlayPanel:
         details.columnconfigure((0, 1), weight=1, uniform="card")
         details.rowconfigure((0, 1), weight=1)
         frame.rowconfigure(4, weight=1)
+        self.cards = []
         for i, (name, value) in enumerate((
             ("재정", self.budget), ("법률·관세", self.policy),
             ("광석 시장", self.market), ("외교", self.diplomacy),
         )):
             card = ttk.LabelFrame(details, text=name, padding=(10, 6))
+            self.cards.append(card)
             card.grid(row=i//2, column=i%2, sticky="nsew", padx=(0, 6), pady=4)
             label = ttk.Label(card, textvariable=value, justify="left")
             label.pack(fill="both", expand=True, anchor="nw")
@@ -105,7 +113,8 @@ class PlayPanel:
         actions.grid(row=5, sticky="ew")
         self.step_button = ttk.Button(actions, text="하루 진행", command=self.step)
         self.step_button.grid(row=0, column=0, padx=(0, 12))
-        ttk.Label(actions, text="수입 관세율(%):").grid(row=0, column=1)
+        self.tariff_label = ttk.Label(actions, text="수입 관세율(%):")
+        self.tariff_label.grid(row=0, column=1)
         self.tariff_entry = ttk.Entry(actions, textvariable=self.tariff, width=9)
         self.tariff_entry.grid(row=0, column=2, padx=5)
         self.tariff_button = ttk.Button(actions, text="관세 적용 후 하루 진행", command=self.set_tariff)
@@ -127,8 +136,15 @@ class PlayPanel:
         ready = not (self.busy or self.closing or self.disconnected)
         for widget in (self.new_button, self.load_button):
             widget.state(["!disabled"] if ready else ["disabled"])
-        for widget in (self.save_button, self.step_button, self.tariff_button, self.tariff_entry):
+        for widget in (self.save_button, self.step_button):
             widget.state(["!disabled"] if ready and self.current else ["disabled"])
+        factory = self._industry(self.current)
+        for widget in (self.tariff_label, self.tariff_button, self.tariff_entry):
+            widget.state(["!disabled"] if ready and self.current and not factory else ["disabled"])
+            if factory:
+                widget.grid_remove()
+            else:
+                widget.grid()
         self.selector.configure(state="readonly" if ready else "disabled")
 
     def _send(self, command):
@@ -164,7 +180,8 @@ class PlayPanel:
                 try:
                     self._show(reply["status"])
                     if command.startswith(("new ", "load ")):
-                        self.country.set(self.current["country"])
+                        self.country.set(self.FACTORY if self._industry(self.current)
+                                         else self.current["country"])
                     self.notice.set("저장했습니다." if command.startswith("save ") else "준비됐습니다.")
                 except (KeyError, TypeError, ValueError):
                     self.disconnected = True
@@ -179,37 +196,60 @@ class PlayPanel:
         whole, fraction = divmod(ppm, 10_000)
         return f"{whole}.{fraction:04d}".rstrip("0") if fraction else str(whole)
 
+    @staticmethod
+    def _industry(status):
+        return bool(status and status.get("scenario") == "industry-v1")
+
     def _show(self, status):
-        headline = f"국가 {status['country']}  |  {status['date']}  |  진행 기록 {status['commit']}"
+        factory = self._industry(status)
+        perspective = self.FACTORY if factory else f"국가 {status['country']}"
+        headline = f"{perspective}  |  {status['date']}  |  진행 기록 {status['commit']}"
         budget = (f"국고: {status['treasury']}\n"
                   f"누적 수입: {status['revenue']}\n"
                   f"누적 지출: {status['expenditure']}\n"
                   f"부채: {status['debt']}")
-        policy = (f"무역법: {status['law']}\n"
-                  f"수입 관세율: {self._percent(status['tariff_ppm'])}%\n"
-                  f"법정 상한: {self._percent(status['max_tariff_ppm'])}%")
-        market = (f"광석 시세: {status['ore_price']}\n"
-                  f"수입업자 도착 광석: {status['delivered_ore']}\n"
-                  f"운송 중 광석: {status['in_transit_ore']}\n"
-                  f"납부된 광석 관세(수입에 포함): {status['paid_duty']}")
-        diplomacy = "\n".join(f"{war['opponent']}: {war['state']}" for war in status["wars"])
+        if factory:
+            policy = ("광석을 투입해 식량을 생산합니다.\n"
+                      "광석이 부족하면 생산이 멈춥니다.")
+            market = (f"공장 광석 재고: {status['ore_stock']}\n"
+                      f"배치당 필요한 광석: {status['ore_per_batch']}\n"
+                      f"공장 식량 재고: {status['food_stock']}\n"
+                      f"누적 생산 배치: {status['production_batches']}\n"
+                      + ("현재 광석 부족" if status["ore_insufficient"] else "배치에 필요한 광석 있음"))
+            diplomacy = (f"공공사업 지급처 잔액: {status['public_works_cash']}\n"
+                         "실제 국고 지급액을 보여줍니다.\n"
+                         "일정 금액은 국고에 남겨 둡니다.")
+            titles = ("재정", "생산 조건", "공장 재고·생산", "공공사업 지급")
+        else:
+            policy = (f"무역법: {status['law']}\n"
+                      f"수입 관세율: {self._percent(status['tariff_ppm'])}%\n"
+                      f"법정 상한: {self._percent(status['max_tariff_ppm'])}%")
+            market = (f"광석 시세: {status['ore_price']}\n"
+                      f"수입업자 도착 광석: {status['delivered_ore']}\n"
+                      f"운송 중 광석: {status['in_transit_ore']}\n"
+                      f"납부된 광석 관세(수입에 포함): {status['paid_duty']}")
+            diplomacy = "\n".join(f"{war['opponent']}: {war['state']}" for war in status["wars"])
+            titles = ("재정", "법률·관세", "광석 시장", "외교")
+        for card, title in zip(self.cards, titles):
+            card.configure(text=title)
         self.heading.set(headline)
         self.budget.set(budget)
         self.policy.set(policy)
         self.market.set(market)
         self.diplomacy.set(diplomacy or "현재 분쟁 없음.")
-        self.tariff.set(self._percent(status["tariff_ppm"]))
+        if not factory:
+            self.tariff.set(self._percent(status["tariff_ppm"]))
         self.current = status
 
     def new(self):
-        self._send("new " + self.country.get())
+        self._send("new " + self._protocol_tag(self.country.get()))
 
     def step(self):
         if self.current:
             self._send("step 1")
 
     def set_tariff(self):
-        if not self.current:
+        if not self.current or self._industry(self.current):
             return
         value = self.tariff.get().strip()
         if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > 100:
@@ -235,7 +275,7 @@ class PlayPanel:
     def load(self):
         if self.busy or self.closing or self.disconnected:
             return
-        self._file("load " + self.country.get(), filedialog.askopenfilename(
+        self._file("load " + self._protocol_tag(self.country.get()), filedialog.askopenfilename(
             parent=self.root, title="시나리오 불러오기",
         ))
 

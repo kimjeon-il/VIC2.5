@@ -205,6 +205,47 @@ def main():
                 "panel resume differs from uninterrupted native simulation")
         require(panel("new B", "quit")[0]["status"]["max_tariff_ppm"] == 400000,
                 "panel second country does not get its own statute")
+        industry_initial = d / "industry opening.sav"
+        industry_full = d / "industry final.sav"
+        industry_replayed = d / "industry replayed.sav"
+        rows = panel("new TUT", "tariff 10", f"load TUT {panel_save}",
+                     f"load TUT {start}", f"save {industry_initial}", "step 1",
+                     "step 3", "step 1", f"save {industry_full}", "quit")
+        def industry_values(status):
+            require(status["scenario"] == "industry-v1" and status["country"] == "TUT"
+                    and status["ore_per_batch"] == 1, f"wrong industry identity: {status}")
+            return tuple(status[key] for key in (
+                "ore_stock", "food_stock", "production_batches", "treasury",
+                "expenditure", "public_works_cash", "ore_insufficient"))
+        require(rows[0]["ok"], f"industry launch failed: {rows[0]}")
+        initial = rows[0]["status"]
+        require(initial["date"] == "2000-01-01" and industry_values(initial)
+                == (8, 4, 0, 100, 0, 0, False), f"unexpected industry opening: {initial}")
+        require(all(not row["ok"] and row["status"] == initial for row in rows[1:4]),
+                "industry tariff or foreign checkpoint changed the live session")
+        require(rows[4]["ok"] and rows[8]["ok"], "industry save failed")
+        expected = [(6, 8, 2, 98, 2, 2, False), (0, 20, 8, 98, 2, 2, True),
+                    (0, 20, 8, 98, 2, 2, True)]
+        for idx, date, values in zip((5, 6, 7), ("2000-01-02", "2000-01-05", "2000-01-06"), expected):
+            require(rows[idx]["ok"] and rows[idx]["status"]["date"] == date
+                    and industry_values(rows[idx]["status"]) == values,
+                    f"unexpected causal industry trace: {rows[idx]}")
+        replay = panel(f"load TUT {industry_initial}", "step 5",
+                       f"save {industry_replayed}", "quit")
+        require(replay[0]["ok"] and replay[0]["status"] == initial
+                and replay[1]["status"] == rows[7]["status"]
+                and replay[2]["ok"] and industry_full.read_bytes() == industry_replayed.read_bytes(),
+                "industry did not restore native policies and replay exactly")
+        forged_industry = d / "forged industry origin.sav"
+        forged_industry.write_bytes(native_save_with_origin(
+            start.read_bytes(), b"panel:industry-v1:TUT"))
+        forged_reply = panel("new TUT", f"load TUT {forged_industry}", "quit")
+        require(not forged_reply[1]["ok"] and forged_reply[1]["status"] == initial,
+                "industry accepted a forged outer-only scenario ID")
+        cross = panel("new A", f"load A {industry_initial}", "quit")
+        require(not cross[1]["ok"] and cross[1]["status"] == cross[0]["status"],
+                "tariff trial loaded the industry checkpoint")
+        run("", "--tutorial", "market-v1", "--resume", industry_initial, success=False)
     print("Native terminal tutorial: launch, real purchase, rollback and exact replay PASS")
 
 

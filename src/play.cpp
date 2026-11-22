@@ -22,11 +22,17 @@ constexpr auto region="TUTORIAL";
 constexpr auto producer="MILL";
 constexpr auto buyer="PLAYER";
 constexpr auto workers="WORKERS";
+constexpr auto industry_scenario="industry-v1";
+constexpr auto industry_origin="panel:industry-v1:TUT";
+constexpr auto works="PUBLIC-WORKS";
+constexpr auto mill_recipe="TUTORIAL-FOOD";
+constexpr auto mill_site="MILL-SITE";
 
-daily::World tutorial_world() {
+daily::World tutorial_world(bool industry_trial=false) {
+    const auto checkpoint_origin=industry_trial?industry_origin:origin;
     phasegh::World engine{24000};
     auto& geo=engine.seed_geography();
-    geo.set_dataset(origin);
+    geo.set_dataset(checkpoint_origin);
     geo.seed_province(1,region,country);
     geo.seed_unit(1,country,"Tutorial district");
     geo.seed_assignment(1,1);
@@ -36,12 +42,13 @@ daily::World tutorial_world() {
     core.seed_actor(producer,100);
     core.seed_actor(buyer,50);
     core.seed_actor(workers,0);
+    if(industry_trial)core.seed_actor(works,0);
     core.seed_government(country,"HEAD","PM",5,3);
     core.seed_market(region,"ore",1,1,10,0);
     core.seed_market(region,"food",10,1,20,0);
-    core.seed_stock(producer,region,"ore",62);
+    core.seed_stock(producer,region,"ore",industry_trial?8:62);
     core.seed_stock(producer,region,"food",4);
-    core.seed_production_facility("MILL-SITE",producer,region,62);
+    core.seed_production_facility(mill_site,producer,region,62);
     auto& pop=core.seed_population();
     const auto household=pop.household_profile({region,"mixed","shared",4});
     const auto economy=pop.economic_profile(
@@ -52,19 +59,20 @@ daily::World tutorial_world() {
     pop.hire(pop.seed_population(demographic,economy,household,4),
              4,producer,"worker",31,{});
     phased::IndustryRecipe recipe;
-    recipe.id="TUTORIAL-FOOD";recipe.site="MILL-SITE";
+    recipe.id=mill_recipe;recipe.site=mill_site;
     recipe.inputs={{"ore",1}};recipe.outputs={{"food",2}};
     recipe.workers_per_batch=1;recipe.capacity_per_batch=1;
     industry.seed_recipe(recipe);
-    return daily::World::adopt(std::move(engine),2025,origin);
+    return daily::World::adopt(std::move(engine),2025,checkpoint_origin);
 }
 
-p0::Policies tutorial_policies() {
+p0::Policies tutorial_policies(bool industry_trial=false) {
     p0::Policies result;
     // The player is the only household buyer in this exercise.
     result.daily_food_units_per_person=0;
     result.monthly_clothing_units_per_person=0;
-    result.manufacturers.push_back({"TUTORIAL-FOOD",100,workers,country,1});
+    result.manufacturers.push_back({mill_recipe,100,workers,country,1});
+    if(industry_trial)result.public_budget.push_back({country,works,2,98});
     return result;
 }
 
@@ -251,11 +259,31 @@ void set_trial_tariff(p0::DailyGame& game,const std::string& tag,int percent) {
     game.advance_day(order);
 }
 
-daily::World open_trial(const std::string& tag,const std::optional<fs::path>& resume) {
-    if(resume&&(!fs::is_regular_file(*resume)||fs::file_size(*resume)>850'000'000))
+daily::World load_panel_checkpoint(const fs::path& resume) {
+    if(!fs::is_regular_file(resume)||fs::file_size(resume)>850'000'000)
         throw std::invalid_argument("resume must use a regular file within the native save limit");
-    auto world=resume?daily::SnapshotCodec::load(*resume):trial_world(tag);
+    return daily::SnapshotCodec::load(resume);
+}
+
+daily::World open_trial(const std::string& tag,const std::optional<fs::path>& resume) {
+    auto world=resume?load_panel_checkpoint(*resume):trial_world(tag);
     verify_trial(world,tag);
+    return world;
+}
+
+daily::World open_industry(const std::optional<fs::path>& resume) {
+    auto world=resume?load_panel_checkpoint(*resume):tutorial_world(true);
+    const auto& base=world.engine().base();
+    const auto& industry=base.core();
+    const auto& core=industry.core();
+    if(world.migration_origin()!=industry_origin||base.spatial().dataset_hash!=industry_origin||
+       !core.has_country_treasury(country)||!core.has_actor(works)||
+       core.country_treasury(country)==works||
+       !industry.state().recipes.contains(mill_recipe)||
+       industry.state().recipes.at(mill_recipe).site!=mill_site||
+       !core.facilities().contains(mill_site)||core.facility(mill_site).owner!=producer||
+       core.facility(mill_site).region!=region)
+        throw std::invalid_argument("checkpoint does not belong to the industry trial");
     return world;
 }
 
@@ -275,10 +303,37 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
     const auto& world=game.world();
     const auto& engine=world.engine();
     const auto& core=engine.base().core().core();
-    const auto& commerce=engine.commerce();
-    const auto& tariffs=engine.diplomacy().tariffs;
     const auto fiscal=core.country_fiscal(tag);
     const auto date=world.date();
+    std::ostringstream out;
+    out<<"{\"country\":"<<json_string(tag)<<",\"date\":\""
+       <<std::setfill('0')<<std::setw(4)<<date.year<<'-'<<std::setw(2)<<date.month
+       <<'-'<<std::setw(2)<<date.day<<"\""
+       <<",\"commit\":"<<engine.commit_id()
+       <<",\"treasury\":"<<fiscal.cash
+       <<",\"revenue\":"<<fiscal.realized_revenue
+       <<",\"expenditure\":"<<fiscal.realized_expenditure
+       <<",\"debt\":"<<phaseb::add_checked(fiscal.bank_debt,
+            phaseb::add_checked(fiscal.bond_principal,fiscal.unpaid_coupons));
+    if(tag==country) {
+        const auto& industry=engine.base().core().state();
+        Quantity per_batch=0,batches=0;
+        for(const auto& input:industry.recipes.at(mill_recipe).inputs)
+            if(input.good=="ore")per_batch=phaseb::add_checked(per_batch,input.per_unit);
+        for(const auto& run:industry.actual_production_runs)
+            if(run.recipe==mill_recipe)batches=phaseb::add_checked(batches,run.batches);
+        if(per_batch<=0)throw std::invalid_argument("industry trial requires an ore input");
+        const auto ore=core.stock(producer,region,"ore");
+        out<<",\"scenario\":"<<json_string(industry_scenario)
+           <<",\"ore_stock\":"<<ore<<",\"ore_per_batch\":"<<per_batch
+           <<",\"food_stock\":"<<core.stock(producer,region,"food")
+           <<",\"production_batches\":"<<batches
+           <<",\"ore_insufficient\":"<<(ore<per_batch?"true":"false")
+           <<",\"public_works_cash\":"<<core.cash(works)<<'}';
+        return out.str();
+    }
+    const auto& commerce=engine.commerce();
+    const auto& tariffs=engine.diplomacy().tariffs;
     const auto region=trial_region(tag);
     const auto cap=core.p2_rule(tag,tag,
         phasec::P2ClauseKind::maximum_import_tariff_ppm).value_or(1'000'000);
@@ -294,17 +349,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
     for(const auto& [id,cargo]:commerce.daily_shipments)
         if(cargo.buyer==trial_buyer&&cargo.destination==region&&cargo.good==trial_good)
             transit=phaseb::add_checked(transit,cargo.quantity);
-    std::ostringstream out;
-    out<<"{\"country\":"<<json_string(tag)<<",\"date\":\""
-       <<std::setfill('0')<<std::setw(4)<<date.year<<'-'<<std::setw(2)<<date.month
-       <<'-'<<std::setw(2)<<date.day<<"\""
-       <<",\"commit\":"<<engine.commit_id()
-       <<",\"treasury\":"<<fiscal.cash
-       <<",\"revenue\":"<<fiscal.realized_revenue
-       <<",\"expenditure\":"<<fiscal.realized_expenditure
-       <<",\"debt\":"<<phaseb::add_checked(fiscal.bank_debt,
-            phaseb::add_checked(fiscal.bond_principal,fiscal.unpaid_coupons))
-       <<",\"tariff_ppm\":"<<(rate==tariffs.end()?0:rate->second.ppm)
+    out<<",\"tariff_ppm\":"<<(rate==tariffs.end()?0:rate->second.ppm)
        <<",\"max_tariff_ppm\":"<<cap
        <<",\"law\":"<<json_string(law_label)
        <<",\"ore_price\":"<<core.market(region,trial_good).price
@@ -360,12 +405,13 @@ void run_panel() {
             else if(command=="status"&&arg.empty()) {}
             else if(command=="new"||command=="load") {
                 const auto [tag,path]=panel_token(arg);
-                if((tag!="A"&&tag!="B")||(command=="new"&&!path.empty()))
-                    throw std::invalid_argument("select trial country A or B");
+                if((tag!="A"&&tag!="B"&&tag!=country)||(command=="new"&&!path.empty()))
+                    throw std::invalid_argument("select trial country A, B, or TUT");
                 const auto resume=command=="load"?std::optional{panel_path(path)}:std::nullopt;
-                auto next=open_trial(std::string(tag),resume);
+                const bool industry=tag==country;
+                auto next=industry?open_industry(resume):open_trial(std::string(tag),resume);
                 auto replacement=std::make_unique<Session>(Session{std::string(tag),
-                    p0::DailyGame(std::move(next),trial_policies())});
+                    p0::DailyGame(std::move(next),industry?tutorial_policies(true):trial_policies())});
                 last_status=panel_status(replacement->game,replacement->tag);
                 session=std::move(replacement);
             } else if(command=="step"||command=="tariff"||command=="save") {
@@ -380,9 +426,11 @@ void run_panel() {
                         last_status=panel_status(session->game,session->tag);
                         throw;
                     }
-                } else if(command=="tariff")
+                } else if(command=="tariff") {
+                    if(session->tag==country)
+                        throw std::invalid_argument("the industry trial has no tariff order");
                     set_trial_tariff(session->game,session->tag,command_number(arg,0,100));
-                else save_new(session->game.world(),panel_path(arg));
+                } else save_new(session->game.world(),panel_path(arg));
             } else throw std::invalid_argument("unknown or malformed panel command");
             if(session&&(command=="step"||command=="tariff"))
                 last_status=panel_status(session->game,session->tag);
