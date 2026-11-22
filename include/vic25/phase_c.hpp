@@ -1502,6 +1502,11 @@ public:
         f.owner=buyer;
         events_.push_back("bankrupt-real-factory-cash-sale");
     }
+    [[nodiscard]] std::int64_t p2_art_academy_throughput_ppm(
+            const std::string& country)const {
+        return p2_active_national_enactment_points(country,
+            "amendment_degenerate_art","building_art_academy_throughput_add");
+    }
     // Only directly authored national effects used by the commissioned
     // compensation / acquisition grievance path. Unrelated custom legal
     // slots cannot impersonate an economic-system or a compatible parent.

@@ -421,8 +421,21 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
               "manufacturing expansion evidence is not the exact national law");
         ++monopoly;
     }
-    check(monopoly==1&&canonical_law_row_evidence().size()==446,
-          "expected one new exact manufacturing expansion law source");
+    check(monopoly==1,"expected one exact manufacturing expansion law source");
+    std::size_t arts=0;
+    for(const auto& row:audit) {
+        if(row.source.key!="building_art_academy_throughput_add")continue;
+        check(row.source.source_id=="amendment_degenerate_art"&&
+              row.normalized_value==-100'000&&
+              row.status==CanonicalLawRowStatus::verified_row&&
+              row.executor=="phased::Stage::manufacture (registered Arts Academy)"&&
+              row.behavior_test=="test_phase_d_buildings::national_art_amendment_changes_actual_academy_output"&&
+              !row.source.boolean&&!row.source.institution&&!row.source.sponsor,
+              "academy throughput proof is not the exact national amendment");
+        ++arts;
+    }
+    check(arts==1&&canonical_law_row_evidence().size()==447,
+          "expected one new exact arts academy amendment source");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
         "state_shopkeepers_investment_pool_efficiency_mult",

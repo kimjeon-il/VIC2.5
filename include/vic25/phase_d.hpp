@@ -1105,10 +1105,10 @@ public:
         // the number of completed batches or workers/inputs consumed.
         // Only explicit industry class IDs may opt in: never guess industry
         // from a company name, product label or national culture.
+        const auto binding=d_.site_archetypes.find(r.site);
         const auto production_group=[&]() -> std::string {
-            if(const auto bound=d_.site_archetypes.find(r.site);
-               bound!=d_.site_archetypes.end()) {
-                const auto* archetype=building::find(bound->second);
+            if(binding!=d_.site_archetypes.end()) {
+                const auto* archetype=building::find(binding->second);
                 if(archetype && archetype->industry==r.industry_class &&
                    !archetype->throughput_modifier.empty())
                     return std::string(archetype->throughput_modifier);
@@ -1127,7 +1127,10 @@ public:
             return "";
         }();
         const auto colonial=law_unincorporated_recipe_throughput_ppm(d_,c_,r);
-        auto bonus=colonial;
+        const auto arts=binding!=d_.site_archetypes.end()&&
+            binding->second=="vic3_115.urban.arts_academy"?
+            c_.p2_art_academy_throughput_ppm(c_.sovereignty(f.region)):0;
+        auto bonus=phaseb::add_checked(colonial,arts);
         if(!production_group.empty()) {
             const auto country=c_.sovereignty(f.region);
             if(c_.has_government(country)) {
@@ -1151,7 +1154,7 @@ public:
                 phaseb::mul_checked(normal%1'000'000,multiplier)/1'000'000);
             // Whole-unit granularity: a debuff may not invalidate a real
             // one-unit process the existing transform requires to be positive.
-            return colonial<0&&multiplier>0&&normal>0?
+            return (colonial<0||arts<0)&&multiplier>0&&normal>0?
                 std::max<Quantity>(1,rounded):rounded;
         };
         for(const auto& x:r.outputs)outputs.emplace_back(x.good,adjusted(x.per_unit));

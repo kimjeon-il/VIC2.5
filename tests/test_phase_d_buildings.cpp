@@ -234,9 +234,89 @@ static void test_actual_geographic_site_conditions() {
           map.core().site_archetype("MINE")->industry=="EXTR",
           "siting eligibility did not create validated physical buildings");
 }
+static void national_art_amendment_changes_actual_academy_output() {
+    using namespace vic25::phasec;
+    enum class Rule { none,ethnostate,supremacy,nominal_parent,foreign,local,custom,wrong_parent };
+    const auto run=[](Rule rule,Quantity normal,bool bound=true) {
+        World w{24000};
+        auto& c=w.seed_core();
+        c.seed_region("R","STATE");c.seed_actor("STATE",0);
+        c.seed_actor("ACADEMY",50);
+        c.seed_government("STATE","HEAD","PM",5,3);
+        c.seed_p1_constitution("STATE",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+        const std::string authority=rule==Rule::foreign?"FOREIGN":"STATE";
+        if(rule==Rule::foreign) {
+            c.seed_region("OTHER","FOREIGN");c.seed_actor("FOREIGN",0);
+            c.seed_government("FOREIGN","FH","FP",5,3);
+            c.seed_p1_constitution("FOREIGN",{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:foreign"});
+        }
+        if(rule!=Rule::none) {
+            P2BaseLaw policy;
+            policy.id="SPEECH";policy.country=authority;
+            policy.domain=rule==Rule::nominal_parent||rule==Rule::wrong_parent?
+                "free_speech":"citizenship";
+            policy.base_choice=rule==Rule::nominal_parent?"law_censorship":
+                rule==Rule::supremacy?"law_national_supremacy":"law_ethnostate";
+            policy.scope="national";policy.legal_basis="fixture:recognized-parent";
+            if(rule==Rule::wrong_parent)policy.base_choice="law_protected_speech";
+            if(rule==Rule::local||rule==Rule::custom)policy.domain="custom_speech";
+            if(rule==Rule::local) {
+                policy.tier=P2NormTier::local_ordinance;
+                policy.scope="R";
+            }
+            c.p2_seed_base(policy);
+            c.p2_seed_amendment({"amendment_degenerate_art",policy.id,"fixture:art","",
+                {{"art-clause",authority,P2ClauseKind::political_association_allowed,1}}});
+        }
+        w.seed_standard_industries();
+        if(bound)w.seed_building_facility("ART","ACADEMY","R",31,
+                                        "vic3_115.urban.arts_academy");
+        else c.seed_production_facility("ART","ACADEMY","R",31);
+        IndustryRecipe recipe;
+        recipe.id="ART";recipe.site="ART";recipe.industry_class="SERV";
+        recipe.inputs={{"fabric",1},{"dye",1}};recipe.outputs={{"fine_art",normal}};
+        recipe.workers_per_batch=1;recipe.nonmarket_waste_per_batch=10;
+        if(bound)w.seed_building_recipe(recipe);else w.seed_recipe(recipe);
+        c.seed_stock("ACADEMY","R","fabric",1);c.seed_stock("ACADEMY","R","dye",1);
+        const auto pop=seed_worker(w,1);
+        auto& people=c.seed_population();
+        const auto wallet="HH:"+std::to_string(people.slice(pop).key.household);
+        c.seed_actor(wallet,0);
+        people.hire(pop,1,"ACADEMY","artist",31,vic25::phaseb::JobRequirements{});
+        World::Plan plan;
+        plan[4].push_back([](Stage& stage){stage.manufacture_daily("ART",1,1,31);});
+        plan[5].push_back([wallet](Stage& stage){
+            stage.phase_c().wages_under_law("ACADEMY",wallet,"STATE",1,"STATE");
+        });
+        w.advance_daily(plan,true,false,1,31);
+        const auto& actual=w.core();
+        check(actual.cash("ACADEMY")==49&&actual.cash(wallet)==1&&
+              actual.stock("ACADEMY","R","fabric")==0&&
+              actual.stock("ACADEMY","R","dye")==0&&
+              w.state().actual_production_runs.back().batches==1&&
+              w.state().cumulative_nonmarket_waste.at("ART")==10,
+              "academy output multiplier changed real inputs, wages, batches or waste");
+        const auto save=vic25::phased::SnapshotCodec::encode(w);
+        check(vic25::phased::SnapshotCodec::encode(vic25::phased::SnapshotCodec::decode(save))==save,
+              "academy production did not preserve snapshot semantics");
+        return actual.stock("ACADEMY","R","fine_art");
+    };
+    check(run(Rule::none,10)==10,"baseline academy lacks actual output");
+    check(run(Rule::ethnostate,10)==9,"national amendment did not reduce academy output by 10%");
+    check(run(Rule::supremacy,10)==9,"authored alternative parent lost academy penalty");
+    check(run(Rule::ethnostate,1)==1,"one-unit output rolled back or removed paid work");
+    for(const auto scope:{Rule::nominal_parent,Rule::foreign,Rule::local,
+                         Rule::custom,Rule::wrong_parent})
+        check(run(scope,10)==10,"invalid amendment provenance affected the academy");
+    check(run(Rule::ethnostate,10,false)==10,"unbound SERV site inherited academy effect");
+}
+
 int main() {
     try {
         test_native_catalog_and_actual_production();
+        national_art_amendment_changes_actual_academy_output();
         test_construction_and_recipe_before_commission();
         test_farm_with_real_material_and_renewable_crop();
         test_actual_geographic_site_conditions();
