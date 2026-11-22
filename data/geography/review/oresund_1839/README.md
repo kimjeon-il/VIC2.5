@@ -69,3 +69,21 @@ with the cut; no gaps, positive-area overlaps, or erroneous land edges
 are expected. The water polygon should contain one hole, and both sides
 of Ven and the narrow strait must remain open. This checks geometry,
 not period navigation.
+
+## Review tile for display tests
+
+`python scripts/build_oresund_review_tile.py --output build/oresund-review.vic25`
+samples the committed shapes at cell centers on one bounded 128 × 128
++Z cube-face window. It preserves the three local land IDs and uses 101
+for review water and 0 for outside the study cut, not for sea. The
+generator keeps the Ven hole and rejects an ambiguous edge, overlapping
+classes, or a gap at any sampled point. It needs only Python's standard
+library; the tile is generated in the build, not shipped as a game asset.
+`python tests/test_oresund_review_tile.py` checks repeatable output and the
+three lands, water on both sides of Ven and in the narrow strait, and the
+outside class.
+
+The separate `vic25_oresund_review_gpu` CTest on Linux uses the existing
+OpenGL 3.3 test harness to draw the geographic patch into a framebuffer and
+check its palette colors with Xvfb/Mesa. This is a display diagnostic, not
+a playable globe or a test of a physical graphics card.

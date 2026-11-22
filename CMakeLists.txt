@@ -194,6 +194,23 @@ if (VIC25_ENABLE_GL)
             find_program(VIC25_XVFB_EXECUTABLE xvfb-run REQUIRED)
             add_test(NAME vic25_phase_e_gpu_tests COMMAND "${VIC25_XVFB_EXECUTABLE}" -a $<TARGET_FILE:vic25_phase_e_gpu_tests>)
             set_tests_properties(vic25_phase_e_gpu_tests PROPERTIES ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
+            find_package(Python3 REQUIRED COMPONENTS Interpreter)
+            set(VIC25_ORESUND_CHART "${CMAKE_CURRENT_SOURCE_DIR}/data/geography/review/oresund_1839")
+            set(VIC25_ORESUND_TILE "${CMAKE_CURRENT_BINARY_DIR}/oresund-review-tile.txt")
+            add_custom_command(OUTPUT "${VIC25_ORESUND_TILE}"
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_oresund_review_tile.py"
+                        --output "${VIC25_ORESUND_TILE}"
+                DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_oresund_review_tile.py"
+                        "${VIC25_ORESUND_CHART}/land.geojson"
+                        "${VIC25_ORESUND_CHART}/water.geojson"
+                        "${VIC25_ORESUND_CHART}/scope.geojson"
+                VERBATIM)
+            add_custom_target(vic25_oresund_review_tile DEPENDS "${VIC25_ORESUND_TILE}")
+            add_dependencies(vic25_phase_e_gpu_tests vic25_oresund_review_tile)
+            add_test(NAME vic25_oresund_review_gpu
+                COMMAND "${VIC25_XVFB_EXECUTABLE}" -a $<TARGET_FILE:vic25_phase_e_gpu_tests>
+                        "${VIC25_ORESUND_TILE}")
+            set_tests_properties(vic25_oresund_review_gpu PROPERTIES ENVIRONMENT "LIBGL_ALWAYS_SOFTWARE=1")
         else()
             add_test(NAME vic25_phase_e_gpu_tests COMMAND vic25_phase_e_gpu_tests)
         endif()

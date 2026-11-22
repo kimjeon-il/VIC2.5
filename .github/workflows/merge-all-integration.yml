@@ -25,6 +25,8 @@ jobs:
         run: python scripts/verify_resource_flow_contract.py
       - name: Verify historical chart review fixture
         run: python tests/test_oresund_review.py
+      - name: Verify historical chart review tile
+        run: python tests/test_oresund_review_tile.py
       - name: Audit G/H 238 IDs and distinction of BLOCKED versus PASS
         run: python scripts/verify_phase_gh_238.py --root . --audit
       - name: Install OpenGL test dependencies (Linux)
@@ -40,6 +42,9 @@ jobs:
         run: cmake --build build --config Release --parallel 2
       - name: Verify actual country panel window
         run: ctest --test-dir build -C Release -R "^vic25_play_panel$" --output-on-failure --no-tests=error
+      - name: Draw archived Oresund tile with OpenGL (Linux)
+        if: runner.os == 'Linux'
+        run: ctest --test-dir build -C Release -V -R "^vic25_oresund_review_gpu$" --no-tests=error
       - name: Full CTest (includes EV-T10 compact 10k to 30k and 238 explicit G/H IDs)
         run: ctest --test-dir build -C Release --parallel 2 --output-on-failure
       - name: G/H 238 status report (Linux)
