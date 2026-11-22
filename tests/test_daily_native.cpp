@@ -709,8 +709,125 @@ static void real_freight_insurance_and_dated_delivery() {
     (void)original;
 }
 
+static void quiet_days_deliver_real_renewable_growth_before_harvest() {
+    auto seed=[] {
+        vic25::phasegh::World gh(24000);
+        auto& map=gh.seed_geography();
+        map.seed_province(1,"FOREST-REGION","A");
+        map.seed_unit(101,"A","Registered Administration");
+        map.seed_assignment(1,101);
+        auto& d=map.seed_core();
+        auto& c=d.seed_core();
+        c.seed_actor("A",100);
+        c.seed_actor("OPERATOR",100);
+        c.seed_government("A","HEAD","PRIME",5,3);
+        for(const char* id:{"FOREST","FULL"}) {
+            const auto title=std::string("land:FOREST-REGION:")+id;
+            c.seed_shares(title,"OPERATOR",1);
+            map.seed_building_in_province(id,"OPERATOR",1,31,
+                                         "vic3_115.rural.logging_camps",title);
+        }
+        const auto ore_title="mining_right:FOREST-REGION:MINE";
+        c.seed_shares(ore_title,"OPERATOR",1);
+        map.seed_building_in_province("MINE","OPERATOR",1,31,
+                                     "vic3_115.rural.iron_mines",ore_title);
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"FOREST-REGION","shared","shared",2});
+        const auto e=pop.economic_profile({"FOREST-REGION","worker","wage","employee",
+                                          pop.default_education()});
+        const auto profile=pop.demographic_profile({"FOREST-REGION",23640,Sex::female,
+            "culture","faith","citizen","free",pop.default_health(),Service::civilian});
+        const auto slice=pop.seed_population(profile,e,h,2);
+        pop.hire(slice,2,"OPERATOR","worker",1,{});
+        vic25::phased::ResourceSite forest;
+        forest.id="FOREST";forest.site="FOREST";forest.owner="OPERATOR";
+        forest.region="FOREST-REGION";forest.good="wood";
+        forest.monthly_capacity=31;forest.renewable=true;
+        forest.carrying_capacity=2;forest.renewal_per_month=3;
+        d.seed_building_resource_site(forest);
+        forest.id="FULL";forest.site="FULL";forest.standing_biomass=2;
+        forest.renewal_per_month=31;
+        d.seed_building_resource_site(forest);
+        vic25::phased::ResourceSite mine;
+        mine.id="MINE";mine.site="MINE";mine.owner="OPERATOR";
+        mine.region="FOREST-REGION";mine.good="iron";mine.monthly_capacity=31;
+        d.seed_building_resource_site(mine);
+        return World::adopt(std::move(gh),73);
+    };
+    auto w=seed();
+    auto observed=seed();
+    vic25::phasegh::World::Plan observe;
+    observe[11].push_back([](vic25::phasegh::Stage& stage) {
+        need(stage.phase_d().state().resource_sites.contains("FOREST"),
+             "observation requires an actual registered biological pool");
+    });
+    const auto paired=[&] {
+        w.advance_day();observed.advance_day(observe);
+        need(industrial(w).resource_site("FOREST").standing_biomass==
+             industrial(observed).resource_site("FOREST").standing_biomass,
+             "quiet schedule lost an actual daily renewable growth quota");
+    };
+    paired(); // Jan 1 monthly opening
+    const auto opening=w.engine().commit_id();
+    while(w.date()<Date{2000,1,11})paired();
+    need(w.engine().commit_id()==opening&&
+         industrial(w).resource_site("FOREST").standing_biomass==0,
+         "full renewable or nonrenewable source forced ordinary idle commits");
+    auto replay=SnapshotCodec::decode(SnapshotCodec::encode(w));
+    paired();replay.advance_day();
+    need(w.engine().commit_id()==opening+1&&
+         industrial(w).resource_site("FOREST").standing_biomass==1&&
+         SnapshotCodec::encode(w)==SnapshotCodec::encode(replay),
+         "January 11 due regeneration did not run before the next snapshot");
+    while(w.date()<Date{2000,1,21})paired();
+    paired();
+    need(industrial(w).resource_site("FOREST").standing_biomass==2,
+         "second physical increment did not fill the carrying limit");
+    // Feb 1 opening must not grow an already full pool; then even a scheduled
+    // growth day remains cheap until real harvest opens room.
+    while(w.date()<Date{2000,2,10})paired();
+    const auto full=w.engine().commit_id();
+    paired();
+    need(w.engine().commit_id()==full&&
+         industrial(w).resource_site("FULL").standing_biomass==2&&
+         industrial(w).resource_site("MINE").standing_biomass==0,
+         "full or mineral pools should not request an extra regeneration transaction");
+    vic25::phasegh::World::Plan harvest;
+    harvest[4].push_back([](vic25::phasegh::Stage& stage) {
+        stage.phase_d().extract_resource_daily("FOREST",1,11,29);
+    });
+    w.advance_day(harvest);observed.advance_day(harvest);
+    need(ledger(w).stock("OPERATOR","FOREST-REGION","wood")==1&&
+         industrial(w).resource_site("FOREST").standing_biomass==1,
+         "actual legal extraction must consume standing biomass and record goods only once");
+    while(w.date()<Date{2000,2,19})paired();
+    vic25::phasegh::World::Plan too_early;
+    too_early[4].push_back([](vic25::phasegh::Stage& stage) {
+        stage.phase_d().extract_resource_daily("FOREST",2,19,29);
+    });
+    const auto before=SnapshotCodec::encode(w);
+    need(reject([&]{w.advance_day(too_early);})&&SnapshotCodec::encode(w)==before,
+         "future growth was usable before its real date or left ledger changes");
+    paired();
+    // February 20 is the next leap-year increment. Two harvested units
+    // require both the existing one and the real stage-0 addition.
+    vic25::phasegh::World::Plan harvest_due;
+    harvest_due[4].push_back([](vic25::phasegh::Stage& stage) {
+        stage.phase_d().extract_resource_daily("FOREST",2,20,29);
+    });
+    auto same=SnapshotCodec::decode(SnapshotCodec::encode(w));
+    w.advance_day(harvest_due);same.advance_day(harvest_due);observed.advance_day(harvest_due);
+    need(ledger(w).stock("OPERATOR","FOREST-REGION","wood")==3&&
+         industrial(w).resource_site("FOREST").standing_biomass==0&&
+         industrial(w).resource_site("FOREST").cumulative_output==3&&
+         industrial(observed).resource_site("FOREST").cumulative_output==3&&
+         SnapshotCodec::encode(w)==SnapshotCodec::encode(same),
+         "due growth did not feed real extraction with exact stock and replay");
+}
+
 int main(){
     try{
+        quiet_days_deliver_real_renewable_growth_before_harvest();
         cross_domain_daily_events_and_replay();
         daily_rollback_due_to_resource_constraints();
         migrates_old_daily_v1_without_inventing_actions();

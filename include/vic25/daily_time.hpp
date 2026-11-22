@@ -352,6 +352,8 @@ public:
            !engine_.base().core().core().has_active_sovereign_bonds()&&
            !engine_.has_autonomous_daily_trade()&&
            !engine_.has_daily_infamy_decay_work()&&
+           !engine_.base().core().has_due_renewable_growth(
+               current.day,days_in_month(current.year,current.month))&&
            !engine_.base().core().core().has_due_p1_government(day_)&&
            !engine_.base().core().core().has_due_p1_mandates(day_)&&
            !engine_.base().core().core().p4_has_due_amendment(day_)&&

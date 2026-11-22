@@ -269,6 +269,20 @@ struct DomainState {
             append(opening_month,"natural-resource-regeneration",id);
         }
     }
+    static Quantity renewable_growth_due(
+            const ResourceSite& source,int day,int days_in_month) {
+        if(!source.renewable||source.renewal_per_month<=0||
+           source.standing_biomass>=source.carrying_capacity)return 0;
+        return std::min(
+            daily_budget::increment(source.renewal_per_month,day,days_in_month),
+            source.carrying_capacity-source.standing_biomass);
+    }
+    [[nodiscard]] bool has_due_renewable_growth(int day,int days_in_month) const {
+        return std::any_of(resource_sites.begin(),resource_sites.end(),
+            [&](const auto& entry) {
+                return renewable_growth_due(entry.second,day,days_in_month)>0;
+            });
+    }
     // Real renewable inflow becomes available incrementally each day, never
     // as a free whole-month grant at month open. Nonrenewable throughput
     // deterioration remains based on the preceding closed month's activity.
@@ -277,10 +291,7 @@ struct DomainState {
             if(!source.renewable)continue;
             require(source.carrying_capacity>=source.standing_biomass &&
                     source.renewal_per_month>=0,"invalid renewable pool");
-            const auto due=daily_budget::increment(
-                source.renewal_per_month,day,days_in_month);
-            const auto grown=std::min(
-                due,source.carrying_capacity-source.standing_biomass);
+            const auto grown=renewable_growth_due(source,day,days_in_month);
             if(grown<=0)continue;
             source.standing_biomass=phaseb::add_checked(source.standing_biomass,grown);
             append(opening_month,"daily-resource-regeneration",id);
@@ -1563,6 +1574,9 @@ public:
         const auto report=core_.advance_daily(bridge,final_calendar_day);
         domain_=std::move(next);
         return report;
+    }
+    [[nodiscard]] bool has_due_renewable_growth(int day,int days_in_month) const {
+        return domain_.has_due_renewable_growth(day,days_in_month);
     }
     [[nodiscard]] bool has_ready_daily_commission()const {
         for(const auto& [id,project]:domain_.constructions) {
