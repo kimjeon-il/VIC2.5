@@ -23,6 +23,8 @@ jobs:
           python-version: '3.12'
       - name: Resource flow contract static audit
         run: python scripts/verify_resource_flow_contract.py
+      - name: Verify historical chart review fixture
+        run: python tests/test_oresund_review.py
       - name: Audit G/H 238 IDs and distinction of BLOCKED versus PASS
         run: python scripts/verify_phase_gh_238.py --root . --audit
       - name: Install OpenGL test dependencies (Linux)
