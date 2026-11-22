@@ -1572,7 +1572,11 @@ public:
                                 majority=party;
                                 seats=n;
                             }
-                        if(majority.empty())continue;
+                        // Historical seats can outlive dissolution or a
+                        // switch to direct executive tax authority. Neither
+                        // authorizes this parliamentary-only AI response.
+                        if(majority.empty()||c.p4_parliament_dissolved(country)||
+                           c.country_tax_uses_direct_executive(country))continue;
                         const auto legal_ceiling=c.p2_rule(
                             country,country,phasec::P2ClauseKind::income_tax_max_ppm)
                             .value_or(1'000'000);

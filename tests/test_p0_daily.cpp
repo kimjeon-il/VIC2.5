@@ -1850,6 +1850,117 @@ static void p1_parliamentary_cabinet_next_day_and_save() {
                  "P1 next-day office change did not replay atomically");
 }
 
+static void autonomous_tax_requires_current_parliamentary_authority(bool direct_executive) {
+    using namespace phasec;
+    phasegh::World gh{24000};
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"RA","A");geo.seed_province(2,"RB","B");
+    geo.seed_unit(11,"A","A-ROOT");geo.seed_unit(22,"B","B-ROOT");
+    geo.seed_assignment(1,11);geo.seed_assignment(2,22);
+    auto& core=geo.seed_core().seed_core();
+    core.seed_actor("VENDOR",0);
+    const auto election=daily::to_day_index({2000,1,2});
+    const auto fiscal_review=daily::to_day_index({2000,2,1});
+    const auto recast=daily::to_day_index({2000,2,3});
+    for(const std::string country:{"A","B"}) {
+        core.seed_actor(country,0);
+        core.seed_actor(country+"-EMPLOYER",100);
+        core.seed_actor(country+"-WORKER",0);
+        core.seed_government(country,country+"-HEAD",country+"-PM",5,3);
+        core.seed_p1_constitution(country,{P1GovernancePrinciple::presidential_republic,
+            P1PowerDistribution::universal_vote,P1LegislatureKind::unicameral,"test:constitution"});
+        core.p4_register_party({country+"-PARTY",country,country+"-HEAD",100'000,true,true});
+        core.p4_seed_contest({country+"-HOUSE",country,"national","test:house",
+            P4Office::legislature,P4BallotMethod::list_dhondt,P4TermMode::restart_after_poll,
+            48,1'000'000,5,election,election,-1,true,true,false});
+        const auto worker=people(gh,"R"+country,20,"worker");
+        core.seed_population().hire(worker,20,country+"-EMPLOYER","worker",0,{});
+    }
+    p0::Policies policies;
+    policies.autonomous_tax_step_ppm=10'000;
+    policies.autonomous_tax_ceiling_ppm=200'000;
+    policies.daily_food_units_per_person=0;
+    policies.allow_endogenous_debt_repayment=false;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),92),policies);
+    game.advance_day();
+    game.advance_day(); // both actual elections
+    require_test(c(game).country_election("A").seats.at("A-PARTY")==5&&
+                 c(game).country_election("B").seats.at("B-PARTY")==5,
+                 "fixture did not elect independent national assemblies");
+    const auto january_third=game.world().day_index();
+    phasegh::World::Plan grounds;
+    grounds[1].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().borrow_country_budget_from_bank("A",100);
+        stage.phase_c().borrow_country_budget_from_bank("B",100);
+    });
+    grounds[5].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().spend_country_budget("A","VENDOR",100);
+        stage.phase_c().spend_country_budget("B","VENDOR",100);
+    });
+    grounds[9].push_back([=](phasegh::Stage& stage) {
+        auto& auth=stage.phase_c();
+        if(!direct_executive) {
+            auth.p4_dissolve("B-HOUSE","B-HEAD","test:lawful dissolution",january_third,recast);
+            return;
+        }
+        P2Bill bill;
+        bill.id="B-AUTOCRACY-BILL";bill.country="B";bill.proposer="B-PM";
+        bill.legal_basis="test:legislative approval";
+        bill.effective_day=fiscal_review;
+        bill.proposed_base={"B-AUTOCRACY","B","distribution_of_power","national",
+                            "law_autocracy","test:effective constitutional law"};
+        auth.p2_submit_bill(std::move(bill),january_third);
+        auth.p2_approve_bill("B-AUTOCRACY-BILL",{"B-PARTY"});
+        auth.p2_promulgate_bill("B-AUTOCRACY-BILL","B-HEAD",january_third);
+    });
+    game.advance_day(grounds);
+    while(game.world().date()<daily::Date{2000,2,1})game.advance_day();
+    require_test(c(game).p4_parliament_dissolved("B")==!direct_executive&&
+                 !c(game).p4_parliament_dissolved("A")&&!c(game).p1_authority("B").direct_executive&&
+                 c(game).country_election("B").seats.at("B-PARTY")==5&&
+                 c(game).country_fiscal("A").bank_debt==100&&c(game).cash("A")==0&&
+                 c(game).country_fiscal("B").bank_debt==100&&c(game).cash("B")==0&&
+                 c(game).cash("VENDOR")==200,
+                 "fixture must retain historical B seats and settled, separate bank debt");
+    game.advance_day(); // February 1 fiscal AI
+    require_test(game.world().date()==daily::Date{2000,2,2}&&
+                 c(game).has_pending_country_tax("A")&&!c(game).has_pending_country_tax("B")&&
+                 c(game).cash("A")==0&&c(game).cash("B")==0&&
+                 c(game).p1_authority("B").direct_executive==direct_executive&&
+                 c(game).country_election("B").seats.at("B-PARTY")==5,
+                 "B without current parliamentary tax authority blocked A, manufactured revenue or scheduled a tax on old seats");
+    const auto before=daily::SnapshotCodec::encode(game.world());
+    phasegh::World::Plan rejected;
+    rejected[9].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().propose_tax_law("B","B-PM",{"B-PARTY"},110'000);
+    });
+    bool rejected_seats=false;
+    try{game.advance_day(rejected);}
+    catch(const std::exception& e) {
+        rejected_seats=std::string_view(e.what()).find(
+            direct_executive?"P1 direct executive may not invent parliamentary votes":
+                             "P4 dissolved parliament cannot enact a new tax law")!=std::string_view::npos;
+    }
+    require_test(rejected_seats&&daily::SnapshotCodec::encode(game.world())==before,
+                 "manual tax enactment must still reject unusable parliamentary votes atomically");
+    while(game.world().date()<daily::Date{2000,3,1})game.advance_day();
+    if(!direct_executive)require_test(!c(game).p4_parliament_dissolved("B")&&
+                 c(game).p4_contest("B-HOUSE").last_poll_day==recast&&
+                 c(game).country_election("B").seats.at("B-PARTY")==5,
+                 "early election did not restore real B parliamentary authority");
+    phasegh::World::Plan payroll;
+    payroll[5].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().wages_under_law("A-EMPLOYER","A-WORKER","A",100,"A");
+        stage.phase_c().wages_under_law("B-EMPLOYER","B-WORKER","B",100,"B");
+    });
+    game.advance_day(payroll);
+    require_test(c(game).income_tax_ppm("A")==110'000&&c(game).income_tax_ppm("B")==100'000&&
+                 c(game).cash("A")==11&&c(game).cash("A-WORKER")==89&&
+                 c(game).cash("B")==10&&c(game).cash("B-WORKER")==90&&
+                 c(game).has_pending_country_tax("B")==!direct_executive,
+                 "March actual withholding or later elected B policy is wrong");
+}
+
 static void p1_autocracy_uses_real_institution_and_rejects_false_votes() {
     auto opening=fixture();
     auto& c=opening.seed_geography().seed_core().seed_core();
@@ -2244,6 +2355,8 @@ int main(){
         enacted_terakoya_slows_actual_paid_original_research();
         national_elections_are_independent_and_persistent();
         p1_parliamentary_cabinet_next_day_and_save();
+        autonomous_tax_requires_current_parliamentary_authority(false);
+        autonomous_tax_requires_current_parliamentary_authority(true);
         p1_autocracy_uses_real_institution_and_rejects_false_votes();
         native_autonomous_h_crisis_and_organization_funding();
         autonomous_f_two_hop_freight_and_save_replay();

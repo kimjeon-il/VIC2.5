@@ -2983,6 +2983,10 @@ public:
         lend(country_treasury(country),amount);
         events_.push_back("country-bank-credit:"+country);
     }
+    [[nodiscard]] bool country_tax_uses_direct_executive(
+            const std::string& country) const {
+        return p1_constitutions_.contains(country)&&p1_authority(country).direct_executive;
+    }
     void propose_tax_law(const std::string& country, const std::string& proposer,
                          const std::vector<std::string>& supporting_parties, int ppm) {
         require_stage({9});
@@ -2996,8 +3000,7 @@ public:
         const auto& g=governments_.at(country);
         ensure(g.prime_minister==proposer&&!has_pending_country_tax(country),
                "unauthorized or duplicate national income-tax bill");
-        if(p1_constitutions_.contains(country)&&
-           p1_authority(country).direct_executive) {
+        if(country_tax_uses_direct_executive(country)) {
             ensure(supporting_parties.empty(),
                    "P1 direct executive may not invent parliamentary votes");
         } else {
