@@ -404,6 +404,7 @@ static void test_58(){auto a=fixture(),b=fixture();
           "1200 months deterministic");}
 
 
+static void test_periodic_longitude_masks();
 static void test_04(){
     const auto seam=vic25::phasee::raster::direction_to_cube({-1,0,0});
     const auto north=vic25::phasee::raster::direction_to_cube({0,0,1});
@@ -411,6 +412,7 @@ static void test_04(){
     check(seam.face==1&&north.face==4&&south.face==5,"cube faces at seam/poles");
     const auto position=vic25::phasee::raster::address({0,0,1},6);
     check(position.face==4&&position.x<64&&position.y<64,"polar quadtree key");
+    test_periodic_longitude_masks();
 }
 static void test_05(){
     const std::vector<bool> land={true,false,false,false,false,true};
@@ -418,6 +420,60 @@ static void test_05(){
         3,2,land,{{17,{0,5}}});
     check(result.component_count.at(17)==2&&result.base.sample(2,1)==17&&
           result.base.sample(1,0)==0,"multipart Province and NoData");
+}
+static void test_periodic_longitude_masks(){
+    using vic25::phasee::raster::compile_masks;
+    using vic25::phasee::raster::ProvinceMask;
+    using vic25::phasee::raster::LongitudeTopology;
+    const auto periodic=[](auto w,auto h,const auto& land,const auto& masks){
+        return compile_masks(w,h,land,masks,LongitudeTopology::periodic);
+    };
+    // Modern QA only, not campaign geometry: Natural Earth 1:10m land
+    // v5.1.1 (public domain), tree 9380cca83db5f9aef52d5e762765100745f84b27.
+    // Sampled outer three columns at each side of the date line in Chukotka:
+    // lon = -179.875 + .25*x, lat = 67.625 + .25*y. Elsewhere is masked out.
+    constexpr std::uint32_t width=1440,height=8;
+    std::vector<std::uint32_t> observed;
+    for(std::uint32_t y=0;y<6;++y)
+        for(const auto x:{0u,1u,2u,width-3,width-2,width-1})
+            observed.push_back(y*width+x);
+    observed.push_back(6*width+width-3);
+    std::vector<bool> land(width*height);
+    for(const auto cell:observed)land[cell]=true;
+    const std::vector<ProvinceMask> masks{{17,observed}};
+    check(compile_masks(width,height,land,masks).component_count.at(17)==2,
+          "bounded Chukotka reference stays split at the edge");
+    const auto wrapped=periodic(width,height,land,masks);
+    check(wrapped.component_count.at(17)==1&&wrapped.neighbors.empty()&&
+          wrapped.base.sample(0,5)==17&&wrapped.base.sample(width-1,5)==17&&
+          wrapped.base.sample(0,6)==0&&wrapped.base.sample(width-1,6)==0&&
+          wrapped.base.sample(width-3,6)==17&&wrapped.base.sample(width-3,7)==0,
+          "periodic Chukotka joins real land across longitude, without filling water");
+
+    const std::vector<bool> edge_land{true,false,false,true};
+    const std::vector<ProvinceMask> edge_ids{{1,{0}},{2,{3}}};
+    check(compile_masks(4,1,edge_land,edge_ids).neighbors.empty(),
+          "bounded masks do not join distinct edge land");
+    const auto distinct=periodic(4,1,edge_land,edge_ids);
+    check(distinct.neighbors.at(1)==std::set<Id>{2}&&
+          distinct.neighbors.at(2)==std::set<Id>{1},
+          "distinct land IDs across longitude share a symmetric contact");
+    const auto diagonal=periodic(4,2,std::vector<bool>{true,false,false,false,
+                                                       false,false,false,true},
+                                 std::vector<ProvinceMask>{{1,{0}},{2,{7}}});
+    const auto latitude=periodic(4,3,std::vector<bool>{false,true,false,false,
+                                                       false,false,false,false,
+                                                       false,true,false,false},
+                                 std::vector<ProvinceMask>{{1,{1,9}}});
+    check(diagonal.neighbors.empty()&&latitude.neighbors.empty()&&
+          latitude.component_count.at(1)==2,"no diagonal or latitude wrap");
+    const auto one=periodic(1,1,std::vector<bool>{true},std::vector<ProvinceMask>{{1,{0}}});
+    check(one.neighbors.empty()&&one.component_count.at(1)==1,
+          "width one has no horizontal self-contact");
+    const auto narrow=periodic(2,1,std::vector<bool>{true,true},
+                               std::vector<ProvinceMask>{{1,{0}},{2,{1}}});
+    check(narrow.neighbors.at(1)==std::set<Id>{2}&&narrow.neighbors.at(2)==std::set<Id>{1},
+          "width two preserves the ordinary shared contact");
 }
 static void test_06(){
     const std::vector<bool> land={true,true};

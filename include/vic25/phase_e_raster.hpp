@@ -26,9 +26,12 @@ struct CompiledRaster {
     std::map<Id,std::set<Id>> neighbors;
     std::map<Id,std::uint32_t> component_count;
 };
+enum class LongitudeTopology { bounded, periodic };
+
 inline CompiledRaster compile_masks(std::uint32_t width,std::uint32_t height,
                                     const std::vector<bool>& land,
-                                    const std::vector<ProvinceMask>& masks) {
+                                    const std::vector<ProvinceMask>& masks,
+                                    LongitudeTopology longitude=LongitudeTopology::bounded) {
     require(width>0&&height>0&&
             static_cast<std::uint64_t>(width)*height<=std::numeric_limits<std::uint32_t>::max()&&
             land.size()==static_cast<std::size_t>(width)*height,
@@ -45,6 +48,9 @@ inline CompiledRaster compile_masks(std::uint32_t width,std::uint32_t height,
     }
     for(std::size_t i=0;i<land.size();++i)
         require((out.base.ids[i]!=0)==land[i],"ED0_ERR_DATASET_MISMATCH");
+    // Only a global longitude grid has adjacent first/last columns.
+    // One and two columns already have all distinct horizontal neighbors.
+    const bool wrap=longitude==LongitudeTopology::periodic&&width>2;
     auto neighbors_of=[&](std::size_t i) {
         std::array<std::size_t,4> a{std::numeric_limits<std::size_t>::max(),
                                     std::numeric_limits<std::size_t>::max(),
@@ -52,7 +58,9 @@ inline CompiledRaster compile_masks(std::uint32_t width,std::uint32_t height,
                                     std::numeric_limits<std::size_t>::max()};
         const auto x=i%width,y=i/width;
         if(x>0)a[0]=i-1;
+        else if(wrap)a[0]=i+(width-1);
         if(x+1<width)a[1]=i+1;
+        else if(wrap)a[1]=i-(width-1);
         if(y>0)a[2]=i-width;
         if(y+1<height)a[3]=i+width;
         return a;
