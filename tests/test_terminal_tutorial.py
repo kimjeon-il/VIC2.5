@@ -12,7 +12,7 @@ def require(condition, message):
         raise AssertionError(message)
 
 
-def native_save_with_origin(raw, origin):
+def native_save_with_origin(raw, origin, old_origin=b"tutorial:market-v1"):
     # Only the outer Daily World origin metadata is changed. The nested
     # committed C/D/E/G/H snapshot and remaining journal bytes stay exact.
     def field_end(offset):
@@ -22,7 +22,7 @@ def native_save_with_origin(raw, origin):
     for _ in range(5):  # four header strings plus nested native payload
         offset = field_end(offset)
     offset += 24  # day index, commit counter, seed
-    require(raw[offset + 8:field_end(offset)] == b"tutorial:market-v1",
+    require(raw[offset + 8:field_end(offset)] == old_origin,
             "fixture did not locate the expected outer origin")
     payload = (raw[:offset] + struct.pack("<Q", len(origin)) + origin
                + raw[field_end(offset):-8])
@@ -108,6 +108,55 @@ def main():
         damaged = d / "damaged.sav"
         damaged.write_bytes(byte_before[:-1] + bytes([byte_before[-1] ^ 1]))
         run("", "--tutorial", "market-v1", "--resume", damaged, success=False)
+        flags = ("--trial", "tariff-v1", "--country")
+        a_start, a_bad, a_full, a_split, a_resumed = [
+            d / (name + ".sav") for name in
+            ("tariff start","tariff rejected","tariff full","tariff split","tariff resumed")
+        ]
+        a = run(f"status\nsave {a_start}\nquit\n", *flags, "A")
+        def trade_status(out):
+            line = statuses(out)[-1]
+            return dict(kv.split("=", 1) for kv in line.split())
+        opening = trade_status(a)
+        require("synthetic" in a.stdout and opening["country"] == "A"
+                and opening["treasury"] == "100" and opening["max_tariff_ppm"] == "200000"
+                and opening["tariff_ppm"] == "0" and opening["delivered_ore"] == "0",
+                f"unexpected synthetic trial opening: {opening}")
+        require("tariff <percent>" in a.stdout and "--resume" in a.stdout,
+                "commands and explicit resume path must be discoverable from launch")
+        bad = run(f"tariff 21\nsave {a_bad}\nquit\n", *flags, "A", "--resume", a_start)
+        require("forbids excessive import duties" in bad.stderr
+                and a_bad.read_bytes() == a_start.read_bytes(),
+                "over-ceiling tariff did not roll back the whole day")
+        x = run(f"tariff 10\nstep 91\nsave {a_full}\nquit\n", *flags, "A")
+        y = run(f"tariff 10\nstep 30\nsave {a_split}\nquit\n", *flags, "A")
+        z = run(f"step 61\nsave {a_resumed}\nquit\n", *flags, "A", "--resume", a_split)
+        no_duty = trade_status(run("step 92\nquit\n", *flags, "A"))
+        end = trade_status(x)
+        require(end["date"] == "2000-04-02" and end["tariff_ppm"] == "100000"
+                and int(end["delivered_ore"]) > 70 and int(end["paid_duty"]) > 70
+                and int(end["treasury"]) == 100 + int(end["paid_duty"])
+                and no_duty["paid_duty"] == "0" and no_duty["treasury"] == "100"
+                and no_duty["delivered_ore"] == end["delivered_ore"],
+                f"real settled cargo or treasury duty incorrect: {end}; baseline: {no_duty}")
+        require(not x.stderr and not y.stderr and not z.stderr
+                and end == trade_status(z) and a_full.read_bytes() == a_resumed.read_bytes(),
+                "same selected country and fixed policy failed exact snapshot replay")
+        other = run("tariff 10\nstep 2\nquit\n", *flags, "B")
+        b = trade_status(other)
+        require(not other.stderr and b["country"] == "B" and b["max_tariff_ppm"] == "400000"
+                and int(b["treasury"]) > 100 and int(b["delivered_ore"]) > 0,
+                f"second country not independently playable: {b}")
+        wrong = run("", *flags, "B", "--resume", a_split, success=False)
+        require("selected trial country" in wrong.stderr,
+                "trial accepted another country's authentic save")
+        forged = d / "forged-selected-country.sav"
+        forged.write_bytes(native_save_with_origin(
+            a_split.read_bytes(), b"trial:tariff-v1:B", b"trial:tariff-v1:A"))
+        run("", *flags, "B", "--resume", forged, success=False)
+        run("", *flags, "A", "--resume", start, success=False)
+        run("", "--tutorial", "market-v1", "--resume", a_split, success=False)
+        run("", "--trial", "tariff-v1", success=False)
     print("Native terminal tutorial: launch, real purchase, rollback and exact replay PASS")
 
 
