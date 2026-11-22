@@ -1328,6 +1328,78 @@ static void native_autonomous_h_crisis_and_organization_funding() {
 }
 
 
+static void explicit_and_automatic_dues_keep_live_payment_priority() {
+    for(const phasec::Money opening:{16,6}) {
+        phasegh::World gh(23999);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"RA","A");geo.seed_unit(1,"A","DISTRICT_A");
+        geo.seed_province(2,"RB","B");geo.seed_unit(2,"B","DISTRICT_B");
+        geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+        auto& core=geo.seed_core().seed_core();
+        core.seed_actor("A",opening);
+        if(opening==16)core.seed_actor("B",0);
+        core.seed_actor("ORG:Z",0);core.seed_actor("ORG:A",0);core.seed_actor("RESERVE",20);
+        core.seed_government("A","HEAD_A","PM_A",5,3);
+        core.seed_government("B","HEAD_B","PM_B",5,3);
+        phasegh::World::Plan charters;
+        charters[9].push_back([](phasegh::Stage& stage) {
+            stage.create_organization("Z",{"A","B"},10,{{"A","PM_A"},{"B","PM_B"}});
+            stage.create_organization("A",{"A","B"},10,{{"A","PM_A"},{"B","PM_B"}});
+        });
+        gh.advance(charters);
+        p0::Policies policy;
+        policy.auto_national_budgets_from_actual_services=false;
+        policy.organization_dues.push_back({"A","PM_A","Z"});
+        p0::DailyGame game(daily::World::adopt(std::move(gh),37),policy);
+        const auto observe=[](const p0::DailyGame& live,const char* id) {
+            const auto& org=live.world().engine().diplomacy().organizations.at(id);
+            const auto it=org.paid.find({24000,"A"});
+            return it==org.paid.end()?0:it->second;
+        };
+        game.advance_day();
+        const phasec::Money paid_z=opening==16?10:0;
+        require_test(observe(game,"A")==6&&observe(game,"Z")==paid_z&&
+                     c(game).cash("ORG:A")==6&&c(game).cash("ORG:Z")==paid_z&&
+                     c(game).cash("A")==0,
+                     "manual full/skipped dues priority or sorted automatic partial payments changed");
+        const auto snapshot=daily::SnapshotCodec::encode(game.world());
+        p0::DailyGame replay(daily::SnapshotCodec::decode(snapshot),policy);
+        phasegh::World::Plan top_up;
+        top_up[3].push_back([opening](phasegh::Stage& stage) {
+            stage.phase_c().pay("RESERVE","A",20-opening);
+        });
+        game.advance_day(top_up);replay.advance_day(top_up);
+        const auto fully_paid=daily::SnapshotCodec::encode(game.world());
+        require_test(fully_paid==daily::SnapshotCodec::encode(replay.world())&&
+                     observe(game,"Z")==10&&observe(game,"A")==10&&
+                     c(game).cash("ORG:A")==10&&c(game).cash("ORG:Z")==10&&c(game).cash("A")==0,
+                     "top-up failed to settle only the actual remainder or broke snapshot replay");
+        game.advance_day();
+        require_test(observe(game,"Z")==10&&observe(game,"A")==10&&
+                     c(game).cash("ORG:A")==10&&c(game).cash("ORG:Z")==10,
+                     "fully paid obligations must not charge a live ledger again");
+        policy.organization_dues.front().prime_minister="WRONG";
+        p0::DailyGame invalid(daily::SnapshotCodec::decode(fully_paid),policy);
+        bool rejected=false;
+        try {invalid.advance_day();} catch(const std::invalid_argument& e) {
+            rejected=std::string_view(e.what())=="P0_DUES_UNAUTHORIZED_GOVERNMENT";
+        }
+        require_test(rejected&&daily::SnapshotCodec::encode(invalid.world())==fully_paid,
+                     "already-paid explicit mandate bypassed prime-minister authority or rollback");
+        if(opening==6) {
+            policy.organization_dues={{"B","PM_B","Z"}};
+            p0::DailyGame missing(daily::SnapshotCodec::decode(fully_paid),policy);
+            bool strict=false;
+            try {missing.advance_day();} catch(const std::invalid_argument& e) {
+                strict=std::string_view(e.what())=="country treasury needs explicit binding";
+            }
+            require_test(strict&&daily::SnapshotCodec::encode(missing.world())==fully_paid,
+                         "automatic dues must skip a missing wallet while an explicit mandate fails atomically");
+        }
+    }
+}
+
+
 static void autonomous_f_two_hop_freight_and_save_replay() {
     phasegh::World gh(24000);
     auto& geo=gh.seed_geography();
@@ -2511,6 +2583,7 @@ int main(){
         autonomous_tax_requires_current_parliamentary_authority(true);
         p1_autocracy_uses_real_institution_and_rejects_false_votes();
         native_autonomous_h_crisis_and_organization_funding();
+        explicit_and_automatic_dues_keep_live_payment_priority();
         autonomous_f_two_hop_freight_and_save_replay();
         autonomous_daily_facility_maintenance_with_real_inputs();
         autonomous_h_treaty_risk_and_institutional_vote();

@@ -2558,43 +2558,41 @@ public:
                 }
             });
         }
+        // Both Stage5 routes use the same real monthly remainder and live
+        // cash ceiling. Authority, eligibility and ordering belong to callers.
+        const auto pay_outstanding_dues=[](phasegh::Stage& gh,
+                                          const phasegh::Organization& org,
+                                          const std::string& member,bool allow_partial) {
+            auto& c=gh.phase_c();
+            const auto it=org.paid.find({c.month(),member});
+            const Money paid=it==org.paid.end()?0:it->second;
+            if(paid>=org.dues_per_member)return;
+            const Money due=org.dues_per_member-paid;
+            const Money free=c.phase_d_cash_available(c.country_financial_wallet(member));
+            if(!allow_partial&&free<due)return;
+            const Money amount=std::min(due,free);
+            if(amount>0)gh.pay_dues(org.id,member,amount);
+        };
         for(const auto& dues:decisions.organization_dues)
-            plan[5].push_back([dues](phasegh::Stage& gh) {
+            plan[5].push_back([dues,pay_outstanding_dues](phasegh::Stage& gh) {
                 const auto& org=gh.diplomacy().organizations.at(dues.organization);
                 if(!org.active||!org.members.contains(dues.country)||
                    org.dues_per_member<=0)return;
                 if(gh.phase_c().government(dues.country).prime_minister!=
                    dues.prime_minister)
                     throw std::invalid_argument("P0_DUES_UNAUTHORIZED_GOVERNMENT");
-                const auto key=std::make_pair(gh.phase_c().month(),dues.country);
-                const auto it=org.paid.find(key);
-                const Money already=it==org.paid.end()?0:it->second;
-                if(already>=org.dues_per_member)return;
-                const Money due=org.dues_per_member-already;
-                if(gh.phase_c().phase_d_cash_available(gh.phase_c().country_financial_wallet(dues.country))<due)return;
-                gh.pay_dues(dues.organization,dues.country,due);
+                pay_outstanding_dues(gh,org,dues.country,false);
             });
-        // Ordinary member governments honour an already-active real treaty
-        // obligation when their actual treasury can pay. This does not vote
-        // for new charters, grant memberships or fabricate an organization.
-        plan[5].push_back([](phasegh::Stage& gh) {
+        // The sorted automatic pass follows explicit vector order. Automatic
+        // members can only pay from an existing, funded obligation and wallet.
+        plan[5].push_back([pay_outstanding_dues](phasegh::Stage& gh) {
             auto& c=gh.phase_c();
             for(const auto& [id,org]:gh.diplomacy().organizations) {
                 if(!org.active||org.dues_per_member<=0||
                    !c.has_actor("ORG:"+id))continue;
-                for(const auto& member:org.members) {
-                    if(!c.has_country_treasury(member))continue;
-                    const auto key=std::make_pair(c.month(),member);
-                    const auto it=org.paid.find(key);
-                    const Money prior=it==org.paid.end()?0:it->second;
-                    if(prior>=org.dues_per_member)continue;
-                    const Money free=std::max<Money>(0,
-                        c.phase_d_cash_available(
-                            c.country_financial_wallet(member)));
-                    const Money payable=std::min(
-                        org.dues_per_member-prior,free);
-                    if(payable>0)gh.pay_dues(id,member,payable);
-                }
+                for(const auto& member:org.members)
+                    if(c.has_country_treasury(member))
+                        pay_outstanding_dues(gh,org,member,true);
             }
         });
         for(const auto& ai:decisions.crisis_mandates)
