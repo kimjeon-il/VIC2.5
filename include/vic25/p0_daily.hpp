@@ -1767,6 +1767,11 @@ public:
                 const auto& domain=gh.phase_d().state();
                 const auto& p=domain.constructions.at(investment.construction_project);
                 auto& c=gh.phase_c();
+                // Recheck earned wages before reserving cash or drawing
+                // collateral for a previously generated expansion. Explicit
+                // orders and manually initiated projects retain their path.
+                if(generated&&p.id.starts_with("AUTO:PROJECT:")&&
+                   c.outstanding_worker_wages(p.client)>0)return;
                 if(p.ready||p.commissioned||p.accepted_work>=p.work_required ||
                    c.market(p.region,investment.output_good).price<investment.minimum_output_price)
                     return;
@@ -3470,6 +3475,9 @@ public:
                        !p.commissioned||p.permit_required||p.inspection_required||
                        p.allow_accrued_invoice_commission||
                        c.firm_bankrupt(p.client)||c.firm_bankrupt(p.contractor)||
+                       // Stage7 sales may replenish cash after Stage5 wages.
+                       // Cash still owed to workers is not expansion capital.
+                       c.outstanding_worker_wages(p.client)>0||
                        p.work_required<=0||p.cash_price_per_work<=0||
                        p.workers_per_work<=0||p.material_per_work<=0||
                        c.phase_d_workforce(p.contractor)<p.workers_per_work||
