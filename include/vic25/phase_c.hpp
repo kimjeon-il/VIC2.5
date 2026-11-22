@@ -3706,8 +3706,9 @@ public:
         const auto& dem=people_.demographic(
             people_.slice(slice).key.demographic);
         const auto country=sovereignty_.find(dem.region);
+        Money legal=0;
         if(country!=sovereignty_.end()) {
-            const auto legal=p2_rule(country->second,country->second,
+            legal=p2_rule(country->second,country->second,
                  P2ClauseKind::minimum_monthly_contract_wage).value_or(0);
             ensure(wage>=legal,
                    "P2 minimum wage law forbids underpaid new labor contracts");
@@ -3722,8 +3723,10 @@ public:
                 ensure(accepted->wage_ppm>=0&&
                        accepted->wage_ppm<=1'500'000,
                        "P2 invalid discriminated wage multiplier");
-                contracted=phaseb::mul_checked(
-                    wage,accepted->wage_ppm)/1'000'000;
+                // The acceptance factor can adjust wages but cannot leave
+                // an actual new contract below the effective statutory floor.
+                contracted=std::max(legal,phaseb::mul_checked(
+                    wage,accepted->wage_ppm)/1'000'000);
             }
         }
         people_.hire(slice,count,employer,"worker",contracted,

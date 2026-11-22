@@ -173,6 +173,52 @@ static void acceptance_and_five_tier_rights() {
                 daily::SnapshotCodec::decode(bytes))==bytes,
           "source-qualified cultural identities broke old daily checkpoint");
 }
+static void minimum_wage_protects_accepted_new_contract_and_payroll() {
+    const auto run=[](bool minimum,bool deeply_unaccepted,Money offer,Money expected) {
+        Scenario s;
+        auto& core=s.gh.seed_geography().seed_core().seed_core();
+        if(minimum)
+            core.p2_seed_base({"REAL-WAGE-FLOOR","A","wages_trade","national",
+                "statutory-wage-floor","scenario:absolute-contract-minimum",
+                P2NormTier::statute,
+                {{"contract-minimum","A",P2ClauseKind::minimum_monthly_contract_wage,62}}});
+        const auto worker=deeply_unaccepted?s.foreign:s.primary;
+        const auto factor=core.p2_acceptance_effect("A",worker);
+        check(factor&&factor->wage_ppm==(deeply_unaccepted?500'000:1'250'000),
+              "fixture needs a real acceptance wage modifier");
+        const auto wallet="HH:"+std::to_string(core.people().slice(worker).key.household);
+        auto world=daily::World::adopt(std::move(s.gh),42);
+        phasegh::World::Plan day;
+        day[2].push_back([=](phasegh::Stage& stage){
+            stage.phase_c().hire(worker,2,"EMP",offer);
+        });
+        day[5].push_back([=,today=world.day_index()](phasegh::Stage& stage){
+            auto& live=stage.phase_c();
+            live.phase_time_accrue_live_contract_wage(worker,"EMP","new-wage",1,31,today);
+            live.phase_time_settle_wage_arrears(today);
+        });
+        if(expected<0) {
+            const auto before=daily::SnapshotCodec::encode(world);
+            check(rejects([&]{world.advance_day(day);})&&
+                  daily::SnapshotCodec::encode(world)==before,
+                  "an offered wage below the floor must still reject atomically");
+            return;
+        }
+        world.advance_day(day);
+        const auto& live=view(world);
+        const auto* job=live.people().job(worker);
+        const auto gross=vic25::daily_budget::increment(2*expected,1,31);
+        check(job&&job->wage_per_month==expected&&job->count==2&&
+              live.cash("EMP")==500-gross&&live.cash(wallet)==gross&&
+              live.outstanding_worker_wages("EMP")==0,
+              "actual new contract and paid payroll must respect the legal floor");
+    };
+    run(false,true,62,31);
+    run(true,false,62,77);
+    run(true,true,61,-1);
+    run(true,true,62,62);
+}
+
 static void exact_church_laws_change_real_religious_acceptance() {
     using Scores=std::array<int,5>;
     enum class Scope { national, foreign, custom, local };
@@ -2479,6 +2525,7 @@ int main(){
         no_colonial_affairs_adds_only_verified_homeland_acceptance();
         canonical_named_acceptance_changes_only_verified_pop_and_country();
         acceptance_and_five_tier_rights();
+        minimum_wage_protects_accepted_new_contract_and_payroll();
         canonical_citizenship_traits_change_real_pop_rights();
         canonical_citizenship_homeland_allows_actual_border_movement();
         national_heritage_amendments_change_real_pop_wages();
