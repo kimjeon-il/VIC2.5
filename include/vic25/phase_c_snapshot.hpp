@@ -682,6 +682,10 @@ struct SnapshotCodec {
             ar(w.last_positive_daily_unmet_day_);
             ar(w.previous_daily_unmet_);
         }
+        if(!w.people_.pending_occupational_education_.empty()) {
+            ar(std::string("VIC25_PHASEC_POP_OCCUPATIONAL_EDUCATION_1"));
+            ar(w.people_.pending_occupational_education_);
+        }
         return os.str();
     }
     static IntegratedWorld decode(const std::string& bytes){
@@ -702,7 +706,7 @@ struct SnapshotCodec {
              seen_characters=false,seen_political_dynamics=false,
              seen_political_ai=false,seen_political_policies=false,
              seen_separation=false,seen_confidence=false,
-             seen_peacetime_military=false,seen_daily_unmet=false;
+             seen_peacetime_military=false,seen_daily_unmet=false,seen_occupational_education=false;
         while(is.peek()!=std::char_traits<char>::eof()) {
             std::string extension;
             ar(extension);
@@ -1054,6 +1058,21 @@ struct SnapshotCodec {
                 if(w.previous_daily_unmet_.empty()||
                    w.previous_daily_unmet_.size()>w.markets_.size())
                     throw std::runtime_error("invalid daily market observation extension");
+            } else if(extension=="VIC25_PHASEC_POP_OCCUPATIONAL_EDUCATION_1"&&
+                      !seen_occupational_education) {
+                seen_occupational_education=true;
+                auto& pop=w.people_;
+                ar(pop.pending_occupational_education_);
+                if(pop.pending_occupational_education_.empty()||
+                   pop.pending_occupational_education_.size()>pop.educations_.size())
+                    throw std::runtime_error("invalid POP occupational education extension");
+                for(const auto& [id,pending]:pop.pending_occupational_education_) {
+                    const auto base=pop.educations_.find(id);
+                    if(base==pop.educations_.end()||
+                       !pop.training_education_ids_.emplace(
+                           std::make_pair(base->second,pending),id).second)
+                        throw std::runtime_error("invalid POP occupational profile identity");
+                }
             } else {
                 throw std::runtime_error("unknown or duplicate Phase C extension");
             }

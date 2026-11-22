@@ -285,14 +285,8 @@ public:
                count>0 && count<=people_.slice(source).count &&
                people_.employed(source)==0 && new_skill<=100,
                "training outcome needs real unemployed eligible POP partition");
-        const auto& slice=people_.slice(source);
-        const auto& economy=people_.economic(slice.key.economic);
-        auto education=people_.education(economy.education);
-        ensure(new_skill>education.occupational_skill,
-               "unearned or unchanged occupational qualification");
-        education.occupational_skill=new_skill;
-        const Id target=people_.change_education(source,count,education,
-                                                    phaseb::EventKind::training,0);
+        const Id target=people_.schedule_occupational_education(
+            source,count,new_skill);
         events_.push_back("phase-d-real-POP-occupational-training");
         return target;
     }

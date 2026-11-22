@@ -258,9 +258,32 @@ public:
     Id change_education(Id slice_id, People count, const Education& ed, EventKind kind=EventKind::schooling,
                         std::optional<People> employed_allocation=std::nullopt) {
         const auto old = slice(slice_id); auto key = economic(old.key.economic);
-        key.education = education_profile(ed); const Id e = economic_profile(key);
-        if (e == old.key.economic) return slice_id;
-        return transfer(slice_id, count, old.key.demographic, e, old.key.household, kind, employed_allocation);
+        const auto pending=pending_occupational_education_.find(key.education);
+        if(pending!=pending_occupational_education_.end()&&
+           ed.occupational_skill<pending->second.first)
+            key.education=training_education_profile(ed,pending->second);
+        else
+            key.education=education_profile(ed);
+        const Id e=economic_profile(key);
+        if(e==old.key.economic)return slice_id;
+        return transfer(slice_id,count,old.key.demographic,e,old.key.household,kind,employed_allocation);
+    }
+    Id schedule_occupational_education(Id source,People count,std::uint8_t skill) {
+        const auto old=slice(source);
+        require(count>0&&count<=old.count&&employed(source)==0,
+                "training outcome needs an unemployed participant partition");
+        auto key=economic(old.key.economic);
+        const auto base=education(key.education);
+        const auto prior=pending_occupational_education_.find(key.education);
+        require(skill<=100&&skill>base.occupational_skill&&
+                (prior==pending_occupational_education_.end()||
+                 skill>prior->second.first),
+                "unearned or unchanged occupational qualification");
+        const auto due=add_checked(month_,1);
+        require(due>0,"invalid occupational qualification calendar");
+        key.education=training_education_profile(base,{skill,due});
+        return transfer(source,count,old.key.demographic,economic_profile(key),
+            old.key.household,EventKind::training,0,"paid skill effective next month");
     }
     Id migrate(Id slice_id, People count, const std::string& region, Id destination_household,
                std::optional<People> employed_allocation=std::nullopt) {
@@ -414,12 +437,29 @@ public:
             for(const auto& [id,job]:jobs_) if(!slices_.contains(id)||job.count<=0)return false;
             for(const auto& [id,day]:exact_birth_days_)
                 if(!slices_.contains(id)||day<=0||day>31)return false;
+            if(training_education_ids_.size()!=pending_occupational_education_.size()||
+               education_ids_.size()+pending_occupational_education_.size()!=educations_.size())
+                return false;
+            for(const auto& [id,pending]:pending_occupational_education_) {
+                const auto base=educations_.find(id);
+                if(base==educations_.end()||id>=next_id_||id==default_education_||
+                   pending.first<=base->second.occupational_skill||pending.first>100||
+                   (pending.second<=0||pending.second!=add_checked(month_,1)))return false;
+                const auto entry=training_education_ids_.find({base->second,pending});
+                if(entry==training_education_ids_.end()||entry->second!=id||
+                   (education_ids_.contains(base->second)&&
+                    education_ids_.at(base->second)==id))return false;
+            }
             if(total<0 || next_id_==0)return false;
             return true;
         }catch(const std::exception&){return false;}
     }
     // Called exclusively on the staged world just before a successful month commit.
-    void finish_month() { ++month_;native_age_previous_month_=false; }
+    void finish_month() {
+        month_=add_checked(month_,1);
+        if(!pending_occupational_education_.empty())activate_occupational_education();
+        native_age_previous_month_=false;
+    }
     void finish_native_calendar_month() {
         finish_month();
         native_age_previous_month_=native_day_of_month_>0;
@@ -455,6 +495,9 @@ public:
             add(h.long_term_impairment);add(h.limited_capabilities);add(h.illness_severity);add(h.injury_severity);}
         for(const auto& [id,e]:educations_){add(id);add(static_cast<unsigned>(e.school));
             add(e.literacy);add(e.occupational_skill);}
+        for(const auto& [id,pending]:pending_occupational_education_) {
+            add(id);add(pending.first);add(static_cast<std::uint64_t>(pending.second));
+        }
         for(const auto& [id,d]:demographics_){add(id);str(d.region);add(static_cast<std::uint64_t>(d.birth_month));
             add(static_cast<unsigned>(d.sex));str(d.culture);str(d.religion);str(d.citizenship);
             str(d.legal_status);add(d.health);add(static_cast<unsigned>(d.service));}
@@ -491,6 +534,23 @@ private:
     std::map<Id,Health> health_;
     std::map<Education,Id> education_ids_;
     std::map<Id,Education> educations_;
+    // The special interned profile travels with actual Economic slices.
+    // Its legacy skill remains readable until the authored effective month.
+    using PendingEducation=std::pair<std::uint8_t,std::int64_t>;
+    std::map<Id,PendingEducation> pending_occupational_education_;
+    std::map<std::pair<Education,PendingEducation>,Id> training_education_ids_;
+    Id training_education_profile(const Education& base,PendingEducation pending) {
+        require(base.literacy<=100&&base.occupational_skill<pending.first&&
+                pending.first<=100,"invalid pending occupational education");
+        const auto key=std::make_pair(base,pending);
+        if(const auto it=training_education_ids_.find(key);
+           it!=training_education_ids_.end())return it->second;
+        const Id id=next_id_++;
+        educations_.emplace(id,base);
+        pending_occupational_education_.emplace(id,pending);
+        training_education_ids_.emplace(key,id);
+        return id;
+    }
     std::map<Demographic,Id> demographic_ids_;
     std::map<Id,Demographic> demographics_;
     std::map<Economic,Id> economic_ids_;
@@ -511,22 +571,55 @@ private:
     void log(EventKind kind,Id from,Id to,People count,People employed_affected,std::string provenance){
         events_.push_back(Event{next_id_++,month_,kind,from,to,count,employed_affected,std::move(provenance)});
     }
-    // A whole-cohort working-age change moves nobody between households
-    // or jurisdictions. Keep the actual people/anchors, outstanding claims,
-    // birth day and risk credits attached to this same slice identity.
-    void rekey_birthday_labor(Id id,const Economic& next) {
+    // A whole-cohort rekey moves nobody. Keep people/anchors, jobs,
+    // exact birth day and fractional risk credits on the same Slice ID.
+    void rekey_economic(Id id,const Economic& next,EventKind kind,const char* provenance) {
         auto& row=slices_.at(id);
         auto key=row.key;
         key.economic=economic_profile(next);
         if(key==row.key)return;
         while(slice_ids_.contains(key))key.partition=next_partition_++;
         auto position=slice_ids_.extract(row.key);
-        require(!position.empty()&&position.mapped()==id,"missing birthday labor slice");
+        require(!position.empty()&&position.mapped()==id,"missing economic slice key");
         position.key()=key;
         slice_ids_.insert(std::move(position));
         row.key=key;
         ++row.revision;
-        log(EventKind::occupation,id,id,row.count,0,"economic life-course transition");
+        log(kind,id,id,row.count,0,provenance);
+    }
+    void rekey_birthday_labor(Id id,const Economic& next) {
+        rekey_economic(id,next,EventKind::occupation,"economic life-course transition");
+    }
+    void activate_occupational_education() {
+        // Both pending and economically indistinguishable qualified cohorts
+        // may own references. Reuse canonical profiles, not their Slice IDs.
+        std::map<Id,Id> promoted;
+        for(const auto& [id,pending]:pending_occupational_education_) {
+            require(pending.second==month_,"invalid occupational qualification due month");
+            auto next=education(id);
+            next.occupational_skill=pending.first;
+            promoted.emplace(id,education_profile(next));
+        }
+        for(const auto& [id,row]:slices_) {
+            auto next=economic(row.key.economic);
+            const auto target=promoted.find(next.education);
+            if(target==promoted.end())continue;
+            next.education=target->second;
+            rekey_economic(id,next,EventKind::training,"paid occupational skill effective");
+        }
+        // Remove even obsolete pending Economic profiles left by transfers,
+        // schooling, or deaths; no external state holds these profile IDs.
+        for(auto it=economics_.begin();it!=economics_.end();) {
+            if(!promoted.contains(it->second.education)){++it;continue;}
+            require(economic_ids_.erase(it->second)==1,"missing pending economic profile key");
+            it=economics_.erase(it);
+        }
+        for(const auto& [id,target]:promoted) {
+            (void)target;
+            educations_.erase(id);
+        }
+        training_education_ids_.clear();
+        pending_occupational_education_.clear();
     }
     Id transfer_impl(Id from_id,People count,Id d,Id e,Id h,EventKind reason,
                      std::optional<People> jobs_moving,std::string provenance,Id partition_override=0){

@@ -17,7 +17,51 @@ static DemographyRules no_change(){
  r.adult_literacy_access_ppm=0;r.training_ppm=0;return r;
 }
 
+static void paid_training_reuses_canonical_profiles_across_months() {
+ World w{24000};
+ const auto household=w.household_profile({"R","shared","shared",100});
+ const auto demographic=w.demographic_profile({"R",23640,Sex::male,
+      "culture","religion","citizen","free",w.default_health(),Service::civilian});
+ const auto basic=w.economic_profile({"R","worker","wage","unemployed",w.default_education()});
+ const auto untrained=w.seed_population(demographic,basic,household,100);
+ auto sufficient=w.economic(basic);
+ sufficient.education=w.education_profile({School::none,0,70});
+ const auto ordinary=w.economic_profile(sufficient);
+ const auto existing=w.seed_population(demographic,ordinary,household,1);
+ auto schooled=sufficient;
+ schooled.education=w.education_profile({School::primary,60,70});
+ const auto ordinary_school=w.economic_profile(schooled);
+ JobRequirements high;high.minimum_skill=60;
+ for(int i=0;i<24;++i) {
+   const auto enrolled=w.schedule_occupational_education(untrained,2,70);
+   const auto old_economic=w.slice(enrolled).key.economic;
+   const auto old_education=w.economic(old_economic).education;
+   assert(!w.eligible_for(enrolled,high)&&w.eligible_for(enrolled,{}));
+   assert(fails([&]{w.schedule_occupational_education(enrolled,1,70);}));
+   w.hire(enrolled,1,"F","worker",100,{});
+   const auto extension=w.change_education(enrolled,1,{School::primary,60,0},EventKind::schooling,0);
+   const auto extended_economic=w.slice(extension).key.economic;
+   const auto extended_education=w.economic(extended_economic).education;
+   assert(!w.eligible_for(extension,high)&&w.validate());
+   assert(w.allocate_rate(enrolled,"carry",1,500'000)==0);
+   w.finish_month();
+   assert(w.has_slice(enrolled)&&w.has_slice(extension)&&w.has_slice(existing));
+   assert(w.slice(enrolled).key.economic==ordinary&&
+          w.slice(extension).key.economic==ordinary_school&&
+          w.slice(enrolled).key.partition!=w.slice(existing).key.partition&&
+          w.eligible_for(enrolled,high)&&w.eligible_for(extension,high));
+   assert(w.job(enrolled)&&w.job(enrolled)->employer=="F"&&
+          w.job(enrolled)->wage_per_month==100&&
+          w.allocate_rate(enrolled,"carry",1,500'000)==1);
+   assert(fails([&]{(void)w.education(old_education);})&&
+          fails([&]{(void)w.education(extended_education);})&&
+          fails([&]{(void)w.economic(old_economic);})&&
+          fails([&]{(void)w.economic(extended_economic);}));
+   assert(w.validate()&&w.population()==101);
+ }
+}
 int main(){
+ paid_training_reuses_canonical_profiles_across_months();
  { // POP-D0/D1: same adults can have different job ownership allocation partitions.
   World w{24000};auto h=w.household_profile({"R1","extended","share",3});
   auto ed=w.education_profile({School::secondary,90,40});

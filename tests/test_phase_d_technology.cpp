@@ -1,4 +1,6 @@
 #include "vic25/phase_d_snapshot.hpp"
+#include "vic25/p0_daily.hpp"
+#include "vic25/daily_snapshot.hpp"
 #include <iostream>
 #include <stdexcept>
 using namespace vic25::phased;
@@ -233,10 +235,146 @@ static void enacted_recipient_laws_change_actual_paid_technology_diffusion(){
     run("free_speech","law_protected_speech",100,false,false,false,false,true);
 }
 
+static void test_daily_paid_training_waits_for_next_month() {
+    using namespace vic25;
+    const auto ledger=[](const p0::DailyGame& game)->const phasec::IntegratedWorld& {
+        return game.world().engine().base().core().core();
+    };
+    const auto course=[](const p0::DailyGame& game)->const TrainingProgram& {
+        return game.world().engine().base().core().training("COURSE");
+    };
+    phasegh::World gh{24000};
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");geo.seed_unit(1,"A","ROOT");geo.seed_assignment(1,1);
+    auto& d=geo.seed_core();auto& c=d.seed_core();
+    c.seed_actor("A",0);c.seed_actor("FACTORY",100);
+    c.seed_actor("TRAINER",0);c.seed_actor("SPONSOR",20);
+    geo.seed_province(2,"DEST","A");
+    geo.seed_assignment(2,1);
+    const auto dest_house = c.seed_population().household_profile({"DEST","migration","shared",1});
+    const auto dest_wallet = "HH:"+std::to_string(dest_house);
+    c.seed_actor(dest_wallet,0);
+    auto& pop=c.seed_population();
+    const auto cohort=[&](std::string profession,std::string family,People count=1){
+        const auto h=pop.household_profile({"R",std::move(family),"shared",1});
+        const auto e=pop.economic_profile({"R",profession,"wage","unemployed",pop.default_education()});
+        const auto b=pop.demographic_profile({"R",23640,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+        const auto id=pop.seed_population(b,e,h,count);
+        const auto wallet="HH:"+std::to_string(h);
+        if(profession!="teacher")c.seed_actor(wallet,0);
+        return std::pair{id,wallet};
+    };
+    const auto [teacher,teacher_wallet]=cohort("teacher","educator");
+    const auto [untaught,untaught_wallet]=cohort("machinist","comparison");
+    const auto [trainee,trainee_wallet]=cohort("machinist","training",2);
+    pop.hire(teacher,1,"TRAINER","teacher",310,{});
+    phased::TrainingProgram t;
+    t.id="COURSE";t.trainer="TRAINER";t.sponsor="SPONSOR";
+    t.trainee_slice=trainee;t.trainee_count=1;t.target_occupational_skill=70;
+    t.required_service=2;t.fee_per_service=3;
+    d.seed_training(t);
+    phaseb::DemographyRules r;
+    r.fertility_ppm=r.infant_death_ppm=r.child_death_ppm=r.adult_death_ppm=
+        r.senior_death_ppm=r.very_old_death_ppm=r.illness_incidence_ppm=r.accident_ppm=0;
+    r.primary_access_ppm=r.secondary_access_ppm=r.tertiary_access_ppm=
+        r.adult_literacy_access_ppm=r.training_ppm=0;
+    phaseb::JobRequirements req;req.minimum_skill=60;
+    r.monthly_vacancies.push_back({"FACTORY","machinist",31,310,req});
+    c.enable_demography(r);
+    p0::Policies policy;policy.daily_food_units_per_person=0;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),999),policy);
+    const auto training=[](bool delivered,bool paid,bool certified){
+        phasegh::World::Plan plan;
+        plan[1].push_back([](auto& s){s.phase_d().plan_training("COURSE",1);});
+        if(delivered)plan[4].push_back([](auto& s){s.phase_d().deliver_training("COURSE",1);});
+        if(paid)plan[5].push_back([](auto& s){s.phase_d().pay_training("COURSE",1);});
+        if(certified)plan[10].push_back([](auto& s){s.phase_d().certify_training("COURSE");});
+        return plan;
+    };
+    game.advance_day(training(true,true,false));
+    need(course(game).verified_service==1&&course(game).paid_service==1&&
+          !course(game).certified&&ledger(game).phase_d_workforce("FACTORY")==0&&
+          !ledger(game).people().eligible_for(trainee,req)&&!ledger(game).people().eligible_for(untaught,req)&&
+          ledger(game).cash("SPONSOR")==17&&ledger(game).cash("TRAINER")==3,
+          "partial paid course must not change skill or employment");
+    const auto saved=daily::SnapshotCodec::encode(game.world());
+    for(const bool delivered:{false,true}) {
+        bool blocked=false;
+        try{game.advance_day(training(delivered,false,true));}
+        catch(const std::exception& e){
+            blocked=std::string(e.what()).find("lacks verified training input")!=std::string::npos;
+        }
+        need(blocked&&daily::SnapshotCodec::encode(game.world())==saved,
+              "incomplete delivery/payment must roll certification back without any invented money or people");
+    }
+    game.advance_day(training(true,true,true));
+    const auto trained=course(game).resulting_slice;
+    need(course(game).certified&&trained!=0&&trained!=trainee&&
+         !ledger(game).people().eligible_for(trained,req)&&
+         ledger(game).people().eligible_for(trained,phaseb::JobRequirements{})&&
+         !ledger(game).people().eligible_for(trainee,req)&&
+         !ledger(game).people().eligible_for(untaught,req)&&
+         ledger(game).cash("SPONSOR")==14&&ledger(game).cash("TRAINER")==6&&
+         ledger(game).people().population()==4,
+         "paid Jan2 course must still withhold elevated skill during January");
+    constexpr std::string_view marker="VIC25_PHASEC_POP_OCCUPATIONAL_EDUCATION_1";
+    const auto pending_checkpoint=daily::SnapshotCodec::encode(game.world());
+    need(pending_checkpoint.find(marker)!=std::string::npos,
+         "only unfinished credentials need saved scheduling metadata");
+    auto replay=p0::DailyGame(daily::SnapshotCodec::decode(pending_checkpoint),policy);
+    Id arrived=0;
+    const auto move=[&](Id& result) {
+        phasegh::World::Plan plan;
+        plan[10].push_back([&](auto& stage) {
+            result=stage.phase_c().migrate_with_explicit_property_allocation(
+                trained,1,"DEST",dest_house,trainee_wallet,dest_wallet,0,"",0);
+        });
+        return plan;
+    };
+    game.advance_day(move(arrived));
+    Id replay_arrived=0;
+    replay.advance_day(move(replay_arrived));
+    need(arrived==replay_arrived&&arrived!=trained&&!ledger(game).people().has_slice(trained)&&
+         !ledger(game).people().eligible_for(arrived,req)&&
+         ledger(game).cash(dest_wallet)==0&&ledger(game).cash("FACTORY")==100,
+         "Jan3 real migration must neither shed the pending credential nor start skilled wages");
+    while(game.world().date().month==1) {
+        game.advance_day();
+        replay.advance_day();
+    }
+    need(game.world().date().day==1&&ledger(game).people().eligible_for(arrived,req)&&
+         !ledger(game).people().eligible_for(trainee,req)&&
+         !ledger(game).people().eligible_for(untaught,req)&&
+         ledger(game).cash(dest_wallet)==0&&ledger(game).cash("FACTORY")==100&&
+         !ledger(game).people().job(arrived)&&
+         daily::SnapshotCodec::encode(game.world()).find(marker)==std::string::npos,
+         "only the certified migrant must become eligible at February opening and clear scheduling");
+    phasegh::World::Plan february_open;
+    february_open[2].push_back([&](auto& stage) {
+        need(stage.phase_c().people().eligible_for(arrived,req),
+             "February Stage 2 must already see earned occupation skill");
+    });
+    game.advance_day(february_open);
+    replay.advance_day(february_open);
+    need(ledger(game).phase_d_workforce("FACTORY")==1&&ledger(game).people().job(arrived)&&
+         ledger(game).people().job(arrived)->requirements.minimum_skill==60&&
+         ledger(game).financial().balanced()&&ledger(game).people().population()==4&&
+         daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+         "February typed hiring must use earned skill in current and resumed games");
+    game.advance_day();replay.advance_day();
+    need(ledger(game).cash(dest_wallet)>0&&ledger(game).cash("A")>0&&
+         ledger(game).cash(trainee_wallet)==0&&ledger(game).cash(untaught_wallet)==0&&
+         ledger(game).financial().balanced()&&
+         daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+         "only resulting qualified labor may earn wages, with actual tax and deterministic replay");
+}
+
 int main(){
     try{
         test_paid_contact_and_licensed_nonautomatic_diffusion();
         test_occupational_training_changes_real_pop_next_month();
+        test_daily_paid_training_waits_for_next_month();
         test_commercial_adoption_requires_paid_license();
         enacted_recipient_laws_change_actual_paid_technology_diffusion();
         std::cout<<"Technology transfer, lawful licensing and POP skill tests PASS\n";
