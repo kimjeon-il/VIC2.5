@@ -147,6 +147,128 @@ static void country_tariff_ai_respects_each_sovereigns_current_law() {
     run(true);
 }
 
+static void tariff_ai_skips_stale_or_delegated_authority() {
+    using namespace phasec;
+    enum class Mode { cabinet, delegated_mandate, delegated_food };
+    const auto run=[](Mode mode) {
+        const bool cabinet=mode==Mode::cabinet;
+        const bool food=mode==Mode::delegated_food;
+        auto gh=fixture();
+        auto& geo=gh.seed_geography();
+        geo.seed_province(88,"FOREIGN","B");
+        geo.seed_unit(88,"B","ROOT-B");geo.seed_assignment(88,88);
+        auto& core=geo.seed_core().seed_core();
+        core.seed_actor("B",200);core.seed_actor("B-SELLER",0);
+        core.seed_country_treasury("A","TREASURY");
+        core.seed_government("B","HEAD_B","PM_B",5,3);
+        for(const auto* tag:{"A","B"}) {
+            core.seed_p1_constitution(tag,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,"test:constitution"});
+            core.p2_seed_base({std::string(tag)+"-TRADE",tag,"trade_policy","national",
+                               "law_protectionism","test:enacted trade law"});
+        }
+        core.seed_market("FOREIGN","food",100,1,200,0);
+        core.seed_stock("FIRM","R","food",2);core.seed_stock("FIRM","R","ore",100);
+        core.seed_stock("B-SELLER","FOREIGN","food",2);
+        const auto worker=core.seed_population().slices().begin()->first;
+        core.seed_population().hire(worker,4,"FIRM","worker",10,{});
+        phaseb::Id hungry{};
+        std::string hungry_wallet;
+        if(food) {
+            hungry=people(gh,"FOREIGN",2,"worker");
+            hungry_wallet="HH:"+std::to_string(core.people().slice(hungry).key.household);
+            core.seed_actor(hungry_wallet,0);
+        }
+        p0::Policies policy;policy.daily_food_units_per_person=0;
+        policy.manufacturers.push_back({"FOOD_RECIPE",1000,"WORKERS","TREASURY",1});
+        policy.countries.push_back({"A","PM_A","R","food","FIRM",300,2,100'000});
+        if(!food)policy.countries.push_back({"B","PM_B","FOREIGN","food","B-SELLER",300,2,100'000});
+        p0::DailyGame game(daily::World::adopt(std::move(gh),83),policy);
+        const auto tariff=[](const p0::DailyGame& sim,const char* tag) {
+            return sim.world().engine().diplomacy().tariffs.at({tag,"food"}).ppm;
+        };
+        const auto tomorrow=game.world().day_index()+1;
+        phasegh::World::Plan first;
+        if(food)first[0].push_back([](phasegh::Stage& stage) {
+            stage.adopt_tariff_daily("AUTHORED-B-OPENING","B","food",100'000,"PM_B");
+        });
+        if(cabinet)first[7].push_back([](phasegh::Stage& stage) {
+            stage.phase_c().consume("B-SELLER","FOREIGN","food",2);
+        });
+        first[9].push_back([=](phasegh::Stage& stage) {
+            if(cabinet)stage.phase_c().schedule_p1_cabinet_daily(
+                "B","HEAD_B","PM_NEXT",{},tomorrow,"test:actual cabinet formation");
+            else stage.establish_protectorate("LAWFUL-DELEGATION","A","B","PM_A","PM_B");
+        });
+        game.advance_day(first);
+        require_test(c(game).government("B").prime_minister=="PM_B"&&
+                     tariff(game,"A")==100'000&&tariff(game,"B")==100'000,
+                     "opening authorized tariffs and incumbent must both exist");
+        if(!cabinet) {
+            while(game.world().date()<daily::Date{2000,1,31})game.advance_day();
+            if(food) {
+                // Enable actual household demand after preserving the
+                // incumbent tariff up to the delegation's effective date.
+                policy.buyers.push_back({hungry,hungry_wallet,"B-SELLER","FOREIGN","food",1});
+                game=p0::DailyGame(daily::SnapshotCodec::decode(
+                    daily::SnapshotCodec::encode(game.world())),policy);
+            }
+            phasegh::World::Plan shortage;
+            shortage[7].push_back([](phasegh::Stage& stage) {
+                stage.phase_c().consume("B-SELLER","FOREIGN","food",2);
+            });
+            game.advance_day(shortage);
+            require_test(!game.world().engine().diplomacy().protectorates.at("LAWFUL-DELEGATION").active&&
+                         (!food||c(game).food_grievance("FOREIGN")>0),
+                         "fixture must have an imminent, not already active, delegation and an observed shortage");
+        }
+        const auto pending=daily::SnapshotCodec::encode(game.world());
+        p0::DailyGame replay(daily::SnapshotCodec::decode(pending),policy);
+        const auto ore=c(game).stock("FIRM","R","ore");
+        const auto before_commands=game.world().engine().diplomacy().commands.size();
+        const auto next=daily::following_day(game.world().date());
+        game.advance_day();replay.advance_day();
+        require_test(game.world().date()==next&&c(game).stock("FIRM","R","ore")==ore-2&&
+                     tariff(game,"A")==100'000&&tariff(game,"B")==100'000&&
+                     game.world().engine().diplomacy().commands.size()==before_commands&&
+                     daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+                     "unauthorized automatic tariff cannot abort independent production, change duty, or impersonate");
+        const auto live_prime=cabinet?"PM_NEXT":"PM_B";
+        require_test(c(game).government("B").prime_minister==live_prime&&
+                     (cabinet||game.world().engine().diplomacy().protectorates.at("LAWFUL-DELEGATION").active),
+                     "authorized cabinet or delegated foreign policy did not take effect");
+        const auto before=daily::SnapshotCodec::encode(game.world());
+        phasegh::World::Plan manual;
+        manual[0].push_back([](phasegh::Stage& stage) {
+            stage.adopt_tariff_daily("MANUAL-CHECK","B","food",0,"PM_B");
+        });
+        bool strict=false;
+        try{game.advance_day(manual);}
+        catch(const std::exception& e) {
+            strict=std::string_view(e.what()).find(cabinet?"H_ERR_UNAUTHORIZED_GOVERNMENT":
+                "H_ERR_DELEGATED_FOREIGN_POLICY")!=std::string_view::npos;
+        }
+        require_test(strict&&daily::SnapshotCodec::encode(game.world())==before,
+                     "manual tariff authority must still reject and roll back the entire day");
+        if(cabinet) {
+            policy.countries.back().prime_minister="PM_NEXT";
+            p0::DailyGame renewed(daily::SnapshotCodec::decode(before),policy);
+            renewed.advance_day();
+            require_test(tariff(renewed,"B")==0&&
+                         renewed.world().engine().diplomacy().commands.size()==before_commands+1,
+                         "new prime's separately authored mandate must still update the rate");
+        }
+    };
+    std::string failures;
+    for(const auto mode:{Mode::cabinet,Mode::delegated_mandate,Mode::delegated_food}) {
+        try{run(mode);}
+        catch(const std::exception& e) {
+            failures+=std::to_string(static_cast<int>(mode))+": "+e.what()+"; ";
+        }
+    }
+    if(!failures.empty())throw std::runtime_error("tariff authority blocked daily commit: "+failures);
+}
+
 static void daily_production_trade_ai_investment_replay() {
     auto w=fixture();
     const auto& pop=w.base().core().core().people().slices();
@@ -2096,6 +2218,7 @@ static void automatic_naval_air_and_real_blockade() {
 int main(){
     try{
         country_tariff_ai_respects_each_sovereigns_current_law();
+        tariff_ai_skips_stale_or_delegated_authority();
         daily_production_trade_ai_investment_replay();
         economic_laws_adjust_only_paid_private_order_ceiling();
         household_shareholder_efficiency_changes_paid_daily_construction_orders();

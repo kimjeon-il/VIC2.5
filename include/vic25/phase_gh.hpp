@@ -514,13 +514,16 @@ class Stage {
     void register_arrived_losses();
     void pay_insurance_premiums();
     void settle_insurance_claims();
-    void allow_foreign_policy(const std::string& country) const {
+    [[nodiscard]] bool retains_foreign_policy(const std::string& country) const {
         for (const auto& [id, link] : diplomacy_.protectorates) {
             (void)id;
-            require(!(link.active && link.dependent == country &&
-                      link.exclusive_foreign_policy),
-                    "H_ERR_DELEGATED_FOREIGN_POLICY");
+            if(link.active&&link.dependent==country&&link.exclusive_foreign_policy)
+                return false;
         }
+        return true;
+    }
+    void allow_foreign_policy(const std::string& country) const {
+        require(retains_foreign_policy(country),"H_ERR_DELEGATED_FOREIGN_POLICY");
     }
     [[nodiscard]] bool exempt(const std::string& seller,
                               const std::string& buyer,
@@ -798,6 +801,15 @@ public:
         return c.p2_rule(importer,importer,
             phasec::P2ClauseKind::maximum_import_tariff_ppm)
             .value_or(1'000'000);
+    }
+    // P0 may decline to generate an unauthorized automatic action.
+    // Actual explicit tariff commands retain their strict checks.
+    [[nodiscard]] bool automatic_tariff_authorized(
+            const std::string& importer,const std::string& prime) {
+        const auto& c=phase_c();
+        return !prime.empty()&&c.has_government(importer)&&
+               c.government(importer).prime_minister==prime&&
+               retains_foreign_policy(importer);
     }
     // When an effective P2 statute lowers the legal ceiling, pre-existing
     // tariff commands remain historical but cannot keep applying an unlawful

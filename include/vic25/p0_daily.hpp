@@ -1610,6 +1610,7 @@ public:
                     if(it==gh.diplomacy().tariffs.end()||it->second.ppm==0)
                         continue;
                     const auto& prime=c.government(country).prime_minister;
+                    if(!gh.automatic_tariff_authorized(country,prime))continue;
                     gh.adopt_tariff_daily(
                         "P0:auto-food-import-relief:"+country+":"+
                         std::to_string(date.year)+"-"+std::to_string(date.month)+
@@ -1620,7 +1621,8 @@ public:
         for(const auto& ai:decisions.countries) {
             plan[0].push_back([ai,date](phasegh::Stage& gh) {
                 const auto& c=gh.phase_c();
-                if(c.sovereignty(ai.domestic_region)!=ai.country)return;
+                if(c.sovereignty(ai.domestic_region)!=ai.country||
+                   !gh.automatic_tariff_authorized(ai.country,ai.prime_minister))return;
                 const auto& quote=c.market(ai.domestic_region,ai.good);
                 const auto available=c.stock(ai.domestic_seller,ai.domestic_region,ai.good);
                 const auto desired=(quote.price<ai.protect_below_price &&
