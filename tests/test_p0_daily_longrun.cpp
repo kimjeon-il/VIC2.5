@@ -787,6 +787,137 @@ static void refinance_only_matured_sovereign_principal_with_existing_cash() {
     verify_unpaid(capped);
 }
 
+static void earned_wages_open_only_the_missing_live_household_deposit() {
+    using namespace phasec;
+    phasegh::World opening(24000);
+    auto& geo=opening.seed_geography();
+    geo.seed_province(1,"R","A");geo.seed_unit(1,"A","ROOT");
+    geo.seed_assignment(1,1);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_government("A","HEAD","PM",5,3);
+    c.seed_actor("A",0);c.seed_actor("FUNDED",100);c.seed_actor("POOR",0);
+    auto& pop=c.seed_population();
+    const auto economy=pop.economic_profile({"R","worker","wage","employee",
+                                              pop.default_education()});
+    const auto adult=pop.demographic_profile({"R",23700,phaseb::Sex::female,
+        "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+    const auto household=[&](const char* identity,const char* employer) {
+        const auto h=pop.household_profile({"R",identity,"shared",1});
+        const auto worker=pop.seed_population(adult,economy,h,1);
+        if(*employer)pop.hire(worker,1,employer,"worker",310,{});
+        return "HH:"+std::to_string(h);
+    };
+    const auto paid=household("new-paid","FUNDED");
+    const auto unpaid=household("new-unpaid","POOR");
+    const auto known=household("already-banked","FUNDED");
+    const auto idle=household("not-earning","");
+    c.seed_actor(known,7);
+    const auto edge_h=pop.household_profile({"R","same-slice","shared",2});
+    const auto edge="HH:"+std::to_string(edge_h);
+    const auto edge_worker=pop.seed_population(adult,economy,edge_h,2);
+    pop.hire(edge_worker,1,"FUNDED","worker",20,{});
+    p0::Policies policy;
+    policy.daily_food_units_per_person=0;
+    policy.monthly_clothing_units_per_person=0;
+    p0::DailyGame game(daily::World::adopt(std::move(opening),649),policy);
+    const auto start=daily::SnapshotCodec::encode(game.world());
+    phasegh::World::Plan inspect;
+    inspect[1].push_back([&](phasegh::Stage& stage) {
+        const auto& live=stage.phase_c();
+        check(!live.has_actor(paid)&&!live.has_actor(unpaid)&&!live.has_actor(idle)&&
+               !live.has_actor(edge),
+               "a Stage1 reservation opened an account before actually earned wages");
+        check(live.cash(known)==7&&
+               live.financial().balance("BANK:deposit")==-107&&
+               live.financial().balance("BANK:reserves")==107,
+               "merely opening a wallet changed existing cash or bank balances");
+    });
+    // January day 1 rounds one worker at wage 20 to zero. Extending the
+    // same live contract to two workers creates an actual wage of one.
+    inspect[2].push_back([&](phasegh::Stage& stage) {
+        stage.phase_c().hire(edge_worker,1,"FUNDED",20);
+    });
+    auto abort=inspect;
+    abort[9].push_back([](phasegh::Stage&) {throw std::runtime_error("discard payroll day");});
+    bool rolled_back=false;
+    try {game.advance_day(abort);}
+    catch(const std::runtime_error& e) {
+        rolled_back=std::string_view(e.what())=="discard payroll day";
+        if(!rolled_back)throw;
+    }
+    check(rolled_back&&daily::SnapshotCodec::encode(game.world())==start,
+           "discarded payroll day left a deposit account or payment behind");
+    game.advance_day(inspect);
+    const auto& live=game.world().engine().base().core().core();
+    check(live.cash(paid)==9&&live.cash(known)==16&&live.cash(unpaid)==0&&
+           live.cash(edge)==1&&live.cash("A")==2&&live.cash("FUNDED")==79&&
+           live.outstanding_worker_wages("POOR")==10&&
+           !live.has_actor(idle)&&live.financial().balanced()&&
+           live.financial().balance("BANK:deposit")==-107,
+           "lawful new deposit paid improperly, invented income or lost arrears");
+    p0::DailyGame replay(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(game.world())),policy);
+    game.advance_day();replay.advance_day();
+    check(daily::SnapshotCodec::encode(game.world())==
+           daily::SnapshotCodec::encode(replay.world())&&
+           game.world().engine().base().core().core().cash(paid)==18&&
+           game.world().engine().base().core().core().outstanding_worker_wages("POOR")==20,
+           "new household deposit failed next-day checkpoint replay");
+}
+
+static void wallet_required_staffing_cannot_activate_unbanked_inactive_adults() {
+    using namespace phasec;
+    phasegh::World opening(24000);
+    auto& geo=opening.seed_geography();
+    geo.seed_province(1,"R","A");geo.seed_unit(1,"A","ROOT");
+    geo.seed_assignment(1,1);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_government("A","HEAD","PM",5,3);
+    c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+        P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:politics"});
+    c.seed_actor("A",0);c.seed_actor("FIRM",100);
+    c.seed_interest_group("UNION");
+    c.p3_seed_group({"A","UNION","","custom_fixture","favored",
+        P3GroupType::trade_unions,0,0});
+    c.p2_seed_base({"fixture-law","A","custom_fixture","national","favored","fixture:law"});
+    auto& pop=c.seed_population();
+    const auto idle=pop.economic_profile({"R","adult","inactive","unemployed",
+                                           pop.default_education()});
+    const auto adult=pop.demographic_profile({"R",23700,phaseb::Sex::female,
+        "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+    const auto representative=pop.household_profile({"R","member","shared",1});
+    const auto member=pop.seed_population(adult,idle,representative,1);
+    const auto hh=pop.household_profile({"R","inactive-candidates","shared",20});
+    const auto candidates=pop.seed_population(adult,idle,hh,20);
+    const auto wallet="HH:"+std::to_string(hh);
+    auto world=daily::World::adopt(std::move(opening),650);
+    phasegh::World::Plan join;
+    join[9].push_back([member](phasegh::Stage& stage) {
+        stage.phase_c().join_interest_group(member,"UNION",1);
+    });
+    world.advance_day(join);
+    check(world.engine().base().core().core().p3_trait_modifier_ppm(
+              "A","state_working_adult_ratio_add")==50'000,
+          "fixture did not activate the existing working adult trait");
+    const auto checkpoint=daily::SnapshotCodec::encode(world);
+    for(const auto guarded:{true,false}) {
+        p0::Policies policy;
+        policy.daily_food_units_per_person=0;
+        policy.monthly_clothing_units_per_person=0;
+        policy.staffing.push_back({"FIRM","R",1,310,guarded});
+        p0::DailyGame game(daily::SnapshotCodec::decode(checkpoint),policy);
+        game.advance_day();
+        const auto& live=game.world().engine().base().core().core();
+        check(live.has_actor(wallet)==!guarded&&
+              live.people().slice(candidates).count==(guarded?20:19)&&
+              live.cash("FIRM")== (guarded?100:90),
+              "adult trait bypassed the required-wallet policy or blocked explicit payroll");
+        if(!guarded)
+            check(live.cash(wallet)==9&&live.cash("A")==1,
+                  "authorized explicit hire did not receive its actual first wage");
+    }
+}
+
 static void late_sale_cash_pays_earned_wages_before_bank_service() {
     using namespace phasec;
     phasegh::World gh(24000);
@@ -1364,6 +1495,8 @@ int main(){
         automatic_sovereign_budget_uses_laws_effective_today();
         automatic_budget_retains_real_coupon_only_financing();
         refinance_only_matured_sovereign_principal_with_existing_cash();
+        wallet_required_staffing_cannot_activate_unbanked_inactive_adults();
+        earned_wages_open_only_the_missing_live_household_deposit();
         late_sale_cash_pays_earned_wages_before_bank_service();
         collateral_cannot_be_reused_after_actual_inventory_shrinks();
         caught_bank_rejection_releases_only_its_new_collateral_ticket();

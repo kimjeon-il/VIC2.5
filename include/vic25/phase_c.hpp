@@ -352,16 +352,7 @@ public:
     void seed_actor(const std::string& who, Money amount) {
         ensure(stage_ == -1 && commit_id_ == 0, "actor seed after simulation start");
         ensure(!who.empty() && !actors_.contains(who) && amount >= 0, "invalid actor seed");
-        register_typed(EntityKind::actor,who);
-        actors_.insert(who);
-        for (const auto& [suffix, type] : std::array<std::pair<std::string, AccountType>, 7>{{
-            {"cash", AccountType::asset}, {"capital", AccountType::equity},
-            {"revenue", AccountType::revenue}, {"expense", AccountType::expense},
-            {"debt", AccountType::liability},
-            {"reparations_payable", AccountType::liability},
-            {"reparations_receivable", AccountType::asset}}}) {
-            money_.add_account(account(who, suffix), who, type);
-        }
+        register_financial_actor(who);
         if (amount) {
             money_.post({unique("seed"), "opening cash", {
                 {account(who, "cash"), amount, 0}, {account(who, "capital"), 0, amount}}});
@@ -3494,6 +3485,40 @@ public:
 
     // Accrued salaries are legal employer liabilities and employee receivables,
     // not fabricated cash. The existing C FinanceLedger holds all balances.
+    // A real earned-wage contract can use the existing C deposit ledger
+    // even if its live household did not start with a financial actor.
+    // Register only that household and never seed a balance or bank posting.
+    void phase_time_accrue_live_contract_wage(Id worker,const std::string& employer,
+            const std::string& claim,int day,int days_in_month,std::int64_t today) {
+        require_stage({5});
+        if(!people_.has_slice(worker))return;
+        const auto* job=people_.job(worker);
+        if(!job||job->employer!=employer||job->count<=0||job->wage_per_month<=0||
+           !actors_.contains(job->employer)||firm_bankrupt(job->employer))
+            return;
+        const auto& row=people_.slice(worker);
+        const auto& demo=people_.demographic(row.key.demographic);
+        const auto ruler=sovereignty_.find(demo.region);
+        if(ruler==sovereignty_.end())return;
+        const auto& country=ruler->second;
+        const bool governed=has_government(country);
+        if((governed&&!has_country_treasury(country))||
+           (!governed&&(has_any_government()||!actors_.contains(country))))
+            return;
+        const auto& treasury=governed?country_treasury(country):country;
+        const auto wallet="HH:"+std::to_string(row.key.household);
+        const Money gross=vic25::daily_budget::increment(
+            positive_product(job->count,job->wage_per_month),day,days_in_month);
+        if(gross<=0||wallet==treasury||wallet==employer||treasury==employer)return;
+        ensure(!claim.empty()&&today>=0&&!wage_arrears_.contains(claim),
+               "invalid or duplicate wage debt");
+        if(!actors_.contains(wallet)) {
+            register_financial_actor(wallet);
+            events_.push_back("opened-earned-wage-household-wallet:"+wallet);
+        }
+        phase_time_accrue_contract_wage(claim,employer,wallet,treasury,
+                                       governed?country:"",gross,today);
+    }
     void phase_time_accrue_contract_wage(const std::string& claim_id,
                                           const std::string& employer,
                                           const std::string& worker,
@@ -5895,6 +5920,18 @@ private:
             total=phaseb::add_checked(total,legislature.seats.at(party));
         }
         return total;
+    }
+    void register_financial_actor(const std::string& who) {
+        register_typed(EntityKind::actor,who);
+        actors_.insert(who);
+        for (const auto& [suffix, type] : std::array<std::pair<std::string, AccountType>, 7>{{
+            {"cash", AccountType::asset}, {"capital", AccountType::equity},
+            {"revenue", AccountType::revenue}, {"expense", AccountType::expense},
+            {"debt", AccountType::liability},
+            {"reparations_payable", AccountType::liability},
+            {"reparations_receivable", AccountType::asset}}}) {
+            money_.add_account(account(who, suffix), who, type);
+        }
     }
     TypedEntityId register_typed(EntityKind kind,const std::string& name) {
         ensure(!name.empty()&&!typed_entities_.contains({kind,name}),"duplicate typed entity");

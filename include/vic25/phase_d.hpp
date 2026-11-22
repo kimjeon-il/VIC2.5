@@ -1347,6 +1347,16 @@ public:
                 "D_DAILY_RESEARCH_MONTHLY_LAB_BUDGET");
         perform_research(project,units);
     }
+    void cancel_unperformed_daily_research(const std::string& project,
+                                           Quantity units) {
+        must(5);
+        auto& p=d_.researches.at(project);
+        require(units>0&&p.planned_work>=units&&!p.reviewed,
+                "daily research cancellation must match unperformed work");
+        c_.phase_d_release_cash(p.sponsor,"research:"+project,
+                                product(units,p.cash_cost_per_work));
+        p.planned_work-=units;
+    }
     void pay_research(const std::string& project,Quantity units) {
         must(5);
         auto& p=d_.researches.at(project);

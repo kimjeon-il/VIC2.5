@@ -769,6 +769,8 @@ inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
     for(const auto& [id,row]:c.people().slices()) {
         if(c.people().demographic(row.key.demographic).region!=p.region)
             continue;
+        if(p.require_payroll_wallet &&
+           !c.has_actor("HH:"+std::to_string(row.key.household)))continue;
         if(c.people().economic(row.key.economic).livelihood=="inactive")
             inactive.push_back(id);
     }
@@ -1451,8 +1453,7 @@ public:
             const auto& slice=game_c.people().slice(slice_id);
             const auto& dem=game_c.people().demographic(slice.key.demographic);
             const auto wallet="HH:"+std::to_string(slice.key.household);
-            if(!game_c.has_actor(wallet)||!game_c.has_actor(contract.employer))
-                continue;
+            if(!game_c.has_actor(contract.employer))continue;
             const auto sovereign=game_c.sovereignty(dem.region);
             if(game_c.has_government(sovereign)&&
                !game_c.has_country_treasury(sovereign))
@@ -1486,23 +1487,13 @@ public:
                     *reserved=payable;
                 });
             plan[5].push_back(
-                [slice_id,employer,wallet,treasury,sovereign,purpose,
-                 date,dim,reserved,today=world_.day_index()](phasegh::Stage& gh) {
+                [slice_id,employer,purpose,date,dim,reserved,
+                 today=world_.day_index()](phasegh::Stage& gh) {
                     auto& c=gh.phase_c();
                     if(*reserved>0)
                         c.phase_d_release_cash(employer,purpose,*reserved);
-                    const auto* actual=c.people().job(slice_id);
-                    if(!actual||actual->employer!=employer||
-                       actual->count<=0||actual->wage_per_month<=0||
-                       c.firm_bankrupt(employer))return;
-                    const Money gross=daily_increment(
-                        times(actual->count,actual->wage_per_month),
-                        date.day,dim);
-                    if(gross<=0)return;
-                    c.phase_time_accrue_contract_wage(
-                        purpose,employer,wallet,treasury,
-                        c.has_government(sovereign)?sovereign:"",
-                        gross,today);
+                    c.phase_time_accrue_live_contract_wage(
+                        slice_id,employer,purpose,date.day,dim,today);
                 });
         }
         // Jobs accepted at Stage2 did not exist when the Stage1 wage plan
@@ -1517,29 +1508,10 @@ public:
                    job.count<=0||job.wage_per_month<=0||
                    scenario_payroll.contains(job.employer)||
                    c.firm_bankrupt(job.employer))continue;
-                const auto& row=c.people().slice(slice_id);
-                const auto& demographic=c.people().demographic(
-                    row.key.demographic);
-                const std::string wallet="HH:"+std::to_string(row.key.household);
-                const auto& country=c.sovereignty(demographic.region);
-                if(!c.has_actor(wallet)||!c.has_actor(job.employer)||
-                   !c.has_actor(country)&&!c.has_country_treasury(country))
-                    continue;
-                if(c.has_government(country)&&!c.has_country_treasury(country))
-                    continue;
-                if(!c.has_government(country)&&c.has_any_government())
-                    continue;
-                const auto treasury=c.has_government(country)?
-                     c.country_treasury(country):country;
-                if(treasury==wallet||treasury==job.employer||
-                   wallet==job.employer)continue;
-                const Money gross=daily_increment(
-                    times(job.count,job.wage_per_month),date.day,dim);
-                if(gross<=0)continue;
                 const auto claim="P0:CONTRACT-WAGE:"+
                     std::to_string(today)+":"+std::to_string(slice_id);
-                c.phase_time_accrue_contract_wage(claim,job.employer,wallet,
-                    treasury,c.has_government(country)?country:"",gross,today);
+                c.phase_time_accrue_live_contract_wage(
+                    slice_id,job.employer,claim,date.day,dim,today);
             }
         });
         // Earned wages are accrued by the preceding Stage5 employer
@@ -2052,7 +2024,8 @@ public:
         // stage9 verified result. Every lab shares cumulative DAY capacity
         // with manufacturing and geological extraction.
         for(const auto& research:decisions.researches) {
-            auto work=std::make_shared<Quantity>(0);
+            struct DailyResearchWork { Quantity planned{},actual{}; };
+            auto work=std::make_shared<DailyResearchWork>();
             plan[1].push_back([research,date,dim,work,today=world_.day_index()](phasegh::Stage& gh) {
                 const auto& ds=gh.phase_d().state();
                 const auto& p=ds.researches.at(research.project);
@@ -2133,15 +2106,40 @@ public:
                     static_cast<Quantity>(funds/p.cash_cost_per_work)});
                 if(n<=0)return;
                 gh.phase_d().plan_research(research.project,n);
-                *work=n;
+                work->planned=n;
             });
             plan[4].push_back([research,date,dim,work](phasegh::Stage& gh){
-                if(*work>0)
-                    gh.phase_d().perform_research_daily(research.project,
-                                                   *work,date.day,dim);
+                if(work->planned<=0)return;
+                auto& d=gh.phase_d();
+                auto& c=gh.phase_c();
+                const auto& p=d.state().researches.at(research.project);
+                const auto& lab=c.facility(p.lab_site);
+                const Quantity available_site=std::max<Quantity>(
+                    0,lab.capacity-lab.damaged);
+                const Quantity used_month=used_site_capacity(d.state(),p.lab_site,d.month());
+                const Quantity used_day=c.phase_d_shared_site_used(p.lab_site);
+                const Quantity lab_work=std::max<Quantity>(0,std::min(
+                    proportional(available_site,date.day,dim)-used_month,
+                    available_site-used_day));
+                const People labor=std::max<People>(0,c.phase_d_workforce(p.holder)-
+                                    c.phase_d_shared_labor_used(p.holder));
+                const Quantity material=std::max<Quantity>(0,
+                    c.phase_d_material_available(p.holder,p.region,p.material_good));
+                // Other Stage4 work may have used today's shared workers or
+                // inputs since the cash plan was accepted. Do not duplicate
+                // their use, roll back the day, or pay for unperformed work.
+                work->actual=std::min({work->planned,lab_work,
+                    static_cast<Quantity>(labor/p.workers_per_work),
+                    material/p.material_per_work});
+                if(work->actual>0)
+                    d.perform_research_daily(research.project,work->actual,date.day,dim);
             });
             plan[5].push_back([research,work](phasegh::Stage& gh){
-                if(*work>0)gh.phase_d().pay_research(research.project,*work);
+                auto& d=gh.phase_d();
+                if(work->planned>work->actual)
+                    d.cancel_unperformed_daily_research(research.project,
+                                                       work->planned-work->actual);
+                if(work->actual>0)d.pay_research(research.project,work->actual);
             });
             plan[9].push_back([research](phasegh::Stage& gh){
                 const auto& p=gh.phase_d().state().researches.at(research.project);

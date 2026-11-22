@@ -323,7 +323,8 @@ static void check_paid_investment_order(const char* law,const char* profession,b
                       phaseb::People staff=12,phaseb::People material=20,
                       bool public_funds=false,phasec::Money arrears=0,
                       int false_amendment=0,InvestmentOrderLegalSources sources={},
-                      CeilingLaw law_scope=CeilingLaw::national) {
+                      CeilingLaw law_scope=CeilingLaw::national,
+                      phasec::Money expected_current_wage=0) {
     phasegh::World gh(24000);
     auto& geo=gh.seed_geography();
     geo.seed_province(1,"R",sources.country);geo.seed_unit(11,sources.country,"ROOT");
@@ -414,12 +415,18 @@ static void check_paid_investment_order(const char* law,const char* profession,b
     opts.allow_endogenous_investment_credit=false;
     opts.allow_collateralized_enterprise_credit=false;
     opts.investments.push_back({"SITE","food",10,100,maximum});
+    std::string current_wallet;
     p0::DailyGame game([&] {
         if(arrears>0) {
+            // This posted historical liability survives independently of any
+            // still-current job. Only the paired case adds a new day's salary.
             core.seed_actor("EMPLOYEE",0);
-            const auto employee=people(gh,"R",1,"worker");
-            core.seed_population().hire(employee,1,"FIRM","worker",arrears,
-                                        phaseb::JobRequirements{});
+            if(expected_current_wage>0) {
+                const auto employee=people(gh,"R",1,"worker");
+                current_wallet="HH:"+std::to_string(core.people().slice(employee).key.household);
+                core.seed_population().hire(employee,1,"FIRM","worker",arrears,
+                                            phaseb::JobRequirements{});
+            }
         }
         auto clock=daily::World::adopt(std::move(gh),7);
         if(arrears>0) {
@@ -465,7 +472,11 @@ static void check_paid_investment_order(const char* law,const char* profession,b
                               c(game).cash("EMPLOYEE")+c(game).cash(sources.country)==arrears&&
                               c(game).outstanding_worker_wages("FIRM")==0,
                               "existing earned household wages were not actually settled");
-    require_test(c(game).cash("FIRM")==cash-10*expected-arrears&&
+    if(expected_current_wage>0)
+        require_test(c(game).has_actor(current_wallet)&&
+                     c(game).cash(current_wallet)==expected_current_wage,
+                     "new daily wages did not enter the actual household deposit");
+    require_test(c(game).cash("FIRM")==cash-10*expected-arrears-expected_current_wage&&
                  c(game).cash("BUILDER")==10*expected&&
                  c(game).cash(household)==100&&c(game).cash("CORP")==10&&
                  c(game).shares("company:FIRM",share?household:"CORP")==100&&
@@ -516,6 +527,8 @@ static void household_shareholder_efficiency_changes_paid_daily_construction_ord
     check_paid_investment_order("law_agrarianism","farmer",true,false,true,200,2,4,12,2);
     check_paid_investment_order("law_agrarianism","farmer",true,false,true,200,4,4,12,20,true);
     check_paid_investment_order("law_agrarianism","farmer",true,false,true,120,6,4,12,20,false,60);
+    check_paid_investment_order("law_agrarianism","farmer",true,false,true,122,6,4,12,20,
+                                false,60,0,{},CeilingLaw::national,2);
     check_paid_investment_order("law_traditionalism","farmer",true,false,true,200,1,1);
     check_paid_investment_order("law_agrarianism","farmer",true,false,true,200,3,1);
     check_paid_investment_order("law_agrarianism","farmer",true,false,true,300,11,5,12,20,false,0,1);
@@ -948,6 +961,8 @@ static void paid_laboratory_research_speed(
                            "law_industry_banned","test:industry"});
     const auto scientist=people(gh,"R",40,"scientist");
     core.seed_population().hire(scientist,40,"FIRM","scientist",1,{});
+    const auto scientist_wallet="HH:"+std::to_string(
+        core.people().slice(scientist).key.household);
     core.seed_production_facility("RESEARCH-LAB","FIRM","R",1240);
     phased::TechnologyDefinition tech;tech.id="SOURCED";d.seed_technology(tech);
     phased::ResearchProject p;p.id="RESEARCH";p.holder="FIRM";p.sponsor="A";
@@ -990,6 +1005,8 @@ static void paid_laboratory_research_speed(
                            "A","country_production_tech_research_speed_mult")==100'000,
                          "fixture lacks actual active Industrialist trait");
     p0::Policies policies;
+    // Capture exact lab receipts and lab inputs, not unrelated farm output.
+    policies.manufacturers.push_back({"FOOD_RECIPE",0});
     if(!low_daily_limit)
         policies.researches.push_back({"RESEARCH",explicit_micro_order?1:20,discipline});
     // No policy override in the low case: use P0's own one-unit daily order.
@@ -1012,7 +1029,13 @@ static void paid_laboratory_research_speed(
     }
     const auto cash=c(game).cash("A"),firm=c(game).cash("FIRM"),
         inputs=c(game).stock("FIRM","R",research_material);
+    const auto opening_payroll=c(game).has_actor(scientist_wallet)?
+        c(game).cash(scientist_wallet):Money{0};
+    Money new_payroll=0;
     for(int step=1;step<=days;++step) {
+        const auto date=game.world().date();
+        const auto days_this_month=daily::days_in_month(date.year,date.month);
+        new_payroll+=40*date.day/days_this_month-40*(date.day-1)/days_this_month;
         game.advance_day();
         if(step==1&&!low_daily_limit&&!explicit_micro_order) {
             const std::string why="wrong actual funded research speed (scope "+
@@ -1035,7 +1058,8 @@ static void paid_laboratory_research_speed(
                          progress().verified_work==paid_after_twenty_days,
                          "fractional production research rate stalled or a second penalty accelerated it");
         require_test(c(game).cash("A")==cash-5*progress().paid_work&&
-                     c(game).cash("FIRM")==firm+5*progress().paid_work&&
+                     c(game).cash("FIRM")==firm+5*progress().paid_work-new_payroll&&
+                     c(game).cash(scientist_wallet)==opening_payroll+new_payroll&&
                      c(game).stock("FIRM","R",research_material)==inputs-progress().paid_work,
                      "daily paid evidence did not match actual lab money and material");
         if(!low_daily_limit&&!explicit_micro_order)
@@ -1044,7 +1068,8 @@ static void paid_laboratory_research_speed(
     phaseb::People evidence=0;
     for(const auto& e:game.world().engine().base().core().state().research_evidence)
         if(e.project=="RESEARCH")evidence+=e.units;
-    require_test(c(game).cash("A")==cash-5*required&&c(game).cash("FIRM")==firm+5*required&&
+    require_test(c(game).cash("A")==cash-5*required&&c(game).cash("FIRM")==firm+5*required-new_payroll&&
+                 c(game).cash(scientist_wallet)==opening_payroll+new_payroll&&
                  c(game).stock("FIRM","R",research_material)==inputs-required&&evidence==required&&
                  progress().paid_work==required&&progress().verified_work==required&&
                  progress().required_evidence==required&&progress().reviewed,
@@ -1095,7 +1120,7 @@ static void enacted_terakoya_slows_actual_paid_original_research() {
     run(Scope::dated,"",20,3);
 }
 
-static void native_autonomous_funded_research_and_day_lab_limit() {
+static void native_autonomous_funded_research_and_day_lab_limit(bool competing_factory=false) {
     auto gh=fixture();
     auto& d=gh.seed_geography().seed_core();
     auto& c=d.seed_core();
@@ -1120,6 +1145,7 @@ static void native_autonomous_funded_research_and_day_lab_limit() {
     c.seed_population().hire(worker,4,"FIRM","worker",10,
                              phaseb::JobRequirements{});
     p0::Policies rules;
+    if(!competing_factory)rules.manufacturers.push_back({"FOOD_RECIPE",0});
     rules.researches.push_back({"PROJECT-RESEARCH",1});
     p0::DailyGame game(daily::World::adopt(std::move(gh),23),rules);
     const auto sponsor_cash=::c(game).cash("A");
@@ -1137,6 +1163,15 @@ static void native_autonomous_funded_research_and_day_lab_limit() {
     require_test(daily::SnapshotCodec::encode(game.world())==
                  daily::SnapshotCodec::encode(replay.world()),
                  "research stage replay must be deterministic");
+    if(competing_factory) {
+        const auto& state=game.world().engine().base().core().state();
+        const auto& actual=state.researches.at("PROJECT-RESEARCH");
+        require_test(!actual.reviewed&&actual.verified_work==1&&actual.paid_work==1&&
+                     actual.planned_work==0&&::c(game).cash("A")==sponsor_cash-5&&
+                     ::c(game).stock("FIRM","R","ore")==materials-5,
+                     "competing real output did not use four existing workers or cancel only unused lab funding");
+        return;
+    }
     require_test(game.world().engine().base().core().state().researches.at(
                      "PROJECT-RESEARCH").reviewed &&
                  ::c(game).cash("A")==sponsor_cash-10 &&
@@ -1686,6 +1721,80 @@ static void native_cg_credit_service_keeps_trade_facility_in_sync() {
                  "G/C post-repayment facility and liability must survive checkpoint replay");
 }
 
+
+static void insolvent_bank_keeps_pop_deposits_and_stops_new_investment_credit() {
+    auto gh=fixture();
+    auto& d=gh.seed_geography().seed_core();
+    auto& bank=d.seed_core();
+    bank.seed_annual_bank_interest_ppm(1'000);
+    bank.seed_actor("FAILED",0);
+    bank.seed_actor("CREDIT_PROJECT_FIRM",0);
+    bank.seed_actor("OLD_DEBT",30);
+    bank.seed_stock("CREDIT_PROJECT_FIRM","R","ore",1);
+    bank.seed_stock("FIRM","R","food",20);
+    bank.seed_stock("BUILDER","R","steel",2);
+    auto& pop=bank.seed_population();
+    const auto builder=std::next(pop.slices().begin())->first;
+    const auto household=std::next(pop.slices().begin(),2)->first;
+    pop.hire(builder,2,"BUILDER","worker",10,{});
+    auto project=d.construction("NEW_FARM");
+    project.id="CREDIT_PROJECT";project.client="CREDIT_PROJECT_FIRM";
+    project.target_site="CREDIT_FARM";project.work_required=1;
+    project.cash_price_per_work=120;
+    d.seed_construction(project);
+
+    p0::Policies options;
+    options.daily_food_units_per_person=0;
+    options.monthly_clothing_units_per_person=0;
+    p0::DailyGame opening(daily::World::adopt(std::move(gh),7),options);
+    phasegh::World::Plan start;
+    start[1].push_back([](phasegh::Stage& h) {
+        h.phase_c().lend("FAILED",200);
+        h.phase_c().lend("OLD_DEBT",20);
+    });
+    start[7].push_back([](phasegh::Stage& h) {
+        auto& world=h.phase_c();
+        world.pay("FAILED","HH",200); // no assets remain at the unsecured obligor
+        world.trade("CREDIT_PROJECT_FIRM","A","R","ore",1,100);
+    });
+    const auto pre_loss=daily::SnapshotCodec::encode(opening.world());
+    auto healthy=p0::DailyGame(daily::SnapshotCodec::decode(pre_loss),options);
+    healthy.advance_day(start);
+    start[8].push_back([](phasegh::Stage& h) {
+        h.phase_c().forgive_defaulted_loan("FAILED",200);
+    });
+    opening.advance_day(start);
+    require_test(c(opening).bank_insolvent()&&c(opening).bank_losses()==200&&
+                 c(opening).outstanding_loan("FAILED")==0&&
+                 c(opening).cash("HH")==1200&&c(healthy).cash("HH")==1200,
+                 "recognizing a loan loss must not erase the POP deposit");
+    const auto failed=daily::SnapshotCodec::encode(opening.world());
+    options.investments={{"NEW_FARM","food",0,1,1},{"CREDIT_PROJECT","food",0,1,1}};
+    options.buyers.push_back({household,"HH","FIRM","R","food",1});
+    options.debt_service.push_back({"OLD_DEBT",10,5});
+    p0::DailyGame solvent(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(healthy.world())),options);
+    p0::DailyGame insolvent(daily::SnapshotCodec::decode(failed),options);
+    p0::DailyGame replay(daily::SnapshotCodec::decode(failed),options);
+    solvent.advance_day();insolvent.advance_day();replay.advance_day();
+    const auto work=[](const p0::DailyGame& g,const char* id) {
+        return g.world().engine().base().core().construction(id).paid_work;
+    };
+    require_test(c(solvent).outstanding_loan("CREDIT_PROJECT_FIRM")==20&&
+                 work(solvent,"CREDIT_PROJECT")==1&&
+                 c(insolvent).outstanding_loan("CREDIT_PROJECT_FIRM")==0&&
+                 work(insolvent,"CREDIT_PROJECT")==0,
+                 "a real eligible investment must lose new credit after bank failure");
+    require_test(work(insolvent,"NEW_FARM")==1&&
+                 c(insolvent).outstanding_loan("OLD_DEBT")==15&&
+                 c(insolvent).cash("HH")<1200&&c(insolvent).cash("HH")>0&&
+                 c(insolvent).stock("FIRM","R","food")<20,
+                 "cash investment, old debt service and POP purchases must still settle");
+    require_test(c(insolvent).bank_insolvent()&&
+                 daily::SnapshotCodec::encode(insolvent.world())==
+                 daily::SnapshotCodec::encode(replay.world()),
+                 "bank failure and subsequent economic flows must replay exactly");
+}
 
 static void national_elections_are_independent_and_persistent() {
     auto build=[] {
@@ -2350,6 +2459,7 @@ int main(){
         multiple_households_do_not_inflate_one_sellers_stock();
         a_strike_is_not_a_permanent_hiring_vacancy();
         native_autonomous_extraction_physical_flow();
+        native_autonomous_funded_research_and_day_lab_limit(true);
         native_autonomous_funded_research_and_day_lab_limit();
         production_research_speed_requires_actual_economic_law();
         enacted_terakoya_slows_actual_paid_original_research();
@@ -2366,6 +2476,7 @@ int main(){
         autonomous_f_congestion_uses_actual_alternate_edge();
         autonomous_daily_bank_debt_service_and_liquidity_floor();
         native_cg_credit_service_keeps_trade_facility_in_sync();
+        insolvent_bank_keeps_pop_deposits_and_stops_new_investment_credit();
         std::cout<<"P0 daily grand strategy: bounded integration scenarios PASS\n";
         return 0;
     }catch(const std::exception& e) {
