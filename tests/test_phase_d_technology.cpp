@@ -295,9 +295,12 @@ static void test_daily_paid_training_waits_for_next_month() {
     game.advance_day(training(true,true,false));
     need(course(game).verified_service==1&&course(game).paid_service==1&&
           !course(game).certified&&ledger(game).phase_d_workforce("FACTORY")==0&&
-          !ledger(game).people().eligible_for(trainee,req)&&!ledger(game).people().eligible_for(untaught,req)&&
-          ledger(game).cash("SPONSOR")==17&&ledger(game).cash("TRAINER")==3,
+          !ledger(game).people().eligible_for(trainee,req)&&!ledger(game).people().eligible_for(untaught,req),
           "partial paid course must not change skill or employment");
+    need(ledger(game).cash("SPONSOR")==17&&ledger(game).cash("TRAINER")==3&&
+          ledger(game).cash(teacher_wallet)==0&&
+          ledger(game).outstanding_worker_wages("TRAINER")==10,
+          "first course fee posts after ordinary settlement of the teacher's actual wage");
     const auto saved=daily::SnapshotCodec::encode(game.world());
     for(const bool delivered:{false,true}) {
         bool blocked=false;
@@ -315,9 +318,12 @@ static void test_daily_paid_training_waits_for_next_month() {
          ledger(game).people().eligible_for(trained,phaseb::JobRequirements{})&&
          !ledger(game).people().eligible_for(trainee,req)&&
          !ledger(game).people().eligible_for(untaught,req)&&
-         ledger(game).cash("SPONSOR")==14&&ledger(game).cash("TRAINER")==6&&
          ledger(game).people().population()==4,
          "paid Jan2 course must still withhold elevated skill during January");
+    need(ledger(game).cash("SPONSOR")==14&&ledger(game).cash("TRAINER")==3&&
+         ledger(game).cash(teacher_wallet)==3&&
+         ledger(game).outstanding_worker_wages("TRAINER")==17,
+         "two course fees and lawful teacher payroll must coexist without invented funds");
     constexpr std::string_view marker="VIC25_PHASEC_POP_OCCUPATIONAL_EDUCATION_1";
     const auto pending_checkpoint=daily::SnapshotCodec::encode(game.world());
     need(pending_checkpoint.find(marker)!=std::string::npos,
