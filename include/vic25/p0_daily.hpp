@@ -1088,6 +1088,7 @@ public:
                     Staffing{employer,region,wanted,monthly_wage});
             }
         }
+        std::set<std::string> autonomous_extractors;
         for(const auto& [id,site]:industry.resource_sites) {
             if(std::any_of(decisions.extractors.begin(),
                            decisions.extractors.end(),
@@ -1100,7 +1101,19 @@ public:
             decisions.extractors.push_back(Extractor{
                 id,std::max<Quantity>(1,phaseb::add_checked(
                     quote.target_stock,regional_need[{site.region,site.good}]))});
+            autonomous_extractors.insert(id);
         }
+        std::set<std::string> scenario_payroll;
+        for(const auto& p:decisions.manufacturers)
+            if(p.wage_per_worker_per_day>0)
+                scenario_payroll.insert(
+                    game_c.facility(industry.recipes.at(p.recipe).site).owner);
+        for(const auto& p:decisions.extractors)
+            if(p.wage_per_unit>0)
+                scenario_payroll.insert(industry.resource_sites.at(p.resource_site).owner);
+        for(const auto& p:decisions.maintenance)
+            if(p.wage_per_worker_per_day>0)
+                scenario_payroll.insert(game_c.facility(p.facility).owner);
         if(decisions.allow_endogenous_staffing) {
             // A commissioned site may recruit from the existing unemployed
             // POP pool. The monthly capacity is prorated to a day; no worker,
@@ -1162,6 +1175,83 @@ public:
                 const auto site_key=std::make_tuple(
                     facility.owner,facility.region,recipe.site);
                 site_jobs[site_key]=std::max(site_jobs[site_key],desired);
+            }
+            // Resource sites use the same funded regional staffing path
+            // as selected manufacturers. A real daily output opportunity
+            // must exist before we recruit; scenario-managed extraction and
+            // scenario remuneration keep their original explicit ownership.
+            std::map<std::string,Money> observed_wages;
+            std::map<std::string,bool> has_opening_wage_debt;
+            std::optional<std::map<std::string,Money>> highest_existing_wage;
+            for(const auto& policy:decisions.extractors) {
+                if(!autonomous_extractors.contains(policy.resource_site))continue;
+                const auto& src=industry.resource_sites.at(policy.resource_site);
+                if(scenario_payroll.contains(src.owner)||
+                   !game_c.facilities().contains(src.site))continue;
+                const auto& f=game_c.facility(src.site);
+                if(f.capacity<=f.damaged)continue;
+                const auto& quote=game_c.market(src.region,src.good);
+                const Quantity target=std::min(policy.target_inventory,
+                    phaseb::add_checked(quote.target_stock,
+                        regional_need[{src.region,src.good}]));
+                const Quantity stock=game_c.stock(src.owner,src.region,src.good);
+                if(stock>=target)continue;
+                const Quantity flow=proportional(src.monthly_capacity,date.day,dim)-
+                                    src.produced_this_month;
+                const Quantity equipment=proportional(f.capacity-f.damaged,date.day,dim)-
+                    used_site_capacity(industry,src.site,game_c.month());
+                if(flow<=0||equipment<=0)continue;
+                Quantity units=std::min({target-stock,flow,
+                                        equipment/src.site_service_per_unit});
+                if(src.renewable)units=std::min(units,src.standing_biomass);
+                if(units<=0)continue;
+                const auto [debt,new_debt_check]=has_opening_wage_debt.try_emplace(src.owner,false);
+                if(new_debt_check)
+                    debt->second=game_c.outstanding_worker_wages(src.owner)>0;
+                if(debt->second)continue;
+                const auto [observed,fresh]=observed_wages.try_emplace(src.region,0);
+                if(fresh)observed->second=regional_monthly_wage(game_c,src.region,0,dim);
+                if(observed->second<=0)continue;
+                const auto& country=game_c.sovereignty(src.region);
+                const bool governed=game_c.has_government(country);
+                if((governed&&!game_c.has_country_treasury(country))||
+                   (!governed&&(game_c.has_any_government()||!game_c.has_actor(country)))||
+                   src.owner==(governed?game_c.country_treasury(country):country))
+                    continue;
+                const Money wage=std::max<Money>(observed->second,
+                    game_c.p2_rule(country,country,
+                        phasec::P2ClauseKind::minimum_monthly_contract_wage).value_or(0));
+                const Money wage_day=daily_increment(wage,date.day,dim);
+                if(wage_day<=0)continue;
+                // Match Stage4's highest contracted daily cost without
+                // changing the offered regional/legal hiring wage.
+                if(!highest_existing_wage) {
+                    highest_existing_wage.emplace();
+                    for(const auto& [slice,job]:game_c.people().jobs()) {
+                        (void)slice;
+                        if(job.count<=0||job.wage_per_month<=0)continue;
+                        auto& high=(*highest_existing_wage)[job.employer];
+                        high=std::max(high,daily_increment(job.wage_per_month,date.day,dim));
+                    }
+                }
+                const auto high=highest_existing_wage->find(src.owner);
+                const Money cost_per_worker=high==highest_existing_wage->end()?
+                    wage_day:std::max(wage_day,high->second);
+                Money unit_cost=times(src.workers_per_unit,cost_per_worker);
+                for(const auto& input:src.operational_inputs_per_unit) {
+                    if(!game_c.has_market(src.region,input.good)) {
+                        units=0;break;
+                    }
+                    units=std::min(units,game_c.phase_d_material_available(
+                        src.owner,src.region,input.good)/input.per_unit);
+                    unit_cost=phaseb::add_checked(unit_cost,
+                        times(input.per_unit,game_c.market(src.region,input.good).price));
+                }
+                if(units<=0||quote.price<=unit_cost)continue;
+                regional_wages[{src.owner,src.region}]=wage;
+                const auto site_key=std::make_tuple(src.owner,src.region,src.site);
+                site_jobs[site_key]=std::max(site_jobs[site_key],
+                                            times(units,src.workers_per_unit));
             }
             std::map<std::pair<std::string,std::string>,People> wanted;
             for(const auto& [key,count]:site_jobs) {
@@ -1444,17 +1534,6 @@ public:
         // calendar day. The C bank/tax ledger remains the sole authority.
         // P0 scenario payroll, when explicitly configured, owns that firm's
         // remuneration and must not be paid for a second time.
-        std::set<std::string> scenario_payroll;
-        for(const auto& p:decisions.manufacturers)
-            if(p.wage_per_worker_per_day>0)
-                scenario_payroll.insert(
-                    game_c.facility(industry.recipes.at(p.recipe).site).owner);
-        for(const auto& p:decisions.extractors)
-            if(p.wage_per_unit>0)
-                scenario_payroll.insert(industry.resource_sites.at(p.resource_site).owner);
-        for(const auto& p:decisions.maintenance)
-            if(p.wage_per_worker_per_day>0)
-                scenario_payroll.insert(game_c.facility(p.facility).owner);
         for(const auto& [slice_id,contract]:game_c.people().jobs()) {
             if(contract.count<=0||contract.wage_per_month<=0||
                scenario_payroll.contains(contract.employer)||

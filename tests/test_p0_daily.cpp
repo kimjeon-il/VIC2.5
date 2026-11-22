@@ -971,6 +971,128 @@ static void native_autonomous_extraction_physical_flow() {
 }
 
 
+static void domestic_quarry_hires_and_supplies_paid_glassworks() {
+    const auto run=[](bool viable,bool older_debt=false,bool expensive_contract=false) {
+        phasegh::World w(24000);
+        auto& geography=w.seed_geography();
+        geography.seed_province(1,"R","A");
+        geography.seed_unit(1,"A","LOCAL");
+        geography.seed_assignment(1,1);
+        auto& d=geography.seed_core();
+        auto& core=d.seed_core();
+        core.seed_actor("A",100);
+        core.seed_government("A","head","prime",5,3);
+        for(const auto* owner:{"QUARRY","GLASS"})core.seed_actor(owner,1000);
+        core.seed_market("R","sand",viable?10:1,1,viable?30:1,2);
+        core.seed_market("R","coal",10,1,30,0);
+        core.seed_market("R","glass",100,1,300,3);
+        core.seed_stock("GLASS","R","coal",5);
+        d.seed_standard_industries();
+        d.seed_building_facility("GLASSWORKS","GLASS","R",31,
+                                "vic3_115.urban.glassworks");
+        phased::IndustryRecipe glass;
+        glass.id="GLASS-RECIPE";glass.site="GLASSWORKS";
+        glass.inputs={{"coal",1},{"sand",1}};glass.outputs={{"glass",1}};
+        glass.workers_per_batch=1;glass.capacity_per_batch=1;
+        glass.industry_class="MANU";
+        d.seed_building_recipe(glass);
+        const auto quarry_worker=people(w,"R",4,"worker");
+        const auto glass_worker=people(w,"R",1,"glass-worker");
+        core.seed_population().hire(glass_worker,1,"GLASS","glass-worker",31,{});
+        const auto wallet=[&](auto id) {
+            return "HH:"+std::to_string(core.people().slice(id).key.household);
+        };
+        const auto quarry_wallet=wallet(quarry_worker);
+        const auto glass_wallet=wallet(glass_worker);
+        core.seed_actor(quarry_wallet,0);
+        if(glass_wallet!=quarry_wallet)core.seed_actor(glass_wallet,0);
+        if(expensive_contract) {
+            core.seed_actor("BENCHMARK",100);
+            const auto benchmark=people(w,"R",2,"benchmark-worker");
+            core.seed_population().hire(benchmark,1,"BENCHMARK","benchmark-worker",31,{});
+            core.seed_actor(wallet(benchmark),0);
+            const auto expensive=people(w,"R",3,"certified-quarry-worker");
+            core.seed_population().hire(expensive,1,"QUARRY","certified-quarry-worker",620,{});
+            core.seed_actor(wallet(expensive),0);
+        }
+        const int site_capacity=expensive_contract?62:31;
+        core.seed_production_facility("SAND-SITE","QUARRY","R",site_capacity);
+        phased::ResourceSite sand;
+        sand.id="SAND-RESOURCE";sand.site="SAND-SITE";sand.owner="QUARRY";
+        sand.region="R";sand.good="sand";sand.monthly_capacity=site_capacity;
+        sand.workers_per_unit=1;sand.site_service_per_unit=1;
+        d.seed_resource_site(sand);
+
+        p0::Policies policies;
+        policies.allow_endogenous_staffing=true;
+        policies.daily_food_units_per_person=0;
+        policies.auto_national_budgets_from_actual_services=false;
+        if(older_debt)core.seed_actor("FORMER-QUARRY-WORKER",0);
+        auto clock=daily::World::adopt(std::move(w),19);
+        if(older_debt) {
+            phasegh::World::Plan earned;
+            earned[5].push_back([today=clock.day_index()](phasegh::Stage& stage) {
+                stage.phase_c().phase_time_accrue_contract_wage(
+                    "quarry-previous-earned","QUARRY","FORMER-QUARRY-WORKER",
+                    "A","A",1000,today);
+            });
+            clock.advance_day(earned);
+        }
+        p0::DailyGame game(std::move(clock),policies);
+        require_test(::c(game).phase_d_workforce("QUARRY")==static_cast<int>(expensive_contract)&&
+                     !::c(game).stock("QUARRY","R","sand")&&
+                     ::c(game).has_actor(quarry_wallet),
+                     "quarry fixture must not preseed sand or quarry labor");
+        require_test(!older_debt||
+                     (::c(game).cash("QUARRY")==1000&&
+                      ::c(game).outstanding_worker_wages("QUARRY")==1000),
+                     "prior earned quarry wages must coexist with positive opening cash");
+        game.advance_day();
+        const auto& resource=game.world().engine().base().core().resource_site("SAND-RESOURCE");
+        if(expensive_contract) {
+            require_test(::c(game).phase_d_workforce("QUARRY")==1&&
+                         !resource.cumulative_output&&
+                         !::c(game).stock("GLASS","R","glass")&&
+                         ::c(game).cash("QUARRY")==980&&
+                         !::c(game).outstanding_worker_wages("QUARRY"),
+                         "quarry forecast must include its highest existing daily contract wage");
+            return;
+        }
+        if(older_debt) {
+            require_test(!::c(game).phase_d_workforce("QUARRY")&&
+                         !resource.cumulative_output&&
+                         ::c(game).cash("FORMER-QUARRY-WORKER")==900&&
+                         ::c(game).cash("QUARRY")==0&&
+                         !::c(game).outstanding_worker_wages("QUARRY"),
+                         "opening cash owed for old quarry wages cannot fund new recruiting");
+            return;
+        }
+        if(::c(game).phase_d_workforce("QUARRY")!=static_cast<int>(viable)||
+           resource.cumulative_output!=static_cast<int>(viable))
+            throw std::runtime_error(std::string("quarry employment/output (expected ")+
+                std::to_string(viable)+") was "+
+                std::to_string(::c(game).phase_d_workforce("QUARRY"))+"/"+
+                std::to_string(resource.cumulative_output));
+        if(viable)
+            require_test(::c(game).stock("GLASS","R","sand")==1&&
+                         ::c(game).cash("QUARRY")>1000&&
+                         ::c(game).cash("GLASS")<1000&&
+                         ::c(game).cash(quarry_wallet)==1&&
+                         !::c(game).stock("GLASS","R","glass"),
+                         "quarry sand must be bought for actual cash before factory use");
+        const auto checkpoint=daily::SnapshotCodec::encode(game.world());
+        p0::DailyGame replay(daily::SnapshotCodec::decode(checkpoint),policies);
+        game.advance_day();
+        replay.advance_day();
+        require_test(::c(game).stock("GLASS","R","glass")==static_cast<int>(viable)&&
+                     ::c(game).stock("GLASS","R","coal")==5-static_cast<int>(viable)&&
+                     daily::SnapshotCodec::encode(game.world())==
+                         daily::SnapshotCodec::encode(replay.world()),
+                     "paid domestic inputs must make only real glass and reproduce on replay");
+    };
+    run(true);run(false);run(true,true);run(true,false,true);
+}
+
 enum class ResearchLawScope { actual, local, custom, foreign, none, other, dated };
 static void paid_laboratory_research_speed(
         ResearchLawScope scope,const char* discipline,int first,int days,bool trait=false,
@@ -2646,6 +2768,7 @@ int main(){
         multiple_households_do_not_inflate_one_sellers_stock();
         a_strike_is_not_a_permanent_hiring_vacancy();
         native_autonomous_extraction_physical_flow();
+        domestic_quarry_hires_and_supplies_paid_glassworks();
         native_autonomous_funded_research_and_day_lab_limit(true);
         native_autonomous_funded_research_and_day_lab_limit();
         production_research_speed_requires_actual_economic_law();
