@@ -2644,8 +2644,22 @@ public:
                     Money fiscal_exposure=0;
                     bool eligible=true;
                     for(const auto& term:t.clauses) {
-                        if(term.obligor!=rule.country)continue;
                         const auto kind=term.kind;
+                        // A dated ceasefire/peace binds both belligerents.
+                        // A beneficiary here is not a passive payee; neutral
+                        // parties are not themselves bound by the war term.
+                        if(!rule.allow_military_commitments&&
+                           phasegh::is_war_treaty_term(kind)&&
+                           (term.obligor==rule.country||term.beneficiary==rule.country)) {
+                            const auto& wars=gh.diplomacy().wars;
+                            const auto war=wars.find(term.war_id);
+                            if(war!=wars.end()&&
+                               phasegh::war_term_signatories_match(term,war->second)) {
+                                eligible=false;
+                                break;
+                            }
+                        }
+                        if(term.obligor!=rule.country)continue;
                         if(kind==phasegh::ClauseKind::territorial_cession &&
                            !rule.allow_territorial_cession)
                             eligible=false;

@@ -1,5 +1,6 @@
 #include "vic25/phase_gh.hpp"
 #include "vic25/daily_snapshot.hpp"
+#include "vic25/p0_daily.hpp"
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -281,6 +282,61 @@ static void signed_and_dated_war_terms_bind_only_the_named_conflict() {
         c.war_id=war_id;
         h.propose_treaty_package("ENDED-WAR",{"A","B"},{c},"A","PM_A");
     });
+}
+
+static void fiscal_treaty_mandates_do_not_sign_named_war_terms() {
+    using namespace vic25;
+    const auto run=[](ClauseKind kind,bool mandate_is_obligor,bool permitted) {
+        auto world=two_recorded_wars_between_the_same_countries();
+        constexpr auto war_id="WAR:OLD-CONFLICT";
+        constexpr auto other_id="WAR:OTHER-CONFLICT";
+        World::Plan offer;
+        offer[9].push_back([kind,mandate_is_obligor](Stage& h) {
+            auto term=clause("war-term",kind,mandate_is_obligor?"B":"A",
+                                              mandate_is_obligor?"A":"B");
+            term.war_id="WAR:OLD-CONFLICT";
+            h.propose_treaty_package("WAR-OFFER",{"A","B","C"},{term},"A","PM_A");
+            const auto aid=clause("fiscal-aid",ClauseKind::financial_aid,"A","B","",3);
+            h.propose_treaty_package("FISCAL-OFFER",{"A","B"},{aid},"A","PM_A");
+        });
+        world.advance_day(offer);
+        p0::Policies policy;
+        policy.allow_autonomous_war_peace=false;
+        policy.allow_endogenous_crisis_wars=false;
+        policy.allow_autonomous_naval_air_ai=false;
+        policy.daily_food_units_per_person=0;
+        policy.monthly_clothing_units_per_person=0;
+        policy.treaty_ratifications.push_back({"B","PM_B",10,false,permitted,false});
+        policy.treaty_ratifications.push_back({"C","PM_C",10,false,false,false});
+        p0::DailyGame game(std::move(world),policy);
+        game.advance_day();
+        const auto& signed_pacts=game.world().engine().diplomacy().treaties;
+        verify(signed_pacts.at("FISCAL-OFFER").ratifications.contains("B")&&
+               signed_pacts.at("WAR-OFFER").ratifications.contains("C"),
+               "military opt-in disturbed fiscal action or the neutral signatory");
+        verify(signed_pacts.at("WAR-OFFER").ratifications.contains("B")==permitted,
+               "fiscal-only mandate signed a real war term as a named signatory");
+        while(game.world().date()<=daily::Date{2000,4,1}) game.advance_day();
+        const auto& h=game.world().engine().diplomacy();
+        const auto& war=h.wars.at(war_id);
+        const auto& other=h.wars.at(other_id);
+        verify(h.treaties.at("FISCAL-OFFER").active&&other.active&&
+               !other.armistice&&other.ended_day<0,
+               "treaty AI disturbed fiscal activation or an unrelated conflict");
+        if(!permitted)
+            verify(war.active&&!war.armistice&&war.ended_day<0,
+                   "a refused mandate nevertheless changed named war state");
+        else if(kind==ClauseKind::ceasefire)
+            verify(!war.active&&war.armistice&&war.ended_day<0,
+                   "authorized ceasefire failed to pause the named war");
+        else
+            verify(!war.active&&!war.armistice&&war.ended_day>=0,
+                   "authorized peace failed to close the named war");
+    };
+    for(const auto kind:{ClauseKind::ceasefire,ClauseKind::peace_settlement})
+        for(const bool named_obligor:{false,true})
+            for(const bool military_authority:{false,true})
+                run(kind,named_obligor,military_authority);
 }
 
 static void jointly_terminated_war_term_stays_terminated_after_monthly_rollover() {
@@ -706,6 +762,7 @@ int main(){
         old_unbound_ordinary_treaty_cannot_suspend_or_end_a_real_war();
         legacy_automatic_war_scope_is_preserved_without_guessing();
         signed_and_dated_war_terms_bind_only_the_named_conflict();
+        fiscal_treaty_mandates_do_not_sign_named_war_terms();
         jointly_terminated_war_term_stays_terminated_after_monthly_rollover();
         old_saves_keep_only_proven_termination_state();
         sakoku_blocks_only_new_claimant_initiation();
