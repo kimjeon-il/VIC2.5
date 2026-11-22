@@ -404,6 +404,15 @@ public:
     };
     [[nodiscard]] BankCreditView assess_investment_credit(
         const std::string& firm,const BankCreditRule& rule)const {
+        return quote_investment_credit(firm,rule,nullptr);
+    }
+private:
+    struct DailyInvestmentCreditUse {
+        Money spent{},receipt_basis{},ceiling{};
+    };
+    [[nodiscard]] BankCreditView quote_investment_credit(
+        const std::string& firm,const BankCreditRule& rule,
+        DailyInvestmentCreditUse* first_draw)const {
         ensure(rule.max_loans_to_reserves_ppm>=0&&
                rule.max_loans_to_reserves_ppm<=10'000'000&&
                rule.max_firm_debt_to_revenue_ppm>=0&&
@@ -444,24 +453,44 @@ public:
                                    rule.max_loans_to_reserves_ppm);
         const Money firm_limit=scale(finance.receipts,
                                    rule.max_firm_debt_to_revenue_ppm);
-        const Money daily_limit=scale(finance.receipts,
-                                    rule.max_daily_draw_to_revenue_ppm);
+        const auto drawn=investment_credit_draws_today_.find(firm);
+        const bool new_allowance=drawn==investment_credit_draws_today_.end();
+        const Money basis=new_allowance?finance.receipts:drawn->second.receipt_basis;
+        const Money quoted_limit=scale(basis,rule.max_daily_draw_to_revenue_ppm);
+        const Money daily_limit=new_allowance?quoted_limit:
+            std::min(quoted_limit,drawn->second.ceiling);
+        const Money spent=new_allowance?0:drawn->second.spent;
+        if(new_allowance&&first_draw)*first_draw={0,basis,daily_limit};
         result.bank_available=std::max<Money>(0,bank_limit-loans);
         result.firm_available=std::min({
             result.bank_available,
             std::max<Money>(0,firm_limit-finance.outstanding_bank_loan),
-            daily_limit});
+            std::max<Money>(0,daily_limit-spent)});
         result.eligible=result.firm_available>0;
         return result;
     }
+public:
     Money lend_investment_credit(const std::string& firm,Money requested,
                                  const BankCreditRule& rule) {
         require_stage({1});
         ensure(requested>=0,"P0_NEGATIVE_INVESTMENT_CREDIT_REQUEST");
         if(requested==0)return 0;
-        const auto view=assess_investment_credit(firm,rule);
+        DailyInvestmentCreditUse first_draw;
+        const auto view=quote_investment_credit(firm,rule,&first_draw);
         const auto amount=std::min(requested,view.firm_available);
-        if(amount>0)lend(firm,amount);
+        if(amount>0) {
+            // Allocate scratch before issuing money. A rejected loan must
+            // not freeze a new allowance in a continuing staged callback.
+            auto [it,first]=investment_credit_draws_today_.try_emplace(firm,first_draw);
+            try {
+                const Money next=phaseb::add_checked(it->second.spent,amount);
+                lend(firm,amount);
+                it->second.spent=next;
+            }catch(...) {
+                if(first)investment_credit_draws_today_.erase(it);
+                throw;
+            }
+        }
         return amount;
     }
     // New legal firms come from a real investor's cash at Stage 9. The
@@ -4540,6 +4569,7 @@ public:
             // twelve times per calendar day.
             if(n==11)staged.validate();
         }
+        staged.investment_credit_draws_today_.clear();
         staged.stage_=-1;
         ensure(staged.month()==opening_month+(final_calendar_day?1:0),
                "TIME_ERR_NATIVE_CALENDAR_ROLLOVER");
@@ -4600,6 +4630,7 @@ public:
                 stage.phase_d_reservation_mode_=false;
             }
         }
+        stage.investment_credit_draws_today_.clear();
         stage.stage_ = -1;
         ++stage.commit_id_;
         *this = std::move(stage);
@@ -5583,6 +5614,9 @@ private:
     Money total_bad_debt_{};
     bool bank_insolvent_{};
     std::map<std::string,Money> bank_principal_by_borrower_;
+    // Scratch for one actual staged day or legacy monthly Stage1 clearing.
+    // Cleared before every commit (snapshots cannot capture an open stage).
+    std::map<std::string,DailyInvestmentCreditUse> investment_credit_draws_today_;
     std::map<std::string,SovereignBond> sovereign_bonds_;
     std::map<std::pair<std::string,std::string>,Money> sovereign_coupon_due_;
     std::map<std::pair<std::string,std::string>,Money> sovereign_coupon_fraction_;

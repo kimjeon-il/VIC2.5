@@ -230,6 +230,8 @@ static void bank_credit_uses_actual_profit_and_balance_sheet() {
     second[1].push_back([rule](phasec::IntegratedWorld& live) {
         verify(live.lend_investment_credit("FIRM",50,rule)==25,
                "unsecured borrowing bypassed the bank's actual credit ceiling");
+        verify(live.lend_investment_credit("FIRM",50,rule)==0,
+               "legacy monthly clearing bypassed its one Stage1 draw allowance");
     });
     second[8].push_back([](phasec::IntegratedWorld& live) {
         live.repay("FIRM",10);
@@ -240,6 +242,86 @@ static void bank_credit_uses_actual_profit_and_balance_sheet() {
            c.cash("FIRM")==115,
            "bank loan and repayment did not reconcile real deposits");
     c.validate();
+}
+
+static void bank_investment_credit_has_one_per_firm_daily_draw_allowance() {
+    using Core=phasec::IntegratedWorld;
+    phasegh::World opening(24000);
+    auto& geo=opening.seed_geography();
+    geo.seed_unit(1,"A","Credit district");
+    geo.seed_province(1,"R","A");geo.seed_assignment(1,1);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_actor("FIRM",50);c.seed_actor("PEER",50);c.seed_actor("BUYER",900);
+    c.seed_market("R","ore",10,1,100,0);
+    c.seed_stock("FIRM","R","ore",20);c.seed_stock("PEER","R","ore",20);
+    c.seed_annual_bank_interest_ppm(100'000);
+    auto world=daily::World::adopt(std::move(opening),23);
+    phasegh::World::Plan receipts;
+    receipts[7].push_back([](phasegh::Stage& stage) {
+        auto& live=stage.phase_c();
+        live.trade("FIRM","BUYER","R","ore",5,10);
+        live.trade("PEER","BUYER","R","ore",5,10);
+    });
+    world.advance_day(receipts);
+    phasegh::World::Plan fragmented;
+    fragmented[1].push_back([](phasegh::Stage& stage) {
+        auto& live=stage.phase_c();
+        const Core::BankCreditRule rule{};
+        verify(live.lend_investment_credit("FIRM",0,rule)==0&&
+               live.lend_investment_credit("FIRM",10,rule)==10&&
+               live.assess_investment_credit("FIRM",rule).firm_available==15,
+               "first actual daily investment draw did not reduce its remaining quote");
+        auto stricter=rule;
+        stricter.max_daily_draw_to_revenue_ppm=200'000;
+        verify(live.lend_investment_credit("FIRM",50,stricter)==0,
+               "a stricter rule did not reduce remaining daily headroom");
+    });
+    fragmented[1].push_back([](phasegh::Stage& stage) {
+        auto& live=stage.phase_c();
+        const Core::BankCreditRule rule{};
+        auto looser=rule;
+        looser.max_daily_draw_to_revenue_ppm=1'000'000;
+        verify(live.lend_investment_credit("FIRM",50,looser)==15&&
+               live.lend_investment_credit("FIRM",50,looser)==0&&
+               live.lend_investment_credit("PEER",50,rule)==25,
+               "separate requests bypassed the daily limit or shared it across firms");
+    });
+    const auto before=daily::SnapshotCodec::encode(world);
+    auto discarded=fragmented;
+    discarded[11].push_back([](phasegh::Stage&) {
+        throw std::runtime_error("discard requested after actual bank draws");
+    });
+    bool rejected=false;
+    try {world.advance_day(discarded);}
+    catch(const std::runtime_error& e) {
+        rejected=std::string_view(e.what())=="discard requested after actual bank draws";
+        if(!rejected)throw;
+    }
+    verify(rejected&&daily::SnapshotCodec::encode(world)==before,
+           "aborted day leaked actual credit or its daily allowance");
+    world.advance_day(fragmented);
+    const auto& first=world.engine().base().core().core();
+    verify(first.outstanding_loan("FIRM")==25&&first.outstanding_loan("PEER")==25&&
+           first.financial().balance("BANK:loan")==50&&
+           first.cash("FIRM")==125&&first.cash("PEER")==125,
+           "same-day credit allowance did not reconcile bank and firm balances");
+    auto restored=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+    phasegh::World::Plan next;
+    next[1].push_back([](phasegh::Stage& stage) {
+        auto& live=stage.phase_c();
+        const Core::BankCreditRule rule{};
+        verify(live.lend_investment_credit("FIRM",50,rule)==25&&
+               live.lend_investment_credit("FIRM",1,rule)==0,
+               "new date did not restore allowance or preserve total debt cap");
+    });
+    world.advance_day(next);restored.advance_day(next);
+    const auto& final=world.engine().base().core().core();
+    verify(final.outstanding_loan("FIRM")==50&&final.outstanding_loan("PEER")==25&&
+           final.financial().balance("BANK:loan")==75&&
+           final.financial().balance("BANK:deposit")==-1075&&
+           final.cash("FIRM")==150&&final.cash("PEER")==125&&
+           daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(restored),
+           "next-date loan totals or save/replay lost daily draw isolation");
 }
 
 static void factory_freight_wages_and_fifty_day_replay(bool route_available) {
@@ -336,5 +418,6 @@ int main() {
     producer_imports_for_final_sales_not_ore_resale(false,2,5,false);
     producer_imports_for_final_sales_not_ore_resale(false,2,1000,false,true);
     earned_wage_arrears_take_priority_over_input_imports();
+    bank_investment_credit_has_one_per_firm_daily_draw_allowance();
     bank_credit_uses_actual_profit_and_balance_sheet();
 }
