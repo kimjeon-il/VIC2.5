@@ -346,15 +346,9 @@ static void sales_fund_expansion_on_an_ordinary_day() {
         const auto count=day2.state().constructions.size();
         const bool owner_used_quota=proposer=="OWNER" ||
             (proposer.empty()&&current_owner=="OWNER");
-        const bool dominant=law==1 && manufacturing &&
-            rival_capacity>=0 && (rival_capacity<31 || different_good ||
-                coproduct || different_region || retrofit || byproduct_case==1);
-        if(dominant)
-            check(count==initial_projects,
-                  "active laissez-faire failed to reject majority same-good manufacturing expansion");
-        else if(funded&&!owner_used_quota) {
+        if(funded&&!owner_used_quota) {
             check(count==initial_projects+1,
-                  "cash-backed expansion on day two did not follow real household sales");
+                  "cash-backed expansion did not follow real sales (the regional share must not block it)");
             const auto id="AUTO:PROJECT:DAILY:5:OWNER:BUILT_FARM:"+
                 std::to_string(proposal_day);
             const auto& proposal=day2.construction(id);

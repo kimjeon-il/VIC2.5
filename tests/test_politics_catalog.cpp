@@ -414,14 +414,13 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
     for(const auto& row:audit) {
         if(row.source.key!="country_forbid_monopoly_bool")continue;
         check(row.source.source_id=="law_laissez_faire"&&row.normalized_value==1&&
-              row.status==CanonicalLawRowStatus::verified_row&&
-              row.executor=="p0::DailyGame (existing regional manufacturing expansion)"&&
-              row.behavior_test=="test_p2_enterprise_ai::sales_fund_expansion_on_an_ordinary_day"&&
+              row.status==CanonicalLawRowStatus::no_recorded_path&&
+              row.executor.empty()&&row.behavior_test.empty()&&
               row.source.boolean&&!row.source.institution&&!row.source.sponsor,
-              "manufacturing expansion evidence is not the exact national law");
+              "retired expansion proxy must not be credited as a verified monopoly law effect");
         ++monopoly;
     }
-    check(monopoly==1,"expected one exact manufacturing expansion law source");
+    check(monopoly==1,"expected one retained monopoly modifier in the canonical source");
     std::size_t arts=0;
     for(const auto& row:audit) {
         if(row.source.key!="building_art_academy_throughput_add")continue;
@@ -434,8 +433,8 @@ static void canonical_effect_audit_retains_scope_and_evidence() {
               "academy throughput proof is not the exact national amendment");
         ++arts;
     }
-    check(arts==1&&canonical_law_row_evidence().size()==447,
-          "expected one new exact arts academy amendment source");
+    check(arts==1&&canonical_law_row_evidence().size()==446,
+          "expected exact arts academy evidence and only the remaining verified rows");
     std::size_t old_farmer_effects=0,new_shareholder_effects=0,explicit_only=0;
     const std::set<std::string_view> documented_investor_keys{
         "state_shopkeepers_investment_pool_efficiency_mult",

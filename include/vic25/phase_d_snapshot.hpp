@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -114,13 +115,31 @@ template<class A,class X>void contact(A& a,X& x){
     F(teachers_per_work);F(tuition_per_work);F(planned_instruction);F(reviewed);
 #undef F
 }
-template<class A,class X>void training(A& a,X& x){
-#define F(v) a(x.v)
-    F(id);F(trainer);F(sponsor);F(trainee_slice);F(trainee_count);
-    F(target_occupational_skill);F(required_service);F(verified_service);
-    F(paid_service);F(planned_service);F(fee_per_service);
-    F(certified);F(resulting_slice);
-#undef F
+// The v8 format is positional. Read and discard removed paid-course rows;
+// already-settled cash and earned POP education belong to the Phase C payload.
+inline void retired_courses(phasec::persistence_detail::BinaryWriter& a){
+    a(std::uint64_t{0});
+}
+inline void retired_courses(phasec::persistence_detail::BinaryReader& a){
+    std::uint64_t count{};a(count);
+    if(count>2'000'000)throw std::runtime_error("Phase D oversized map");
+    std::set<std::string> keys;
+    for(std::uint64_t i=0;i<count;++i){
+        std::string key,id,trainer,sponsor;
+        Id trainee_slice{},resulting_slice{};
+        People trainee_count{};
+        std::uint8_t target_skill{};
+        Quantity required{},verified{},paid{},planned{};
+        Money fee{};
+        bool certified{};
+        a(key);a(id);a(trainer);a(sponsor);a(trainee_slice);a(trainee_count);
+        a(target_skill);a(required);a(verified);a(paid);a(planned);a(fee);
+        a(certified);a(resulting_slice);
+        if(id!=key||required<=0||verified<0||paid>verified)
+            throw std::runtime_error("invalid retired Phase D course row");
+        if(!keys.emplace(std::move(key)).second)
+            throw std::runtime_error("Phase D duplicate serialized key");
+    }
 }
 template<class A,class X> void promotion(A& a,X& x) {
     a(x.holder);a(x.tech);a(x.next);
@@ -144,7 +163,7 @@ template<class A,class X> void state(A& a,X& d) {
     map(a,d.technologies,[](auto& ar,auto& v){technology(ar,v);});
     map(a,d.licenses,[](auto& ar,auto& v){license(ar,v);});
     map(a,d.contacts,[](auto& ar,auto& v){contact(ar,v);});
-    map(a,d.training,[](auto& ar,auto& v){training(ar,v);});
+    retired_courses(a);
     a(d.knowledge);a(d.active_site_tech);
     map(a,d.promotions,[](auto& ar,auto& vec_value) {
         vec(ar,vec_value,[](auto& a1,auto& e){promotion(a1,e);});

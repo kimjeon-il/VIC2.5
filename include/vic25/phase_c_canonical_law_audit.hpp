@@ -63,10 +63,10 @@ inline CanonicalLawEffectAudit classify_canonical_law_row(
     return result;
 }
 
-inline const std::array<CanonicalLawRowEvidence,447>& canonical_law_row_evidence() {
+inline const std::array<CanonicalLawRowEvidence,446>& canonical_law_row_evidence() {
     // Curated source rows covered by the named behavior comparison. Merely
     // adding a key to the old map does not establish proof here.
-    static const std::array<CanonicalLawRowEvidence,447> evidence{{
+    static const std::array<CanonicalLawRowEvidence,446> evidence{{
         {{"law_religious_schools","state_education_access_add",0.1,false,true},
          "IntegratedWorld::phase_time_auto_demography",
          "test_politics_identity::enacted_education_changes_real_daily_schooling"},
@@ -1403,9 +1403,6 @@ inline const std::array<CanonicalLawRowEvidence,447>& canonical_law_row_evidence
         {{"law_terakoya","country_tech_research_speed_mult",-0.1,false,false},
          "p0::DailyGame (paid original laboratory work)",
          "test_p0_daily::enacted_terakoya_slows_actual_paid_original_research"},
-        {{"law_laissez_faire","country_forbid_monopoly_bool",1,true,false},
-         "p0::DailyGame (existing regional manufacturing expansion)",
-         "test_p2_enterprise_ai::sales_fund_expansion_on_an_ordinary_day"},
         {{"amendment_degenerate_art","building_art_academy_throughput_add",-0.1,false,false},
          "phased::Stage::manufacture (registered Arts Academy)",
          "test_phase_d_buildings::national_art_amendment_changes_actual_academy_output"}

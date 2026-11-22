@@ -3368,7 +3368,6 @@ public:
                        r.requires_same_stage_nonstorable_energy)continue;
                     recipes_by_site[r.site].push_back(&entry);
                 }
-                enterprise_ai::ExpansionCapacityGuard competition(c,domain);
                 std::map<std::string,Candidate> best_by_owner;
                 for(const auto& [id,p]:domain.constructions) {
                     if(owners_already_proposed.contains(p.client)||
@@ -3394,8 +3393,7 @@ public:
                         const auto& [rid,r]=*entry;
                         const auto& product=r.outputs.front().good;
                         if(!c.has_market(p.region,product)||
-                           c.market(p.region,product).unmet<=0||
-                           competition.forbids(r))continue;
+                           c.market(p.region,product).unmet<=0)continue;
                         const auto quote=enterprise_ai::evaluate(
                             c,domain,gh.geography().spatial(),gh.commerce(),
                             r,date.day,dim);

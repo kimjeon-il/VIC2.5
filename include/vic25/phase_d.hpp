@@ -121,16 +121,6 @@ struct KnowledgeContact {
     Quantity planned_instruction{};
     bool reviewed{};
 };
-struct TrainingProgram {
-    std::string id,trainer,sponsor;
-    Id trainee_slice{};
-    People trainee_count{};
-    std::uint8_t target_occupational_skill{};
-    Quantity required_service{},verified_service{},paid_service{},planned_service{};
-    Money fee_per_service{};
-    bool certified{};
-    Id resulting_slice{};
-};
 struct KnowledgePromotion {
     std::string holder, tech;
     KnowledgeLevel next{KnowledgeLevel::usable};
@@ -156,7 +146,6 @@ struct DomainState {
     std::map<std::string,TechnologyDefinition> technologies;
     std::map<std::string,TechnologyLicense> licenses;
     std::map<std::string,KnowledgeContact> contacts;
-    std::map<std::string,TrainingProgram> training;
     std::map<std::pair<std::string,std::string>,KnowledgeLevel> knowledge;
     std::map<std::string,std::string> active_site_tech;
     std::map<std::int64_t,std::vector<KnowledgePromotion>> promotions;
@@ -218,7 +207,6 @@ struct DomainState {
         for(auto& [id,p]:work_packages){(void)id;p.planned_work=0;}
         for(auto& [id,p]:researches){(void)id;p.planned_work=0;}
         for(auto& [id,p]:contacts){(void)id;p.planned_instruction=0;}
-        for(auto& [id,p]:training){(void)id;p.planned_service=0;}
         if(auto it=promotions.find(c.month());it!=promotions.end()) {
             for(const auto& u:it->second) {
                 require(!u.holder.empty()&&!u.tech.empty(),"bad knowledge promotion");
@@ -440,11 +428,6 @@ struct DomainState {
                     contact.verified_instruction>=0 &&
                     contact.paid_instruction<=contact.verified_instruction,
                     "invalid contact training evidence");
-        }
-        for(const auto& [id,p]:training) {
-            require(id==p.id&&p.required_service>0 && p.verified_service>=0 &&
-                    p.paid_service<=p.verified_service,
-                    "invalid POP occupational training evidence");
         }
         for(const auto& [id,p]:researches) {
             require(p.verified_work>=0&&p.paid_work<=p.verified_work,
@@ -1447,54 +1430,6 @@ public:
             contact.target,contact.tech,KnowledgeLevel::understood});
         d_.append(d_.opening_month,"verified-knowledge-transfer-next-month",id);
     }
-    void plan_training(const std::string& id,Quantity units){
-        must(1);
-        auto& p=d_.training.at(id);
-        require(!p.certified&&units>0 &&
-                p.verified_service+p.planned_service+units<=p.required_service,
-                "invalid POP occupational training plan");
-        if(p.fee_per_service)
-            c_.phase_d_reserve_cash(p.sponsor,"training:"+id,
-                                    product(units,p.fee_per_service));
-        p.planned_service=phaseb::add_checked(p.planned_service,units);
-    }
-    void deliver_training(const std::string& id,Quantity units){
-        must(4);
-        auto& p=d_.training.at(id);
-        require(!p.certified&&units>0&&units<=p.planned_service &&
-                c_.people().has_slice(p.trainee_slice) &&
-                c_.people().slice(p.trainee_slice).count>=p.trainee_count &&
-                c_.people().employed(p.trainee_slice)==0,
-                "training would duplicate employed trainees");
-        occupy_labor(p.trainer,units);
-        p.verified_service=phaseb::add_checked(p.verified_service,units);
-        p.planned_service-=units;
-        d_.append(d_.opening_month,"real-POP-occupational-training",id);
-    }
-    void pay_training(const std::string& id,Quantity units){
-        must(5);
-        auto& p=d_.training.at(id);
-        require(units>0&&p.paid_service+units<=p.verified_service,
-                "training fee lacks actual instructional service");
-        const Money fee=product(units,p.fee_per_service);
-        if(fee){
-            c_.phase_d_release_cash(p.sponsor,"training:"+id,fee);
-            c_.pay(p.sponsor,p.trainer,fee);
-        }
-        p.paid_service=phaseb::add_checked(p.paid_service,units);
-        d_.append(d_.opening_month,"training-service-financially-settled",id);
-    }
-    void certify_training(const std::string& id){
-        must(10);
-        auto& p=d_.training.at(id);
-        require(!p.certified&&p.verified_service>=p.required_service &&
-                p.paid_service>=p.required_service,
-                "new POP qualification lacks verified training input");
-        p.resulting_slice=c_.phase_d_certify_occupational_training(
-            p.trainee_slice,p.trainee_count,p.target_occupational_skill);
-        p.certified=true;
-        d_.append(d_.opening_month,"next-month-valid-POP-skill",id);
-    }
     void propose_adoption(const std::string& site,const std::string& tech) {
         must(9);
         const auto& f=c_.facility(site);
@@ -1936,18 +1871,6 @@ public:
                 "invalid knowledge contact");
         domain_.contacts.emplace(contact.id,std::move(contact));
     }
-    void seed_training(TrainingProgram p){
-        require(core_.commit_id()==0&&!p.id.empty() &&
-                !domain_.training.contains(p.id) &&
-                !p.trainer.empty()&&!p.sponsor.empty()&&
-                p.trainee_count>0 && p.trainee_slice>0 &&
-                p.required_service>0 && p.fee_per_service>=0 &&
-                p.target_occupational_skill<=100 &&
-                core_.people().has_slice(p.trainee_slice) &&
-                core_.people().slice(p.trainee_slice).count>=p.trainee_count,
-                "invalid occupational training program");
-        domain_.training.emplace(p.id,std::move(p));
-    }
     void seed_knowledge(std::string holder,std::string tech,KnowledgeLevel level) {
         require(core_.commit_id()==0&&!holder.empty()&&!tech.empty() &&
                 level!=KnowledgeLevel::unknown &&
@@ -1987,9 +1910,6 @@ public:
     }
     [[nodiscard]] const KnowledgeContact& contact(const std::string& id)const{
         return domain_.contacts.at(id);
-    }
-    [[nodiscard]] const TrainingProgram& training(const std::string& id)const{
-        return domain_.training.at(id);
     }
     [[nodiscard]] const TechnologyLicense& license(const std::string& id)const{
         return domain_.licenses.at(id);

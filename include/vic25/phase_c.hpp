@@ -278,18 +278,6 @@ public:
                "trade settlement cannot release a bank collateral ticket");
         resources_.release_goods({owner,region,good},purpose,amount);
     }
-    Id phase_d_certify_occupational_training(Id source,People count,
-                                             std::uint8_t new_skill){
-        require_stage({10});
-        ensure(phase_d_reservation_mode_&&people_.has_slice(source) &&
-               count>0 && count<=people_.slice(source).count &&
-               people_.employed(source)==0 && new_skill<=100,
-               "training outcome needs real unemployed eligible POP partition");
-        const Id target=people_.schedule_occupational_education(
-            source,count,new_skill);
-        events_.push_back("phase-d-real-POP-occupational-training");
-        return target;
-    }
     void phase_d_use_labor(const std::string& owner,People required){
         require_stage({4});
         ensure(phase_d_reservation_mode_,"unbound resource phase");
@@ -331,12 +319,6 @@ public:
     }
     [[nodiscard]] const std::string& sovereignty(const std::string& region) const {
         return sovereignty_.at(region);
-    }
-
-    [[nodiscard]] const std::string* sovereignty_if_known(
-            const std::string& region)const {
-        const auto found=sovereignty_.find(region);
-        return found==sovereignty_.end()?nullptr:&found->second;
     }
 
     [[nodiscard]] bool has_actor(const std::string& who)const {
@@ -2874,8 +2856,6 @@ public:
     [[nodiscard]] std::int64_t p2_modifier_ppm(
         const std::string& country,const std::string& effect_key)const;
     [[nodiscard]] std::int64_t p2_private_construction_order_modifier_ppm(
-        const std::string& country)const;
-    [[nodiscard]] bool p2_forbids_manufacturing_monopoly(
         const std::string& country)const;
     [[nodiscard]] std::int64_t p2_national_influence_ppm(
         const std::string& country)const;
