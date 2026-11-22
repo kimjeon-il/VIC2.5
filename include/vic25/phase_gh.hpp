@@ -170,7 +170,8 @@ inline std::optional<PathQuote> quote_daily_freight_path(
         const std::map<std::string,std::int32_t>* override_days=nullptr,
         const std::function<Quantity(const TransportEdge&)>*
             effective_capacity=nullptr,
-        bool documented_services_only=false) {
+        bool documented_services_only=false,
+        Quantity minimum_due_capacity=1) {
     if(from==to)return PathQuote{0,0,std::numeric_limits<Quantity>::max(),{}};
     if(trade.transport_edges.empty())return std::nullopt;
     using Item=std::tuple<Money,Month,Id>;
@@ -221,11 +222,13 @@ inline std::optional<PathQuote> quote_daily_freight_path(
                 lawful;
             // Actual native cargo occupies only its departing segment
             // today. Future segments are capacity-checked when the lot
-            // physically reaches their hub, not months prematurely.
+            // physically reaches their hub, not months prematurely. A
+            // stranded lot may require more than one available unit now.
             const bool due_now=day_of_month<=0 || node==from;
             if(!edge.enabled||(due_now&&used>=ceiling))continue;
             require(edge.from==node && used>=0,
                     "G_ERR_LOGISTICS_INDEX_CORRUPT");
+            if(due_now&&ceiling-used<minimum_due_capacity)continue;
             const Money next_cost=phaseb::add_checked(cost,edge.freight_per_unit);
             const Month next_travel=phaseb::add_checked(travel,
                 day_of_month>0&&actual_days>0?
@@ -1180,7 +1183,8 @@ public:
                 const auto alternate=quote_daily_freight_path(
                     trade_,geo.regions.at(cargo.hub_region),
                     geo.regions.at(cargo.destination),c.month(),
-                    day_of_month_,days_in_month_,nullptr,true,nullptr,&cap);
+                    day_of_month_,days_in_month_,nullptr,true,nullptr,&cap,
+                    false,cargo.quantity);
                 if(!alternate||alternate->edges.empty()||
                    alternate->capacity<cargo.quantity)continue;
                 cargo.path_edges.resize(cargo.hop_index+1);

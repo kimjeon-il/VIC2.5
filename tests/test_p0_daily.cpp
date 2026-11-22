@@ -1522,6 +1522,107 @@ static void explicit_and_automatic_dues_keep_live_payment_priority() {
 }
 
 
+static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
+    const auto build=[](bool expires) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"SOURCE","A");
+        geo.seed_province(2,"PORT","B");
+        geo.seed_unit(1,"A","A-ADMIN");geo.seed_assignment(1,1);
+        geo.seed_unit(2,"B","B-ADMIN");geo.seed_assignment(2,2);
+        geo.seed_border(1,2);
+        auto& d=geo.seed_core();
+        auto& c=d.seed_core();
+        for(const auto* actor:{"A","B","MINE","RAIL"})c.seed_actor(actor,0);
+        c.seed_actor("FACTORY",4000);
+        c.seed_government("A","HEAD-A","PM-A",5,3);
+        c.seed_government("B","HEAD-B","PM-B",5,3);
+        c.seed_market("SOURCE","ore",10,10,10);
+        c.seed_market("PORT","ore",30,30,30);
+        c.seed_market("PORT","fuel",4,4,4);
+        c.seed_market("PORT","tools",40,1,100);
+        c.seed_stock("MINE","SOURCE","ore",200);
+        c.seed_stock("FACTORY","PORT","fuel",200);
+        c.seed_production_facility("WORKS","FACTORY","PORT",31);
+        phased::IndustryRecipe recipe;
+        recipe.id="TOOLS";recipe.site="WORKS";
+        recipe.inputs={{"ore",2},{"fuel",2}};recipe.outputs={{"tools",2}};
+        recipe.workers_per_batch=recipe.capacity_per_batch=1;
+        d.seed_recipe(recipe);
+        const auto worker=people(gh,"PORT",1,"worker");
+        const auto customer=people(gh,"PORT",2,"consumer");
+        auto& pop=c.seed_population();
+        pop.hire(worker,1,"FACTORY","worker",31,{});
+        const auto wallet=[&](auto id) {
+            return "HH:"+std::to_string(c.people().slice(id).key.household);
+        };
+        const auto buyer=wallet(customer);
+        c.seed_actor(wallet(worker),0);
+        c.seed_actor(buyer,10000);
+
+        gh.seed_verified_geographic_link("rail-source",1,2,"rail");
+        phasegh::TransportEdge rail;
+        rail.id="sole-service";rail.carrier="RAIL";rail.from=1;rail.to=2;
+        rail.monthly_capacity=62;rail.freight_per_unit=1;rail.transit_days=2;
+        rail.mode="rail";rail.evidence_id="fixture:dated-rail-service";
+        rail.valid_from_month=24000;rail.valid_through_month=expires?24000:24001;
+        gh.seed_transport_edge(rail);
+        gh.seed_route({"ORE","MINE","FACTORY","ore",1,2,62,1});
+
+        p0::Policies rules;
+        rules.auto_national_budgets_from_actual_services=false;
+        rules.daily_food_units_per_person=rules.monthly_clothing_units_per_person=0;
+        // No fictional substitute input. Both choices use the same real
+        // recurring order and buyer, isolated from independent discovery.
+        rules.allow_endogenous_input_procurement=false;
+        rules.buyers.push_back({customer,buyer,"FACTORY","PORT","tools",1});
+        return std::pair{p0::DailyGame(daily::World::adopt(std::move(gh),85),rules),buyer};
+    };
+    auto [open,buyer]=build(false);
+    auto [cut,cut_buyer]=build(true);
+    const auto tools_batches=[](const p0::DailyGame& g) {
+        Quantity n=0;
+        for(const auto& run:g.world().engine().base().core().state().actual_production_runs)
+            if(run.recipe=="TOOLS")n+=run.batches;
+        return n;
+    };
+    const auto& freight=[](const p0::DailyGame& g) -> const phasegh::TradeState& {
+        return g.world().engine().commerce();
+    };
+    for(int i=0;i<31;++i){open.advance_day();cut.advance_day();}
+    const auto old_batches=tools_batches(cut);
+    const auto old_fills=freight(cut).fills.size();
+    require_test(cut.world().date()==daily::Date{2000,2,1} && cut_buyer==buyer &&
+                 old_batches>20 && old_batches==tools_batches(open) &&
+                 old_fills==freight(open).fills.size() &&
+                 !freight(cut).daily_shipments.empty() &&
+                 !freight(open).daily_shipments.empty() &&
+                 c(cut).cash(buyer)==c(open).cash(buyer) &&
+                 c(cut).cash(buyer)<10000 && c(cut).cash("MINE")>0 &&
+                 c(cut).cash("RAIL")>0,
+                 "both operating lines must have paid cargo, actual tools and household fulfillment");
+    const auto closing_customer_cash=c(cut).cash(buyer);
+    const auto old_in_flight=freight(cut).daily_shipments.size();
+    cut.advance_day();open.advance_day();
+    require_test(freight(cut).daily_shipments.size()<old_in_flight &&
+                 freight(cut).fills.size()==old_fills &&
+                 tools_batches(cut)>old_batches &&
+                 c(cut).cash(buyer)<closing_customer_cash,
+                 "expiry must honor in-flight cargo and sale without dispatching new goods");
+    for(int i=0;i<7;++i){open.advance_day();cut.advance_day();}
+    require_test(freight(cut).daily_shipments.empty() &&
+                 freight(cut).fills.size()==old_fills &&
+                 freight(open).fills.size()>old_fills &&
+                 tools_batches(open)>tools_batches(cut) &&
+                 c(open).cash(buyer)<c(cut).cash(buyer) &&
+                 c(cut).previous_daily_solvent_unmet(
+                     "PORT","tools",cut.world().day_index())==2 &&
+                 c(open).previous_daily_solvent_unmet(
+                     "PORT","tools",open.world().day_index())==0 &&
+                 c(cut).market("PORT","tools").price>c(open).market("PORT","tools").price,
+                 "loss of the sole real link must cut production and paid sales, and raise the solvent shortage price");
+}
+
 static void producer_import_counts_real_on_site_and_inbound_stock_once() {
     p0::Policies options;
     options.daily_food_units_per_person=0;
@@ -1593,6 +1694,71 @@ static void producer_import_counts_real_on_site_and_inbound_stock_once() {
            commerce.fills.size()==2&&core().stock("SELLER","SOURCE","ore")==17&&
            daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
            "only delivered input must feed the real batch, with exact snapshot replay");
+}
+
+static void expired_trade_leg_uses_alternate_that_can_carry_full_lot() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    for(const auto& [id,region,country]:std::vector<std::tuple<int,std::string,std::string>>{
+            {1,"SOURCE","A"},{2,"HUB","A"},{3,"PORT","B"}}) {
+        geo.seed_province(id,region,country);
+        geo.seed_unit(id,country,"DISTRICT-"+region);
+        geo.seed_assignment(id,id);
+    }
+    geo.seed_border(1,2);geo.seed_border(2,3);
+    auto& seed=geo.seed_core().seed_core();
+    for(const auto* actor:{"A","B","SELLER","TRADER","FIRST","EXPIRED","SMALL","FULL"})
+        seed.seed_actor(actor,std::string_view(actor)=="TRADER"?100:0);
+    seed.seed_government("A","HEAD_A","PM_A",5,3);
+    seed.seed_government("B","HEAD_B","PM_B",5,3);
+    seed.seed_market("SOURCE","ore",10,10,10,0);
+    seed.seed_market("PORT","ore",30,30,30,2);
+    seed.seed_stock("SELLER","SOURCE","ore",2);
+    gh.seed_verified_geographic_link("source-hub",1,2,"rail");
+    gh.seed_verified_geographic_link("hub-port",2,3,"rail");
+    const auto edge=[&](const char* id,const char* carrier,int from,int to,
+                        int capacity,int rate,int start,int end) {
+        gh.seed_transport_edge({id,carrier,static_cast<phaseb::Id>(from),
+            static_cast<phaseb::Id>(to),capacity,rate,0,true,1,"rail",
+            "fixture:dated-service",start,end});
+    };
+    edge("FIRST","FIRST",1,2,62,1,24000,24001);
+    edge("EXPIRED","EXPIRED",2,3,62,1,24000,24000);
+    edge("SMALL","SMALL",2,3,29,2,24001,24001);
+    edge("FULL","FULL",2,3,58,3,24001,24001);
+    auto world=daily::World::adopt(std::move(gh),57);
+    for(int i=0;i<30;++i)world.advance_day(); // Jan 31: the last operating day.
+    p0::Policies policies;
+    policies.merchant_offices.push_back({"TRADER","PORT",2,0,50'000});
+    p0::DailyGame game(std::move(world),policies);
+    game.advance_day();
+    const auto& trade=game.world().engine().commerce();
+    require_test(trade.fills.size()==1&&trade.daily_shipments.size()==1&&
+                 trade.fills.front().quantity==2&&
+                 trade.fills.front().physical_path==
+                     std::vector<std::string>{"FIRST","EXPIRED"}&&
+                 c(game).cash("SELLER")==20&&c(game).cash("FIRST")==2&&
+                 c(game).cash("TRADER")==78&&c(game).stock("TRADER","PORT","ore")==0,
+                 "fixture must dispatch and pay for both units on the January booked route");
+    const auto saved=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(saved),policies);
+    game.advance_day();replay.advance_day(); // Feb 1: expired next leg, full alternate fits exactly.
+    require_test(trade.daily_shipments.size()==1&&!trade.daily_shipments.begin()->second.at_hub&&
+                 trade.daily_shipments.begin()->second.path_edges==
+                     std::vector<std::string>{"FIRST","FULL"}&&
+                 c(game).cash("FULL")==6&&c(game).cash("SMALL")==0&&
+                 c(game).cash("EXPIRED")==0&&c(game).cash("TRADER")==72&&
+                 c(game).stock("TRADER","PORT","ore")==0,
+                 "expired booked leg must bypass the cheaper too-small alternate and dispatch the full lot");
+    game.advance_day();replay.advance_day(); // Feb 2: now and only now buyer can use the units.
+    require_test(trade.daily_shipments.empty()&&trade.fills.size()==1&&
+                 c(game).stock("SELLER","SOURCE","ore")==0&&
+                 c(game).stock("TRADER","PORT","ore")==2&&
+                 c(game).cash("SELLER")+c(game).cash("FIRST")+c(game).cash("FULL")+
+                     c(game).cash("TRADER")==100&&c(game).financial().balanced()&&
+                 daily::SnapshotCodec::encode(game.world())==
+                     daily::SnapshotCodec::encode(replay.world()),
+                 "alternate cargo must arrive once without a duplicate purchase or freight debit");
 }
 
 static void autonomous_f_two_hop_freight_and_save_replay() {
@@ -2780,7 +2946,9 @@ int main(){
         p1_autocracy_uses_real_institution_and_rejects_false_votes();
         native_autonomous_h_crisis_and_organization_funding();
         explicit_and_automatic_dues_keep_live_payment_priority();
+        loss_of_paid_freight_constrains_output_and_solvent_customers();
         producer_import_counts_real_on_site_and_inbound_stock_once();
+        expired_trade_leg_uses_alternate_that_can_carry_full_lot();
         autonomous_f_two_hop_freight_and_save_replay();
         autonomous_daily_facility_maintenance_with_real_inputs();
         autonomous_h_treaty_risk_and_institutional_vote();
