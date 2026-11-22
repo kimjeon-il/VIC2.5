@@ -19,11 +19,23 @@ endif()
 add_executable(vic25_demo src/main.cpp)
 target_link_libraries(vic25_demo PRIVATE vic25_core)
 
+# Native terminal tutorial; independent of optional renderer dependencies.
+add_executable(vic25_play src/play.cpp)
+target_link_libraries(vic25_play PRIVATE vic25_core)
+
 include(CTest)
 if (BUILD_TESTING)
     add_executable(vic25_core_tests tests/test_core.cpp)
     target_link_libraries(vic25_core_tests PRIVATE vic25_core)
     add_test(NAME vic25_core_tests COMMAND vic25_core_tests)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME vic25_terminal_tutorial
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_terminal_tutorial.py
+                         $<TARGET_FILE:vic25_play>)
+        set_tests_properties(vic25_terminal_tutorial PROPERTIES TIMEOUT 90)
+    endif()
 endif()
 
 # POP-I1~I4: independent social/demographic simulation (existing S0 core preserved).

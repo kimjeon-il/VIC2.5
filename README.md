@@ -47,6 +47,19 @@ ctest --test-dir build --output-on-failure
 
 CMake 3.20+, C++20 컴파일러가 필요합니다. Linux/GCC 14 환경에서 빌드·CTest 1개가 통과했습니다. 다른 운영체제의 빌드/성능 검증은 별도입니다.
 
+### 텍스트 튜토리얼 실행
+
+`cmake --build build --target vic25_play` 후 `./build/vic25_play`를 실행하면
+합성 시장 튜토리얼 `market-v1`이 열립니다. 기존 `vic25_demo`와 별개이며
+지도 GUI나 역사 캠페인이 아닙니다. 별도 그래픽 라이브러리가 필요하지 않습니다.
+
+- `status`: 현재 날짜, 인구, 국고, 식량 가격·재고, 구매자 현금 확인
+- `step 3`: 실제 일간 엔진을 3일 진행
+- `buy 2`: 그날 시장 가격으로 식량 2개 구매. 현금이나 재고가 부족하면 그날은 커밋되지 않음
+- `save tutorial.sav`: 새 파일에만 저장. 기존 파일은 덮어쓰지 않으며, 저장 위치의 파일시스템이 하드 링크를 지원해야 함
+- `./build/vic25_play --tutorial market-v1 --resume tutorial.sav`: 동일한 튜토리얼 정책으로 저장을 이어서 실행
+- `help`, `quit`: 명령 안내, 종료
+
 ## 문서
 
 - [S0 범위와 확인된 이력](docs/S0_STATUS.md)
