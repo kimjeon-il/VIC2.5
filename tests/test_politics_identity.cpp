@@ -1749,6 +1749,79 @@ static void no_colonial_affairs_adds_only_verified_homeland_acceptance() {
           "replaced colonization law retained a stale effect on real migration");
 }
 
+static void daily_migration_checks_receiving_law_without_an_origin_government() {
+    const auto run=[](bool receiving_government,bool closed) {
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.set_dataset("receiving-border-with-unseeded-origin-government");
+        geo.seed_province(1,"SOURCE","A");
+        geo.seed_province(2,"TARGET","B");
+        geo.seed_unit(1,"A","SOURCE-UNIT");geo.seed_assignment(1,1);
+        geo.seed_unit(2,"B","TARGET-UNIT");geo.seed_assignment(2,2);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",50);c.seed_actor("B",0);
+        c.seed_shares("company:A","A",10);
+        if(receiving_government) {
+            c.seed_government("B","HEAD","PRIME",5,3);
+            c.seed_p1_constitution("B",{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,
+                "fixture:constitution"});
+            law(c,"B","migration",closed?"closed_borders":"no_migration_controls");
+        }
+        auto& pop=c.seed_population();
+        const auto home=pop.household_profile({"SOURCE","mixed","shared",50});
+        const auto away=pop.household_profile({"TARGET","mixed","shared",0});
+        const auto dem=pop.demographic_profile({"SOURCE",23640,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto econ=pop.economic_profile({"SOURCE","worker","wage",
+            "employee",pop.default_education()});
+        const auto worker=pop.seed_population(dem,econ,home,100);
+        phaseb::DemographyRules rules;
+        rules.fertility_ppm=rules.infant_death_ppm=rules.child_death_ppm=0;
+        rules.adult_death_ppm=rules.senior_death_ppm=rules.very_old_death_ppm=0;
+        rules.illness_incidence_ppm=rules.accident_ppm=0;
+        rules.primary_access_ppm=rules.secondary_access_ppm=rules.tertiary_access_ppm=0;
+        rules.adult_literacy_access_ppm=rules.training_ppm=0;
+        rules.migration_ppm=310'000; // exactly one worker on January 1
+        rules.destination_by_region["SOURCE"]="TARGET";
+        c.enable_demography(rules);
+        auto world=daily::World::adopt(std::move(gh),19);
+        const auto saved=daily::SnapshotCodec::encode(world);
+        check(view(world).p2_migration_permitted(worker,"TARGET")==!closed,
+              "the explicit migration law did not identify the receiving border");
+        if(closed) {
+            phasegh::World::Plan explicit_move;
+            explicit_move[10].push_back([=](phasegh::Stage& stage) {
+                stage.phase_c().migrate_with_explicit_property_allocation(
+                    worker,1,"TARGET",away,"A","B",11,"company:A",1);
+            });
+            auto explicit_world=daily::SnapshotCodec::decode(saved);
+            check(rejects([&]{explicit_world.advance_day(explicit_move);})&&
+                  daily::SnapshotCodec::encode(explicit_world)==saved,
+                  "forbidden explicit migration did not preserve people and assets");
+        }
+        world.advance_day();
+        const auto& live=view(world);
+        People source=0,target=0;
+        for(const auto& [id,row]:live.people().slices()) {
+            const auto& region=live.people().demographic(row.key.demographic).region;
+            if(region=="SOURCE")source+=row.count;
+            if(region=="TARGET")target+=row.count;
+        }
+        check(source==(closed?100:99)&&target==(closed?0:1)&&
+              live.people().population()==100&&live.people().validate(),
+              closed?"daily POP crossed a closed border from a registered origin without a government":
+                     "daily POP did not move across a lawful open route");
+        check(live.cash("A")==50&&live.cash("B")==0&&
+              live.shares("company:A","A")==10&&live.shares("company:A","B")==0,
+              "daily movement changed explicit cash or securities custody");
+    };
+    run(true,true);
+    run(true,false);
+    run(false,false); // registered route with no political rate rows at all
+}
+
 static void land_reform_restricts_only_peasant_internal_migration() {
     const auto run=[](const std::string& choice,bool domestic,bool restricted,
                       const std::string& borders="no_migration_controls") {
@@ -2312,6 +2385,7 @@ int main(){
         canonical_citizenship_homeland_allows_actual_border_movement();
         national_heritage_amendments_change_real_pop_wages();
         physical_migration_and_law_block();
+        daily_migration_checks_receiving_law_without_an_origin_government();
         land_reform_restricts_only_peasant_internal_migration();
         abolition_preserves_real_people_and_membership();
         economic_law_restricts_real_company_ownership();

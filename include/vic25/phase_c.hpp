@@ -4402,19 +4402,48 @@ public:
                     occupation_mortality,
                     education!=std::optional<std::string>("no_schools")});
             }
+        const auto apply_rate_factor=[](People base,std::int64_t factor)->People {
+            const auto scaled=std::clamp<std::int64_t>(
+                1'000'000+factor,0,2'000'000);
+            const auto adjusted=phaseb::mul_checked(
+                static_cast<std::int64_t>(base),scaled)/1'000'000;
+            return static_cast<People>(
+                std::clamp<std::int64_t>(adjusted,0,1'000'000));
+        };
         phaseb::Engine::RateAdjustment adjustment;
-        if(!rates.empty())adjustment=[&,day,days_in_month](
+        if(!rates.empty()||(demographic_rules_.migration_ppm>0&&
+                            !demographic_rules_.destination_by_region.empty()))
+            adjustment=[&,day,days_in_month](
                 const phaseb::World& population,Id id,
                 const char* kind,People base)->People {
-            if(!population.has_slice(id))return base;
+            const std::string_view metric(kind);
+            if((rates.empty()&&metric!="migration")||!population.has_slice(id))return base;
             const auto& dem=population.demographic(
                 population.slice(id).key.demographic);
+            if(metric=="migration") {
+                // The legal route is binding independently of optional political
+                // rate rows, including when only the receiving government exists.
+                const auto dest=demographic_rules_.destination_by_region.find(
+                    dem.region);
+                if(dest==demographic_rules_.destination_by_region.end()||
+                   !p2_migration_permitted(id,dest->second))return 0;
+                const auto next=sovereignty_.find(dest->second);
+                if(next==sovereignty_.end())return base;
+                const auto target=rates.find(next->second);
+                if(target==rates.end())return base;
+                auto factor=target->second.migration;
+                // Apply only the receiving country's flat effects to a
+                // destination verified as unincorporated.
+                if(!p1_region_incorporated(dest->second).value_or(true))
+                    factor=phaseb::add_checked(factor,
+                        target->second.unincorporated_migration);
+                return apply_rate_factor(base,factor);
+            }
             const auto juris=sovereignty_.find(dem.region);
             if(juris==sovereignty_.end())return base;
             const auto found=rates.find(juris->second);
             if(found==rates.end())return base;
             const auto& policy=found->second;
-            const std::string metric(kind);
             if(metric=="school") {
                 if(!policy.schools_allowed)return 0;
                 auto access=phaseb::add_checked(policy.school,
@@ -4448,29 +4477,8 @@ public:
                 const auto incorporated=p1_incorporation_.find(dem.region);
                 if(incorporated!=p1_incorporation_.end()&&incorporated->second)
                     factor=phaseb::add_checked(factor,policy.healthcare);
-            } else if(metric=="migration") {
-                const auto dest=demographic_rules_.destination_by_region.find(
-                    dem.region);
-                if(dest==demographic_rules_.destination_by_region.end()||
-                   !p2_migration_permitted(id,dest->second))return 0;
-                const auto next=sovereignty_.find(dest->second);
-                if(next!=sovereignty_.end())
-                    if(const auto target=rates.find(next->second);
-                       target!=rates.end()) {
-                        factor=target->second.migration;
-                        // Apply only the receiving country's flat effects
-                        // to a destination verified as unincorporated.
-                        if(!p1_region_incorporated(dest->second).value_or(true))
-                            factor=phaseb::add_checked(factor,
-                                target->second.unincorporated_migration);
-                    }
             } else return base;
-            const auto scaled=std::clamp<std::int64_t>(
-                1'000'000+factor,0,2'000'000);
-            const auto adjusted=phaseb::mul_checked(
-                static_cast<std::int64_t>(base),scaled)/1'000'000;
-            return static_cast<People>(
-                std::clamp<std::int64_t>(adjusted,0,1'000'000));
+            return apply_rate_factor(base,factor);
         };
         (void)phaseb::Engine{demographic_rules_}.advance_day(
             people_,day,days_in_month,std::move(adjustment));
