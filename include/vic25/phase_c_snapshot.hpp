@@ -473,8 +473,10 @@ struct SnapshotCodec {
         }
         if(!w.people_.exact_birth_days_.empty()) {
             const auto calendar_day=w.people_.native_calendar_day();
-            ar(std::string(calendar_day>0?"VIC25_PHASEC_EXACT_BIRTH_DAYS_2":
-                                          "VIC25_PHASEC_EXACT_BIRTH_DAYS_1"));
+            ar(std::string(w.people_.native_age_previous_month_?
+                    "VIC25_PHASEC_EXACT_BIRTH_DAYS_3":
+                    (calendar_day>0?"VIC25_PHASEC_EXACT_BIRTH_DAYS_2":
+                                    "VIC25_PHASEC_EXACT_BIRTH_DAYS_1")));
             ar(w.people_.exact_birth_days_);
             // Age-sensitive jobs are validated on load before the outer
             // daily wrapper restores its date. Keep the committed POP day.
@@ -730,18 +732,22 @@ struct SnapshotCodec {
                    w.bank_interest_fraction_.size()>1'000'000)
                     throw std::runtime_error("invalid bank interest extension");
             } else if((extension=="VIC25_PHASEC_EXACT_BIRTH_DAYS_1"||
-                       extension=="VIC25_PHASEC_EXACT_BIRTH_DAYS_2")&&
+                       extension=="VIC25_PHASEC_EXACT_BIRTH_DAYS_2"||
+                       extension=="VIC25_PHASEC_EXACT_BIRTH_DAYS_3")&&
                       !seen_birth_days) {
                 seen_birth_days=true;
                 ar(w.people_.exact_birth_days_);
                 if(w.people_.exact_birth_days_.size()>5'000'000)
                     throw std::runtime_error("oversized POP exact birth extension");
-                if(extension=="VIC25_PHASEC_EXACT_BIRTH_DAYS_2") {
+                if(extension!="VIC25_PHASEC_EXACT_BIRTH_DAYS_1") {
                     int calendar_day{};
                     ar(calendar_day);
-                    if(calendar_day<1||calendar_day>31||w.people_.exact_birth_days_.empty())
+                    const bool previous=extension=="VIC25_PHASEC_EXACT_BIRTH_DAYS_3";
+                    if(calendar_day<1||calendar_day>31||w.people_.exact_birth_days_.empty()||
+                       (previous&&(calendar_day<28||w.people_.month()<=0)))
                         throw std::runtime_error("invalid POP calendar day extension");
                     w.people_.set_native_calendar_day(calendar_day);
+                    w.people_.native_age_previous_month_=previous;
                 }
             } else if(extension=="VIC25_PHASEC_WAGE_INSOLVENCY_1"&&!seen_wages) {
                 seen_wages=true;

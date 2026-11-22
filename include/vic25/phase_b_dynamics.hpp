@@ -128,7 +128,82 @@ public:
         report.digest=w.fingerprint();
         return report;
     }
+    // An otherwise idle bare native day must still apply a real age
+    // change. On a known day, the hypothetical age is the month quotient.
+    static bool known_birthday_labor_due(const World& w,const LaborRule& rule,int day) {
+        for(const auto& [id,born]:w.exact_birth_days()) {
+            if(born!=day)continue;
+            const auto age=w.age_months(w.slice(id).key.demographic);
+            if(contract_age_ineligible(w,id,age,rule)||
+               life_course_kind(w,id,age,rule)!=LifeCourseKind::none)return true;
+        }
+        return false;
+    }
+
+    // This is a calendar/contract rule, not a stochastic demography hazard.
+    // The bare clock already processes first days at month opening.
+    static void apply_known_birthday_labor(
+            World& w,const LaborRule& rule,int previous_month_final_day) {
+        const auto day=w.native_calendar_day();
+        if(day<=0)return;
+        for(const auto& [id,born]:w.exact_birth_days()) {
+            const bool missed=day==1&&previous_month_final_day>0&&
+                              born>previous_month_final_day;
+            if(born!=day&&!missed)continue;
+            // A missing calendar date can advance exact age on the next
+            // actual day. The registered birth day is never substituted.
+            const auto age=w.age_months_slice(id);
+            if(contract_age_ineligible(w,id,age,rule))
+                w.release(id,w.employed(id));
+            if(!missed||age==rule.minimum_age_months||age==rule.maximum_age_months)
+                labor_life_course(w,id,rule,true);
+        }
+    }
 private:
+    enum class LifeCourseKind {none,entry,retirement};
+
+    static bool contract_age_ineligible(const World& w,Id id,std::int64_t age,
+                                        const LaborRule& rule) {
+        const auto* job=w.job(id);
+        if(!job)return false;
+        const LaborRule base;
+        const auto minimum=std::max({base.minimum_age_months,
+            rule.minimum_age_months,job->requirements.minimum_age_months});
+        const auto maximum=std::min({base.maximum_age_months,
+            rule.maximum_age_months,job->requirements.maximum_age_months});
+        return age<minimum||age>=maximum;
+    }
+    static LifeCourseKind life_course_kind(const World& w,Id id,
+            std::int64_t age,const LaborRule& rule) {
+        const auto& row=w.slice(id);
+        const auto& d=w.demographic(row.key.demographic);
+        if(d.service!=Service::civilian && d.service!=Service::reserve)
+            return LifeCourseKind::none;
+        const auto& econ=w.economic(row.key.economic);
+        if(age>=rule.minimum_age_months&&age<rule.maximum_age_months&&
+           econ.profession=="not_assigned"&&econ.livelihood=="inactive")
+            return LifeCourseKind::entry;
+        if(age>=rule.maximum_age_months&&econ.livelihood=="wage")
+            return LifeCourseKind::retirement;
+        return LifeCourseKind::none;
+    }
+    static void labor_life_course(World& w,Id id,const LaborRule& rule,
+                                  bool same_identity=false) {
+        if(!w.has_slice(id))return;
+        const auto change=life_course_kind(w,id,w.age_months_slice(id),rule);
+        if(change==LifeCourseKind::none)return;
+        const auto current=w.slice(id);
+        auto next=w.economic(current.key.economic);
+        if(change==LifeCourseKind::entry) {
+            next.profession="unskilled_worker";next.livelihood="wage";
+            next.labor_class="unemployed";
+        } else {
+            if(w.employed(id)>0)w.release(id,w.employed(id));
+            next.livelihood="inactive";next.labor_class="retired";
+        }
+        if(same_identity)w.rekey_birthday_labor(id,next);
+        else (void)w.reclassify_economic(id,current.count,next,0);
+    }
     DemographyRules rules_;
     RateAdjustment adjustment_;
     [[nodiscard]] People adjusted_rate(const World& w,Id id,
@@ -256,25 +331,9 @@ private:
         // transition; it must not be inferred solely from a family POP's trade.
         // Retirement preserves occupational identity/history while changing livelihood.
         const auto life_course=lifecycle_due?w.slices():std::map<Id,Slice>{};
-        for(const auto& [id,snapshot]:life_course){
-            if(!w.has_slice(id))continue;
-            const auto current=w.slice(id);
-            const auto& d=w.demographic(current.key.demographic);
-            if(d.service!=Service::civilian && d.service!=Service::reserve)continue;
-            const auto age=w.age_months_slice(id);
-            const auto& econ=w.economic(current.key.economic);
-            if(age>=rules_.labor.minimum_age_months && age<rules_.labor.maximum_age_months &&
-               econ.profession=="not_assigned" && econ.livelihood=="inactive"){
-                Economic adult=econ;
-                adult.profession="unskilled_worker";adult.livelihood="wage";
-                adult.labor_class="unemployed";
-                (void)w.reclassify_economic(id,current.count,adult,0);
-            }else if(age>=rules_.labor.maximum_age_months && econ.livelihood=="wage"){
-                if(w.employed(id)>0)w.release(id,w.employed(id));
-                Economic retired=econ;
-                retired.livelihood="inactive";retired.labor_class="retired";
-                (void)w.reclassify_economic(id,current.count,retired,0);
-            }
+        for(const auto& [id,snapshot]:life_course) {
+            (void)snapshot;
+            labor_life_course(w,id,rules_.labor);
         }
         // Exogenous monthly migration: move actual people and cancel their local
         // employment before future job matching; no new money or population.

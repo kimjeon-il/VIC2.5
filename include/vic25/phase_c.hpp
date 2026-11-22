@@ -4197,7 +4197,15 @@ public:
         require_stage({0});
         ensure(day_of_month>=1&&day_of_month<=31,
                "invalid native day for POP birth/eligibility");
+        const auto previous_month_final_day=
+            people_.committed_previous_month_final_day();
         people_.set_native_calendar_day(day_of_month);
+        phaseb::Engine::apply_known_birthday_labor(
+            people_,demographic_rules_.labor,previous_month_final_day);
+    }
+    [[nodiscard]] bool phase_time_known_birthday_labor_due(int day_of_month)const {
+        return phaseb::Engine::known_birthday_labor_due(
+            people_,demographic_rules_.labor,day_of_month);
     }
     // Calendar day executes in the caller's one-day staging transaction.
     // This is the only routine that applies autonomous POP risk on a date.
@@ -4495,7 +4503,7 @@ public:
                 // Update month-based age classification after today's real
                 // population events; never rerun month-sized risk rates.
                 staged.strike_active_.clear();
-                staged.people_.finish_month();
+                staged.people_.finish_native_calendar_month();
                 staged.people_.release_ineligible();
             }
             if(n==10&&(!staged.p3_groups_.empty()||

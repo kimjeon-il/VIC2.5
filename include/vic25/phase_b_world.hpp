@@ -5,6 +5,7 @@ namespace vic25::phasec { struct SnapshotCodec; }
 namespace vic25::phaseb {
 
 class World {
+    friend class Engine;
     friend struct ::vic25::phasec::SnapshotCodec;
 public:
     explicit World(std::int64_t month = 0) : month_(month) { default_health_ = health_profile(Health{}); default_education_ = education_profile(Education{}); }
@@ -44,8 +45,12 @@ public:
     void set_native_calendar_day(int day) {
         require(day>=0&&day<=31,"invalid native POP calendar day");
         native_day_of_month_=day;
+        native_age_previous_month_=false;
     }
     [[nodiscard]] int native_calendar_day()const{return native_day_of_month_;}
+    [[nodiscard]] int committed_previous_month_final_day()const {
+        return native_age_previous_month_?native_day_of_month_:0;
+    }
     [[nodiscard]] int exact_birth_day(Id slice_id)const {
         auto it=exact_birth_days_.find(slice_id);
         return it==exact_birth_days_.end()?0:it->second;
@@ -60,8 +65,11 @@ public:
         const auto& s=slice(slice_id);
         const auto months=age_months(s.key.demographic);
         const int born=exact_birth_day(slice_id);
-        return months-(native_day_of_month_>0&&born>0&&
-                       native_day_of_month_<born?1:0);
+        if(native_day_of_month_<=0||born==0)return months;
+        // A month-close commit advances the monthly cursor, not the
+        // already processed civil date that owns this day's exact age.
+        return months-(native_age_previous_month_?1:0)-
+                      (native_day_of_month_<born?1:0);
     }
 
     Id health_profile(const Health& health) {
@@ -411,7 +419,11 @@ public:
         }catch(const std::exception&){return false;}
     }
     // Called exclusively on the staged world just before a successful month commit.
-    void finish_month() { ++month_; }
+    void finish_month() { ++month_;native_age_previous_month_=false; }
+    void finish_native_calendar_month() {
+        finish_month();
+        native_age_previous_month_=native_day_of_month_>0;
+    }
     // deterministic, conservative fixed-point count (rate = per million people per month).
     People allocate_rate(Id id, const std::string& category, People exposed, People ppm) {
         require(ppm>=0 && ppm<=PPM && exposed>=0,"invalid rate");
@@ -472,7 +484,8 @@ public:
 private:
     Id next_id_{1},next_partition_{10'000},default_health_{},default_education_{};
     std::int64_t month_{};
-    int native_day_of_month_{}; // transient; next actual day sets this at Stage0
+    int native_day_of_month_{}; // committed local age context; Stage0 sets the next native day
+    bool native_age_previous_month_{}; // true only between native month close and next Stage0
     std::map<Id,int> exact_birth_days_; // optional saved extension
     std::map<Health,Id> health_ids_;
     std::map<Id,Health> health_;
@@ -497,6 +510,23 @@ private:
     }
     void log(EventKind kind,Id from,Id to,People count,People employed_affected,std::string provenance){
         events_.push_back(Event{next_id_++,month_,kind,from,to,count,employed_affected,std::move(provenance)});
+    }
+    // A whole-cohort working-age change moves nobody between households
+    // or jurisdictions. Keep the actual people/anchors, outstanding claims,
+    // birth day and risk credits attached to this same slice identity.
+    void rekey_birthday_labor(Id id,const Economic& next) {
+        auto& row=slices_.at(id);
+        auto key=row.key;
+        key.economic=economic_profile(next);
+        if(key==row.key)return;
+        while(slice_ids_.contains(key))key.partition=next_partition_++;
+        auto position=slice_ids_.extract(row.key);
+        require(!position.empty()&&position.mapped()==id,"missing birthday labor slice");
+        position.key()=key;
+        slice_ids_.insert(std::move(position));
+        row.key=key;
+        ++row.revision;
+        log(EventKind::occupation,id,id,row.count,0,"economic life-course transition");
     }
     Id transfer_impl(Id from_id,People count,Id d,Id e,Id h,EventKind reason,
                      std::optional<People> jobs_moving,std::string provenance,Id partition_override=0){

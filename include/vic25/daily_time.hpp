@@ -347,6 +347,7 @@ public:
         if(commands.empty()&&!close&&!first_calendar_day&&
            !native_actions&&!cargo_due&&!treaty_due&&!construction_due &&
            !engine_.base().core().core().daily_auto_demography_enabled()&&
+           !engine_.base().core().core().phase_time_known_birthday_labor_due(current.day)&&
            engine_.base().core().core().annual_bank_interest_ppm()==0&&
            !engine_.base().core().core().has_active_sovereign_bonds()&&
            !engine_.has_autonomous_daily_trade()&&
