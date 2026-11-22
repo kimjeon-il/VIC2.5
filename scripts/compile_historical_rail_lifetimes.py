@@ -24,15 +24,23 @@ def read_tsv(path, expected):
         return list(reader)
 
 
-def certain_month(date_string):
+def exact_date(date_string):
     if not date_string or len(date_string) != 10:
         raise ValueError("day-level verified opening required")
     date = dt.date.fromisoformat(date_string)
     if date.year < 1801:
         raise ValueError("VIC2.5 source scope starts in 1801")
+    return date
+
+
+def first_complete_month(date):
     # If a line opened on the 15th, its first *complete* month is next month.
     # This is an evidence precision rule, not a fabricated first-of-month date.
     return date.year * 12 + date.month - 1 + (date.day != 1)
+
+
+def certain_month(date_string):
+    return first_complete_month(exact_date(date_string))
 
 
 def validate_catalog(path):
@@ -46,12 +54,16 @@ def validate_catalog(path):
             raise ValueError("duplicate or incomplete historical line")
         if row["from_station"] == row["to_station"] or not row["source_url"].startswith("https://"):
             raise ValueError("missing independent rail-opening evidence")
-        opened = certain_month(row["opened_on"])
-        freight = (certain_month(row["confirmed_freight_start_on"])
+        opened = exact_date(row["opened_on"])
+        freight = (exact_date(row["confirmed_freight_start_on"])
                    if row["confirmed_freight_start_on"] else None)
+        # Monthly bounds deliberately discard dates within the same month.
+        # Validate source chronology at the precision of the evidence first.
         if freight is not None and freight < opened:
             raise ValueError("freight service cannot precede first verified opening")
-        by_id[key] = (opened, freight, row)
+        by_id[key] = (first_complete_month(opened),
+                      first_complete_month(freight) if freight is not None else None,
+                      row)
     return by_id
 
 
