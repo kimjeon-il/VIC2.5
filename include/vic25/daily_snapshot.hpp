@@ -201,7 +201,8 @@ public:
         if(std::filesystem::exists(file))
             throw std::runtime_error("TIME_ERR_REFUSE_OVERWRITE_EXISTING_SAVE");
         const auto bytes=encode(world);
-        const auto tmp=file.string()+".uncommitted";
+        auto tmp=file;
+        tmp+=".uncommitted";
         {
             std::ofstream out(tmp,std::ios::binary|std::ios::trunc);
             if(!out)throw std::runtime_error("TIME_ERR_CHECKPOINT_OPEN");

@@ -47,11 +47,11 @@ def run(exe):
         assert adopted["date"] > opening["date"]
         assert adopted["tariff_ppm"] == 100_000 and "10%" in panel.policy.get()
         with TemporaryDirectory() as directory:
-            save = Path(directory) / "trial with spaces.vic25"
+            save = Path(directory) / "한글 trial with spaces.vic25"
             with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
                 panel.save_button.invoke()
                 wait(root, panel)
-                assert save.is_file()
+                assert save.is_file(), panel.notice.get()
                 before = save.read_bytes()
                 panel.save_button.invoke()
                 wait(root, panel)

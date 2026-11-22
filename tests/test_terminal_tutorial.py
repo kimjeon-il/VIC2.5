@@ -185,6 +185,9 @@ def main():
         require(replies[2] == replies[1] and not replies[3]["ok"]
                 and replies[3]["status"] == opening, "status or rejected tariff advanced")
         split = replies[5]["status"]
+        require(replies[6]["ok"] and replies[6]["status"] == split,
+                f"Unicode checkpoint save failed: {replies[6]}")
+        require(replies[11]["ok"], f"final checkpoint save failed: {replies[11]}")
         require(all(not r["ok"] and r["status"] == split and r["error"]
                     for r in replies[7:10]), "failed load or save replaced live state")
         finish = replies[10]["status"]
