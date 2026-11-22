@@ -32,6 +32,9 @@ inline void Stage::phase_time_infamy_decay(
         require(today>=state.last_day,
                 "H Infamy cannot process days out of order");
         if(today==state.last_day)continue;
+        // No missed daily change is possible with neither balance nor carry.
+        // Rebase before Stage9 can add a new incident to this dormant record.
+        if(!state.has_decay_work()) { state.last_day=today;continue; }
         require(today==state.last_day+1,
                 "H Infamy calendar gap must not silently lose decay");
         const auto& core=phase_c();

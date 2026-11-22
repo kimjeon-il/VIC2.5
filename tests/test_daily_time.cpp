@@ -329,16 +329,183 @@ static void quiet_days_process_only_due_regional_decree_changes() {
     skip_quiet(world);
 }
 
+static void quiet_calendar_preserves_authoritative_infamy_decay() {
+    namespace gh=vic25::phasegh;
+    namespace b=vic25::phaseb;
+    auto opening=base_world();
+    auto& geo=opening.seed_geography();
+    geo.seed_province(2,"R2","COUNTRY-B");geo.seed_unit(2,"COUNTRY-B","STATE-B");
+    geo.seed_assignment(2,2);geo.seed_border(1,2);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_government("COUNTRY-A","HEAD_A","PM_A",5,3);
+    c.seed_government("COUNTRY-B","HEAD_B","PM_B",5,3);
+    for(const std::string country:{"COUNTRY-A","COUNTRY-B"}) {
+        const auto region=country=="COUNTRY-A"?"R1":"R2";
+        const auto unit="SCENARIO-UNIT-"+country;
+        c.seed_unit(unit);c.seed_army_deployment(unit,country,region);
+        c.seed_stock(unit,region,"ammunition",2);
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({region,"shared","shared",2});
+        const auto e=pop.economic_profile({region,"soldier","wage","employee",
+                                          pop.default_education()});
+        const auto d=pop.demographic_profile({region,23640,b::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),b::Service::active});
+        c.seed_active(unit,pop.seed_population(d,e,h,2));
+    }
+    auto world=World::adopt(std::move(opening),21);
+    DayPlan claim;
+    claim[9].push_back([](gh::Stage& stage) {
+        stage.geography().queue_claim("NATIVE-CALENDAR-CLAIM",2,"COUNTRY-A",true);
+    });
+    world.advance_day(claim);
+    while(world.date()<Date{2000,2,1})world.advance_day();
+    DayPlan crisis;
+    crisis[9].push_back([](gh::Stage& stage) {
+        stage.open_crisis("NATIVE-CALENDAR-CRISIS",2,"COUNTRY-A","COUNTRY-B","PM_A");
+    });
+    world.advance_day(crisis);
+    while(world.date()<Date{2000,3,1})world.advance_day();
+    DayPlan escalate;
+    escalate[9].push_back([](gh::Stage& stage) {
+        check(stage.begin_war_from_crisis("NATIVE-CALENDAR-CRISIS","COUNTRY-A","PM_A"),
+              "fixture did not record an actual game crisis escalation");
+    });
+    const auto incident_day=world.day_index();
+    world.advance_day(escalate);
+    check(world.engine().infamy_view("COUNTRY-A").value_ppm==1'000'000&&
+          world.engine().diplomacy().infamy_events.size()==1,
+          "crisis did not add its accounted native H incident");
+    DayPlan tick;
+    tick[0].push_back([](gh::Stage&) {});
+    auto forced=SnapshotCodec::decode(SnapshotCodec::encode(world));
+    world.advance_day();forced.advance_day(tick);
+    world=SnapshotCodec::decode(SnapshotCodec::encode(world));
+    world.advance_day();forced.advance_day(tick);
+    world.advance_day(tick);forced.advance_day(tick);
+    const auto actual=world.engine().infamy_view("COUNTRY-A");
+    check(actual.last_day==incident_day+3&&actual.value_ppm<1'000'000&&
+          actual.value_ppm>0&&SnapshotCodec::encode(world)==SnapshotCodec::encode(forced),
+          "unforced active H calendar lost decay or differed from explicit save/replay");
+}
+
+static void quiet_calendar_skips_empty_infamy_without_losing_later_incidents() {
+    namespace gh=vic25::phasegh;
+    auto opening=base_world();
+    opening.seed_geography().seed_core().seed_core().seed_government(
+        "COUNTRY-A","HEAD_A","PM_A",5,3);
+    auto world=World::adopt(std::move(opening),22);
+    DayPlan incident,tick,next_incident;
+    incident[9].push_back([](gh::Stage& stage) {
+        stage.record_infamy("small","COUNTRY-A","fixture:recorded diplomatic incident",1);
+    });
+    tick[0].push_back([](gh::Stage&) {});
+    next_incident[9].push_back([](gh::Stage& stage) {
+        stage.record_infamy("new","COUNTRY-A","fixture:second recorded diplomatic incident",1'000'000);
+    });
+    world.advance_day(incident);
+    world.advance_day(tick);
+    check(world.engine().infamy_view("COUNTRY-A").value_ppm==0&&
+          world.engine().diplomacy().infamy.at("COUNTRY-A").carry==0,
+          "fixture did not exhaust both balance and fractional carry");
+    auto forced=SnapshotCodec::decode(SnapshotCodec::encode(world));
+    const auto before=world.engine().commit_id();
+    world.advance_day();world.advance_day();
+    check(world.engine().commit_id()==before,
+          "dormant zero Infamy must not require native calendar commits");
+    forced.advance_day(tick);forced.advance_day(tick);
+    world=SnapshotCodec::decode(SnapshotCodec::encode(world));
+    world.advance_day(next_incident);forced.advance_day(next_incident);
+    world.advance_day();forced.advance_day(tick);
+    const auto& actual=world.engine().diplomacy().infamy.at("COUNTRY-A");
+    const auto& expected=forced.engine().diplomacy().infamy.at("COUNTRY-A");
+    check(actual.value_ppm==expected.value_ppm&&actual.carry==expected.carry&&
+          actual.last_day==expected.last_day&&actual.value_ppm<1'000'000&&
+          world.engine().diplomacy().infamy_events.size()==2,
+          "idle zero carry changed later native incident or lost its decay");
+}
+
+// Old 2.0 bare idle advances updated just these two outer fields. Keep
+// nested H bytes exact (including fractional carry and incident journal).
+static std::string infamy_snapshot_with_calendar_gap(
+        const std::string& bytes,const char* version,int skipped_days) {
+    auto payload=bytes.substr(0,bytes.size()-8);
+    std::istringstream in(payload,std::ios::binary);
+    detail::Reader r{in};
+    std::string magic,old_version,time,calendar;
+    r(magic);r(old_version);r(time);r(calendar);
+    std::uint64_t n{};r(n);
+    in.seekg(static_cast<std::streamoff>(n),std::ios::cur);
+    const auto clock_offset=static_cast<std::size_t>(in.tellg());
+    DayIndex day{};std::uint64_t commits{};r(day);r(commits);
+    const auto clock_end=static_cast<std::size_t>(in.tellg());
+    std::ostringstream prefix(std::ios::binary);
+    detail::Writer header{prefix};
+    header(magic);header(std::string(version));header(time);header(calendar);
+    const auto prefix_bytes=prefix.str();
+    payload.replace(0,prefix_bytes.size(),prefix_bytes);
+    std::ostringstream clock(std::ios::binary);
+    detail::Writer head{clock};
+    head(day+skipped_days);
+    head(static_cast<std::uint64_t>(static_cast<std::int64_t>(commits)+skipped_days));
+    payload.replace(clock_offset,clock_end-clock_offset,clock.str());
+    std::ostringstream tail(std::ios::binary);
+    detail::Writer checksum{tail};
+    checksum(vic25::phasec::persistence_detail::checksum(payload));
+    return payload+tail.str();
+}
+static void old_infamy_snapshot_resumes_without_inventing_past_decay() {
+    namespace gh=vic25::phasegh;
+    auto opening=base_world();
+    opening.seed_geography().seed_core().seed_core().seed_government(
+        "COUNTRY-A","HEAD_A","PM_A",5,3);
+    auto world=World::adopt(std::move(opening),23);
+    DayPlan incident,tick;
+    incident[9].push_back([](gh::Stage& stage) {
+        stage.record_infamy("retained","COUNTRY-A","fixture:recorded diplomatic incident",1'000'000);
+    });
+    tick[0].push_back([](gh::Stage&) {});
+    world.advance_day(incident);world.advance_day(tick);
+    const auto prior=world.engine().diplomacy().infamy.at("COUNTRY-A");
+    check(prior.value_ppm>0&&prior.carry>0,"fixture must preserve nonzero balance and carry");
+    const auto clean=SnapshotCodec::encode(world);
+    const auto old=infamy_snapshot_with_calendar_gap(clean,"vic25-daily-save/2.0",2);
+    auto restored=SnapshotCodec::decode(old);
+    const auto& resume=restored.engine().diplomacy().infamy.at("COUNTRY-A");
+    check(restored.date()==Date{2000,1,5}&&resume.value_ppm==prior.value_ppm&&
+          resume.carry==prior.carry&&resume.last_day==restored.day_index()-1&&
+          restored.engine().diplomacy().infamy_events.size()==1,
+          "legacy resume changed recorded Infamy, inferred history or left the clock stale");
+    const auto migrated=SnapshotCodec::encode(restored);
+    check(migrated.find("vic25-daily-save/2.1")!=std::string::npos&&
+          SnapshotCodec::encode(SnapshotCodec::decode(migrated))==migrated&&
+          rejects([&]{(void)SnapshotCodec::decode(infamy_snapshot_with_calendar_gap(
+              migrated,"vic25-daily-save/2.1",2));})&&
+          rejects([&]{(void)SnapshotCodec::decode(infamy_snapshot_with_calendar_gap(
+              clean,"vic25-daily-save/2.0",-1));}),
+          "active snapshot version must reject new gaps and impossible future timestamps");
+    const auto day=restored.day_index();
+    auto replay=SnapshotCodec::decode(migrated);
+    restored.advance_day();replay.advance_day(tick);
+    const auto& after=restored.engine().diplomacy().infamy.at("COUNTRY-A");
+    check(after.value_ppm==prior.value_ppm-(5'000'000+prior.carry)/366&&
+          after.carry==(5'000'000+prior.carry)%366&&after.last_day==day&&
+          SnapshotCodec::encode(restored)==SnapshotCodec::encode(replay),
+          "first prospective day did not preserve exact saved carry and replay");
+}
+
 int main() {
     try {
         calendar_exact();
+        quiet_calendar_preserves_authoritative_infamy_decay();
+        quiet_calendar_skips_empty_infamy_without_losing_later_incidents();
+        old_infamy_snapshot_resumes_without_inventing_past_decay();
         quiet_days_process_only_due_regional_decree_changes();
         daily_real_ledgers_and_month_close();
         daily_rejection_and_atomic_month_rollback();
         exact_legacy_migration();
         save_load_deterministic_replay();
         no_op_365_days_does_not_recalculate_monthly();
-        std::cout<<"DAILY_TIME_V2_REAL_ENGINE: 7 groups PASS\n";
+        std::cout<<"DAILY_TIME_V2_REAL_ENGINE: 10 groups PASS\n";
         return 0;
     }catch(const std::exception& e) {
         std::cerr<<"DAILY_TIME_V2 FAIL: "<<e.what()<<"\n";

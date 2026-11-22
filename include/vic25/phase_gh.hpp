@@ -23,6 +23,8 @@
 #include <utility>
 #include <vector>
 
+namespace vic25::daily { struct SnapshotCodec; }
+
 namespace vic25::phasegh {
 using Id = phasee::Id;
 using Month = phasee::Month;
@@ -409,6 +411,7 @@ enum class InfamyTier:std::uint8_t {
 };
 struct InfamyRecord {
     std::int64_t value_ppm{},carry{},last_day{-1};
+    [[nodiscard]] bool has_decay_work() const { return value_ppm!=0||carry!=0; }
 };
 struct InfamyEvent {
     std::string id,country,source;
@@ -1490,6 +1493,7 @@ public:
 
 class World {
     friend struct SnapshotCodec;
+    friend struct vic25::daily::SnapshotCodec;
 public:
     using Task=std::function<void(Stage&)>;
     using Plan=std::array<std::vector<Task>,12>;
@@ -1497,6 +1501,15 @@ private:
     phasee::World core_;
     TradeState trade_;
     DiplomacyState diplomacy_;
+    void resume_legacy_daily_infamy(std::int64_t previous_day) {
+        // The older outer date could skip native H work. Historical inputs
+        // are unavailable: preserve saved balances, carry and all events.
+        for(auto& [country,record]:diplomacy_.infamy) {
+            (void)country;
+            if(record.has_decay_work()&&record.last_day>=0&&record.last_day<previous_day)
+                record.last_day=previous_day;
+        }
+    }
     void check(const TradeState& g, const DiplomacyState& h,
                const phasee::SpatialStage& s) const {
         for(const auto& [id,r]:g.routes) {
@@ -1590,7 +1603,8 @@ public:
         // mitigation; this avoids circular prestige/rank/Influence updates.
         std::map<std::string,std::int32_t> infamy_bonuses;
         for(const auto& [country,record]:diplomacy_.infamy) {
-            (void)record;
+            if(!record.has_decay_work()||!core_.core().core().has_government(country))
+                continue;
             const auto cap=diplomatic_capacity(country);
             if(cap.influence.complete)
                 infamy_bonuses[country]=cap.infamy_decay_bonus_ppm;
@@ -1732,6 +1746,10 @@ public:
     [[nodiscard]] const phasee::World& base() const {return core_;}
     [[nodiscard]] Month month() const{return core_.month();}
     [[nodiscard]] std::uint64_t commit_id()const{return core_.commit_id();}
+    [[nodiscard]] bool has_daily_infamy_decay_work() const {
+        return std::any_of(diplomacy_.infamy.begin(),diplomacy_.infamy.end(),
+            [](const auto& entry){ return entry.second.has_decay_work(); });
+    }
     [[nodiscard]] bool has_due_daily_treaty(std::int64_t day)const {
         for(const auto& [id,t]:diplomacy_.daily_treaties) {
             (void)id;

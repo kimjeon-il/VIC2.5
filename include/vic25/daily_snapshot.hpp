@@ -122,17 +122,32 @@ template<class A,class W>void metadata(A& a,W& world,int format) {
 } // namespace detail
 
 struct SnapshotCodec {
+private:
+    static void validate_infamy_clock(const World& world) {
+        const auto previous=world.day_-1;
+        for(const auto& [country,record]:world.engine_.diplomacy().infamy) {
+            (void)country;
+            require(record.last_day<=previous,"TIME_ERR_INFAMY_FUTURE_DAY");
+            require(!record.has_decay_work()||
+                    (record.last_day>=0&&record.last_day==previous),
+                    "TIME_ERR_ACTIVE_INFAMY_CALENDAR_GAP");
+        }
+    }
+public:
     static constexpr const char* magic="VIC25_DAILY_SNAPSHOT_1";
     static constexpr const char* version="vic25-daily-save/2.0";
+    static constexpr const char* active_infamy_version="vic25-daily-save/2.1";
     static constexpr const char* prior_version="vic25-daily-save/1.0";
     static constexpr const char* conversion_version="vic25-daily-save/1.1";
     static std::string encode(const World& world) {
         world.validate();
+        validate_infamy_clock(world);
         const std::string base=phasegh::SnapshotCodec::encode(world.engine_);
         std::ostringstream os(std::ios::binary|std::ios::out);
         detail::Writer w{os};
         w(std::string(magic));
-        w(std::string(version));
+        w(std::string(world.engine_.has_daily_infamy_decay_work()?
+                      active_infamy_version:version));
         w(std::string(time_contract));
         w(std::string(calendar_contract));
         const auto length=static_cast<std::uint64_t>(base.size());
@@ -161,7 +176,8 @@ struct SnapshotCodec {
         detail::Reader r{is};
         std::string m,v,t,c;
         r(m);r(v);r(t);r(c);
-        if(m!=magic||(v!=version&&v!=prior_version&&v!=conversion_version)||
+        if(m!=magic||(v!=version&&v!=active_infamy_version&&
+                      v!=prior_version&&v!=conversion_version)||
            t!=time_contract||c!=calendar_contract)
             throw std::runtime_error("TIME_ERR_SNAPSHOT_CONTRACT_MISMATCH");
         std::uint64_t length{};r(length);
@@ -172,10 +188,13 @@ struct SnapshotCodec {
         if(!is)throw std::runtime_error("TIME_ERR_TRUNCATED_LEGACY_PAYLOAD");
         auto original=phasegh::SnapshotCodec::decode(base);
         World result=World::adopt(std::move(original));
-        detail::metadata(r,result,v==version?2:(v==conversion_version?1:0));
+        detail::metadata(r,result,(v==version||v==active_infamy_version)?2:
+                                  (v==conversion_version?1:0));
         if(is.peek()!=std::char_traits<char>::eof())
             throw std::runtime_error("TIME_ERR_TRAILING_DATA");
         result.validate();
+        if(v==version)result.engine_.resume_legacy_daily_infamy(result.day_-1);
+        validate_infamy_clock(result);
         return result;
     }
     static void save(const World& world,const std::filesystem::path& file) {
