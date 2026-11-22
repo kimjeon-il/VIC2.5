@@ -1395,6 +1395,104 @@ static void enacted_education_changes_real_daily_schooling() {
     scenario("terakoya",2,true,"SCHOOL",1806,1806);
 }
 
+static void school_staff_capacity_requires_workers_in_the_school_region() {
+    const auto run=[](int local,int distant,phaseb::People seats,
+                      phaseb::People graduates) {
+        phasegh::World opening(24000);
+        auto& geo=opening.seed_geography();
+        geo.seed_unit(1,"A","A-ADMIN");
+        geo.seed_province(1,"SCHOOL","A");geo.seed_assignment(1,1);
+        geo.seed_province(2,"DISTANT","A");geo.seed_assignment(2,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",100);
+        c.seed_actor("TEACHERS",100);
+        c.seed_government("A","HEAD","PRIME",5,3);
+        c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"scenario:school"});
+        c.p1_set_incorporation("SCHOOL",true);
+        c.p1_set_incorporation("DISTANT",true);
+        c.seed_interest_group("Devout");
+        c.p3_seed_group({"A","Devout","","","",P3GroupType::devout,0,0});
+        c.p3_set_ideologies("A","Devout",{"materialist"});
+        law(c,"A","education_system","religious_schools");
+        c.seed_public_institution("SCHOOLS","TEACHERS","SCHOOL","paper",50,1);
+        c.seed_p1_institution("A","SCHOOLS",P1InstitutionKind::education,2);
+        auto& pop=c.seed_population();
+        phaseb::Id member{};
+        std::vector<std::pair<std::string,Money>> payroll;
+        for(const auto* region:{"SCHOOL","DISTANT"}) {
+            const bool at_school=std::string_view(region)=="SCHOOL";
+            const auto home=pop.household_profile({region,"mixed","shared",100});
+            const auto youth=pop.economic_profile({region,"not_assigned","inactive",
+                                                   "ineligible",pop.default_education()});
+            const auto child=pop.demographic_profile({region,23904,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+            if(at_school)pop.seed_population(child,youth,home,100'000);
+            const auto adult=pop.demographic_profile({region,23651,phaseb::Sex::male,
+                "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+            const auto trained=pop.economic_profile({region,"teacher","wage","employee",
+                                                      pop.default_education()});
+            const auto n=at_school?local:distant;
+            if(n) {
+                const auto employee=pop.seed_population(adult,trained,home,n);
+                pop.hire(employee,n,"TEACHERS","teacher",31,{});
+                const auto wallet="HH:"+std::to_string(home);
+                c.seed_actor(wallet,0);
+                payroll.emplace_back(wallet,n);
+            }
+            if(at_school) {
+                const auto observer=pop.economic_profile({region,"observer","wage","unemployed",
+                                                           pop.default_education()});
+                member=pop.seed_population(adult,observer,home,100);
+            }
+        }
+        phaseb::DemographyRules rates;
+        rates.fertility_ppm=0; rates.child_death_ppm=0; rates.adult_death_ppm=0;
+        rates.illness_incidence_ppm=0; rates.accident_ppm=0; rates.training_ppm=0;
+        rates.primary_access_ppm=310'000;
+        c.enable_demography(rates);
+        auto world=daily::World::adopt(std::move(opening),43);
+        phasegh::World::Plan plan;
+        plan[5].push_back([payroll](phasegh::Stage& stage) {
+            for(const auto& [wallet,gross]:payroll)
+                stage.phase_c().wages_under_law("TEACHERS",wallet,"A",gross,"A");
+        });
+        plan[9].push_back([member](phasegh::Stage& stage) {
+            auto& core=stage.phase_c();
+            core.join_interest_group(member,"Devout",100);
+            check(core.p3_trait_modifier_ppm("A","state_education_access_add")==-100'000,
+                  "fixture did not activate the existing Devout school delivery penalty");
+        });
+        auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+        world.advance_day(plan);replay.advance_day(plan);
+        const auto& core=world.engine().base().core().core();
+        check(daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay),
+              "same-school staff coverage was not reproducible after reload");
+        phaseb::People educated=0;
+        for(const auto& [id,row]:core.people().slices()) {
+            (void)id;
+            const auto& dem=core.people().demographic(row.key.demographic);
+            const auto& econ=core.people().economic(row.key.economic);
+            if(dem.region=="SCHOOL"&&dem.birth_month==23904&&
+               core.people().education(econ.education).school==phaseb::School::primary)
+                educated+=row.count;
+        }
+        const auto capacity=core.p1_institution_capacity("SCHOOLS");
+        if(capacity.usable_slots!=seats||educated!=graduates)
+            throw std::runtime_error("school seats/actual graduates: "+
+                std::to_string(capacity.usable_slots)+"/"+std::to_string(educated)+
+                " expected "+std::to_string(seats)+"/"+std::to_string(graduates));
+        check(core.cash("TEACHERS")==98&&core.cash("A")==100,
+              "school's same-day wage postings changed between matched payrolls");
+        for(const auto& [wallet,gross]:payroll)
+            check(core.cash(wallet)==gross,"actual school employment wages were not paid");
+        check(core.people().population()==100'102&&capacity.cash_backed&&capacity.level==2,
+              "school staffing changed population, funding or statutory level");
+    };
+    run(2,0,1,1322);
+    run(1,1,0,677);
+}
+
 static void chiefs_aid_uses_only_effective_welfare_bureaucracy() {
     const auto scenario=[](const std::string& choice,P1InstitutionKind kind,
                            const std::string& service_region,
@@ -2403,6 +2501,7 @@ int main(){
         effective_health_institution_and_flat_law_change_daily_mortality();
         childrens_rights_changes_only_exact_profession_mortality();
         enacted_education_changes_real_daily_schooling();
+        school_staff_capacity_requires_workers_in_the_school_region();
         std::cout<<"VIC2.5 POLICY IDENTITY AND REFERENCE DATA PASS\n";
     }catch(const std::exception& e){
         std::cerr<<"POLITICS IDENTITY FAILURE: "<<e.what()<<"\n";

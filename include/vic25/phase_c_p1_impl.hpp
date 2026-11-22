@@ -255,7 +255,24 @@ inline P1InstitutionView IntegratedWorld::p1_institution_capacity(
         const std::string& institution_id)const {
     const auto& link=p1_institutions_.at(institution_id);
     const auto& service=public_institutions_.at(institution_id);
-    const People staff=employed_by(service.operator_id);
+    People staff=0;
+    if(link.kind!=P1InstitutionKind::education) {
+        staff=employed_by(service.operator_id);
+    } else {
+        // An operator can employ workers in multiple regions. Only the
+        // non-striking contracts at this sovereign school can staff its seats.
+        const auto sovereign=sovereignty_.find(service.region);
+        if(sovereign!=sovereignty_.end()&&sovereign->second==link.country) {
+            for(const auto& [slice,job]:people_.jobs()) {
+                if(job.employer!=service.operator_id||
+                   people_.demographic(people_.slice(slice).key.demographic)
+                       .region!=service.region)continue;
+                const auto unavailable=currently_striking(slice);
+                ensure(unavailable<=job.count,"strike exceeds employment");
+                staff=phaseb::add_checked(staff,job.count-unavailable);
+            }
+        }
+    }
     const auto [level,slots]=p1_institution_legal_capacity(institution_id);
     People staff_capacity=positive_product(
         staff,service.patients_per_worker);
