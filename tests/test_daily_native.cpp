@@ -825,10 +825,125 @@ static void quiet_days_deliver_real_renewable_growth_before_harvest() {
          "due growth did not feed real extraction with exact stock and replay");
 }
 
+static void daily_treaty_schedule_handles_late_future_and_rollback() {
+    using GhPlan=vic25::phasegh::World::Plan;
+    using GhStage=vic25::phasegh::Stage;
+    Fixture fixture;
+    auto world=World::adopt(std::move(fixture.gh),141);
+    const auto start=world.day_index();
+    const auto active=[](const auto& state,const char* id) {
+        return state.diplomacy().daily_treaties.at(id).active;
+    };
+    GhPlan propose;
+    propose[9].push_back([start](GhStage& stage) {
+        stage.propose_daily_treaty("Z_OVERDUE","A","B","iron","PM_A",start,start+1);
+        stage.propose_daily_treaty("A_TODAY","A","B","iron","PM_A",start,start+3);
+        stage.propose_daily_treaty("FUTURE","A","B","iron","PM_A",start,start+6);
+        stage.propose_daily_treaty("NEVER","A","B","iron","PM_A",start,start+1);
+        stage.ratify_daily_treaty("FUTURE","B","PM_B");
+    });
+    world.advance_day(propose);
+    need(!world.engine().has_due_daily_treaty(start+1)&&
+         world.engine().has_due_daily_treaty(start+6),
+         "only fully ratified inactive treaties may schedule activation");
+    world.advance_day();
+    need(!active(world.engine(),"Z_OVERDUE")&&!active(world.engine(),"NEVER"),
+         "elapsed effective date did not authorize activation without the other party");
+    GhPlan late;
+    late[9].push_back([](GhStage& stage) {
+        stage.ratify_daily_treaty("Z_OVERDUE","B","PM_B");
+        stage.ratify_daily_treaty("A_TODAY","B","PM_B");
+    });
+    world.advance_day(late);
+    const auto& engine=world.engine();
+    need(world.day_index()==start+3&&engine.has_due_daily_treaty(start+3)&&
+         !active(engine,"Z_OVERDUE")&&!active(engine,"A_TODAY"),
+         "late Stage9 ratification must schedule the following Stage0, not activate inline");
+    const auto save=SnapshotCodec::encode(world);
+    auto loaded=SnapshotCodec::decode(save);
+    need(SnapshotCodec::encode(loaded)==save&&
+         loaded.engine().has_due_daily_treaty(start+3),
+         "a saved fully approved overdue treaty lost its due schedule");
+    const auto revision=loaded.engine().diplomacy().revision;
+    GhPlan interrupt;
+    interrupt[0].push_back([&](GhStage& stage) {
+        need(active(stage,"Z_OVERDUE")&&active(stage,"A_TODAY")&&
+             stage.diplomacy().revision==revision+2&&
+             !active(stage,"FUTURE")&&!active(stage,"NEVER"),
+             "eligible due treaties did not activate exactly once before Stage0 callbacks");
+        throw std::runtime_error("rollback observed due treaty activations");
+    });
+    bool threw=false;
+    try {loaded.advance_day(interrupt);}catch(const std::runtime_error& e) {
+        threw=std::string_view(e.what())=="rollback observed due treaty activations";
+    }
+    need(threw&&SnapshotCodec::encode(loaded)==save&&
+         loaded.engine().has_due_daily_treaty(start+3),
+         "failed Stage0 transaction lost treaty schedule or committed activations");
+    world.advance_day();loaded.advance_day();
+    need(SnapshotCodec::encode(world)==SnapshotCodec::encode(loaded)&&
+         engine.diplomacy().revision==revision+2&&!engine.has_due_daily_treaty(start+4),
+         "replayed treaty activations were not consumed once");
+    world.advance_day();world.advance_day();
+    need(!active(engine,"FUTURE")&&engine.has_due_daily_treaty(start+6),
+         "future treaty must stay pending through the prior day");
+    world.advance_day();
+    need(active(engine,"FUTURE")&&!active(engine,"NEVER")&&
+         !engine.has_due_daily_treaty(start+100)&&
+         engine.diplomacy().revision==revision+3,
+         "future treaty activation or active/unapproved index filtering diverged");
+
+    // With no POP, production, cargo, or rules tick, only the due treaty
+    // should promote a quiet date into a genuine authoritative daily commit.
+    vic25::phasegh::World quiet_gh(24000);
+    auto& quiet_geo=quiet_gh.seed_geography();
+    quiet_geo.seed_province(1,"QUIET_A","A");
+    quiet_geo.seed_province(2,"QUIET_B","B");
+    quiet_geo.seed_unit(1,"A","QUIET_DISTRICT_A");
+    quiet_geo.seed_unit(2,"B","QUIET_DISTRICT_B");
+    quiet_geo.seed_assignment(1,1);
+    quiet_geo.seed_assignment(2,2);
+    auto& quiet_core=quiet_geo.seed_core().seed_core();
+    for(const auto* country:{"A","B"}) {
+        quiet_core.seed_actor(country,0);
+        quiet_core.seed_government(country,"HEAD","PM",5,3);
+    }
+    auto quiet=World::adopt(std::move(quiet_gh),143);
+    const auto quiet_start=quiet.day_index();
+    GhPlan quiet_sign;
+    quiet_sign[9].push_back([quiet_start](GhStage& stage) {
+        stage.propose_daily_treaty("QUIET","A","B","iron","PM",quiet_start,quiet_start+2);
+        stage.ratify_daily_treaty("QUIET","B","PM");
+    });
+    quiet.advance_day(quiet_sign);
+    const auto quiet_commit=quiet.engine().commit_id();
+    const auto idle=quiet.advance_day();
+    need(idle.authoritative_commit==quiet_commit&&quiet.engine().commit_id()==quiet_commit&&
+         !active(quiet.engine(),"QUIET"),
+         "a future treaty caused work on a pre-effective quiet day");
+    const auto due=quiet.advance_day();
+    need(due.authoritative_commit==quiet_commit+1&&quiet.engine().commit_id()==quiet_commit+1&&
+         active(quiet.engine(),"QUIET"),
+         "an otherwise quiet due day did not commit treaty activation");
+
+    // The legacy monthly bridge has never applied native daily activations.
+    Fixture legacy;
+    GhPlan legacy_approval;
+    legacy_approval[9].push_back([](GhStage& stage) {
+        stage.propose_daily_treaty("LEGACY","A","B","iron","PM_A",0,1);
+        stage.ratify_daily_treaty("LEGACY","B","PM_B");
+    });
+    legacy.gh.advance(legacy_approval);
+    legacy.gh.advance();
+    need(!active(legacy.gh,"LEGACY")&&legacy.gh.has_due_daily_treaty(1),
+         "legacy advancement activated the native-only treaty schedule");
+}
+
 int main(){
     try{
         quiet_days_deliver_real_renewable_growth_before_harvest();
         cross_domain_daily_events_and_replay();
+        daily_treaty_schedule_handles_late_future_and_rollback();
         daily_rollback_due_to_resource_constraints();
         migrates_old_daily_v1_without_inventing_actions();
         daily_diplomacy_changes_real_trade_tariff();

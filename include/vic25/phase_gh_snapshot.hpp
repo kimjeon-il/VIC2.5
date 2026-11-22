@@ -399,6 +399,7 @@ struct SnapshotCodec {
             if(!pact.pending_termination&&jointly_approved_treaty_termination(pact))
                 pact.active=false;
         }
+        next.diplomacy_.rebuild_daily_treaty_schedule();
         next.validate();
         return next;
     }

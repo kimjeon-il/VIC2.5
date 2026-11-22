@@ -443,6 +443,45 @@ struct DiplomacyState {
     std::vector<MilitaryAssistance> military_assistance;
     std::map<std::tuple<std::string,std::string,std::string,Month>,Quantity> quota_used;
     std::uint64_t revision{};
+
+private:
+    friend class Stage;
+    friend class World;
+    friend struct SnapshotCodec;
+
+    // The daily treaty map is the authority. This queue is derived,
+    // deliberately not persisted, and travels with the staged copy.
+    std::map<std::int64_t,std::set<std::string>> daily_treaty_schedule_;
+
+    void schedule_daily_treaty_if_ready(const DailyTreaty& treaty) {
+        if(!treaty.active&&treaty.approved_a&&treaty.approved_b)
+            daily_treaty_schedule_[treaty.effective_day].insert(treaty.id);
+    }
+    void rebuild_daily_treaty_schedule() {
+        daily_treaty_schedule_.clear();
+        for(const auto& [id,treaty]:daily_treaties) {
+            (void)id;
+            schedule_daily_treaty_if_ready(treaty);
+        }
+    }
+    [[nodiscard]] bool has_due_daily_treaty(std::int64_t day)const {
+        return !daily_treaty_schedule_.empty()&&
+               daily_treaty_schedule_.begin()->first<=day;
+    }
+    void activate_due_daily_treaties(std::int64_t day) {
+        if(!has_due_daily_treaty(day))return;
+        const auto end=daily_treaty_schedule_.upper_bound(day);
+        // Preserve the old treaty-map ID order across all due dates,
+        // including treaties approved after their effective day elapsed.
+        std::set<std::string> due;
+        for(auto it=daily_treaty_schedule_.begin();it!=end;++it)
+            due.merge(it->second);
+        daily_treaty_schedule_.erase(daily_treaty_schedule_.begin(),end);
+        for(const auto& id:due) {
+            daily_treaties.at(id).active=true;
+            ++revision;
+        }
+    }
 };
 
 struct DiplomaticCapacityView {
@@ -809,6 +848,7 @@ public:
                         treaty.approved_a:treaty.approved_b;
         require(!approval,"H_DAILY_DUPLICATE_RATIFICATION");
         approval=true;
+        diplomacy_.schedule_daily_treaty_if_ready(treaty);
         ++diplomacy_.revision;
     }
     [[nodiscard]] std::int64_t legal_import_tariff_ceiling(
@@ -1624,14 +1664,7 @@ public:
                             stage.settle_due_daily_trade_cargo();
                             stage.register_arrived_losses();
                         }
-                        for(auto& [id,t]:new_diplomacy.daily_treaties) {
-                            (void)id;
-                            if(!t.active&&t.approved_a&&t.approved_b&&
-                               t.effective_day<=day) {
-                                t.active=true;
-                                ++new_diplomacy.revision;
-                            }
-                        }
+                        new_diplomacy.activate_due_daily_treaties(day);
                         stage.reconcile_war_treaties();
                     }
                     // Existing drawn liens precede new Stage1 resource plans.
@@ -1751,12 +1784,7 @@ public:
             [](const auto& entry){ return entry.second.has_decay_work(); });
     }
     [[nodiscard]] bool has_due_daily_treaty(std::int64_t day)const {
-        for(const auto& [id,t]:diplomacy_.daily_treaties) {
-            (void)id;
-            if(!t.active&&t.approved_a&&t.approved_b&&t.effective_day<=day)
-                return true;
-        }
-        return false;
+        return diplomacy_.has_due_daily_treaty(day);
     }
     [[nodiscard]] bool has_ready_daily_commission()const {
         return core_.has_ready_daily_commission();
