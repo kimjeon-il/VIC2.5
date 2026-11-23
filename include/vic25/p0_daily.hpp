@@ -637,9 +637,25 @@ struct Policies {
     }
 };
 
+// Market names are physical goods, not aliases in the inventory ledger.
+inline bool staple_food(std::string_view good) {
+    return good=="food"||good=="groceries";
+}
+inline bool staple_clothing(std::string_view good) {
+    return good=="clothing"||good=="clothes";
+}
+inline const char* default_staple(const phasec::IntegratedWorld* markets,
+                                  const std::string& region,
+                                  const char* legacy,const char* industry) {
+    // Market registration is fixed after seeding. Do not switch the
+    // default between production forecasts and purchases when stock moves.
+    if(markets && !markets->has_market(region,legacy) &&
+                  markets->has_market(region,industry))return industry;
+    return legacy;
+}
 // Forecast and actual purchase use precisely the same real POP demand rules.
-// An empty labor_class is universal. Rules for food/clothing override the
-// legacy built-in basket only for the matching cohort.
+// An explicit basket or buyer replaces the default of its staple family only
+// for the matching cohort. Configured orders still keep their exact good IDs.
 using HouseholdNeedKey=std::tuple<std::string,Id,std::string>;
 struct HouseholdNeedAmount {
     int priority{};
@@ -650,8 +666,10 @@ household_daily_needs(
     const phaseb::World& people,int day,int days,
     Quantity food_per_day,Quantity clothing_per_month,
     const std::vector<HouseholdBasketRule>& basket,
-    const std::set<std::pair<Id,std::string>>& explicit_goods={}) {
+    const std::set<std::pair<Id,std::string>>& explicit_goods={},
+    const phasec::IntegratedWorld* markets=nullptr) {
     std::map<HouseholdNeedKey,HouseholdNeedAmount> needs;
+    std::map<std::string,std::pair<const char*,const char*>> staple_choices;
     for(const auto& [slice_id,pop]:people.slices()) {
         if(pop.count<=0)continue;
         const auto& demo=people.demographic(pop.key.demographic);
@@ -663,7 +681,10 @@ household_daily_needs(
             else need.priority=std::min(need.priority,priority);
             need.quantity=phaseb::add_checked(need.quantity,units);
         };
-        bool custom_food=false,custom_clothing=false;
+        bool custom_food=explicit_goods.contains({slice_id,"food"})||
+                         explicit_goods.contains({slice_id,"groceries"});
+        bool custom_clothing=explicit_goods.contains({slice_id,"clothing"})||
+                             explicit_goods.contains({slice_id,"clothes"});
         for(const auto& rule:basket) {
             if(!rule.labor_class.empty()&&rule.labor_class!=econ.labor_class)
                 continue;
@@ -675,15 +696,21 @@ household_daily_needs(
                               !specific.labor_class.empty() &&
                               specific.labor_class==econ.labor_class;
                    }))continue;
-            if(rule.good=="food")custom_food=true;
-            if(rule.good=="clothing")custom_clothing=true;
+            if(staple_food(rule.good))custom_food=true;
+            if(staple_clothing(rule.good))custom_clothing=true;
             add(rule.good,daily_increment(
                 times(pop.count,rule.units_per_person_per_month),day,days),
                 rule.priority);
         }
-        if(!custom_food)add("food",times(pop.count,food_per_day),0);
-        if(!custom_clothing)add("clothing",daily_increment(
-            times(pop.count,clothing_per_month),day,days),1);
+        if(!custom_food||!custom_clothing) {
+            const auto [it,added]=staple_choices.try_emplace(demo.region);
+            if(added)it->second={
+                default_staple(markets,demo.region,"food","groceries"),
+                default_staple(markets,demo.region,"clothing","clothes")};
+            if(!custom_food)add(it->second.first,times(pop.count,food_per_day),0);
+            if(!custom_clothing)add(it->second.second,daily_increment(
+                times(pop.count,clothing_per_month),day,days),1);
+        }
     }
     return needs;
 }
@@ -702,10 +729,12 @@ inline Money regional_monthly_wage(const phasec::IntegratedWorld& c,
     if(!observed.empty()) {
         std::sort(observed.begin(),observed.end());
         wage=observed[observed.size()/2];
-    } else if(c.has_market(region,"food")&&food_per_day>0) {
+    } else if(food_per_day>0) {
         // No invented historical wage: a transparent subsistence-price proxy
         // is used only when the region actually has a quoted food market.
-        wage=times(times(c.market(region,"food").price,food_per_day),days);
+        const auto* good=default_staple(&c,region,"food","groceries");
+        if(c.has_market(region,good))
+            wage=times(times(c.market(region,good).price,food_per_day),days);
     }
     return wage;
 }
@@ -990,7 +1019,7 @@ public:
             game_c.people(),date.day,dim,
             decisions.daily_food_units_per_person,
             decisions.monthly_clothing_units_per_person,
-            decisions.household_basket,explicit_demand);
+            decisions.household_basket,explicit_demand,&game_c);
         std::map<std::pair<std::string,std::string>,Quantity> regional_need;
         for(const auto& [key,need]:household_forecast) {
             const auto& [region,household,good]=key;
@@ -1241,7 +1270,7 @@ public:
                 const Money cost_per_worker=high==highest_existing_wage->end()?
                     wage_day:std::max(wage_day,high->second);
                 Money unit_cost=times(src.workers_per_unit,cost_per_worker);
-                for(const auto& input:src.operational_inputs_per_unit) {
+                for(const auto& input:phased::input_totals(src.operational_inputs_per_unit)) {
                     if(!game_c.has_market(src.region,input.good)) {
                         units=0;break;
                     }
@@ -1663,11 +1692,17 @@ public:
         for(const auto& p:decisions.countries)
             if(p.good=="food")scripted_food_tariffs.insert(p.country);
         plan[0].push_back(
-            [date,scripted_food_tariffs](phasegh::Stage& gh) {
+            [date,today=world_.day_index(),scripted_food_tariffs](phasegh::Stage& gh) {
                 const auto& c=gh.phase_c();
                 std::set<std::string> treated;
                 for(const auto& [region,unmet]:c.regional_food_grievances()) {
                     if(unmet<=0||!c.has_market(region,"food"))continue;
+                    // General deprivation cannot identify the good that was
+                    // missing when both staple markets are present. Require
+                    // yesterday's direct evidence for the tariffed good.
+                    if(c.has_market(region,"groceries")&&
+                       c.previous_daily_solvent_unmet(region,"food",today)<=0)
+                        continue;
                     const auto& country=c.sovereignty(region);
                     if(scripted_food_tariffs.contains(country) ||
                        !c.has_government(country) ||
@@ -2074,7 +2109,8 @@ public:
                     times(actual_daily_worker_wage(c,src.owner,date.day,dim),
                           src.workers_per_unit);
                 Money unit_cost=wage_per_unit;
-                for(const auto& input:src.operational_inputs_per_unit) {
+                const auto inputs=phased::input_totals(src.operational_inputs_per_unit);
+                for(const auto& input:inputs) {
                     if(!c.has_market(src.region,input.good))return;
                     unit_cost=phaseb::add_checked(unit_cost,
                         times(input.per_unit,
@@ -2103,7 +2139,7 @@ public:
                 if(already_site>=facility_limit)return;
                 available=std::min(available,
                          (facility_limit-already_site)/src.site_service_per_unit);
-                for(const auto& input:src.operational_inputs_per_unit)
+                for(const auto& input:inputs)
                     available=std::min(available,
                         c.phase_d_material_available(
                             src.owner,src.region,input.good)/input.per_unit);
@@ -2333,7 +2369,7 @@ public:
                     if(purchased>0)c.consume(b.household_actor,b.region,b.good,purchased);
                     // Household deprivation is NOT the same as solvent unmet
                     // demand: cash-poor POP also generate a real food grievance.
-                    if(b.good=="food"&&purchased<demand)
+                    if(staple_food(b.good)&&purchased<demand)
                         c.phase_time_record_food_need_gap(b.region,demand-purchased);
                 }
             });
@@ -2353,7 +2389,7 @@ public:
             (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 const auto needs=household_daily_needs(c.people(),date.day,dim,
-                    food_units,clothing_monthly,basket,explicitly_managed_demand);
+                    food_units,clothing_monthly,basket,explicitly_managed_demand,&c);
                 std::vector<std::pair<HouseholdNeedKey,HouseholdNeedAmount>> ordered(
                     needs.begin(),needs.end());
                 std::sort(ordered.begin(),ordered.end(),
@@ -2385,7 +2421,7 @@ public:
                             still_due-=purchased;
                         }
                     }
-                    if(good=="food" && still_due>0)
+                    if(staple_food(good) && still_due>0)
                         c.phase_time_record_food_need_gap(region,still_due);
                 }
             });

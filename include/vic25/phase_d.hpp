@@ -85,14 +85,13 @@ struct IndustryRecipe {
     bool needs_retrofit{}; // retrofit pipeline remains unsupported by this slice
     bool requires_same_stage_nonstorable_energy{}; // I2-DISPATCH not yet contracted
 };
-// Quote each good once against the complete requirement for one batch.
+// Quote each good once against the complete requirement for one batch or unit.
 // Keep first occurrence order for local buying when available cash is tight.
-inline std::vector<Input> recipe_input_totals(
-        const IndustryRecipe& recipe) {
+inline std::vector<Input> input_totals(const std::vector<Input>& rows) {
     std::vector<Input> totals;
-    totals.reserve(recipe.inputs.size());
+    totals.reserve(rows.size());
     std::map<std::string_view,std::size_t> index;
-    for(const auto& row:recipe.inputs) {
+    for(const auto& row:rows) {
         const auto [where,first]=index.try_emplace(row.good,totals.size());
         if(first)totals.push_back(row);
         else {
@@ -101,6 +100,10 @@ inline std::vector<Input> recipe_input_totals(
         }
     }
     return totals;
+}
+
+inline std::vector<Input> recipe_input_totals(const IndustryRecipe& recipe) {
+    return input_totals(recipe.inputs);
 }
 
 struct ProductionRun {
@@ -1021,13 +1024,14 @@ public:
         const auto& site=c_.facility(source.site);
         require(site.owner==source.owner&&site.region==source.region,
                 "extraction has no effective owned extraction site");
-        for(const auto& input:source.operational_inputs_per_unit)
+        const auto inputs=input_totals(source.operational_inputs_per_unit);
+        for(const auto& input:inputs)
             require(c_.stock(source.owner,source.region,input.good)>=
                     product(units,input.per_unit),
                     "extraction missing real operating goods");
         occupy_labor(source.owner,product(units,source.workers_per_unit));
         occupy_site(source.site,product(units,source.site_service_per_unit));
-        for(const auto& input:source.operational_inputs_per_unit)
+        for(const auto& input:inputs)
             c_.phase_d_use_material(source.owner,source.region,input.good,
                                     product(units,input.per_unit));
         c_.phase_d_emit_extraction(source.owner,source.region,source.good,units,id);
@@ -1804,7 +1808,7 @@ public:
         v.equipment_units=facility_available/source.site_service_per_unit;
         v.labor_units=core_.phase_d_workforce(source.owner)/source.workers_per_unit;
         v.consumable_units=v.available_flow;
-        for(const auto& input:source.operational_inputs_per_unit)
+        for(const auto& input:input_totals(source.operational_inputs_per_unit))
             v.consumable_units=std::min(v.consumable_units,
                 core_.stock(source.owner,source.region,input.good)/input.per_unit);
         v.feasible_units=std::min({v.available_flow,v.available_biomass,

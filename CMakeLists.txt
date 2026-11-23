@@ -414,6 +414,14 @@ if(BUILD_TESTING)
     add_test(NAME vic25_p0_daily_longrun COMMAND vic25_p0_daily_longrun)
 endif()
 
+# The native economic smoke covers actual standard-industry POP purchases,
+# not just the tutorial's legacy food and clothing IDs.
+if(BUILD_TESTING)
+    add_executable(vic25_economy_native_smoke tests/test_economy_native_smoke.cpp)
+    target_link_libraries(vic25_economy_native_smoke PRIVATE vic25_core)
+    add_test(NAME vic25_economy_native_smoke COMMAND vic25_economy_native_smoke)
+endif()
+
 # Economy/logistics/credit simulation with actual dated freight and payroll.
 if(BUILD_TESTING)
     add_executable(vic25_economy_transport_trade_credit_smoke

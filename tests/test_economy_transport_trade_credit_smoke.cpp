@@ -454,7 +454,55 @@ static void repeated_recipe_inputs_share_a_single_procurement_target(bool enough
            "end-of-day stock did not refill one real batch or replay exactly");
 }
 
+static void repeated_extraction_inputs_use_one_real_stock(bool enough) {
+    phasegh::World opening(24000);
+    auto& geo=opening.seed_geography();
+    geo.seed_unit(1,"A","Extraction fixture");
+    geo.seed_province(1,"R","A");geo.seed_assignment(1,1);
+    auto& d=geo.seed_core();
+    auto& c=d.seed_core();
+    c.seed_actor("A",0);c.seed_actor("MINER",100);
+    c.seed_market("R","tools",2,2,2,0);c.seed_market("R","coal",20,20,20,2);
+    c.seed_stock("MINER","R","tools",enough?3:2);
+    d.seed_building_facility("MINE","MINER","R",31,"vic3_115.rural.coal_mines");
+    auto& pop=c.seed_population();
+    const auto hh=pop.household_profile({"R","fixture","shared",1});
+    const auto eco=pop.economic_profile({"R","worker","wage","employee",pop.default_education()});
+    const auto demo=pop.demographic_profile({"R",23640,phaseb::Sex::female,
+        "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+    const auto worker=pop.seed_population(demo,eco,hh,1);
+    pop.hire(worker,1,"MINER","miner",0,{});
+    phased::ResourceSite source;
+    source.id="COAL";source.site="MINE";source.owner="MINER";source.region="R";
+    source.good="coal";source.monthly_capacity=31;
+    source.operational_inputs_per_unit={{"tools",1},{"tools",2}};
+    d.seed_building_resource_site(source);
+    const auto capacity=d.building_resource_capacity("COAL");
+
+    p0::Policies policies;
+    policies.daily_food_units_per_person=0;
+    policies.monthly_clothing_units_per_person=0;
+    policies.allow_endogenous_staffing=false;
+    p0::DailyGame game(daily::World::adopt(std::move(opening),17),policies);
+    auto replay=p0::DailyGame(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(game.world())),policies);
+    game.advance_day();replay.advance_day();
+    const auto& played=game.world().engine().base().core();
+    const auto& ledger=played.core();
+    verify(capacity.consumable_units==(enough?1:0)&&
+           capacity.feasible_units==(enough?1:0),
+           "resource capacity counted the same tools more than once");
+    verify(played.resource_site("COAL").cumulative_output==(enough?1:0)&&
+           ledger.stock("MINER","R","coal")==(enough?1:0)&&
+           ledger.stock("MINER","R","tools")==(enough?0:2)&&
+           ledger.cash("MINER")==100&&ledger.financial().balanced()&&
+           daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+           "extraction must value and consume the complete tools requirement exactly once");
+}
+
 int main() {
+    repeated_extraction_inputs_use_one_real_stock(false);
+    repeated_extraction_inputs_use_one_real_stock(true);
     repeated_recipe_inputs_share_a_single_procurement_target(true);
     repeated_recipe_inputs_share_a_single_procurement_target(false);
     factory_freight_wages_and_fifty_day_replay(true);
