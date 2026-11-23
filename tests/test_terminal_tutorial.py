@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Black-box smoke and deterministic checkpoint checks for the native tutorial."""
+from calendar import monthrange
+from datetime import date as civil_date
 import json
 from pathlib import Path
 import struct
@@ -351,6 +353,85 @@ def main():
         legacy_build = panel("new A", "public-build", "quit")
         require(not legacy_build[1]["ok"] and legacy_build[1]["status"] == legacy_build[0]["status"],
                 "the old tariff trial must not receive a construction offer")
+
+        pending_law = d / "law-pending.vic25"
+        effective_law = d / "law-effective.vic25"
+        replayed_law = d / "law-replayed.vic25"
+        law = panel("new LAW-A", "bill-introduce", "step 2", "law-hire",
+                    "bill-introduce", "bill-approve FAKE", "bill-promulgate", "quit")
+        require(law[0]["ok"] and law[0]["status"]["scenario"] == "law-v1",
+                "genuine elected law trial unavailable")
+        require(not law[1]["ok"] and law[1]["status"] == law[0]["status"],
+                "opening unelected government must not introduce this fixture bill")
+        direct = panel("new LAW-A", "step 2", "income-tax 10", "tariff 10", "quit")
+        require(all(not row["ok"] and row["status"] == direct[1]["status"] for row in direct[2:4]),
+                "direct executive controls must not write to the elected trial")
+        elected = law[2]["status"]["law_bill"]
+        require(elected["threshold"] == 3 and
+                sum(row["seats"] for row in elected["seats"]) == 5 and
+                any(row["party"] == "WORKERS" and row["seats"] >= 3 for row in elected["seats"]) and
+                any(row["party"] == "OTHER" and 0 < row["seats"] < 3 for row in elected["seats"]),
+                "actual autonomous election did not earn chamber quorum")
+        require(law[3]["ok"] and law[3]["status"]["workers"][0] ==
+                   {"contract_wage": 31, "cash": 1} and law[3]["status"]["employer_cash"] == 999,
+                "pre-law worker did not receive actual funded baseline pay")
+        proposed = law[4]["status"]
+        require(law[4]["ok"] and proposed["law_bill"]["phase"] == "submitted" and
+                not proposed["law_bill"]["vote_ready"] and proposed["law_bill"]["next_review"] and
+                proposed["minimum_monthly_contract_wage"] == 0 and
+                not law[5]["ok"] and not law[6]["ok"],
+                "proposal bypassed native political review or unauthorized command succeeded")
+        # Same opening election/hire, now advance checkpoints from native dates
+        # one at a time rather than presuming fixed bill success.
+        def run_law(steps, *tail):
+            return panel("new LAW-A", "step 2", "law-hire", "bill-introduce",
+                         *(f"step {n}" for n in steps), *tail, "quit")
+        steps = []
+        for _ in range(12):
+            last = run_law(steps)[-2]["status"]
+            if last["law_bill"]["vote_ready"]:
+                break
+            due = last["law_bill"]["next_review"]
+            require(due, "actual movement-backed wage bill never became ready")
+            steps.append((civil_date.fromisoformat(due) - civil_date.fromisoformat(last["date"])).days + 1)
+        else:
+            raise AssertionError("actual movement failed to reach its voting stage")
+        rows = run_law(steps, "bill-approve OTHER", "bill-approve FAKE",
+                       "bill-approve WORKERS", "bill-promulgate",
+                       f"save {pending_law}", "law-hire", f"save {effective_law}")
+        wrong_party, fake_party, approved, promulgated, _, hired, _ = rows[-8:-1]
+        require(not wrong_party["ok"] and not fake_party["ok"] and
+                wrong_party["status"] == fake_party["status"] == last and
+                approved["status"]["law_bill"]["phase"] == "approved",
+                "actual elected quorum did not gate native approval")
+        pending = promulgated["status"]
+        require(pending["law_bill"]["phase"] == "promulgated" and
+                pending["law_bill"]["effective_date"] == pending["date"] and
+                pending["minimum_monthly_contract_wage"] == 0,
+                "promulgation must wait for actual effective-day processing")
+        after = hired["status"]
+        processed = civil_date.fromisoformat(pending["date"])
+        month_days = monthrange(processed.year, processed.month)[1]
+        def due(wage):
+            return wage * processed.day // month_days - wage * (processed.day - 1) // month_days
+        require(hired["ok"] and after["minimum_monthly_contract_wage"] == 62 and
+                after["law_bill"]["phase"] == "effective" and
+                after["workers"][0]["contract_wage"] == 31 and
+                after["workers"][1]["contract_wage"] == 62 and
+                after["workers"][1]["cash"] == due(62) and
+                pending["employer_cash"] - after["employer_cash"] == due(31) + due(62) and
+                after["workers"][0]["cash"] - pending["workers"][0]["cash"] == due(31),
+                "new effective contract failed real pay or rewrote the existing contract")
+        control = run_law(steps, "step 2", "law-hire")[-2]["status"]
+        require(control["workers"][1]["contract_wage"] == 31 and
+                control["workers"][1]["cash"] == due(31) < after["workers"][1]["cash"],
+                "no-law worker control did not isolate the effective wage increase")
+        resumed_law = panel(f"load A {pending_law}", f"load LAW-A {pending_law}",
+                            "law-hire", f"save {replayed_law}", "quit")
+        require(not resumed_law[0]["ok"] and resumed_law[1]["status"] == pending and
+                resumed_law[2]["status"] == after and
+                effective_law.read_bytes() == replayed_law.read_bytes(),
+                "law scenario cross-load, pending reopening, or exact paid replay failed")
 
         replies = panel("status", "new A", "status", "tariff 21",
                         "tariff 10", "step 30", f"save {panel_save}",

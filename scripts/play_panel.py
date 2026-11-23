@@ -1,4 +1,5 @@
 """Map-free native VIC2.5 trial panel; requires an existing Python/Tk installation."""
+from datetime import date
 import json
 from pathlib import Path
 from queue import Empty, Queue
@@ -48,9 +49,12 @@ class NativeEngine:
 class PlayPanel:
     FACTORY = "공장 시범판"
     BUDGETS = {"A 예산 시범판": "BUDGET-A", "B 예산 시범판": "BUDGET-B"}
+    LEGISLATURE = "A 입법 시범판"
 
     @classmethod
     def _protocol_tag(cls, choice):
+        if choice == cls.LEGISLATURE:
+            return "LAW-A"
         return "TUT" if choice == cls.FACTORY else cls.BUDGETS.get(choice, choice)
 
     def __init__(self, root, executable):
@@ -63,6 +67,7 @@ class PlayPanel:
         self.tariff = tk.StringVar(root, "0")
         self.tax = tk.StringVar(root, "0")
         self.spending = tk.StringVar(root, "0")
+        self.law_party = tk.StringVar(root, "")
         self.heading = tk.StringVar(root, "열린 시범 시나리오 없음")
         self.budget = tk.StringVar(root, "국가를 선택하고 시나리오를 시작하세요.")
         self.policy = tk.StringVar(root, "법률·관세·세금 정보 없음")
@@ -84,7 +89,7 @@ class PlayPanel:
         setup = ttk.Frame(frame, padding=(0, 10))
         setup.grid(row=2, sticky="ew")
         ttk.Label(setup, text="시작·불러올 국가/시나리오:").grid(row=0, column=0, padx=(0, 6))
-        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY, *self.BUDGETS),
+        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE),
                                      width=16, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
         self.new_button = ttk.Button(setup, text="새로 시작", command=self.new)
@@ -139,6 +144,12 @@ class PlayPanel:
         self.spending_entry.bind("<Return>", lambda event: self.set_spending_cap())
         self.build_button = ttk.Button(actions, text="건설 신청 후 하루 진행", command=self.public_build)
         self.build_button.grid(row=3, column=1, columnspan=3, sticky="w", pady=(4, 0))
+        self.law_party_choice = ttk.Combobox(actions, textvariable=self.law_party,
+                                             width=17, state="readonly")
+        self.law_party_choice.grid(row=0, column=1, columnspan=2, padx=(0, 6), sticky="w")
+        self.law_party_choice.bind("<<ComboboxSelected>>", lambda event: self._update_controls())
+        self.law_action_button = ttk.Button(actions, command=self.advance_bill)
+        self.law_action_button.grid(row=0, column=3, sticky="w")
         ttk.Separator(frame).grid(row=6, sticky="ew")
         notice = ttk.Label(frame, textvariable=self.notice, justify="left", wraplength=500)
         notice.grid(row=7, sticky="ew", pady=(5, 0))
@@ -158,19 +169,22 @@ class PlayPanel:
         for widget in (self.save_button, self.step_button):
             widget.state(["!disabled"] if ready and self.current else ["disabled"])
         factory = self._industry(self.current)
+        legislature = self._legislature(self.current)
+        direct_actions = not (factory or legislature)
         for widget in (self.tariff_label, self.tariff_button, self.tariff_entry):
-            widget.state(["!disabled"] if ready and self.current and not factory else ["disabled"])
-            if factory:
-                widget.grid_remove()
-            else:
+            widget.state(["!disabled"] if ready and self.current and direct_actions else ["disabled"])
+            if direct_actions:
                 widget.grid()
-        tax_ready = ready and self.current and not factory and self.current["pending_income_tax_ppm"] is None
+            else:
+                widget.grid_remove()
+        tax_ready = (ready and self.current and direct_actions
+                     and self.current["pending_income_tax_ppm"] is None)
         for widget in (self.tax_label, self.tax_entry, self.tax_button):
             widget.state(["!disabled"] if tax_ready else ["disabled"])
-            if factory:
-                widget.grid_remove()
-            else:
+            if direct_actions:
                 widget.grid()
+            else:
+                widget.grid_remove()
         budget = self._budget(self.current)
         spending_ready = ready and budget and self.current["pending_civilian_spending_cap"] is None
         for widget in (self.spending_label, self.spending_entry, self.spending_button):
@@ -186,6 +200,21 @@ class PlayPanel:
             self.build_button.grid()
         else:
             self.build_button.grid_remove()
+        if legislature:
+            bill = self.current["law_bill"]
+            command, label = self._law_action(self.current)
+            voting = bill["phase"] == "submitted" and bill["vote_ready"]
+            self.law_party_choice.configure(state="readonly" if ready and voting else "disabled")
+            if voting:
+                self.law_party_choice.grid()
+            else:
+                self.law_party_choice.grid_remove()
+            self.law_action_button.configure(text=label)
+            self.law_action_button.state(["!disabled"] if ready and command else ["disabled"])
+            self.law_action_button.grid()
+        else:
+            self.law_party_choice.grid_remove()
+            self.law_action_button.grid_remove()
         self.selector.configure(state="readonly" if ready else "disabled")
 
     def _send(self, command):
@@ -219,13 +248,18 @@ class PlayPanel:
                 self.notice.set("오류: " + str(reply.get("error", "게임 엔진이 요청을 거절했습니다.")))
             elif reply.get("status") is not None:
                 try:
+                    opening = command.startswith(("new ", "load "))
+                    if opening:
+                        self.law_party.set("")
                     self._show(reply["status"])
-                    if command.startswith(("new ", "load ")):
+                    if opening:
                         choice = self.current["country"]
                         if self._industry(self.current):
                             choice = self.FACTORY
                         elif self._budget(self.current):
                             choice += " 예산 시범판"
+                        elif self._legislature(self.current):
+                            choice = self.LEGISLATURE
                         self.country.set(choice)
                     if command.startswith("income-tax "):
                         self.notice.set("소득세 변경을 예약했습니다.")
@@ -256,11 +290,49 @@ class PlayPanel:
     def _budget(status):
         return bool(status and status.get("scenario") == "budget-v1")
 
+    @staticmethod
+    def _legislature(status):
+        return bool(status and status.get("scenario") == "law-v1")
+
+    @staticmethod
+    def _seat_label(seat):
+        return f"{seat['party']} ({seat['seats']}석)"
+
+    def _law_action(self, status):
+        bill = status["law_bill"]
+        phase = bill["phase"]
+        if phase == "available":
+            return ("bill-introduce" if bill["seats"] else None, "법안 발의 후 하루 진행")
+        if phase == "submitted" and bill["vote_ready"]:
+            chosen = self.law_party.get()
+            for seat in bill["seats"]:
+                party = seat["party"]
+                if (seat["seats"] > 0 and chosen == self._seat_label(seat)
+                        and party and not any(char.isspace() for char in party)):
+                    return ("bill-approve " + party, "선택 정당으로 표결 후 하루 진행")
+            return (None, "선택 정당으로 표결 후 하루 진행")
+        if phase == "approved":
+            return ("bill-promulgate", "공포 후 하루 진행")
+        if phase in ("submitted", "promulgated"):
+            reviewing = phase == "submitted"
+            due = bill["next_review" if reviewing else "effective_date"]
+            label = "다음 심의일까지 진행" if reviewing else "시행일까지 진행"
+            if due:
+                # The native cursor is the next date to process, not the
+                # last date processed. Include the scheduled day itself.
+                days = (date.fromisoformat(due) - date.fromisoformat(status["date"])).days + 1
+                if 1 <= days <= 366:
+                    return (f"step {days}", label)
+            return (None, label)
+        return (None, "추가 법안 조치 없음")
+
     def _show(self, status):
         factory = self._industry(status)
         perspective = self.FACTORY if factory else f"국가 {status['country']}"
         if self._budget(status):
             perspective += " · 예산 시범판"
+        elif self._legislature(status):
+            perspective += " · 입법 시범판"
         headline = f"{perspective}  |  {status['date']}  |  진행 기록 {status['commit']}"
         budget = (f"국고: {status['treasury']}\n"
                   f"누적 수입: {status['revenue']}\n"
@@ -300,6 +372,27 @@ class PlayPanel:
                          "실제 국고 지급액을 보여줍니다.\n"
                          "일정 금액은 국고에 남겨 둡니다.")
             titles = ("재정", "생산 조건", "공장 재고·생산", "공공사업 지급")
+        elif self._legislature(status):
+            bill = status["law_bill"]
+            phase = {"available": "발의 전", "submitted": "심의 중", "approved": "가결",
+                     "promulgated": "공포됨", "effective": "시행 중", "rejected": "부결"}[bill["phase"]]
+            if bill["phase"] == "submitted" and bill["vote_ready"]:
+                phase = "표결 가능"
+            policy = f"최저임금 법안: {phase}\n가결 기준: {bill['threshold']}석"
+            if bill["seats"]:
+                policy += "\n" + " · ".join(f"{s['party']}: {s['seats']}석" for s in bill["seats"])
+            else:
+                policy += "\n선거 결과 대기 중"
+            if bill["next_review"]:
+                policy += f"\n다음 심의일: {bill['next_review']}"
+            if bill["effective_date"]:
+                policy += f"\n시행일: {bill['effective_date']}"
+            minimum = status["minimum_monthly_contract_wage"]
+            policy += f"\n월 최저임금: {minimum if minimum else '없음'}"
+            self.law_party_choice.configure(values=tuple(self._seat_label(s) for s in bill["seats"]))
+            market = "새 근로계약에 적용합니다. 기존 계약의 임금은 자동으로 바뀌지 않습니다."
+            diplomacy = "선출 의회에서 지지 정당을 명시적으로 골라 표결합니다."
+            titles = ("재정", "최저임금 법안·의석", "근로계약 적용", "의회 조작")
         else:
             policy = (f"무역법: {status['law']}\n"
                       f"수입 관세율: {self._percent(status['tariff_ppm'])}%\n"
@@ -322,7 +415,7 @@ class PlayPanel:
         self.policy.set(policy)
         self.market.set(market)
         self.diplomacy.set(diplomacy or "현재 분쟁 없음.")
-        if not factory:
+        if not factory and not self._legislature(status):
             self.tariff.set(self._percent(status["tariff_ppm"]))
             self.tax.set(self._percent(status["income_tax_ppm"] if pending_tax is None else pending_tax))
         self.current = status
@@ -335,7 +428,7 @@ class PlayPanel:
             self._send("step 1")
 
     def set_tariff(self):
-        if not self.current or self._industry(self.current):
+        if not self.current or self._industry(self.current) or self._legislature(self.current):
             return
         value = self.tariff.get().strip()
         if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > 100:
@@ -344,7 +437,7 @@ class PlayPanel:
         self._send("tariff " + value)
 
     def set_income_tax(self):
-        if (not self.current or self._industry(self.current)
+        if (not self.current or self._industry(self.current) or self._legislature(self.current)
                 or self.current["pending_income_tax_ppm"] is not None):
             return
         value = self.tax.get().strip()
@@ -366,6 +459,12 @@ class PlayPanel:
         construction = self.current.get("public_construction") if self.current else None
         if construction and construction["state"] == "available":
             self._send("public-build")
+
+    def advance_bill(self):
+        if self._legislature(self.current):
+            command, _ = self._law_action(self.current)
+            if command:
+                self._send(command)
 
     def _file(self, verb, path):
         if not path:

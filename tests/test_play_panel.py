@@ -1,5 +1,6 @@
 """Drive real Tk controls linked to the native trial; needs a display (or Xvfb)."""
 import sys
+from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic, sleep
@@ -21,6 +22,7 @@ def wait(root, panel):
 
 def run(exe):
     assert play_panel.PlayPanel._protocol_tag("공장 시범판") == "TUT"
+    assert play_panel.PlayPanel._protocol_tag("A 입법 시범판") == "LAW-A"
     root = tk.Tk()
     panel = play_panel.PlayPanel(root, exe)
     try:
@@ -105,6 +107,7 @@ def run(exe):
             assert panel.current["public_construction"]["commissioned_capacity"] == 31
             assert "준공" in panel.budget.get()
             run_industry(root, panel, save)
+            run_elected_bill(root, panel, Path(directory) / "선출 의회 공포 대기.vic25")
     finally:
         panel.close()
         stop = monotonic() + 3
@@ -156,6 +159,86 @@ def run_income_tax(root, panel, save):
     assert panel.current["pending_income_tax_ppm"] is None
     assert "소득세율: 15%" in panel.policy.get()
     assert panel.tax_button.instate(["!disabled"])
+
+
+def run_elected_bill(root, panel, save):
+    panel.country.set("A 입법 시범판")
+    panel.new_button.invoke()
+    wait(root, panel)
+    assert panel.current["scenario"] == "law-v1"
+    assert not panel.tax_button.winfo_ismapped() and not panel.tariff_button.winfo_ismapped()
+    for _ in range(4):
+        if panel.current["law_bill"]["seats"]:
+            break
+        panel.step_button.invoke()
+        wait(root, panel)
+    opening = panel.current
+    seats = opening["law_bill"]["seats"]
+    threshold = opening["law_bill"]["threshold"]
+    majority = next(p for p in seats if p["seats"] >= threshold)
+    minority = next(p for p in seats if 0 < p["seats"] < threshold)
+    assert f"가결 기준: {threshold}석" in panel.policy.get()
+    assert f"{majority['party']}: {majority['seats']}석" in panel.policy.get()
+    assert panel.law_action_button.winfo_ismapped() and panel.law_action_button.instate(["!disabled"])
+    panel.country.set("B")  # Prospective chooser must not change the incumbent trial.
+    panel.law_action_button.invoke()
+    wait(root, panel)
+    assert panel.current["country"] == "A" and panel.current["scenario"] == "law-v1"
+    assert panel.current["law_bill"]["phase"] == "submitted"
+    for _ in range(12):
+        bill = panel.current["law_bill"]
+        if bill["vote_ready"]:
+            break
+        today = date.fromisoformat(panel.current["date"])
+        review = date.fromisoformat(bill["next_review"])
+        assert review >= today and bill["next_review"] in panel.policy.get()
+        assert panel.law_action_button.cget("text") == "다음 심의일까지 진행"
+        assert panel.law_action_button.instate(["!disabled"])
+        panel.law_action_button.invoke()
+        wait(root, panel)
+    submitted = panel.current
+    assert submitted["law_bill"]["vote_ready"]
+    assert panel.law_party_choice.winfo_ismapped() and panel.law_party.get() == ""
+    assert panel.law_action_button.instate(["disabled"])
+    panel.law_party_choice.current(next(
+        i for i, p in enumerate(submitted["law_bill"]["seats"]) if p == minority))
+    panel.law_party_choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+    panel.law_action_button.invoke()
+    wait(root, panel)
+    assert panel.current == submitted and "오류:" in panel.notice.get()
+    panel.law_party_choice.current(next(
+        i for i, p in enumerate(submitted["law_bill"]["seats"]) if p == majority))
+    panel.law_party_choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+    panel.law_action_button.invoke()
+    wait(root, panel)
+    assert panel.current["law_bill"]["phase"] == "approved"
+    panel.law_action_button.invoke()
+    wait(root, panel)
+    pending = panel.current
+    assert pending["law_bill"]["phase"] == "promulgated"
+    assert pending["law_bill"]["effective_date"] in panel.policy.get()
+    assert pending["minimum_monthly_contract_wage"] == opening["minimum_monthly_contract_wage"]
+    assert panel.law_action_button.cget("text") == "시행일까지 진행"
+    assert panel.law_action_button.instate(["!disabled"])
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file()
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.country.set("A 입법 시범판")
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == pending and panel.country.get() == "A 입법 시범판"
+    today = date.fromisoformat(pending["date"])
+    effective = date.fromisoformat(pending["law_bill"]["effective_date"])
+    assert effective >= today
+    panel.law_action_button.invoke()
+    wait(root, panel)
+    assert panel.current["law_bill"]["phase"] == "effective"
+    assert panel.current["minimum_monthly_contract_wage"] == 62
+    assert "월 최저임금: 62" in panel.policy.get()
 
 
 def run_industry(root, panel, tariff_save):
