@@ -1018,6 +1018,7 @@ inline void IntegratedWorld::p2_promulgate_bill(
                it->second.signed_by_head||it->second.overridden,
                "P2 presidential assent or parliamentary override required");
     }
+    p2_unschedule_assent(bill_id);
     if(bill.effective_day<=today)bill.effective_day=today+1;
     bill.promulgated_day=today;
     bill.status=P2BillStatus::promulgated;

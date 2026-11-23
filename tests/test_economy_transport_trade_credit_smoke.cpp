@@ -55,7 +55,7 @@ static phasegh::World commerce_fixture(bool future=false,int future_start=24001,
         c.seed_production_facility("WORKS","TRADER","PORT",31);
         phased::IndustryRecipe recipe;
         recipe.id="MAKE_TOOLS";recipe.site="WORKS";
-        recipe.inputs={{"ore",2},{"fuel",2}};
+        recipe.inputs={{"ore",1},{"fuel",2},{"ore",1}};
         recipe.outputs={{"tools",2}};
         recipe.workers_per_batch=recipe.capacity_per_batch=1;
         d.seed_recipe(recipe);
@@ -407,7 +407,56 @@ static void factory_freight_wages_and_fifty_day_replay(bool route_available) {
     }
 }
 
+static void repeated_recipe_inputs_share_a_single_procurement_target(bool enough) {
+    phasegh::World opening(24000);
+    auto& geo=opening.seed_geography();
+    geo.seed_unit(1,"A","Procurement fixture");
+    geo.seed_province(1,"R","A");geo.seed_assignment(1,1);
+    auto& d=geo.seed_core();
+    auto& c=d.seed_core();
+    c.seed_actor("A",0);c.seed_actor("FIRM",100);c.seed_actor("SELLER",0);
+    c.seed_market("R","ore",2,2,2,0);c.seed_market("R","tools",20,20,20,2);
+    c.seed_stock("SELLER","R","ore",enough?6:2);
+    c.seed_production_facility("SHOP","FIRM","R",31);
+    auto& pop=c.seed_population();
+    const auto hh=pop.household_profile({"R","fixture","shared",1});
+    const auto econ=pop.economic_profile({"R","worker","wage","employee",pop.default_education()});
+    const auto demo=pop.demographic_profile({"R",23640,phaseb::Sex::female,
+        "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+    const auto worker=pop.seed_population(demo,econ,hh,1);
+    pop.hire(worker,1,"FIRM","worker",0,{});
+    phased::IndustryRecipe recipe;
+    recipe.id="TOOLS";recipe.site="SHOP";
+    recipe.inputs={{"ore",1},{"ore",2}};recipe.outputs={{"tools",1}};
+    recipe.workers_per_batch=recipe.capacity_per_batch=1;
+    d.seed_recipe(recipe);
+    p0::Policies policies;
+    policies.daily_food_units_per_person=0;
+    policies.monthly_clothing_units_per_person=0;
+    policies.allow_endogenous_staffing=false;
+    p0::DailyGame game(daily::World::adopt(std::move(opening),17),policies);
+    phasegh::World::Plan audit;
+    audit[3].push_back([enough](phasegh::Stage& stage) {
+        const auto& c=stage.phase_c();
+        verify(c.stock("FIRM","R","ore")== (enough?3:2)&&
+               c.cash("SELLER")== (enough?6:4),
+               "same-day local procurement did not reserve the total repeated input");
+    });
+    auto replay=p0::DailyGame(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(game.world())),policies);
+    game.advance_day(audit);replay.advance_day(audit);
+    const auto& c1=game.world().engine().base().core().core();
+    verify(c1.stock("FIRM","R","tools")== (enough?1:0)&&
+           c1.stock("FIRM","R","ore")== (enough?3:2)&&
+           c1.stock("SELLER","R","ore")==0&&c1.cash("SELLER")== (enough?12:4)&&
+           c1.cash("FIRM")== (enough?88:96)&&c1.financial().balanced()&&
+           daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+           "end-of-day stock did not refill one real batch or replay exactly");
+}
+
 int main() {
+    repeated_recipe_inputs_share_a_single_procurement_target(true);
+    repeated_recipe_inputs_share_a_single_procurement_target(false);
     factory_freight_wages_and_fifty_day_replay(true);
     factory_freight_wages_and_fifty_day_replay(false);
     merchant_discovers_seller_goods_and_path();

@@ -2912,7 +2912,7 @@ public:
                           const std::vector<std::string>&,std::int64_t);
     void p2_cancel_bill(const std::string&,std::int64_t);
     void p2_assent_due(std::int64_t);
-    [[nodiscard]] bool p2_has_assent_work()const;
+    [[nodiscard]] bool p2_has_assent_due(std::int64_t)const;
     void p2_promulgate_bill(const std::string&,const std::string&,std::int64_t);
     [[nodiscard]] bool p2_has_due(std::int64_t)const;
     void phase_time_apply_p2(std::int64_t);
@@ -5777,6 +5777,8 @@ private:
     std::map<std::string,P2Bill> p2_bills_;
     std::map<std::string,P2Enactment> p2_enactments_;
     std::map<std::string,P2Assent> p2_assents_;
+    // Derived from live assent records. Day -1 is initial Stage9 evaluation.
+    std::map<std::int64_t,std::set<std::string>> p2_assent_due_;
     std::map<std::string,P1LegislativePowers> p1_legislative_powers_;
     std::map<std::string,std::int64_t> p2_retry_after_;
     std::map<std::int64_t,std::set<std::string>> p2_review_due_; // derived
@@ -5847,6 +5849,9 @@ private:
     [[nodiscard]] std::int64_t p2_scaled_new_review_days(
         const std::string&,std::int64_t)const;
     void p2_rebuild_review_due_index();
+    static std::int64_t p2_assent_due_key(const P2Assent&);
+    void p2_unschedule_assent(const std::string&);
+    void p2_rebuild_assent_due_index();
     static int compare_nonnegative_ratios(std::uint64_t a, std::uint64_t b,
                                           std::uint64_t c, std::uint64_t d) {
         ensure(b != 0 && d != 0, "zero election divisor");

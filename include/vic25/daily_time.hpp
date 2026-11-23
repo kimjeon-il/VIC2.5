@@ -102,6 +102,16 @@ inline Date add_calendar_months(Date date,std::int32_t months) {
     const auto month=static_cast<std::int32_t>(zero_based%12+1);
     return {year,month,std::min(date.day,days_in_month(year,month))};
 }
+// P0 and the bare daily fallback retain their separate Stage9 ordering,
+// but use the same lawful ballot and next-term calendar path.
+inline void hold_autonomous_contests(phasec::IntegratedWorld& c,
+        const std::vector<std::string>& ids,Date date,DayIndex today) {
+    for(const auto& id:ids) {
+        const auto months=c.p4_contest(id).term_months;
+        const auto next=to_day_index(add_calendar_months(date,months));
+        c.p4_hold_contest(id,today,next,c.p4_autonomous_ballot(id));
+    }
+}
 inline bool is_month_end(Date d) {
     return d.day==days_in_month(d.year,d.month);
 }
@@ -359,7 +369,7 @@ public:
            !engine_.base().core().core().p4_has_due_amendment(day_)&&
            !engine_.base().core().core().p2_has_due(day_)&&
            !engine_.base().core().core().p2_has_review_due(day_)&&
-           !engine_.base().core().core().p2_has_assent_work()&&
+           !engine_.base().core().core().p2_has_assent_due(day_)&&
            !engine_.base().core().core().p4_has_campaign_due(day_)&&
            !engine_.base().core().core().p1_has_character_work()&&
            !engine_.base().core().core().p1_has_ai_review(day_)&&
@@ -528,12 +538,7 @@ public:
         // A base daily::World without P0 still holds all lawful due elections.
         real_actions[9].push_back([today=day_,current](phasegh::Stage& gh) {
             auto& c=gh.phase_c();
-            for(const auto& contest_id:c.p4_due_contests(today)) {
-                const auto months=c.p4_contest(contest_id).term_months;
-                const auto next=to_day_index(add_calendar_months(current,months));
-                c.p4_hold_contest(contest_id,today,next,
-                                  c.p4_autonomous_ballot(contest_id));
-            }
+            hold_autonomous_contests(c,c.p4_due_contests(today),current,today);
         });
         // Stage9 interest-group bargaining is conditional on an actually
         // submitted bill and historically/simulation-provided policy demands.
@@ -547,7 +552,7 @@ public:
                 gh.phase_c().p2_review_due(today);
         });
         real_actions[9].push_back([today=day_](phasegh::Stage& gh) {
-            if(gh.phase_c().p2_has_assent_work())
+            if(gh.phase_c().p2_has_assent_due(today))
                 gh.phase_c().p2_assent_due(today);
         });
         // AI selects only lawful P1/P2 commands after real election results

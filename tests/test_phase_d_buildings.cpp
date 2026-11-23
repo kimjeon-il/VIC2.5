@@ -73,10 +73,10 @@ static void test_native_catalog_and_actual_production() {
 
     IndustryRecipe food;
     food.id="BREAD";food.site="FOOD";food.industry_class="MANU";
-    food.inputs={{"grain",1}};food.outputs={{"groceries",2}};
+    food.inputs={{"grain",1},{"grain",2}};food.outputs={{"groceries",2}};
     food.workers_per_batch=1;
     w.seed_building_recipe(food);
-    core.seed_stock("FIRM","R","grain",2);
+    core.seed_stock("FIRM","R","grain",6);
     check(w.building_production_capacity("BREAD").feasible_batches==0,
           "unemployed staff incorrectly created product capacity");
     const auto worker=seed_worker(w,2);
@@ -84,13 +84,20 @@ static void test_native_catalog_and_actual_production() {
     p[2].push_back([worker](Stage& s){
         s.phase_c().hire(worker,2,"FIRM",1);
     });
-    p[4].push_back([](Stage& s){s.manufacture("BREAD",2);});
     w.advance(p);
+    const auto capacity=w.building_production_capacity("BREAD");
+    check(capacity.equipment_batches==3 && capacity.labor_batches==2 &&
+          capacity.input_batches==2 && capacity.feasible_batches==2 &&
+          w.core().stock("FIRM","R","grain")==6,
+          "capacity must quote the cumulative ingredient requirement without consuming stock");
+    World::Plan production;
+    production[4].push_back([](Stage& s){s.manufacture("BREAD",2);});
+    w.advance(production);
     check(w.building_production_capacity("BREAD").feasible_batches==0,
           "exhausted physical inputs should cap future production");
     check(w.core().stock("FIRM","R","groceries")==4 &&
           w.core().stock("FIRM","R","grain")==0 &&
-          w.realized_batches("MANU",4200,4200)==2,
+          w.realized_batches("MANU",4200,4201)==2,
           "building recipe did not perform real inventory-backed production");
     check(w.site_archetype("PORT")->industry=="LOGI" &&
           !w.state().recipes.contains("PORT_GROCERIES"),

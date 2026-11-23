@@ -23,8 +23,10 @@ inline void IntegratedWorld::p1_set_legislative_powers(
 inline void IntegratedWorld::p2_open_assent(const std::string& id) {
     const auto& b=p2_bills_.at(id);
     if(p1_legislative_powers(b.country).veto!=P1VetoRule::none&&
-       p2_enactments_.contains(id))
-        p2_assents_.try_emplace(id,P2Assent{id,b.country,-1,-1,false,false,false});
+       p2_enactments_.contains(id)&&
+       p2_assents_.try_emplace(id,
+           P2Assent{id,b.country,-1,-1,false,false,false}).second)
+        p2_assent_due_[-1].insert(id);
 }
 inline void IntegratedWorld::p2_sign_bill(
         const std::string& id,const std::string& head,std::int64_t day) {
@@ -35,6 +37,7 @@ inline void IntegratedWorld::p2_sign_bill(
            "P2 invalid presidential signature");
     auto& a=p2_assents_.at(id);
     ensure(!a.vetoed&&!a.signed_by_head,"P2 already decided");
+    p2_unschedule_assent(id);
     a.signed_by_head=true;a.deadline=-1;
     events_.push_back("p2-executive-assent:"+id);
 }
@@ -48,7 +51,10 @@ inline void IntegratedWorld::p2_veto_bill(
            "P2 veto unavailable");
     auto& a=p2_assents_.at(id);
     ensure(!a.vetoed&&!a.signed_by_head,"P2 already decided");
+    const auto reconsideration_end=phaseb::add_checked(day,30);
+    p2_unschedule_assent(id);
     a.vetoed=true;a.veto_day=day;a.deadline=-1;
+    p2_assent_due_[reconsideration_end].insert(id);
     events_.push_back("p2-executive-veto:"+id);
 }
 inline void IntegratedWorld::p2_override_veto(
@@ -82,36 +88,59 @@ inline void IntegratedWorld::p2_override_veto(
         ensure(votes>=threshold(p4_contests_.at(contest).seats),
                "P2 senate override lacks votes");
     }
-    ensure(day>=a.veto_day&&day<=a.veto_day+30,
+    ensure(day>=a.veto_day&&day<=p2_assent_due_key(a),
            "P2 veto override must occur within the 30-day reconsideration");
+    p2_unschedule_assent(id);
     a.overridden=true;
     events_.push_back("p2-veto-overridden:"+id);
 }
-inline bool IntegratedWorld::p2_has_assent_work()const {
+inline std::int64_t IntegratedWorld::p2_assent_due_key(const P2Assent& a) {
+    return a.vetoed?phaseb::add_checked(a.veto_day,30):a.deadline;
+}
+inline void IntegratedWorld::p2_unschedule_assent(const std::string& id) {
+    const auto a=p2_assents_.find(id);
+    if(a==p2_assents_.end()||a->second.signed_by_head||a->second.overridden)return;
+    const auto due=p2_assent_due_.find(p2_assent_due_key(a->second));
+    if(due==p2_assent_due_.end())return;
+    due->second.erase(id);
+    if(due->second.empty())p2_assent_due_.erase(due);
+}
+inline void IntegratedWorld::p2_rebuild_assent_due_index() {
+    p2_assent_due_.clear();
     for(const auto& [id,a]:p2_assents_)
         if(p2_bills_.at(id).status==P2BillStatus::approved&&
-           !a.signed_by_head&&!a.overridden)return true;
-    return false;
+           !a.signed_by_head&&!a.overridden)
+            p2_assent_due_[p2_assent_due_key(a)].insert(id);
+}
+inline bool IntegratedWorld::p2_has_assent_due(std::int64_t day)const {
+    return !p2_assent_due_.empty()&&p2_assent_due_.begin()->first<=day;
 }
 inline void IntegratedWorld::p2_assent_due(std::int64_t day) {
     require_stage({9});
-    for(auto& [id,a]:p2_assents_) {
+    // Preserve the prior bill-id order even after a monthly bridge or
+    // restored save leaves more than one date to process at this boundary.
+    std::set<std::string> due;
+    while(p2_has_assent_due(day)) {
+        auto it=p2_assent_due_.begin();
+        due.merge(it->second);
+        p2_assent_due_.erase(it);
+    }
+    for(const auto& id:due) {
+        auto& a=p2_assents_.at(id);
         auto& bill=p2_bills_.at(id);
         if(bill.status!=P2BillStatus::approved||
            a.signed_by_head||a.overridden)continue;
         if(a.vetoed) {
-            if(day>=a.veto_day+30) {
-                bill.status=P2BillStatus::rejected;
-                if(const auto process=p2_enactments_.find(id);
-                   process!=p2_enactments_.end())
-                    p2_retry_after_[process->second.law_key]=day+730;
-                events_.push_back("p2-veto-sustained-bill-failed:"+id);
-            }
-            continue;
-        }
-        if(a.deadline<0)
-            a.deadline=day+p1_legislative_powers(a.country).assent_days;
-        if(a.deadline<=day) {
+            bill.status=P2BillStatus::rejected;
+            if(const auto process=p2_enactments_.find(id);
+               process!=p2_enactments_.end())
+                p2_retry_after_[process->second.law_key]=day+730;
+            events_.push_back("p2-veto-sustained-bill-failed:"+id);
+        } else if(a.deadline<0) {
+            a.deadline=phaseb::add_checked(day,
+                p1_legislative_powers(a.country).assent_days);
+            p2_assent_due_[a.deadline].insert(id);
+        } else {
             a.signed_by_head=true;
             events_.push_back("p2-assent-deadline:"+id);
         }

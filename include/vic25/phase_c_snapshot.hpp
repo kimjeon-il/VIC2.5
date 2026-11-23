@@ -1081,6 +1081,7 @@ struct SnapshotCodec {
         // Negotiation's derived due index depends on the optional chamber
         // decisions trailer, which may appear AFTER the P2 base-law trailer.
         if(seen_p2)w.p2_rebuild_due_index();
+        if(seen_separation)w.p2_rebuild_assent_due_index();
         w.validate();
         return w;
     }

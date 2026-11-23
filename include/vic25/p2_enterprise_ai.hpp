@@ -163,7 +163,11 @@ inline Quote evaluate(const phasec::IntegratedWorld& c,
     q.demand_batches=shortage/primary.per_unit+
                      (shortage%primary.per_unit?1:0);
     if(q.demand_batches<=0)return q;
-    for(const auto& in:recipe.inputs) {
+    // evaluate also accepts drafts not yet validated by Phase D.
+    if(std::any_of(recipe.inputs.begin(),recipe.inputs.end(),
+                   [](const phased::Input& row){return row.per_unit<=0;}))
+        return q;
+    for(const auto& in:phased::recipe_input_totals(recipe)) {
         const auto supply=observed_supply(c,spatial,trade,
                           q.region,in.good,in.per_unit,day,days);
         if(!supply)return q;

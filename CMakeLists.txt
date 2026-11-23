@@ -414,6 +414,15 @@ if(BUILD_TESTING)
     add_test(NAME vic25_p0_daily_longrun COMMAND vic25_p0_daily_longrun)
 endif()
 
+# Economy/logistics/credit simulation with actual dated freight and payroll.
+if(BUILD_TESTING)
+    add_executable(vic25_economy_transport_trade_credit_smoke
+                   tests/test_economy_transport_trade_credit_smoke.cpp)
+    target_link_libraries(vic25_economy_transport_trade_credit_smoke PRIVATE vic25_core)
+    add_test(NAME vic25_economy_transport_trade_credit_smoke
+             COMMAND vic25_economy_transport_trade_credit_smoke)
+endif()
+
 # P4 party-system and institution-specific election schedule regressions.
 if(BUILD_TESTING)
     add_executable(vic25_p4_governance_tests tests/test_p4_governance.cpp)

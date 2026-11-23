@@ -1565,8 +1565,111 @@ static void canonical_national_authority_funds_dated_regional_decrees() {
     reject_next(world,"A",3);
 }
 
+static void executive_assent_wakes_only_on_due_day_and_replays() {
+    enum class Decision { timeout, veto, signature };
+    for(const auto decision:{Decision::timeout,Decision::veto,Decision::signature}) {
+        const bool vetoed=decision==Decision::veto;
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");geo.seed_unit(1,"A","R");
+        geo.seed_assignment(1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",0);
+        c.seed_government("A","HEAD","PM",5,3);
+        c.seed_p1_constitution("A",{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:authority"});
+        c.p1_set_legislative_powers("A",{P1VetoRule::suspensive,666'667,6});
+        c.p1_mark_player_country("A",true);
+        c.seed_interest_group("Actual");
+        c.p3_seed_group({"A","Actual","","","",P3GroupType::custom,0,0});
+        c.seed_p1_coalition("A",{{"Actual"},{},false});
+        c.p3_seed_movement({"Backing","A","assent_fixture","reformed","",
+            P3MovementGoal::legal_reform,{"Actual"},{},900'000,900'000,true});
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"R","mixed","shared",250});
+        const auto e=pop.economic_profile({"R","worker","wage","employee",
+                                          pop.default_education()});
+        const auto d=pop.demographic_profile({"R",23651,phaseb::Sex::male,
+            "culture","faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto cohort=pop.seed_population(d,e,h,1000);
+        auto world=daily::World::adopt(std::move(gh),31);
+        const auto start=world.day_index();
+        const std::string id="ASSENT";
+        phasegh::World::Plan submit;
+        submit[9].push_back([&](phasegh::Stage& stage) {
+            stage.phase_c().join_interest_group(cohort,"Actual",1000);
+            P2Bill bill;
+            bill.id=id;bill.country="A";bill.proposer="PM";
+            bill.legal_basis="fixture:process";
+            bill.proposed_base={"revised","A","assent_fixture","national",
+                "reformed","fixture:assent"};
+            stage.phase_c().p2_submit_bill(std::move(bill),start);
+        });
+        world.advance_day(submit);
+        for(int i=0;i<12&&!ledger(world).p2_enactment_ready(id);++i) {
+            const auto next=ledger(world).p2_enactments().at(id).next_review_day;
+            ok(next>=world.day_index(),"assent fixture lost its legislative review");
+            while(world.day_index()<=next)world.advance_day();
+        }
+        ok(ledger(world).p2_enactment_ready(id),"assent fixture never reached a legal vote");
+        const auto vote=world.day_index();
+        phasegh::World::Plan approve;
+        approve[9].push_back([&](phasegh::Stage& stage){
+            stage.phase_c().p2_approve_bill(id,{});
+            if(vetoed)stage.phase_c().p2_veto_bill(id,"HEAD",vote);
+        });
+        world.advance_day(approve);
+        const auto due=vote+(vetoed?30:6);
+        auto restored=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
+        if(decision==Decision::signature) {
+            const auto signing_day=world.day_index();
+            phasegh::World::Plan sign;
+            sign[9].push_back([&](phasegh::Stage& stage) {
+                stage.phase_c().p2_sign_bill(id,"HEAD",signing_day);
+            });
+            world.advance_day(sign);restored.advance_day(sign);
+            ok(!ledger(world).p2_has_assent_due(due)&&
+               !ledger(restored).p2_has_assent_due(due),
+               "explicit signature left stale work at the original deadline");
+            const auto today=world.day_index();
+            phasegh::World::Plan finish;
+            finish[9].push_back([&](phasegh::Stage& stage) {
+                stage.phase_c().p2_promulgate_bill(id,"HEAD",today);
+            });
+            world.advance_day(finish);restored.advance_day(finish);
+            ok(ledger(world).p2_bills().at(id).status==P2BillStatus::promulgated&&
+               daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(restored),
+               "explicit assent did not enable lawful promulgation after replay");
+            continue;
+        }
+        for(;world.day_index()<due;) {
+            ok(!ledger(world).p2_has_assent_due(world.day_index())&&
+               !ledger(restored).p2_has_assent_due(restored.day_index()),
+               "future executive deadline woke daily political work");
+            world.advance_day();restored.advance_day();
+        }
+        ok(ledger(world).p2_has_assent_due(due)&&ledger(restored).p2_has_assent_due(due),
+           "executive deadline missing on its actual date");
+        world.advance_day();restored.advance_day();
+        ok(ledger(world).p2_bills().at(id).status==
+             (vetoed?P2BillStatus::rejected:P2BillStatus::approved),
+           "deadline did not preserve real assent/veto outcome");
+        const auto today=world.day_index();
+        phasegh::World::Plan after;
+        if(!vetoed)after[9].push_back([&](phasegh::Stage& stage) {
+            stage.phase_c().p2_promulgate_bill(id,"HEAD",today);
+        });
+        world.advance_day(after);restored.advance_day(after);
+        ok(!ledger(world).p2_has_assent_due(world.day_index())&&
+           daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(restored),
+           "deadline replay or stale duplicate changed the committed world");
+    }
+}
+
 int main(){
     try{
+        executive_assent_wakes_only_on_due_day_and_replays();
         custom_authority_law_never_pays_for_real_decree();
         canonical_national_authority_funds_dated_regional_decrees();
         actual_upper_house_personal_terms_and_replay();
@@ -1580,7 +1683,7 @@ int main(){
         political_concessions_commit_real_national_authority();
         direct_named_amendment_strength_changes_actual_clout();
         national_base_group_strength_requires_genuine_law_slot();
-        std::cout<<"P2 advanced politics: thirteen focused scenarios PASS\n";
+        std::cout<<"P2 advanced politics: fourteen focused scenarios PASS\n";
         return 0;
     }catch(const std::exception& ex){
         std::cerr<<"P2 ADVANCED POLITICS FAILED: "<<ex.what()<<"\n";

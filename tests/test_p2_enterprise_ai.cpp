@@ -66,6 +66,23 @@ static void quote_requires_real_supply_and_verified_route() {
         real,domain,gh.base().spatial(),gh.commerce(),steel,1,31);
     check(local.valid && local.margin_per_batch>0 &&
           local.freight_per_batch==0,"local observed profits incorrect");
+    auto repeated=steel;
+    repeated.inputs.push_back({"iron",4});
+    const auto combined=enterprise_ai::evaluate(
+        real,domain,gh.base().spatial(),gh.commerce(),repeated,1,31);
+    check(combined.valid && combined.feasible_supply_batches==2 &&
+          combined.inputs_per_batch==12 && combined.freight_per_batch==0,
+          "enterprise quote must divide stock by the combined input requirement");
+    auto invalid=steel;
+    invalid.inputs.push_back({"iron",0});
+    check(!enterprise_ai::evaluate(
+        real,domain,gh.base().spatial(),gh.commerce(),invalid,1,31).valid,
+        "enterprise quote let aggregation hide a nonpositive draft input");
+    repeated.inputs.push_back({"iron",6});
+    const auto insufficient=enterprise_ai::evaluate(
+        real,domain,gh.base().spatial(),gh.commerce(),repeated,1,31);
+    check(!insufficient.valid && real.stock("SELLER","R","iron")==10,
+          "enterprise quote double-counted stock for a single batch or mutated it");
     steel.inputs.push_back({"copper",1});
     const auto absent=enterprise_ai::evaluate(
         real,domain,gh.base().spatial(),gh.commerce(),steel,1,31);
@@ -83,7 +100,7 @@ static void quote_requires_real_supply_and_verified_route() {
           routed.margin_per_batch<local.margin_per_batch,
           "actual route tariff/freight failed to affect enterprise margin");
 }
-static void collateralized_autonomous_new_factory() {
+static void collateralized_autonomous_new_factory(bool scenario_credit) {
     phasegh::World gh{24000};
     auto& e=gh.seed_geography();
     e.seed_province(1,"R","STATE");
@@ -130,11 +147,24 @@ static void collateralized_autonomous_new_factory() {
           enterprise_ai::approved_credit_remaining(
               gh.base().core().core(),gh.commerce(),"OWNER")==40,
           "credit availability was not backed by the live G collateral ledger");
-    p0::DailyGame game(daily::World::adopt(std::move(gh),25));
-    game.advance_day(); // February 1, autonomous builder pays real construction
+    p0::Policies policy;
+    // Isolate the optional facility; ordinary investment lending is tested
+    // separately and remains enabled by default.
+    policy.allow_endogenous_investment_credit=false;
+    if(scenario_credit)policy.allow_collateralized_enterprise_credit=true;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),25),policy);
+    game.advance_day(); // February 1, first possible build day
     const auto& gh1=game.world().engine();
     const auto& live=gh1.base().core().core();
     const auto& project=gh1.base().core().construction("FOOD_PLAN");
+    if(!scenario_credit) {
+        check(project.accepted_work==0 && live.outstanding_loan("OWNER")==0 &&
+              gh1.commerce().credit.at("FOOD_CREDIT").drawn==0 &&
+              live.stock("BUILDER","R","steel")==1 &&
+              !live.facilities().contains("NEW_FOOD"),
+              "default factory planning must not draw scenario collateral credit");
+        return;
+    }
     check(project.accepted_work==1 && project.ready &&
           live.outstanding_loan("OWNER")>=24 &&
           live.stock("BUILDER","R","steel")==0 &&
@@ -569,7 +599,8 @@ static void self_funded_expansion_commissions_and_sells_real_output() {
 int main() {
     try {
         quote_requires_real_supply_and_verified_route();
-        collateralized_autonomous_new_factory();
+        collateralized_autonomous_new_factory(false);
+        collateralized_autonomous_new_factory(true);
         selected_recipe_drives_production_hiring_and_restock(false);
         selected_recipe_drives_production_hiring_and_restock(true);
         sales_fund_expansion_on_an_ordinary_day();

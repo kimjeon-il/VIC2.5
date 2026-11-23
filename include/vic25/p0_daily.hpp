@@ -326,7 +326,9 @@ struct Policies {
     std::vector<BondSecondaryAsk> bond_secondary_asks;
     std::vector<BondSecondaryBid> bond_secondary_bids;
     bool allow_autonomous_recipe_comparison{true};
-    bool allow_collateralized_enterprise_credit{true};
+    // Optional secured G contracts are scenario inputs. Ordinary C bank
+    // investment loans, repayments and outstanding G obligations are separate.
+    bool allow_collateralized_enterprise_credit{false};
     std::vector<GovernmentFormation> government_formations; // append-only
     std::vector<ParliamentNoConfidence> no_confidence_votes;
     std::vector<ParliamentDissolution> dissolutions;
@@ -809,8 +811,9 @@ inline Quantity available_production(const phased::Stage& d,
     const auto& primary=r.outputs.front();
     if(c.stock(f.owner,f.region,primary.good)>=policy.target_inventory)return 0;
     const auto& quote=c.market(f.region,primary.good);
+    const auto inputs=phased::recipe_input_totals(r);
     Money cost_per_batch=0;
-    for(const auto& input:r.inputs) {
+    for(const auto& input:inputs) {
         const auto& iq=c.market(f.region,input.good);
         cost_per_batch=phaseb::add_checked(cost_per_batch,times(input.per_unit,iq.price));
     }
@@ -833,7 +836,7 @@ inline Quantity available_production(const phased::Stage& d,
     People labor=c.phase_d_workforce(f.owner)-c.phase_d_shared_labor_used(f.owner);
     if(labor<=0)return 0;
     batches=std::min(batches,labor/r.workers_per_batch);
-    for(const auto& input:r.inputs)
+    for(const auto& input:inputs)
         batches=std::min(batches,c.phase_d_material_available(f.owner,f.region,input.good)/input.per_unit);
     if(policy.wage_per_worker_per_day>0)
         batches=std::min(batches,c.phase_d_cash_available(f.owner)/
@@ -1952,7 +1955,7 @@ public:
                 if(day_budget<=used ||
                    day_budget-used<r.capacity_per_batch)return;
                 Money purchasing=0;
-                for(const auto& input:r.inputs) {
+                for(const auto& input:phased::recipe_input_totals(r)) {
                     const Quantity gap=local_material_shortfall(
                         c,f.owner,f.region,input.good,input.per_unit);
                     if(gap==0)continue;
@@ -1991,7 +1994,7 @@ public:
                 // One batch's missing materials are an actual, payable local
                 // purchase; the factory cannot consume newly produced goods
                 // retroactively from later Stage4.
-                for(const auto& input:r.inputs) {
+                for(const auto& input:phased::recipe_input_totals(r)) {
                     if(!c.has_market(f.region,input.good))continue;
                     const Money price=c.market(f.region,input.good).price;
                     Quantity need=local_material_shortfall(
@@ -2429,9 +2432,10 @@ public:
                         day_cap/recipe.capacity_per_batch,
                         employed/recipe.workers_per_batch);
                     if(batches<=0)continue;
+                    const auto inputs=phased::recipe_input_totals(recipe);
                     Money input_cost=0;
                     bool priced=true;
-                    for(const auto& item:recipe.inputs) {
+                    for(const auto& item:inputs) {
                         if(!c.has_market(facility.region,item.good)) {
                             priced=false;break;
                         }
@@ -2443,7 +2447,7 @@ public:
                         actual_daily_worker_wage(c,facility.owner,date.day,dim));
                     if(!priced||times(primary.per_unit,quote.price)<=
                         phaseb::add_checked(input_cost,wage))continue;
-                    for(const auto& item:recipe.inputs) {
+                    for(const auto& item:inputs) {
                         const auto key=std::make_tuple(
                             facility.owner,facility.region,item.good);
                         inputs_wanted[key]=phaseb::add_checked(
@@ -2499,17 +2503,11 @@ public:
         // Execute independent national parliamentary, local and elected-head
         // contests only on their scheduled day. Voters and party preference
         // are read from actual Phase B/P3 state in the Stage9 transaction.
-        for(const auto& contest_id:game_c.p4_due_contests(world_.day_index())) {
-            plan[9].push_back([contest_id,today=world_.day_index(),
+        if(auto contests=game_c.p4_due_contests(world_.day_index());!contests.empty())
+            plan[9].push_back([contests=std::move(contests),today=world_.day_index(),
                                date](phasegh::Stage& gh) {
-                auto& c=gh.phase_c();
-                const auto& contest=c.p4_contest(contest_id);
-                const auto next=daily::to_day_index(
-                    daily::add_calendar_months(date,contest.term_months));
-                c.p4_hold_contest(contest_id,today,next,
-                                  c.p4_autonomous_ballot(contest_id));
+                daily::hold_autonomous_contests(gh.phase_c(),contests,date,today);
             });
-        }
         for(const auto& election:decisions.elections) {
             if(date.year!=election.year||date.month!=election.month||date.day!=election.day)continue;
             plan[9].push_back([election](phasegh::Stage& gh){
@@ -3676,10 +3674,10 @@ public:
                         r.workers_per_batch);
                     Money remaining=times(product.per_unit,output.price)-payroll;
                     if(remaining<=0)continue;
-                    std::map<std::string,Quantity> input_units;
-                    for(const auto& input:r.inputs)
-                        input_units[input.good]=phaseb::add_checked(
-                            input_units[input.good],input.per_unit);
+                    auto input_units=phased::recipe_input_totals(r);
+                    // Import admission previously evaluated goods by ID.
+                    std::sort(input_units.begin(),input_units.end(),
+                        [](const auto& a,const auto& b){return a.good<b.good;});
                     std::string missing;
                     Quantity needed=0;
                     Quantity still_wanted=0;

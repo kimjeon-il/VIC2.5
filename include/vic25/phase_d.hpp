@@ -16,6 +16,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -84,6 +85,24 @@ struct IndustryRecipe {
     bool needs_retrofit{}; // retrofit pipeline remains unsupported by this slice
     bool requires_same_stage_nonstorable_energy{}; // I2-DISPATCH not yet contracted
 };
+// Quote each good once against the complete requirement for one batch.
+// Keep first occurrence order for local buying when available cash is tight.
+inline std::vector<Input> recipe_input_totals(
+        const IndustryRecipe& recipe) {
+    std::vector<Input> totals;
+    totals.reserve(recipe.inputs.size());
+    std::map<std::string_view,std::size_t> index;
+    for(const auto& row:recipe.inputs) {
+        const auto [where,first]=index.try_emplace(row.good,totals.size());
+        if(first)totals.push_back(row);
+        else {
+            auto& total=totals[where->second].per_unit;
+            total=phaseb::add_checked(total,row.per_unit);
+        }
+    }
+    return totals;
+}
+
 struct ProductionRun {
     std::string recipe;
     std::int64_t month{};
@@ -1739,7 +1758,7 @@ public:
         v.equipment_batches=available/r.capacity_per_batch;
         v.labor_batches=core_.phase_d_workforce(f.owner)/r.workers_per_batch;
         v.input_batches=v.equipment_batches;
-        for(const auto& input:r.inputs)
+        for(const auto& input:recipe_input_totals(r))
             v.input_batches=std::min(v.input_batches,
                  core_.stock(f.owner,f.region,input.good)/input.per_unit);
         v.feasible_batches=std::min({v.equipment_batches,
