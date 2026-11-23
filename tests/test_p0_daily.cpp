@@ -3009,9 +3009,11 @@ static void peacetime_military_unfunded_and_nonland_are_bounded() {
 
 // P2/P3 integration: claims, war, fronts, fleet and aviation all operate
 // through the same actual C/E/H day engine; no separate synthetic war ledger.
-enum class CivilianSeaTrade { none, preset, discovered };
+enum class CivilianSeaTrade { none, preset, discovered, factory };
+enum class SupplySea { none, blocked, open };
 static p0::DailyGame autonomous_war_fixture(
-        bool combined_arms,CivilianSeaTrade commerce=CivilianSeaTrade::none) {
+        bool combined_arms,CivilianSeaTrade commerce=CivilianSeaTrade::none,
+        SupplySea supply=SupplySea::none) {
     phasegh::World gh(24000); // Gregorian 2000-01-01
     auto& e=gh.seed_geography();
     e.seed_province(1,"RA","A");
@@ -3030,6 +3032,12 @@ static p0::DailyGame autonomous_war_fixture(
         e.seed_geographic_link("SEA-DIRECT",2,1,"sea");
         e.seed_geographic_link("SEA-LANDING",1,3,"sea");
     }
+    if(supply!=SupplySea::none) {
+        e.seed_province(4,"DEPOT-B","B");e.seed_assignment(4,22);
+        e.seed_province(5,"REAR-B","B");e.seed_assignment(5,22);
+        e.seed_coast(4,7);e.seed_coast(5,7);
+        e.seed_geographic_link("REAR-SEA",4,5,"sea");
+    }
     auto& core=e.seed_core().seed_core();
     core.seed_actor("A",1000);
     core.seed_actor("B",1000);
@@ -3046,6 +3054,19 @@ static p0::DailyGame autonomous_war_fixture(
         people(gh,"RA",12,"soldier",phaseb::Service::active));
     core.seed_active("LAND_B",
         people(gh,"RB",12,"soldier",phaseb::Service::active));
+    if(supply!=SupplySea::none) {
+        core.seed_unit("REAR_UNIT_B");
+        core.seed_army_deployment("REAR_UNIT_B","B","REAR-B");
+        core.seed_active("REAR_UNIT_B",people(gh,"REAR-B",3,"soldier",phaseb::Service::active));
+        core.seed_stock("B","DEPOT-B","ammunition",12);
+        core.seed_stock("A","RA","fuel",1);
+        phasegh::TransportEdge freight;
+        freight.id="REAR-SEA";freight.carrier="CARRIER";freight.from=4;freight.to=5;
+        freight.mode="sea";freight.monthly_capacity=100;freight.freight_per_unit=2;
+        freight.transit_days=1;freight.evidence_id="fixture:abstract-rear-sea";
+        freight.valid_from_month=24000;freight.valid_through_month=24010;
+        gh.seed_transport_edge(freight);
+    }
     if(combined_arms) {
         for(const auto& [unit,country,region]:std::vector<
              std::tuple<std::string,std::string,std::string>>{
@@ -3068,7 +3089,8 @@ static p0::DailyGame autonomous_war_fixture(
             core.set_peacetime_military_program(policy);
             core.seed_stock(unit,region,"ammunition",navy?
                 (country=="A"?8:2):6);
-            core.seed_stock(unit,region,"fuel",navy?5:6);
+            if(supply!=SupplySea::open||unit!="NAVY_A")
+                core.seed_stock(unit,region,"fuel",navy?5:6);
             if(navy)
                 core.p1_register_ship(phasec::P1NavalHull{
                     "HULL_"+country,unit,"test-warship","fixture",
@@ -3080,6 +3102,7 @@ static p0::DailyGame autonomous_war_fixture(
         sea.id="SEA_FROM_B";sea.carrier="CARRIER";
         sea.from=2;sea.to=1;
         sea.monthly_capacity=100;
+        if(commerce==CivilianSeaTrade::factory)sea.freight_per_unit=2;
         sea.transit_days=1;
         sea.mode="sea";
         sea.evidence_id="fixture-observed-direct-sea";
@@ -3099,11 +3122,34 @@ static p0::DailyGame autonomous_war_fixture(
         core.seed_market("RA","ore",30,30,30,
                          commerce==CivilianSeaTrade::discovered?350:0);
         core.seed_stock("CIVILIAN-SUPPLIER","RB","ore",400);
-        if(commerce==CivilianSeaTrade::preset)
+        if(commerce==CivilianSeaTrade::preset||commerce==CivilianSeaTrade::factory)
             gh.seed_route({"CIVILIAN-ORE-ROUTE","CIVILIAN-SUPPLIER",
                 "CIVILIAN-IMPORTER","ore",2,1,100,1});
     }
     p0::Policies config;
+    if(commerce==CivilianSeaTrade::factory) {
+        auto& industry=e.seed_core();
+        constexpr auto importer="CIVILIAN-IMPORTER";
+        core.seed_market("RA","food",18,18,18);
+        core.seed_stock(importer,"RA","ore",3);
+        core.seed_production_facility("CIVILIAN-MILL",importer,"RA",124);
+        phased::IndustryRecipe milling;
+        milling.id="CIVILIAN-MILLING";milling.site="CIVILIAN-MILL";
+        milling.inputs={{"ore",1}};milling.outputs={{"food",3}};
+        milling.workers_per_batch=milling.capacity_per_batch=1;
+        industry.seed_recipe(milling);
+        const auto worker=people(gh,"RA",4,"worker");
+        auto& pop=core.seed_population();
+        const auto wages="HH:"+std::to_string(pop.slice(worker).key.household);
+        core.seed_actor(wages,10'000);
+        pop.hire(worker,4,importer,"worker",0,{});
+        // Existing work-bound payroll, not cancellation of ordinary salaries.
+        config.manufacturers.push_back({milling.id,8,wages,"A",20});
+        config.daily_food_units_per_person=0;
+        config.buyers.push_back({worker,wages,importer,"RA","food",3});
+        config.monthly_clothing_units_per_person=0;
+        config.allow_endogenous_investment_credit=false;
+    }
     if(commerce==CivilianSeaTrade::discovered)
         config.merchant_offices.push_back({"CIVILIAN-IMPORTER","RA",4,0,50'000});
     config.allow_autonomous_army_resupply=false;
@@ -3300,6 +3346,224 @@ static void real_naval_blockade_stops_new_commerce_and_armistice_restores_it(
 }
 
 
+static void effective_armistice_restores_actual_factory_supply_and_paid_work() {
+    constexpr auto importer="CIVILIAN-IMPORTER",supplier="CIVILIAN-SUPPLIER";
+    constexpr auto war="WAR:P2:CRISIS";
+    auto warm=autonomous_war_fixture(true,CivilianSeaTrade::factory);
+    auto policy=warm.policies();
+    policy.allow_autonomous_naval_air_ai=false;
+    p0::DailyGame game(warm.world(),policy);
+    const auto payroll=policy.manufacturers.front().employee_wallet;
+    struct View {
+        Quantity ore{},world_ore{},batches{},food{};
+        phasec::Money vendor{},carrier{},worker{},sales{},treasury{},cash_total{};
+        std::size_t fills{},in_flight{};
+    };
+    const auto observe=[&](const p0::DailyGame& play) {
+        const auto& engine=play.world().engine();
+        const auto& live=c(play);
+        View v;
+        v.ore=live.stock(importer,"RA","ore");
+        v.food=live.stock(importer,"RA","food");
+        for(const auto& [key,quantity]:live.physical_inventory())
+            if(key.good_id=="ore")v.world_ore+=quantity;
+        for(const auto& work:engine.base().core().state().actual_production_runs)
+            if(work.recipe=="CIVILIAN-MILLING")v.batches+=work.batches;
+        v.vendor=live.cash(supplier);v.carrier=live.cash("CARRIER");
+        v.worker=live.cash(payroll);v.sales=live.firm_finance(importer).receipts;
+        v.treasury=live.cash("A");
+        for(const auto& actor:std::vector<std::string>{"A","B","CARRIER",supplier,importer,payroll})
+            v.cash_total+=live.cash(actor);
+        v.fills=engine.commerce().fills.size();v.in_flight=engine.commerce().daily_shipments.size();
+        require_test(v.world_ore+v.batches==403&&v.cash_total==22'000&&
+                     v.sales%18==0&&v.food+v.sales/18==3*v.batches&&live.financial().balanced(),
+                     "physical ore, production sales, or original scenario cash was fabricated");
+        return v;
+    };
+    const auto opening=observe(game);
+    if(!(opening.fills>10&&opening.in_flight>0&&opening.batches>0&&
+         opening.vendor>0&&opening.carrier>0&&opening.worker>0&&opening.sales>0))
+        throw std::runtime_error("factory fixture lacks actual baseline ledger: fills "+
+            std::to_string(opening.fills)+", underway "+std::to_string(opening.in_flight)+
+            ", batches "+std::to_string(opening.batches)+", seller "+std::to_string(opening.vendor)+
+            ", carrier "+std::to_string(opening.carrier)+", wages wallet "+
+            std::to_string(opening.worker)+", sales "+std::to_string(opening.sales));
+    bool blocked=false;
+    phasegh::World::Plan check;
+    check[1].push_back([&](phasegh::Stage& stage) {
+        blocked=stage.naval_blockaded_edge(stage.commerce().transport_edges.at("SEA_FROM_B"));
+    });
+    game.advance_day(check);
+    const auto still_delivering=observe(game);
+    require_test(blocked&&still_delivering.fills==opening.fills&&
+                 still_delivering.in_flight<opening.in_flight&&
+                 still_delivering.ore+still_delivering.batches>opening.ore+opening.batches,
+                 "real blockage dropped previous civilian cargo or permitted a new departure");
+
+    const auto data=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame closed(daily::SnapshotCodec::decode(data),policy);
+    phasegh::World::Plan consent;
+    consent[9].push_back([=](phasegh::Stage& stage) {
+        phasegh::TreatyClause term;
+        term.id="factory-ceasefire";term.kind=phasegh::ClauseKind::ceasefire;
+        term.obligor="B";term.beneficiary="A";term.war_id=war;
+        stage.propose_treaty_package("FACTORY-TRUCE",{"A","B"},{term},"A","PM_A");
+        stage.ratify_package_member("FACTORY-TRUCE","B","PM_B");
+    });
+    game.advance_day(consent);closed.advance_day();
+    while(game.world().date()<daily::Date{2000,4,1}) {
+        game.advance_day();closed.advance_day();
+    }
+    const auto shortage=observe(game),matched=observe(closed);
+    require_test(shortage.ore==0&&shortage.in_flight==0&&shortage.batches>=opening.batches&&
+                 shortage.batches==matched.batches&&shortage.fills==opening.fills&&
+                 matched.fills==opening.fills&&shortage.vendor==opening.vendor&&
+                 shortage.carrier==opening.carrier&&shortage.worker==matched.worker&&
+                 game.world().engine().diplomacy().wars.at(war).active,
+                 "physical shortage or both control branches changed before lawful ceasefire");
+
+    game.advance_day();closed.advance_day();
+    const auto travel=observe(game),closed_now=observe(closed);
+    require_test(game.world().engine().diplomacy().wars.at(war).armistice&&
+                 closed.world().engine().diplomacy().wars.at(war).active&&
+                 travel.fills>shortage.fills&&travel.in_flight>0&&travel.ore==0&&
+                 travel.batches==shortage.batches&&travel.worker==shortage.worker&&
+                 travel.sales==shortage.sales&&closed_now.fills==matched.fills&&
+                 closed_now.in_flight==0,
+                 "only effective ceasefire may dispatch, and no production may predate actual arrival");
+    phasec::Money freight=0,goods=0;
+    Quantity sent=0;
+    const auto& new_fills=game.world().engine().commerce().fills;
+    for(std::size_t i=shortage.fills;i<new_fills.size();++i) {
+        const auto& f=new_fills[i];
+        require_test(f.shipped&&f.route_id=="CIVILIAN-ORE-ROUTE"&&
+                     f.physical_path==std::vector<std::string>{"SEA_FROM_B"},
+                     "restored ore did not dispatch over the canonical native route");
+        freight+=f.freight_paid;goods+=f.goods_value;sent+=f.quantity;
+    }
+    require_test(sent>0&&freight==2*sent&&goods==10*sent&&
+                 travel.vendor-shortage.vendor==goods&&travel.carrier-shortage.carrier==freight,
+                 "restored route did not pay actual seller and carrier in cash");
+
+    const auto underway=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(underway),policy);
+    game.advance_day();closed.advance_day();replay.advance_day();
+    const auto resumed=observe(game),unrecovered=observe(closed);
+    const auto produced=resumed.batches-travel.batches;
+    const auto sold=(resumed.sales-travel.sales)/18;
+    require_test(produced>0&&resumed.ore+produced==sent&&sold>0&&
+                 resumed.worker-travel.worker==18*produced-18*sold&&
+                 resumed.treasury-travel.treasury==2*produced&&
+                 unrecovered.ore==0&&unrecovered.batches==matched.batches&&
+                 unrecovered.sales==matched.sales&&unrecovered.worker==matched.worker&&
+                 daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+                 "arrived ore did not recover real work, paid withholding and food sales only after armistice");
+}
+
+
+static void blocked_automatic_army_rear_cargo_does_not_abort_a_day() {
+    constexpr auto war="WAR:P2:CRISIS";
+    for(const bool closed:{false,true}) {
+        const auto warm=autonomous_war_fixture(true,CivilianSeaTrade::none,
+            closed?SupplySea::blocked:SupplySea::open);
+        auto policy=warm.policies();
+        policy.allow_autonomous_naval_air_ai=false;
+        // Independently observe the canonical blockade without any automatic
+        // supply booking, then branch again from the identical saved opening.
+        auto probe=warm;
+        bool blocked=false;
+        phasegh::World::Plan inspect;
+        inspect[1].push_back([&](phasegh::Stage& stage) {
+            blocked=stage.naval_blockaded_edge(stage.commerce().transport_edges.at("REAR-SEA"));
+        });
+        probe.advance_day(inspect);
+        require_test(blocked==closed&&warm.world().engine().diplomacy().wars.at(war).active&&
+                     c(warm).military_control("DEPOT-B")=="B"&&
+                     c(warm).stock("B","DEPOT-B","ammunition")==12&&
+                     c(warm).stock("REAR_UNIT_B","REAR-B","ammunition")==0&&
+                     c(warm).military_readiness("REAR_UNIT_B","REAR-B").assigned_people==3,
+                     closed?"blocked case lacks real game inputs":"open case lacks real game inputs");
+        const auto opening=daily::SnapshotCodec::encode(warm.world());
+        policy.allow_autonomous_army_resupply=true;
+        if(closed) {
+            // Even a lookalike internal ID submitted as an explicit command
+            // retains the strict native rejection; it is not an AI booking.
+            auto direct=daily::SnapshotCodec::decode(opening);
+            daily::Command order;
+            order.id="F:ARMY:MANUAL";order.kind=daily::Kind::cargo_dispatch;
+            order.from="B";order.to="REAR_UNIT_B";order.region="DEPOT-B";
+            order.destination="REAR-B";order.good="ammunition";order.route_id="REAR-SEA";
+            order.amount=3;order.unit_price=1;
+            direct.enqueue(direct.date(),std::move(order));
+            const auto before=daily::SnapshotCodec::encode(direct);
+            bool rejected=false;
+            try {direct.advance_day();}
+            catch(const std::invalid_argument& e) {
+                rejected=std::string_view(e.what())=="H_ERR_REAL_NAVAL_BLOCKADE";
+            }
+            require_test(rejected&&daily::SnapshotCodec::encode(direct)==before,
+                         "explicit blocked command must remain strictly transactional");
+        } else {
+            p0::DailyGame changed(daily::SnapshotCodec::decode(opening),policy);
+            phasegh::World::Plan become_blocked;
+            bool booked=false,released=false;
+            become_blocked[3].push_back([&](phasegh::Stage& stage) {
+                auto& live=stage.phase_c();
+                const auto& usage=stage.commerce().edge_usage;
+                booked=live.phase_d_cash_available("B")==live.cash("B")-6&&
+                    live.phase_d_material_available("B","DEPOT-B","ammunition")==9&&
+                    usage.contains({live.month(),"REAR-SEA"})&&
+                    usage.at({live.month(),"REAR-SEA"})==3;
+                live.phase_g_transfer_goods("A","NAVY_A","RA","fuel",1);
+            });
+            become_blocked[7].push_back([&](phasegh::Stage& stage) {
+                auto& live=stage.phase_c();
+                const auto& commerce=stage.commerce();
+                released=stage.naval_blockaded_edge(commerce.transport_edges.at("REAR-SEA"))&&
+                    live.phase_d_cash_available("B")==live.cash("B")&&
+                    live.phase_d_material_available("B","DEPOT-B","ammunition")==12&&
+                    !commerce.edge_usage.contains({live.month(),"REAR-SEA"});
+            });
+            const auto cancelled=changed.advance_day(become_blocked);
+            require_test(booked&&released&&cancelled.actions==0&&
+                         changed.world().journal().size()==warm.world().journal().size()&&
+                         changed.world().day_index()==warm.world().day_index()+1&&
+                         c(changed).cash("CARRIER")==0&&changed.world().cargo().empty()&&
+                         c(changed).stock("B","DEPOT-B","ammunition")==12&&
+                         c(changed).stock("REAR_UNIT_B","REAR-B","ammunition")==0,
+                         "newly blocked automatic booking must release exact cash, stock, and edge holds");
+        }
+        p0::DailyGame game(daily::SnapshotCodec::decode(opening),policy);
+        try {game.advance_day();}
+        catch(const std::invalid_argument& e) {
+            require_test(closed&&std::string_view(e.what())=="H_ERR_REAL_NAVAL_BLOCKADE"&&
+                daily::SnapshotCodec::encode(game.world())==opening,
+                "unexpected auto-cargo failure or failure failed to roll back");
+            throw std::runtime_error("native RED: automatic rear cargo on blockaded edge rolled back the full day (H_ERR_REAL_NAVAL_BLOCKADE)");
+        }
+        require_test(game.world().day_index()==warm.world().day_index()+1&&
+                     game.world().engine().diplomacy().wars.at(war).active,
+                     "automatic supply must preserve the real wartime day");
+        if(closed) {
+            require_test(c(game).stock("B","DEPOT-B","ammunition")==12&&
+                         c(game).stock("REAR_UNIT_B","REAR-B","ammunition")==0&&
+                         c(game).cash("CARRIER")==0&&game.world().cargo().empty(),
+                         "blocked game logistics must remain an actual unshipped shortage");
+        } else {
+            require_test(c(game).stock("B","DEPOT-B","ammunition")==9&&
+                         c(game).cash("CARRIER")==6&&game.world().cargo().size()==1&&
+                         c(game).stock("REAR_UNIT_B","REAR-B","ammunition")==0,
+                         "accessible rear supply must book and pay a real cargo before arrival");
+            game.advance_day();
+            require_test(c(game).stock("REAR_UNIT_B","REAR-B","ammunition")==3&&
+                         c(game).stock("B","DEPOT-B","ammunition")==9&&
+                         c(game).cash("CARRIER")==6,
+                         "supplied game unit received no physical cargo on its dated arrival");
+        }
+    }
+}
+
+
 int main(){
     try{
         automatic_wage_withholding_rereads_office_funding();
@@ -3323,6 +3587,8 @@ int main(){
             CivilianSeaTrade::discovered);
         real_naval_blockade_stops_new_commerce_and_armistice_restores_it(
             CivilianSeaTrade::preset);
+        effective_armistice_restores_actual_factory_supply_and_paid_work();
+        blocked_automatic_army_rear_cargo_does_not_abort_a_day();
         automatic_peace_repatriates_and_pays_actual_debt();
         additional_active_cohorts_do_not_block_combat();
         duplicate_pop_demand_is_rejected();

@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-namespace vic25::daily { struct SnapshotCodec; }
+namespace vic25::daily { struct SnapshotCodec; class World; }
 
 namespace vic25::phasegh {
 using Id = phasee::Id;
@@ -678,9 +678,10 @@ public:
     // never an independent invented embargo or naval-strength stock. Without
     // documented E coastal seas and commissioned, fueled, supplied hulls,
     // an ordinary trade lane cannot be blocked.
-    [[nodiscard]] bool naval_blockaded_edge(const TransportEdge& edge) const {
+    [[nodiscard]] static bool naval_blockaded_edge(const TransportEdge& edge,
+            const phasee::SpatialState& geo,const phasec::IntegratedWorld& c,
+            const DiplomacyState& diplomacy) {
         if(edge.mode!="sea"&&edge.mode!="maritime")return false;
-        const auto& geo=spatial_.spatial();
         if(!geo.provinces.contains(edge.from)||
            !geo.provinces.contains(edge.to))return false;
         std::set<phasee::Id> zones=
@@ -688,12 +689,11 @@ public:
         zones.insert(geo.provinces.at(edge.to).coastal_seas.begin(),
                      geo.provinces.at(edge.to).coastal_seas.end());
         if(zones.empty())return false;
-        const auto& c=spatial_.phase_c();
         const auto& from_country=c.sovereignty(
             geo.provinces.at(edge.from).region);
         const auto& to_country=c.sovereignty(
             geo.provinces.at(edge.to).region);
-        for(const auto& [war_id,war]:diplomacy_.wars) {
+        for(const auto& [war_id,war]:diplomacy.wars) {
             (void)war_id;
             if(!war.active||war.armistice)continue;
             std::string protected_country;
@@ -730,6 +730,10 @@ public:
             if(enemy>own)return true;
         }
         return false;
+    }
+    [[nodiscard]] bool naval_blockaded_edge(const TransportEdge& edge) const {
+        return naval_blockaded_edge(edge,spatial_.spatial(),
+                                    spatial_.phase_c(),diplomacy_);
     }
     // Reserve real seller stock, carrier fare and G edge capacity before
     // autonomous merchants make competing Stage1 purchases that same day.
@@ -825,6 +829,30 @@ public:
         ++trade_.revision;
     }
 
+private:
+    friend class vic25::daily::World;
+    // An optional supply booking can become blocked after Stage1. Release
+    // only its own exact holds; explicit dispatch still uses the strict path.
+    void cancel_blockaded_daily_cargo(const std::string& id) {
+        at(7);
+        const auto reserved=trade_.day_cargo_reservations.find(id);
+        require(reserved!=trade_.day_cargo_reservations.end()&&
+                naval_blockaded_edge(trade_.transport_edges.at(reserved->second.edge)),
+                "F_ERR_CARGO_CANCELLATION_NOT_BLOCKADED");
+        const auto& entry=reserved->second;
+        auto usage=trade_.edge_usage.find({phase_c().month(),entry.edge});
+        require(usage!=trade_.edge_usage.end()&&usage->second>=entry.quantity,
+                "F_ERR_MISSING_BOOKED_FREIGHT_CAPACITY");
+        phase_c().phase_g_release_reserved_goods(entry.sender,entry.origin,
+            entry.good,"F:"+id,entry.quantity);
+        if(entry.freight>0)
+            phase_c().phase_d_release_cash(entry.sender,"F:"+id,entry.freight);
+        usage->second-=entry.quantity;
+        if(usage->second==0)trade_.edge_usage.erase(usage);
+        trade_.day_cargo_reservations.erase(reserved);
+    }
+
+public:
     void propose_daily_treaty(const std::string& id,
                               const std::string& a,const std::string& b,
                               const std::string& good,const std::string& prime,

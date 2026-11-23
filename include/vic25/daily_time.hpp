@@ -336,6 +336,12 @@ public:
     // Each stage callback executes on today's date. On the last calendar
     // day, POP age/eligibility updates share this exact transaction.
     DayReport advance_day(const phasegh::World::Plan& native_day_plan={}) {
+        return advance_with_army_cargo(native_day_plan,{});
+    }
+private:
+    friend class vic25::p0::DailyGame;
+    DayReport advance_with_army_cargo(const phasegh::World::Plan& native_day_plan,
+            const std::set<std::string>& automatic_army_cargo) {
         const auto current=date();
         const bool close=is_month_end(current);
         const bool first_calendar_day=current.day==1;
@@ -397,6 +403,7 @@ public:
         // Each owner already stages its own ledger transaction. Avoid a
         // redundant complete world copy at the daily calendar boundary.
         phasegh::World::Plan real_actions;
+        std::set<std::string> blocked_army_cargo;
         for(auto& [id,c]:next_cargo) {
             if(c.arrived||c.arrival!=day_)continue;
             real_actions[0].push_back([c](phasegh::Stage& stage) {
@@ -439,15 +446,29 @@ public:
                         "TIME_ERR_INVALID_CARGO_ETA");
                 require(!next_cargo.contains(command.id),
                         "TIME_ERR_DUPLICATE_CARGO");
+                const bool is_army_supply=automatic_army_cargo.contains(command.id);
                 real_actions[1].push_back(
-                    [command,current](phasegh::Stage& gh) {
+                    [command,current,is_army_supply,&blocked_army_cargo](phasegh::Stage& gh) {
+                        if(is_army_supply&&
+                           gh.naval_blockaded_edge(gh.commerce().transport_edges.at(command.route_id))) {
+                            blocked_army_cargo.insert(command.id);
+                            return;
+                        }
                         gh.reserve_daily_cargo(command.id,command.route_id,
                             command.from,command.region,command.good,
                             command.amount,current.day,
                             days_in_month(current.year,current.month));
                     });
                 real_actions[7].push_back(
-                    [command,current](phasegh::Stage& gh) {
+                    [command,current,is_army_supply,&blocked_army_cargo](phasegh::Stage& gh) {
+                        if(is_army_supply) {
+                            if(blocked_army_cargo.contains(command.id))return;
+                            if(gh.naval_blockaded_edge(gh.commerce().transport_edges.at(command.route_id))) {
+                                gh.cancel_blockaded_daily_cargo(command.id);
+                                blocked_army_cargo.insert(command.id);
+                                return;
+                            }
+                        }
                         gh.dispatch_daily_cargo(command.id,command.route_id,
                             command.from,command.region,command.destination,
                             command.good,command.amount,current.day,
@@ -619,12 +640,23 @@ public:
         engine_.advance_daily(real_actions,day_,first_calendar_day,
                               current.day,days_in_month(current.year,current.month),
                               close,leap?366:365);
+        if(!blocked_army_cargo.empty()) {
+            for(const auto& id:blocked_army_cargo) {
+                next_cargo.erase(id);
+                known_command_ids_.erase(id);
+            }
+            const auto first_today=next_journal.begin()+
+                static_cast<std::vector<Entry>::difference_type>(journal_.size());
+            next_journal.erase(std::remove_if(first_today,next_journal.end(),
+                [&](const Entry& entry) {return blocked_army_cargo.contains(entry.command_id);}),
+                next_journal.end());
+        }
         scheduled_=std::move(next_scheduled);
         journal_=std::move(next_journal);
         cargo_=std::move(next_cargo);
         ++day_;++day_commit_;
         return {current,next,day_commit_,engine_.commit_id(),
-                ordered.size()+(cargo_due?1:0),close};
+                ordered.size()-blocked_army_cargo.size()+(cargo_due?1:0),close};
     }
 };
 } // namespace vic25::daily

@@ -181,6 +181,10 @@ inline ArmySupplyPlan plan_army_supply(
         belligerents.insert(war.defender);
     }
     ArmySupplyPlan planned;
+    // The opening plan may conservatively wait a day if a route opens
+    // later today. Live booking and dispatch recheck newly closed routes.
+    std::map<std::string,bool> blocked_edges;
+
     for(const auto& [unit,deployment]:c.army_deployments()) {
         if(c.p5_guerrilla_is_insurgent_unit(unit))continue;
         const auto& country=deployment.country;
@@ -246,6 +250,10 @@ inline ArmySupplyPlan plan_army_supply(
                    edge.valid_from_month>=0&&gh.month()<edge.valid_from_month||
                    edge.valid_through_month>=0&&gh.month()>edge.valid_through_month)
                     continue;
+                const auto [blockage,fresh]=blocked_edges.try_emplace(edge_id,false);
+                if(fresh)blockage->second=phasegh::Stage::naval_blockaded_edge(
+                    edge,geography,c,gh.diplomacy());
+                if(blockage->second)continue;
                 const Quantity used=transport.edge_usage.contains(
                     {gh.month(),edge_id})?
                     transport.edge_usage.at({gh.month(),edge_id}):0;

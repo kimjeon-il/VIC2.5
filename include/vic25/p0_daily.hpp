@@ -3989,6 +3989,7 @@ public:
         // world on days with no new transport orders.
         phasef::DayPlanningReservations freight_plan;
         std::vector<daily::Command> jobs;
+        std::set<std::string> automatic_army_cargo;
         for(const auto& lane:decisions.freight_lanes)
             if(auto job=phasef::plan_next_hop(world_,lane,freight_plan))
                 jobs.push_back(std::move(*job));
@@ -4007,6 +4008,7 @@ public:
                             issue.arsenal,issue.unit,issue.region,
                             "ammunition",issued);
                 });
+            for(const auto& supply:supplies.cargo)automatic_army_cargo.insert(supply.id);
             jobs.insert(jobs.end(),
                         std::make_move_iterator(supplies.cargo.begin()),
                         std::make_move_iterator(supplies.cargo.end()));
@@ -4120,7 +4122,7 @@ public:
         if(jobs.empty())return world_.advance_day(plan);
         daily::World staged=world_;
         for(auto& cargo:jobs)staged.enqueue(date,std::move(cargo));
-        const auto report=staged.advance_day(plan);
+        const auto report=staged.advance_with_army_cargo(plan,automatic_army_cargo);
         world_=std::move(staged);
         return report;
     }
