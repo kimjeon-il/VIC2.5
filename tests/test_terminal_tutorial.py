@@ -287,6 +287,71 @@ def main():
                 and legacy_spending[2]["status"] == legacy_spending[1]["status"],
                 "legacy tariff scenario must not create native spending accounts")
 
+        build_pending = d / "공공 건설 접수.sav"
+        build_done = d / "공공 건설 완공.sav"
+        build_replay = d / "공공 건설 재실행.sav"
+        builds = panel("new BUDGET-A", "step 25", "public-build",
+                       f"save {build_pending}", "public-build", "step 1", "step 1",
+                       "step 1", f"save {build_done}", "quit")
+        offer = builds[0]["status"].get("public_construction")
+        require(offer is not None and offer["state"] == "available"
+                and offer["invoice"] == 20 and offer["treasury_reserve"] == 40
+                and offer["steel_required"] == 2 and offer["contractor_steel"] == 0
+                and offer["commissioned_capacity"] == 0,
+                "the real trial must show the ordinary construction order and cost before purchase")
+        queued = builds[2]["status"]
+        require(builds[2]["ok"] and queued["country"] == "A"
+                and queued["public_construction"]["state"] == "queued"
+                and queued["public_construction"]["commissioned_capacity"] == 0
+                and queued["public_construction"]["contractor_steel"] == 0
+                and queued["treasury"] == 70,
+                "accepting the real order must not invent a facility, material or paid work")
+        require(not builds[4]["ok"] and builds[4]["status"] == queued,
+                "duplicate order changed the actual pending public construction")
+        bought = builds[5]["status"]
+        require(bought["public_construction"]["contractor_steel"] == 2
+                and bought["public_construction"]["supplier_receipts"] == 6
+                and bought["public_construction"]["paid_work"] == 0
+                and bought["treasury"] == 65,
+                f"steel must be bought locally before construction: {bought}")
+        paid, commissioned = builds[6]["status"], builds[7]["status"]
+        require(paid["public_construction"]["state"] == "paid"
+                and paid["public_construction"]["paid_work"] == 1
+                and paid["public_construction"]["contractor_steel"] == 0
+                and paid["public_construction"]["contractor_receipts"] == 20
+                and paid["public_construction"]["commissioned_capacity"] == 0
+                and paid["treasury"] == 40 and paid["public_program_paid"] == 140,
+                f"real paid construction must consume steel and leave the treasury reserve: {paid}")
+        require(commissioned["public_construction"]["state"] == "commissioned"
+                and commissioned["public_construction"]["commissioned_capacity"] == 31
+                and commissioned["treasury"] == 40
+                and commissioned["public_program_paid"] == 140
+                and commissioned["peer_public_program_paid"] == 145,
+                "only following-day physical commissioning should add capacity, not free money")
+        rerun = panel(f"load BUDGET-B {build_pending}", f"load BUDGET-A {build_pending}",
+                      "step 3", f"save {build_replay}", "quit")
+        require(not rerun[0]["ok"] and rerun[1]["status"] == queued
+                and rerun[2]["status"] == commissioned
+                and build_done.read_bytes() == build_replay.read_bytes(),
+                "native paid construction did not replay exactly from its queued save")
+        no_funds = panel("new BUDGET-B", "step 34", "public-build", "step 2", "quit")
+        require(no_funds[1]["status"]["treasury"] == 40
+                and not no_funds[2]["ok"] and "unfunded" in no_funds[2]["error"]
+                and no_funds[2]["status"] == no_funds[1]["status"]
+                and no_funds[3]["status"]["treasury"] == 40
+                and no_funds[3]["status"]["public_construction"]["paid_work"] == 0
+                and no_funds[3]["status"]["public_construction"]["commissioned_capacity"] == 0,
+                "a government at its real treasury reserve cannot fund or commission the order")
+        build_cli = run("step 25\npublic-build\nstep 3\nquit\n",
+                        "--trial", "budget-v1", "--country", "A")
+        require(not build_cli.stderr and trade_status(build_cli)["public_build_state"] == "commissioned"
+                and trade_status(build_cli)["public_build_paid_work"] == "1"
+                and trade_status(build_cli)["treasury"] == "40",
+                "terminal and country panel must use the same public construction command")
+        legacy_build = panel("new A", "public-build", "quit")
+        require(not legacy_build[1]["ok"] and legacy_build[1]["status"] == legacy_build[0]["status"],
+                "the old tariff trial must not receive a construction offer")
+
         replies = panel("status", "new A", "status", "tariff 21",
                         "tariff 10", "step 30", f"save {panel_save}",
                         f"load B {panel_save}", f"load A {corrupt}",

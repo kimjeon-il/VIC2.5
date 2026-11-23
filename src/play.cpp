@@ -103,6 +103,57 @@ const char* trial_region(std::string_view tag) {return tag=="A"?"DISTRICT-A":"DI
 std::string_view other_country(std::string_view tag) {return tag=="A"?"B":"A";}
 phasegh::Id province(std::string_view tag) {return tag=="A"?1:2;}
 
+std::string public_builder(const std::string& tag) {return "PUBLIC-BUILDER-"+tag;}
+std::string public_steel_seller(const std::string& tag) {return "PUBLIC-STEEL-"+tag;}
+p0::PublicConstructionOffer public_offer(const std::string& tag) {
+    p0::PublicConstructionOffer offer;
+    auto& p=offer.project;
+    p.id="PUBLIC-TOOLS-"+tag;p.target_site="PUBLIC-TOOLS-SITE-"+tag;
+    p.client=tag;p.contractor=public_builder(tag);p.region=trial_region(tag);
+    p.material_good="steel";p.work_required=1;p.material_per_work=2;
+    p.workers_per_work=1;p.cash_price_per_work=20;p.target_capacity=31;
+    offer.treasury_cash_reserve=40;
+    auto& recipe=offer.recipe;
+    recipe.id="PUBLIC-TOOLS-METHOD-"+tag;recipe.site=p.target_site;
+    recipe.inputs={{"iron",1},{"wood",1}};recipe.outputs={{"tools",1}};
+    recipe.workers_per_batch=recipe.capacity_per_batch=1;
+    return offer;
+}
+
+// An earlier budget checkpoint has neither role and keeps its original
+// policies. Never create these actors, markets or stock on a resume.
+bool budget_build_fixture(const daily::World& world,const std::string& tag) {
+    const auto& c=world.engine().base().core().core();
+    const auto builder=public_builder(tag),supplier=public_steel_seller(tag);
+    if(!c.has_actor(builder)&&!c.has_actor(supplier))return false;
+    if(!c.has_actor(builder)||!c.has_actor(supplier)||
+       c.country_treasury(tag)==builder||c.country_treasury(tag)==supplier||
+       !c.has_market(trial_region(tag),"steel")||!c.has_market(trial_region(tag),"tools"))
+        throw std::invalid_argument("checkpoint has an incomplete public construction trial");
+    return true;
+}
+
+void seed_budget_build_fixture(phasec::IntegratedWorld& core,const std::string& tag) {
+    const std::string region=trial_region(tag);
+    const auto builder=public_builder(tag),supplier=public_steel_seller(tag);
+    core.seed_actor(builder,1200);core.seed_actor(supplier,0);
+    core.seed_market(region,"steel",3,3,3);
+    core.seed_market(region,"tools",20,20,20);
+    core.seed_market(region,"iron",4,4,4);
+    core.seed_market(region,"wood",2,2,2);
+    core.seed_stock(supplier,region,"steel",2);
+    auto& pop=core.seed_population();
+    const auto household=pop.household_profile({region,builder,"shared",1});
+    const auto economy=pop.economic_profile(
+        {region,"worker","wage","employee",pop.default_education()});
+    const auto demographic=pop.demographic_profile(
+        {region,23640,phaseb::Sex::female,"trial-culture","trial-faith",
+         "citizen","free",pop.default_health(),phaseb::Service::civilian});
+    const auto worker=pop.seed_population(demographic,economy,household,1);
+    core.seed_actor("HH:"+std::to_string(household),0);
+    pop.hire(worker,1,builder,"worker",31,{});
+}
+
 daily::World trial_world(const std::string& selected,bool budget) {
     using namespace phasec;
     phasegh::World engine{24000};
@@ -129,6 +180,7 @@ daily::World trial_world(const std::string& selected,bool budget) {
         const auto price=tag==selected?30:10;
         core.seed_market(trial_region(tag),trial_good,price,price,price,0);
     }
+    if(budget)seed_budget_build_fixture(core,selected);
     core.seed_actor(trial_seller,0);
     core.seed_actor(trial_buyer,3000);
     core.seed_actor(trial_carrier,0);
@@ -146,7 +198,7 @@ daily::World trial_world(const std::string& selected,bool budget) {
     return daily::World::adopt(std::move(engine),2025,trial_origin(selected,budget));
 }
 
-p0::Policies trial_policies(const std::string& selected,bool budget=false) {
+p0::Policies trial_policies(const daily::World& world,const std::string& selected,bool budget) {
     p0::Policies result;
     result.daily_food_units_per_person=0;
     result.monthly_clothing_units_per_person=0;
@@ -158,6 +210,8 @@ p0::Policies trial_policies(const std::string& selected,bool budget=false) {
             result.public_budget.push_back({tag,providers[0],2,40});
             result.public_budget.push_back({tag,providers[1],3,40});
         }
+    if(budget&&budget_build_fixture(world,selected))
+        result.public_construction_offers.push_back(public_offer(selected));
     return result;
 }
 
@@ -193,7 +247,8 @@ void trial_help(bool budget) {
              <<"Resume: vic25_play --trial "<<(budget?budget_scenario:trial)
              <<" --country A|B --resume <save>\n";
     if(budget)
-        std::cout<<"spending-cap <amount>: schedule a daily public-program limit starting next month.\n";
+        std::cout<<"spending-cap <amount>: schedule a daily public-program limit starting next month.\n"
+                 <<"public-build: submit the offered ordinary public project if the trial has one.\n";
 }
 
 std::string month_opening(std::int64_t month) {
@@ -201,6 +256,24 @@ std::string month_opening(std::int64_t month) {
     std::ostringstream out;
     out<<std::setfill('0')<<std::setw(4)<<date.year<<'-'<<std::setw(2)<<date.month<<"-01";
     return out.str();
+}
+
+const p0::PublicConstructionOffer* find_public_offer(const p0::DailyGame& game,
+                                                     const std::string& tag) {
+    for(const auto& offer:game.policies().public_construction_offers)
+        if(offer.project.client==tag)return &offer;
+    return nullptr;
+}
+
+const char* public_construction_state(const phased::ConstructionProject* p) {
+    return !p?"available":p->commissioned?"commissioned":p->ready?"paid":"queued";
+}
+
+void order_trial_public_build(p0::DailyGame& game,const std::string& tag) {
+    const auto* offer=find_public_offer(game,tag);
+    if(!offer)throw std::invalid_argument("this trial has no public construction offer");
+    const auto& c=game.world().engine().base().core().core();
+    game.order_public_construction(tag,c.government(tag).prime_minister,offer->project.id);
 }
 
 void trial_status(const p0::DailyGame& game,const std::string& selected) {
@@ -235,6 +308,16 @@ void trial_status(const p0::DailyGame& game,const std::string& selected) {
                  <<" pending_civilian_spending_cap="<<(change?std::to_string(change->second):"-")
                  <<" pending_civilian_spending_date="<<(change?month_opening(change->first):"-")
                  <<" public_program_paid="<<program_receipts(c,selected);
+    }
+    if(const auto* offer=find_public_offer(game,selected)) {
+        const auto& p=offer->project;
+        const auto& projects=engine.base().core().state().constructions;
+        const auto started=projects.find(p.id);
+        std::cout<<" public_build_state="<<public_construction_state(
+                       started==projects.end()?nullptr:&started->second)
+                 <<" public_build_invoice="<<phaseb::mul_checked(p.work_required,p.cash_price_per_work)
+                 <<" public_build_steel="<<phaseb::mul_checked(p.work_required,p.material_per_work)
+                 <<" public_build_paid_work="<<(started==projects.end()?0:started->second.paid_work);
     }
     std::cout<<'\n';
 }
@@ -423,6 +506,28 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
            <<",\"pending_civilian_spending_date\":"<<(change?json_string(month_opening(change->first)):"null")
            <<",\"public_program_paid\":"<<program_receipts(core,tag)
            <<",\"peer_public_program_paid\":"<<program_receipts(core,std::string(other_country(tag)));
+        if(const auto* offer=find_public_offer(game,tag)) {
+            const auto& p=offer->project;
+            const auto& projects=engine.base().core().state().constructions;
+            const auto it=projects.find(p.id);
+            const auto* started=it==projects.end()?nullptr:&it->second;
+            const auto capacity=started&&started->commissioned
+                ?core.facility(p.target_site).capacity:0;
+            const auto steel=phaseb::mul_checked(p.work_required,p.material_per_work);
+            out<<",\"public_construction\":{\"state\":"
+               <<json_string(public_construction_state(started))
+               <<",\"invoice\":"<<phaseb::mul_checked(p.work_required,p.cash_price_per_work)
+               <<",\"treasury_reserve\":"<<offer->treasury_cash_reserve
+               <<",\"steel_required\":"<<steel
+               <<",\"steel_purchase_cost\":"<<phaseb::mul_checked(
+                    steel,core.market(p.region,p.material_good).price)
+               <<",\"contractor_steel\":"<<core.stock(p.contractor,p.region,p.material_good)
+               <<",\"supplier_receipts\":"<<core.firm_finance(public_steel_seller(tag)).receipts
+               <<",\"contractor_receipts\":"<<core.firm_finance(p.contractor).receipts
+               <<",\"paid_work\":"<<(started?started->paid_work:0)
+               <<",\"commissioned_capacity\":"<<capacity<<'}';
+        }
+
     }
     const auto& commerce=engine.commerce();
     const auto& tariffs=engine.diplomacy().tariffs;
@@ -509,11 +614,12 @@ void run_panel() {
                 const auto resume=command=="load"?std::optional{checkpoint_path_utf8(path)}:std::nullopt;
                 const bool industry=tag==country;
                 auto next=industry?open_industry(resume):open_trial(std::string(tag),resume,budget);
+                auto policy=industry?tutorial_policies(true):trial_policies(next,std::string(tag),budget);
                 auto replacement=std::make_unique<Session>(Session{std::string(tag),
-                    p0::DailyGame(std::move(next),industry?tutorial_policies(true):trial_policies(std::string(tag),budget))});
+                    p0::DailyGame(std::move(next),std::move(policy))});
                 last_status=panel_status(replacement->game,replacement->tag);
                 session=std::move(replacement);
-            } else if(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="save") {
+            } else if(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="public-build"||command=="save") {
                 if(!session)throw std::invalid_argument("start or load a trial first");
                 if(command=="step") {
                     const auto days=command_number(arg,1,366);
@@ -535,9 +641,12 @@ void run_panel() {
                     propose_trial_income_tax(session->game,session->tag,command_number(arg,0,100));
                 } else if(command=="spending-cap") {
                     propose_trial_spending_cap(session->game,session->tag,command_number(arg,0,1'000'000));
+                } else if(command=="public-build") {
+                    if(!arg.empty())throw std::invalid_argument("public-build takes no arguments");
+                    order_trial_public_build(session->game,session->tag);
                 } else save_new(session->game.world(),checkpoint_path_utf8(arg));
             } else throw std::invalid_argument("unknown or malformed panel command");
-            if(session&&(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"))
+            if(session&&(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="public-build"))
                 last_status=panel_status(session->game,session->tag);
             const auto reply="{\"ok\":true,\"status\":"+last_status+'}';
             std::cout<<reply<<std::endl;
@@ -604,6 +713,9 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={}) {
             } else if(selected&&command=="spending-cap"&&!arg.empty()) {
                 propose_trial_spending_cap(game,*selected,command_number(arg,0,1'000'000));
                 show_status();
+            } else if(selected&&command=="public-build"&&arg.empty()) {
+                order_trial_public_build(game,*selected);
+                show_status();
             } else if(command=="save"&&!arg.empty()) {
                 save_new(game.world(),checkpoint_path_utf8(arg));
                 std::cout<<"saved\n";
@@ -655,7 +767,8 @@ int main(int argc,char** argv) {
             throw std::invalid_argument("resume must use a regular file within the native save limit");
         if(selected) {
             auto world=open_trial(*selected,resume,budget);
-            run(p0::DailyGame(std::move(world),trial_policies(*selected,budget)),selected);
+            auto policies=trial_policies(world,*selected,budget);
+            run(p0::DailyGame(std::move(world),std::move(policies)),selected);
             return 0;
         }
         auto world=resume?daily::SnapshotCodec::load(*resume):tutorial_world();

@@ -90,6 +90,20 @@ def run(exe):
             panel._send("step 31")
             wait(root, panel)
             assert panel.current["civilian_spending_cap"] == 0 and "하루 한도: 0" in panel.budget.get()
+            panel.new_button.invoke()
+            wait(root, panel)
+            assert panel.build_button.winfo_ismapped() and panel.build_button.instate(["!disabled"])
+            assert "국고 공사비 20" in panel.budget.get() and "필요 철강 2" in panel.budget.get()
+            panel.country.set("B 예산 시범판")
+            panel.build_button.invoke()
+            wait(root, panel)
+            assert panel.current["country"] == "A"
+            assert panel.current["public_construction"]["state"] == "queued"
+            assert panel.build_button.instate(["disabled"])
+            panel._send("step 3")
+            wait(root, panel)
+            assert panel.current["public_construction"]["commissioned_capacity"] == 31
+            assert "준공" in panel.budget.get()
             run_industry(root, panel, save)
     finally:
         panel.close()

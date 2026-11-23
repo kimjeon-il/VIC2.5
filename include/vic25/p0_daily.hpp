@@ -126,6 +126,12 @@ struct Investment {
     Money reserve_cash{},minimum_output_price{};
     Quantity maximum_daily_work{1};
 };
+// A scenario authorizes an ordinary project for an existing public client.
+struct PublicConstructionOffer {
+    phased::ConstructionProject project;
+    phased::IndustryRecipe recipe;
+    Money treasury_cash_reserve{};
+};
 // A campaign-supplied blueprint can create a new company and a new type of
 // factory even when that region has no commissioned template to copy. The
 // project and recipe are saved in D only when an actual funded project starts.
@@ -353,6 +359,7 @@ struct Policies {
     // All theater decisions are delegated; manual ground battles remain
     // optional scenario overrides, not required user micro-management.
     bool allow_autonomous_naval_air_ai{true};
+    std::vector<PublicConstructionOffer> public_construction_offers;
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -387,6 +394,34 @@ struct Policies {
                (opportunity.new_firm_equity>0&&opportunity.founder.empty())||
                (opportunity.new_firm_equity==0&&p.client.empty()))
                 throw std::invalid_argument("P0_INVALID_INDUSTRY_OPPORTUNITY");
+        }
+        std::set<std::string> offer_ids,offer_treasuries;
+        std::set<std::string> offer_sites,offer_recipes;
+        for(const auto& offer:public_construction_offers) {
+            const auto& p=offer.project;
+            const auto& r=offer.recipe;
+            const auto invalid=[](const auto& item){return item.good.empty()||item.per_unit<=0;};
+            if(p.id.empty()||p.id.starts_with("AUTO:")||p.client.empty()||
+               p.contractor.empty()||p.contractor==p.client||p.region.empty()||
+               p.material_good.empty()||p.target_site.empty()||
+               !offer_ids.insert(p.id).second||!offer_treasuries.insert(p.client).second||
+               !offer_sites.insert(p.target_site).second||!offer_recipes.insert(r.id).second||
+               p.work_required<=0||p.material_per_work<=0||p.workers_per_work<=0||
+               p.target_capacity<=0||p.cash_price_per_work<=0||
+               p.permit_required||p.inspection_required||p.allow_accrued_invoice_commission||
+               p.ready||p.commissioned||p.ready_month!=-1||p.planned_work!=0||
+               p.accepted_work!=0||p.paid_work!=0||p.capitalized_work!=0||p.capitalized_value!=0||
+               r.id.empty()||r.site!=p.target_site||r.inputs.empty()||r.outputs.empty()||
+               r.workers_per_batch<=0||r.capacity_per_batch<=0||!r.tech_id.empty()||
+               r.needs_retrofit||r.requires_same_stage_nonstorable_energy||
+               std::any_of(r.inputs.begin(),r.inputs.end(),invalid)||
+               std::any_of(r.outputs.begin(),r.outputs.end(),invalid)||
+               std::any_of(r.byproducts.begin(),r.byproducts.end(),invalid)||
+               offer.treasury_cash_reserve<0||
+               std::any_of(investments.begin(),investments.end(),[&](const auto& investment) {
+                   return investment.construction_project==p.id;
+               }))
+                throw std::invalid_argument("P0_INVALID_PUBLIC_CONSTRUCTION_OFFER");
         }
         std::set<std::pair<std::string,std::string>> unique_needs;
         for(const auto& rule:household_basket)
@@ -972,6 +1007,9 @@ inline void fight(phasec::IntegratedWorld& c,const Engagement& e,
 class DailyGame {
     daily::World world_;
     Policies policies_;
+    static std::string public_build_key(const std::string& id) {
+        return "P0:PUBLIC-BUILD:"+id;
+    }
     // A program needs a real payee distinct from its actual treasury. Use
     // the same eligibility before asking investors and before moving cash.
     static bool valid_public_budget_recipient(
@@ -987,6 +1025,23 @@ public:
       :DailyGame(std::move(world),Policies{}){}
     [[nodiscard]] const daily::World& world()const {return world_;}
     [[nodiscard]] const Policies& policies()const {return policies_;}
+    daily::DayReport order_public_construction(const std::string& country,
+            const std::string& proposer,const std::string& project_id) {
+        const auto offer=std::find_if(policies_.public_construction_offers.begin(),
+            policies_.public_construction_offers.end(),
+            [&](const auto& entry){return entry.project.id==project_id;});
+        if(offer==policies_.public_construction_offers.end())
+            throw std::invalid_argument("unknown public construction offer");
+        phasegh::World::Plan command;
+        command[9].push_back([country,proposer,offer=*offer](phasegh::Stage& gh) {
+            gh.phase_c().command_once(public_build_key(offer.project.id),
+                [&](phasec::IntegratedWorld&) {
+                    gh.phase_d().order_public_construction(country,proposer,offer.project,
+                        offer.recipe,offer.treasury_cash_reserve);
+                });
+        });
+        return advance_day(command);
+    }
     // Campaign/save data owns the policy definitions; base day snapshots remain
     // fully compatible and replay exactly when the same policy set is restored.
     daily::DayReport advance_day(const phasegh::World::Plan& additional_today={}) {
@@ -1287,9 +1342,52 @@ public:
                 continue;
             decisions.researches.push_back(ResearchPolicy{id,1});
         }
+        // A committed public order cannot fall back to either private path
+        // when its sanctioned scenario offer is absent or no longer matches.
+        std::erase_if(decisions.investments,[&](const Investment& investment) {
+            return game_c.command_processed(public_build_key(investment.construction_project));
+        });
+        std::map<std::string,const PublicConstructionOffer*> active_public_builds;
+        for(const auto& offer:decisions.public_construction_offers) {
+            const auto found=industry.constructions.find(offer.project.id);
+            if(found==industry.constructions.end()||
+               !game_c.command_processed(public_build_key(offer.project.id)))continue;
+            const auto& p=found->second;
+            const auto& country=game_c.sovereignty(p.region);
+            if(p.ready||p.commissioned||p.paid_work>=p.work_required||
+               !game_c.has_country_treasury(country)||
+               game_c.country_treasury(country)!=p.client||
+               p.client!=offer.project.client||p.contractor!=offer.project.contractor||
+               p.region!=offer.project.region||p.target_site!=offer.project.target_site||
+               p.material_good!=offer.project.material_good||
+               p.work_required!=offer.project.work_required||
+               p.workers_per_work!=offer.project.workers_per_work||
+               p.material_per_work!=offer.project.material_per_work||
+               p.cash_price_per_work!=offer.project.cash_price_per_work||
+               p.target_capacity!=offer.project.target_capacity)continue;
+            active_public_builds.emplace(p.id,&offer);
+            decisions.investments.push_back({p.id,offer.recipe.outputs.front().good,
+                offer.treasury_cash_reserve,1,1});
+        }
+        // Provider payouts happen after the real invoice payment callback.
+        // If that callback paid today's final work, protect just the floor;
+        // while unpaid, keep one next invoice available for the queue.
+        std::map<std::string,std::pair<std::string,Money>> public_build_reserves;
+        for(const auto& [id,offer]:active_public_builds)
+            public_build_reserves.emplace(offer->project.client,
+                std::pair{id,offer->treasury_cash_reserve});
+        const auto public_build_floor=[reserves=std::move(public_build_reserves)]
+            (phasegh::Stage& gh,const std::string& treasury) {
+                const auto reserve=reserves.find(treasury);
+                if(reserve==reserves.end())return Money{0};
+                const auto& p=gh.phase_d().state().constructions.at(reserve->second.first);
+                return phaseb::add_checked(reserve->second.second,
+                    p.paid_work<p.work_required?p.cash_price_per_work:0);
+            };
         std::set<std::string> autonomous_projects;
         for(const auto& [id,project]:industry.constructions) {
-            if(game_c.firm_bankrupt(project.client) ||
+            if(game_c.command_processed(public_build_key(id))||
+               game_c.firm_bankrupt(project.client) ||
                project.ready||project.commissioned||
                project.accepted_work>=project.work_required||
                std::any_of(decisions.investments.begin(),decisions.investments.end(),
@@ -1810,7 +1908,8 @@ public:
             plan[1].push_back([investment,work,generated,investment_rates,
                 construction_population,construction_staff,active_construction,ordinary,
                 today=world_.day_index(),
-                collateral_credit=decisions.allow_collateralized_enterprise_credit]
+                collateral_credit=decisions.allow_collateralized_enterprise_credit&&
+                    !active_public_builds.contains(investment.construction_project)]
                 (phasegh::Stage& gh){
                 const auto& domain=gh.phase_d().state();
                 const auto& p=domain.constructions.at(investment.construction_project);
@@ -3355,7 +3454,7 @@ public:
         auto budget_spent_today=
             std::make_shared<std::map<std::string,Money>>();
         if(has_budget_plan)
-            plan[5].push_back([national_day,date,dim,budget_spent_today]
+            plan[5].push_back([national_day,date,dim,budget_spent_today,public_build_floor]
                               (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 for(const auto& [country,budget]:national_day->by_country) {
@@ -3377,7 +3476,7 @@ public:
                         const auto daily_left=budget.maximum_daily_spending-
                             (*budget_spent_today)[budget.country];
                         const auto cash_left=c.phase_d_cash_available(treasury)-
-                            budget.reserve_cash;
+                            std::max(budget.reserve_cash,public_build_floor(gh,treasury));
                         if(daily_left<=0||cash_left<=0)break;
                         const auto intended=phaseb::mul_checked(
                             std::min<Quantity>(available_slots,
@@ -3395,15 +3494,16 @@ public:
         // wallet to an existing service provider with a declared policy cap.
         // An absent provider or empty treasury cannot produce "free" output.
         for(const auto& program:decisions.public_budget)
-            plan[5].push_back([program,national_day,budget_spent_today]
+            plan[5].push_back([program,national_day,budget_spent_today,public_build_floor]
                               (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 if(!valid_public_budget_recipient(c,program))return;
                 const auto& treasury=c.country_treasury(program.country);
                 const Money free=c.phase_d_cash_available(treasury);
-                if(free<=program.treasury_cash_reserve)return;
-                Money amount=std::min(program.daily_spending_limit,
-                                      free-program.treasury_cash_reserve);
+                const Money floor=std::max(program.treasury_cash_reserve,
+                                           public_build_floor(gh,treasury));
+                if(free<=floor)return;
+                Money amount=std::min(program.daily_spending_limit,free-floor);
                 const auto budget=national_day->by_country.find(program.country);
                 if(budget!=national_day->by_country.end()) {
                     const auto& envelope=budget->second;

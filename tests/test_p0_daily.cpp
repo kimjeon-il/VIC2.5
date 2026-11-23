@@ -2638,6 +2638,90 @@ static void autonomous_tax_requires_current_parliamentary_authority(bool direct_
                  "March actual withholding or later elected B policy is wrong");
 }
 
+static void public_construction_purchases_uses_and_pays_real_inputs() {
+    const auto trial=[](int steel,phasec::Money builder_cash,phasec::Money treasury){
+        phasegh::World gh{24000};
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"RA","A");geo.seed_unit(1,"A","RA");geo.seed_assignment(1,1);
+        auto& d=geo.seed_core();
+        auto& c=d.seed_core();
+        c.seed_actor("A",treasury);c.seed_actor("BUILDER",builder_cash);
+        c.seed_actor("SELLER",0);c.seed_actor("PROVIDER",0);
+        c.seed_government("A","HEAD","PM",5,3);
+        c.seed_p1_constitution("A",{phasec::P1GovernancePrinciple::monarchy,
+            phasec::P1PowerDistribution::autocracy,phasec::P1LegislatureKind::none,"fixture"});
+        c.seed_market("RA","steel",3,3,3);
+        c.seed_market("RA","tools",5,5,5);
+        c.seed_market("RA","wood",1,1,1);
+        if(steel>0)c.seed_stock("SELLER","RA","steel",steel);
+        const auto worker=people(gh,"RA",1,"worker");
+        c.seed_population().hire(worker,1,"BUILDER","worker",0,{});
+        phased::ConstructionProject p;
+        p.id="PUBLIC-TOOLS-A";p.client="A";p.contractor="BUILDER";p.region="RA";
+        p.material_good="steel";p.target_site="SITE";p.work_required=1;
+        p.material_per_work=2;p.workers_per_work=1;p.cash_price_per_work=20;p.target_capacity=31;
+        phased::IndustryRecipe r;
+        r.id="METHOD";r.site="SITE";r.inputs={{"wood",1}};r.outputs={{"tools",1}};
+        r.workers_per_batch=r.capacity_per_batch=1;
+        p0::Policies policy;
+        policy.daily_food_units_per_person=0;
+        policy.public_budget.push_back({"A","PROVIDER",15,0});
+        policy.public_construction_offers.push_back({p,r,40});
+        return p0::DailyGame(daily::World::adopt(std::move(gh),81),policy);
+    };
+    const auto reject=[](p0::DailyGame& game,const std::string& who){
+        const auto before=daily::SnapshotCodec::encode(game.world());
+        bool denied=false;
+        try{game.order_public_construction("A",who,"PUBLIC-TOOLS-A");}catch(const std::exception&){denied=true;}
+        require_test(denied&&daily::SnapshotCodec::encode(game.world())==before,
+                     "invalid public work must restore the opening world");
+    };
+    auto game=trial(2,6,75);
+    const auto domain=[](const p0::DailyGame& g)->const phased::World& {
+        return g.world().engine().base().core();
+    };
+    game.order_public_construction("A","PM","PUBLIC-TOOLS-A");
+    require_test(domain(game).state().constructions.contains("PUBLIC-TOOLS-A")&&
+                 !c(game).facilities().contains("SITE")&&c(game).stock("BUILDER","RA","steel")==0&&
+                 c(game).cash("A")==60&&c(game).cash("PROVIDER")==15,
+                 "lawful Stage9 did not create only an ordinary persisted funded public queue");
+    reject(game,"PM");
+    auto wrong=trial(2,6,75);reject(wrong,"HEAD");
+    auto poor=trial(2,5,75);reject(poor,"PM");
+    auto missing=trial(1,6,75);reject(missing,"PM");
+    auto unfunded=trial(2,6,74);reject(unfunded,"PM");
+    const auto saved=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(saved),game.policies());
+    game.advance_day();replay.advance_day();
+    require_test(c(game).stock("BUILDER","RA","steel")==2&&
+                 c(game).stock("SELLER","RA","steel")==0&&c(game).cash("SELLER")==6&&
+                 c(game).cash("A")==60&&c(game).cash("PROVIDER")==15&&
+                 domain(game).construction("PUBLIC-TOOLS-A").paid_work==0,
+                 "real Stage7 local purchase or funded invoice reservation was lost");
+    const auto funded_checkpoint=daily::SnapshotCodec::encode(game.world());
+    auto untrusted=game.policies();
+    untrusted.public_construction_offers.clear();
+    untrusted.public_budget.clear();
+    untrusted.investments.push_back({"PUBLIC-TOOLS-A","tools",0,1,1});
+    p0::DailyGame stopped(daily::SnapshotCodec::decode(funded_checkpoint),untrusted);
+    stopped.advance_day();
+    require_test(domain(stopped).construction("PUBLIC-TOOLS-A").paid_work==0&&
+                 c(stopped).cash("A")==60&&c(stopped).stock("BUILDER","RA","steel")==2,
+                 "restoring without the sanctioned offer must not reclassify public work as private");
+    game.advance_day();replay.advance_day();
+    require_test(c(game).stock("BUILDER","RA","steel")==0&&c(game).cash("BUILDER")==20&&
+                 c(game).cash("A")==40&&c(game).cash("PROVIDER")==15&&
+                 domain(game).construction("PUBLIC-TOOLS-A").paid_work==1&&
+                 domain(game).construction("PUBLIC-TOOLS-A").capitalized_value==20&&
+                 !c(game).facilities().contains("SITE"),
+                 "one paid physical work must capitalize before commissioning and preserve treasury reserve");
+    game.advance_day();replay.advance_day();
+    require_test(c(game).facilities().contains("SITE")&&c(game).facility("SITE").owner=="A"&&
+                 domain(game).construction("PUBLIC-TOOLS-A").commissioned&&c(game).financial().balanced()&&
+                 daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+                 "committed construction failed native cash conservation, commissioning, or save replay");
+}
+
 static void selected_players_own_tax_without_disabling_rival_ai() {
     using namespace phasec;
     phasegh::World gh{24000};
@@ -3255,6 +3339,7 @@ int main(){
         autonomous_tax_requires_current_parliamentary_authority(false);
         autonomous_tax_requires_current_parliamentary_authority(true);
         selected_players_own_tax_without_disabling_rival_ai();
+        public_construction_purchases_uses_and_pays_real_inputs();
         p1_autocracy_uses_real_institution_and_rejects_false_votes();
         native_autonomous_h_crisis_and_organization_funding();
         explicit_and_automatic_dues_keep_live_payment_priority();

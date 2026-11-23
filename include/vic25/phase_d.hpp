@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+namespace vic25::p0 { class DailyGame; }
 namespace vic25::phased {
 using Money=phasec::Money;
 using People=phaseb::People;
@@ -622,6 +623,64 @@ class Stage {
     DomainState& d_;
     int phase_;
     void must(int n) const {require(phase_==n,"phase D event in wrong stage");}
+    // Only the campaign offer dispatcher may enroll this public project.
+    // The ordinary private-entry eligibility and all work stages are unchanged.
+    friend class vic25::p0::DailyGame;
+    void order_public_construction(const std::string& country,
+            const std::string& proposer,ConstructionProject project,
+            IndustryRecipe recipe,Money cash_reserve) {
+        must(9);
+        require(c_.has_country_treasury(country)&&
+                c_.country_treasury(country)==project.client&&
+                c_.government(country).prime_minister==proposer&&
+                c_.country_tax_uses_direct_executive(country)&&
+                c_.p1_constitution(country).legislature==phasec::P1LegislatureKind::none&&
+                c_.sovereignty(project.region)==country,
+                "unauthorized public construction offer");
+        require(!d_.constructions.contains(project.id)&&
+                !d_.recipes.contains(recipe.id)&&!c_.facilities().contains(project.target_site)&&
+                std::none_of(d_.constructions.begin(),d_.constructions.end(),
+                    [&](const auto& entry){return entry.second.target_site==project.target_site;}),
+                "public construction offer already queued");
+        require(c_.has_actor(project.contractor)&&!c_.firm_bankrupt(project.contractor)&&
+                c_.phase_d_workforce(project.contractor)>=project.workers_per_work&&
+                c_.outstanding_worker_wages(project.contractor)==0&&
+                c_.outstanding_worker_wages(project.client)==0&&
+                !c_.firm_bankrupt(project.client)&&
+                (recipe.industry_class.empty()||d_.industry_classes.contains(recipe.industry_class)),
+                "public construction lacks a qualified operating contractor");
+        const Money cost=product(project.work_required,project.cash_price_per_work);
+        const Money free=c_.phase_d_cash_available(project.client);
+        require(free>=cash_reserve&&free-cash_reserve>=cost,
+                "public construction invoice and reserve are unfunded");
+        require(c_.has_market(project.region,recipe.outputs.front().good),
+                "public construction lacks a local output market");
+        for(const auto& input:recipe.inputs)
+            require(c_.has_market(project.region,input.good),
+                    "public construction lacks a local recipe input market");
+        auto shortage=std::max<Quantity>(0,project.material_per_work-
+            c_.phase_d_material_available(project.contractor,project.region,project.material_good));
+        if(shortage>0) {
+            require(c_.has_market(project.region,project.material_good),
+                    "public construction material lacks a local quote");
+            const auto price=c_.market(project.region,project.material_good).price;
+            require(price>0&&shortage<=c_.phase_d_cash_available(project.contractor)/price,
+                    "public contractor cannot fund its first material purchase");
+            const auto sellers=c_.market_seller_index();
+            const auto local=sellers.find({project.region,project.material_good});
+            if(local!=sellers.end())
+                for(const auto& seller:local->second)
+                    if(seller!=project.contractor)
+                        shortage-=std::min(shortage,c_.phase_d_material_available(
+                            seller,project.region,project.material_good));
+            require(shortage==0,"public construction lacks local saleable material");
+        }
+        const auto id=project.id;
+        const auto method=recipe.id;
+        d_.constructions.emplace(id,std::move(project));
+        d_.recipes.emplace(method,std::move(recipe));
+        d_.append(c_.month(),"funded-public-construction-order",id);
+    }
     void occupy_labor(const std::string& owner,People people) {
         c_.phase_d_use_labor(owner,people);
     }

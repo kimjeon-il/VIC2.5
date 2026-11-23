@@ -137,6 +137,8 @@ class PlayPanel:
         self.spending_button = ttk.Button(actions, text="지출 한도 제출 후 하루 진행", command=self.set_spending_cap)
         self.spending_button.grid(row=2, column=3, pady=(4, 0))
         self.spending_entry.bind("<Return>", lambda event: self.set_spending_cap())
+        self.build_button = ttk.Button(actions, text="건설 신청 후 하루 진행", command=self.public_build)
+        self.build_button.grid(row=3, column=1, columnspan=3, sticky="w", pady=(4, 0))
         ttk.Separator(frame).grid(row=6, sticky="ew")
         notice = ttk.Label(frame, textvariable=self.notice, justify="left", wraplength=500)
         notice.grid(row=7, sticky="ew", pady=(5, 0))
@@ -177,6 +179,13 @@ class PlayPanel:
                 widget.grid()
             else:
                 widget.grid_remove()
+        construction = self.current.get("public_construction") if budget else None
+        self.build_button.state(
+            ["!disabled"] if ready and construction and construction["state"] == "available" else ["disabled"])
+        if construction:
+            self.build_button.grid()
+        else:
+            self.build_button.grid_remove()
         self.selector.configure(state="readonly" if ready else "disabled")
 
     def _send(self, command):
@@ -222,6 +231,8 @@ class PlayPanel:
                         self.notice.set("소득세 변경을 예약했습니다.")
                     elif command.startswith("spending-cap "):
                         self.notice.set("공공사업 지출 한도를 예약했습니다.")
+                    elif command == "public-build":
+                        self.notice.set("건설 신청을 접수했습니다.")
                     else:
                         self.notice.set("저장했습니다." if command.startswith("save ") else "준비됐습니다.")
                 except (KeyError, TypeError, ValueError):
@@ -263,6 +274,20 @@ class PlayPanel:
             if pending is not None:
                 budget += f"\n예약 한도: {pending} ({status['pending_civilian_spending_date']} 시행)"
             self.spending.set(str(pending if pending is not None else cap if cap is not None else 0))
+        construction = status.get("public_construction")
+        if construction:
+            state = construction["state"]
+            label = {"available": "미신청", "queued": "신청 접수",
+                     "paid": "공사비 지급 완료", "commissioned": "준공"}[state]
+            budget += f"\n공공 공구공장: {label}"
+            if state in ("available", "queued"):
+                budget += (f"\n국고 공사비 {construction['invoice']} · 보유 최소액 {construction['treasury_reserve']}"
+                           f"\n필요 철강 {construction['steel_required']} "
+                           f"(예상 시공사 구매비 {construction['steel_purchase_cost']})")
+                if state == "queued":
+                    budget += f" · 확보 {construction['contractor_steel']}"
+            elif state == "commissioned":
+                budget += f" · 설비 용량 {construction['commissioned_capacity']}"
         if factory:
             policy = ("광석을 투입해 식량을 생산합니다.\n"
                       "광석이 부족하면 생산이 멈춥니다.")
@@ -336,6 +361,11 @@ class PlayPanel:
             self.notice.set("오류: 하루 지출 한도를 0부터 1000000 사이의 정수로 입력하세요.")
             return
         self._send("spending-cap " + value)
+
+    def public_build(self):
+        construction = self.current.get("public_construction") if self.current else None
+        if construction and construction["state"] == "available":
+            self._send("public-build")
 
     def _file(self, verb, path):
         if not path:
