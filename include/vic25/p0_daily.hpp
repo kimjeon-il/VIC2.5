@@ -246,6 +246,13 @@ struct PublicBudgetProgram {
     std::string country,recipient;
     Money daily_spending_limit{},treasury_cash_reserve{};
 };
+// Opt-in scenario currency units per already retired person per day.
+// Not a historical calibration or a conversion of the catalog's welfare-rate modifier.
+struct OldAgePensionProgram {
+    std::string country;
+    Money daily_per_retired_person{};
+};
+
 // These bids represent real agents willing to buy bankrupt property. Assets
 // are transferred only with actual existing C cash, never at an invented price.
 // One national cash budget and bounded competitive bond auction. Quotes are
@@ -360,6 +367,7 @@ struct Policies {
     // optional scenario overrides, not required user micro-management.
     bool allow_autonomous_naval_air_ai{true};
     std::vector<PublicConstructionOffer> public_construction_offers;
+    std::vector<OldAgePensionProgram> old_age_pensions;
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -439,6 +447,11 @@ struct Policies {
                b.annual_coupon_ppm<0||b.annual_coupon_ppm>1'000'000||
                b.maturity_days<=0)
                 throw std::invalid_argument("P0_INVALID_SOVEREIGN_FINANCING");
+        std::set<std::string> pension_countries;
+        for(const auto& p:old_age_pensions)
+            if(p.country.empty()||p.daily_per_retired_person<=0||
+               !pension_countries.insert(p.country).second)
+                throw std::invalid_argument("P0_INVALID_OLD_AGE_PENSION");
         std::set<std::pair<std::string,std::string>> budget_programs;
         for(const auto& p:public_budget)
             if(p.country.empty()||p.recipient.empty()||
@@ -3519,6 +3532,79 @@ public:
                     (*budget_spent_today)[program.country]=
                         phaseb::add_checked(
                             (*budget_spent_today)[program.country],amount);
+                }
+            });
+        // An optional pension pays from actual remaining treasury funds;
+        // it never participates in the Stage1 financing demand. Its authored
+        // money amount is independent of the catalog's unbound rate modifier.
+        if(!decisions.old_age_pensions.empty())
+            plan[5].push_back([programs=decisions.old_age_pensions,explicit_envelopes=
+                decisions.national_budget_envelopes,budget_spent_today,public_build_floor,
+                today=world_.day_index()](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                const auto& pop=c.people();
+                for(const auto& program:programs) {
+                    const auto& country=program.country;
+                    if(!c.has_country_treasury(country))continue;
+                    const bool enacted=std::any_of(c.p2_laws().begin(),c.p2_laws().end(),
+                        [&](const auto& entry) {
+                            const auto& l=entry.second;
+                            return l.country==country&&l.tier!=phasec::P2NormTier::local_ordinance&&
+                                (l.scope.empty()||l.scope=="national")&&
+                                phasec::politics::bare_group(l.domain)=="welfare"&&
+                                phasec::politics::bare_law(l.base_choice)=="old_age_pension"&&
+                                c.p2_is_active_base(entry.first);
+                        });
+                    if(!enacted)continue;
+                    const auto& treasury=c.country_treasury(country);
+                    const auto explicit_budget=std::find_if(explicit_envelopes.begin(),
+                        explicit_envelopes.end(),[&](const auto& b){return b.country==country;});
+                    const auto has_explicit=explicit_budget!=explicit_envelopes.end();
+                    Money floor=public_build_floor(gh,treasury);
+                    if(has_explicit)floor=std::max(floor,explicit_budget->reserve_cash);
+                    const Money cash=c.phase_d_cash_available(treasury);
+                    if(cash<=floor)continue;
+                    const auto fiscal=c.country_fiscal(country);
+                    const auto debt_due=phaseb::add_checked(
+                        phaseb::add_checked(fiscal.unpaid_coupons,
+                            c.new_sovereign_coupons_due_today(country,today)),
+                        c.matured_sovereign_bond_principal(country,today));
+                    Money available=cash-floor;
+                    if(available<=debt_due)continue;
+                    available-=debt_due;
+                    auto cap=c.civilian_spending_cap(country);
+                    if(has_explicit) {
+                        const Money maximum=explicit_budget->maximum_daily_spending;
+                        cap=std::min(cap.value_or(maximum),maximum);
+                    }
+                    const Money spent=(*budget_spent_today)[country];
+                    if(cap)available=std::min(available,std::max<Money>(0,*cap-spent));
+                    if(available<=0)continue;
+                    std::map<std::string,People> recipients;
+                    People eligible=0;
+                    for(const auto& [id,row]:pop.slices()) {
+                        (void)id;
+                        if(row.count<=0||pop.economic(row.key.economic).labor_class!="retired")
+                            continue;
+                        const auto& d=pop.demographic(row.key.demographic);
+                        if(pop.household(row.key.household).region!=d.region||
+                           !c.is_sovereign_region(d.region,country))continue;
+                        const auto wallet="HH:"+std::to_string(row.key.household);
+                        if(wallet==treasury||!c.has_actor(wallet))continue;
+                        auto& count=recipients[wallet];
+                        count=phaseb::add_checked(count,row.count);
+                        eligible=phaseb::add_checked(eligible,row.count);
+                    }
+                    if(eligible<=0)continue;
+                    // Same whole money units per person, not wallet ID
+                    // priority. Any indivisible remainder stays in treasury.
+                    const Money per=std::min(program.daily_per_retired_person,
+                                             available/eligible);
+                    if(per<=0)continue;
+                    for(const auto& [wallet,n]:recipients)
+                        c.spend_country_budget(country,wallet,times(n,per));
+                    (*budget_spent_today)[country]=phaseb::add_checked(spent,
+                        times(eligible,per));
                 }
             });
         // A 1.15 aristocratic reinvestment law uses actual recorded

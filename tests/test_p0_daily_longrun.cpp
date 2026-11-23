@@ -1256,6 +1256,152 @@ static void automatic_program_finance_requires_an_actual_distinct_payee() {
           "explicit freeze and balanced legal debt must remain authoritative");
 }
 
+static void lawful_old_age_pension_is_funded_per_retiree() {
+    using namespace phasec;
+    const auto core=[](const p0::DailyGame& x)->const IntegratedWorld& {
+        return x.world().engine().base().core().core();
+    };
+    for(int mode=0;mode<8;++mode) {
+        // Dated adequate, shared cap, scarce existing cash, no cash, local-only, saved cap, newly due coupon, both cap sources.
+        const Money initial=mode==2?5:(mode==3||mode==6)?0:100;
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        auto& c=geo.seed_core().seed_core();
+        for(const std::string tag:{"A","B"}) {
+            const auto id=tag=="A"?1:2;
+            geo.seed_province(id,"R"+tag,tag);geo.seed_unit(id,tag,"CAPITAL");
+            geo.seed_assignment(id,id);
+            c.seed_actor(tag,tag=="A"?initial:100);
+            c.seed_government(tag,tag+"-HEAD",tag+"-PM",5,3);
+            c.seed_p1_constitution(tag,{P1GovernancePrinciple::monarchy,
+                P1PowerDistribution::autocracy,P1LegislatureKind::none,
+                "fixture:direct executive"});
+        }
+        const bool saved_cap=mode==5||mode==7;
+        if(saved_cap)c.seed_civilian_spending_cap_authority("A");
+        c.seed_actor("BIDDER",100);
+        c.seed_actor("PROVIDER",0);
+        if(mode==6)c.seed_actor("COUPON-HOLDER",365);
+        c.p2_seed_base({"OPEN-WELFARE","A","welfare","national",
+                        "no_social_security","fixture:opening statute"});
+        if(mode==4)
+            c.p2_seed_base({"LOCAL-ONLY","A","fixture_local_welfare","RA","old_age_pension",
+                "fixture:local lookalike",P2NormTier::local_ordinance});
+        auto& p=c.seed_population();
+        const auto household=[&](const std::string& region,const std::string& name,
+                                 bool backed) {
+            const auto h=p.household_profile({region,name,"shared",1});
+            if(backed)c.seed_actor("HH:"+std::to_string(h),0);
+            return h;
+        };
+        const auto add=[&](const std::string& region,phaseb::Id home,int birthday,
+                           const std::string& labor,People n) {
+            const auto d=p.demographic_profile({region,birthday,phaseb::Sex::female,
+                "culture","faith","citizen","free",p.default_health(),phaseb::Service::civilian});
+            const auto e=p.economic_profile({region,"worker","inactive",labor,p.default_education()});
+            p.seed_population(d,e,home,n);
+        };
+        const auto mixed=household("RA","mixed",true);
+        const auto elder=household("RA","elder",true);
+        const auto young=household("RA","young",true);
+        const auto absent=household("RA","missing wallet",false);
+        const auto foreign=household("RB","foreign",true);
+        add("RA",mixed,23200,"retired",1);
+        add("RA",mixed,23100,"retired",2);
+        add("RA",mixed,23600,"inactive",5);
+        add("RA",elder,23200,"retired",1);
+        add("RA",young,23800,"inactive",2);
+        add("RA",absent,23200,"retired",2);
+        add("RB",foreign,23200,"retired",3);
+
+        p0::Policies policies;
+        policies.daily_food_units_per_person=0;
+        policies.old_age_pensions.push_back({"A",2});
+        policies.bond_buyer_orders.push_back({"A","BIDDER",90,0,0});
+        if(mode==1||saved_cap)policies.public_budget.push_back({"A","PROVIDER",2,0});
+        if(mode==6) {
+            policies.auto_national_budgets_from_actual_services=false;
+            policies.public_budget.push_back({"A","PROVIDER",120,0});
+        }
+        if(mode==1||mode==7) {
+            policies.national_budget_envelopes.push_back({"A",0,mode==7?9:7,0,1,1,0,0,365,false,true});
+        }
+        const auto opening=daily::World::adopt(std::move(gh),71);
+        const auto start=opening.day_index();
+        const auto effective=saved_cap?daily::to_day_index({2000,2,1}):start+2;
+        p0::DailyGame game(opening,policies),closed(opening,policies);
+        const auto balance=[](const IntegratedWorld& world,phaseb::Id h) {
+            return world.cash("HH:"+std::to_string(h));
+        };
+        phasegh::World::Plan enact,remain;
+        if(saved_cap) {
+            remain[9].push_back([mode](phasegh::Stage& stage) {
+                stage.phase_c().propose_civilian_spending_cap("A","A-PM",mode==7?2:7);
+            });
+            enact=remain;
+        }
+        if(mode==6) {
+            remain[1].push_back([start](phasegh::Stage& stage) {
+                stage.phase_c().issue_sovereign_bond("ORIGINAL-COUPON","A","A-PM",
+                    "COUPON-HOLDER",365,1'000'000,start,start+90);
+            });
+            enact=remain;
+        }
+        if(mode!=4)enact[9].push_back([=](phasegh::Stage& stage) {
+            auto& live=stage.phase_c();
+            P2Bill bill;
+            bill.id="PENSION";bill.country="A";bill.proposer="A-PM";
+            bill.legal_basis="fixture:dated old-age statute";
+            bill.effective_day=effective;
+            bill.proposed_base={"ACT","A","welfare","national","old_age_pension",
+                                "fixture:effective old age pension"};
+            live.p2_submit_bill(std::move(bill),start);
+            live.p2_approve_bill("PENSION",{});
+            live.p2_promulgate_bill("PENSION","A-HEAD",start);
+        });
+        game.advance_day(enact);closed.advance_day(remain);
+        while(game.world().day_index()<effective) {game.advance_day();closed.advance_day();}
+        check(balance(core(game),mixed)==0&&balance(core(closed),mixed)==0,
+              "pending pension took cash before its effective day");
+        if(mode==6)
+            check(core(game).cash("A")==124&&core(game).cash("COUPON-HOLDER")==1&&
+                  core(game).country_fiscal("A").unpaid_coupons==0,
+                  "coupon control only has new daily interest due");
+        const auto saved=daily::SnapshotCodec::encode(game.world());
+        p0::DailyGame replay(daily::SnapshotCodec::decode(saved),policies);
+        game.advance_day();closed.advance_day();replay.advance_day();
+        const auto& actual=core(game);
+        const auto per=mode==0?2:(mode==1||mode==2||mode==5)?1:0;
+        if(mode==6) {
+            check(actual.cash("A")==3&&actual.cash("PROVIDER")==360&&
+                  actual.cash("COUPON-HOLDER")==2&&actual.sovereign_bonds().size()==1&&
+                  actual.country_fiscal("A").unpaid_coupons==0&&actual.cash("BIDDER")==100&&
+                  balance(actual,mixed)==0&&balance(actual,elder)==0&&
+                  actual.cash("A")==core(closed).cash("A")&&
+                  daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+                  "pension consumed cash owed to today's newly accrued sovereign coupon");
+            continue;
+        }
+        const auto other=mode==1?6:saved_cap?64:0;
+        if(saved_cap)
+            check(actual.civilian_spending_cap("A")== (mode==7?2:7),
+                  "the shared funded policy needs the saved cap actually in effect");
+        if(mode==7)
+            check(balance(actual,mixed)==0&&balance(actual,elder)==0,
+                  "an authored envelope must not bypass the tighter enacted pension cap");
+        check(balance(actual,mixed)==3*per&&balance(actual,elder)==per&&
+              balance(actual,young)==0&&balance(actual,foreign)==0&&
+              !actual.has_actor("HH:"+std::to_string(absent))&&
+              balance(core(closed),mixed)==0&&balance(core(closed),elder)==0&&
+              actual.cash("A")==initial-other-4*per&&actual.cash("PROVIDER")==other&&
+              core(closed).cash("A")==initial-other&&actual.cash("B")==100&&
+              actual.cash("BIDDER")==100&&actual.sovereign_bonds().empty()&&
+              actual.people().population()==16&&actual.financial().balanced()&&
+              daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+              "effective pension must pay only real eligible household people in equal funded units");
+    }
+}
+
 static void dated_civilian_cap_limits_combined_real_cash_payments() {
     const auto core=[](const p0::DailyGame& x)->const phasec::IntegratedWorld& {
         return x.world().engine().base().core().core();
@@ -1585,6 +1731,7 @@ int main(){
         known_future_month_birthday_does_not_end_opening_job_early();
         known_future_month_birthday_does_not_end_opening_job_early(true);
         dated_civilian_cap_limits_combined_real_cash_payments();
+        lawful_old_age_pension_is_funded_per_retiree();
         known_birthdays_change_actual_daily_staffing_and_payroll();
         known_birthdays_change_actual_daily_staffing_and_payroll(1);
         known_birthdays_change_actual_daily_staffing_and_payroll(2);

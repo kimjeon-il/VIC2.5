@@ -322,6 +322,12 @@ public:
         return sovereignty_.at(region);
     }
 
+    [[nodiscard]] bool is_sovereign_region(const std::string& region,
+                                            const std::string& country)const {
+        const auto owner=sovereignty_.find(region);
+        return owner!=sovereignty_.end()&&owner->second==country;
+    }
+
     [[nodiscard]] bool has_actor(const std::string& who)const {
         return actors_.contains(who);
     }
@@ -1294,23 +1300,48 @@ public:
             id,country,treasury,face,coupon_ppm,today,maturity_day});
         events_.push_back("real-sovereign-bond-financed");
     }
+private:
+    [[nodiscard]] static std::pair<Money,Money> sovereign_daily_coupon(
+            Money principal,int coupon_ppm,Money carry) {
+        constexpr Money denominator=365'000'000;
+        const Money whole=phaseb::mul_checked(principal/denominator,coupon_ppm);
+        const Money part=phaseb::add_checked(
+            phaseb::mul_checked(principal%denominator,coupon_ppm),carry);
+        return {phaseb::add_checked(whole,part/denominator),part%denominator};
+    }
+public:
+    // Only today's newly accrued coupon, not already payable arrears.
+    // Read the same per-holder carry as actual native settlement without
+    // mutating it; unissued, redeemed and zero-coupon titles cannot cost cash.
+    [[nodiscard]] Money new_sovereign_coupons_due_today(
+            const std::string& country,std::int64_t today)const {
+        Money total=0;
+        for(const auto& [id,bond]:sovereign_bonds_) {
+            const auto asset="bond:"+id;
+            if(bond.country!=country||today<=bond.issue_day||bond.coupon_ppm<=0||
+               ownership_.outstanding_units(asset)<=0)continue;
+            for(const auto& [holder,principal]:ownership_.holders(asset)) {
+                if(principal<=0)continue;
+                const auto fraction=sovereign_coupon_fraction_.find({id,holder});
+                const Money carry=fraction==sovereign_coupon_fraction_.end()?0:fraction->second;
+                total=phaseb::add_checked(total,
+                    sovereign_daily_coupon(principal,bond.coupon_ppm,carry).first);
+            }
+        }
+        return total;
+    }
     void phase_time_service_sovereign_bonds(std::int64_t today) {
         require_stage({5});
         ensure(today>=0,"invalid sovereign bond servicing day");
-        constexpr Money denominator=365'000'000;
         for(const auto& [id,bond]:sovereign_bonds_) {
             if(today<=bond.issue_day)continue;
             const auto holders=ownership_.holders("bond:"+id);
             for(const auto& [holder,principal]:holders) {
                 if(principal<=0||bond.coupon_ppm<=0)continue;
                 const auto key=std::make_pair(id,holder);
-                const Money old=sovereign_coupon_fraction_[key];
-                const Money whole=phaseb::mul_checked(
-                    principal/denominator,bond.coupon_ppm);
-                const Money part=phaseb::add_checked(phaseb::mul_checked(
-                    principal%denominator,bond.coupon_ppm),old);
-                const Money coupon=phaseb::add_checked(whole,part/denominator);
-                sovereign_coupon_fraction_[key]=part%denominator;
+                const auto [coupon,carry]=sovereign_daily_coupon(
+                    principal,bond.coupon_ppm,sovereign_coupon_fraction_[key]);
+                sovereign_coupon_fraction_[key]=carry;
                 if(coupon<=0)continue;
                 const auto payable=account(bond.treasury,"bond_coupon_payable");
                 const auto receivable=account(holder,"bond_coupon_receivable");
