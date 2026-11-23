@@ -877,7 +877,7 @@ public:
     // Cash reservation is now owned by the SAME Phase C authority used by
     // legacy payments, wages, transactions and Phase D activity planning.
     // Payments must actually settle before capitalisation or validation.
-    void plan_work(const std::string& project,Quantity units) {
+    void plan_work(const std::string& project,Quantity units,bool hold_material=false) {
         must(1);
         auto& p=d_.constructions.at(project);
         require(units>0 && p.accepted_work+units<=p.work_required &&
@@ -887,6 +887,9 @@ public:
         if(!p.allow_accrued_invoice_commission)
             c_.phase_d_reserve_cash(p.client,"construction:"+project,
                                      product(units,p.cash_price_per_work));
+        if(hold_material)
+            c_.phase_d_reserve_material(p.contractor,p.region,p.material_good,
+                         "construction:"+project,product(units,p.material_per_work));
         p.planned_work=phaseb::add_checked(p.planned_work,units);
     }
     void plan_package(const std::string& id,Quantity attempt_units) {
@@ -944,7 +947,7 @@ public:
         p.inspected=true;
         d_.append(d_.opening_month,"construction-inspection",project);
     }
-    void perform_work(const std::string& project,Quantity units) {
+    void perform_work(const std::string& project,Quantity units,bool held_material=false) {
         must(4);
         auto& p=d_.constructions.at(project);
         for(const auto& [id,wp]:d_.work_packages) {
@@ -958,7 +961,10 @@ public:
         require(c_.stock(p.contractor,p.region,p.material_good)>=real_stock,
                 "construction requires delivered material");
         occupy_labor(p.contractor,staff);
-        c_.phase_d_use_material(p.contractor,p.region,p.material_good,real_stock);
+        if(held_material)
+            c_.phase_d_use_reserved_material(p.contractor,p.region,p.material_good,
+                                            "construction:"+project,real_stock);
+        else c_.phase_d_use_material(p.contractor,p.region,p.material_good,real_stock);
         p.accepted_work=phaseb::add_checked(p.accepted_work,units);
         p.planned_work-=units;
         d_.append(c_.month(),"actual-construction-work",project);

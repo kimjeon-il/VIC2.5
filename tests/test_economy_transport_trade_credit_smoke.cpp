@@ -500,7 +500,164 @@ static void repeated_extraction_inputs_use_one_real_stock(bool enough) {
            "extraction must value and consume the complete tools requirement exactly once");
 }
 
+static void construction_buys_only_funded_local_steel() {
+    enum class Mode { funded, weak_cash, remote, household, competing, dual_roles, weak_client, blocked_head };
+    std::string failures;
+    for(const auto mode:{Mode::funded,Mode::weak_cash,Mode::remote,Mode::household,Mode::competing,
+                         Mode::dual_roles,Mode::weak_client,Mode::blocked_head}) try {
+        const std::string supply_region=mode==Mode::remote?"FAR":"R";
+        phasegh::World opening(24000);
+        auto& geo=opening.seed_geography();
+        geo.seed_unit(1,"A","Construction fixture");
+        geo.seed_province(1,"R","A");geo.seed_assignment(1,1);
+        geo.seed_province(2,"FAR","A");geo.seed_assignment(2,1);
+        auto& d=geo.seed_core();
+        auto& c=d.seed_core();
+        c.seed_actor("A",0);c.seed_actor("MILLER",0);
+        c.seed_government("A","HEAD","PM",5,3);
+        const phasec::Money opening_cash=mode==Mode::weak_cash?19:(mode==Mode::dual_roles?30:20);
+        const phasec::Money client_cash=mode==Mode::weak_client?9:(mode==Mode::blocked_head?10:50);
+        c.seed_actor("BUILDER",opening_cash);c.seed_actor("CLIENT",client_cash);
+        c.seed_market("R","steel",20,20,20,2);
+        c.seed_market("R","tools",20,20,20,0);
+        if(supply_region!="R")c.seed_market(supply_region,"steel",20,20,20,2);
+        c.seed_market(supply_region,"coal",2,2,2,0);
+        c.seed_market(supply_region,"iron",2,2,2,0);
+        const auto hire=[&](const std::string& region,const std::string& owner,
+                            phaseb::People count=1) {
+            auto& pop=c.seed_population();
+            const auto hh=pop.household_profile({region,owner,"shared",count});
+            const auto eco=pop.economic_profile({region,"worker","wage","employee",pop.default_education()});
+            const auto demo=pop.demographic_profile({region,23640,phaseb::Sex::female,
+                "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+            const auto id=pop.seed_population(demo,eco,hh,count);
+            pop.hire(id,count,owner,"worker",0,{});
+            return "HH:"+std::to_string(hh);
+        };
+        const auto hh=hire("R","BUILDER",mode==Mode::competing?2:1);
+        d.seed_standard_industries();
+        if(mode==Mode::household) {
+            c.seed_actor(hh,0);c.seed_stock(hh,"R","steel",1);
+        } else if(mode==Mode::blocked_head) {
+            c.seed_market("R","wood",5,5,5,0);
+            c.seed_stock("MILLER","R","wood",1);
+        } else if(mode!=Mode::competing) {
+            (void)hire(supply_region,"MILLER");
+            c.seed_stock("MILLER",supply_region,"iron",1);
+            c.seed_stock("MILLER",supply_region,"coal",1);
+            d.seed_building_facility("MILL","MILLER",supply_region,31,
+                                     "vic3_115.urban.steel_mills");
+            phased::IndustryRecipe steel;
+            steel.id="SMELT";steel.site="MILL";steel.industry_class="MANU";
+            steel.inputs={{"iron",1},{"coal",1}};steel.outputs={{"steel",1}};
+            steel.workers_per_batch=1;
+            d.seed_building_recipe(steel);
+        }
+        phased::ConstructionProject p;
+        p.id="PROJECT";p.client="CLIENT";p.contractor="BUILDER";p.region="R";
+        p.target_site="READY-PLANT";p.material_good="steel";
+        p.work_required=p.material_per_work=p.workers_per_work=1;
+        p.target_capacity=31;p.cash_price_per_work=10;
+        d.seed_building_construction(p,"vic3_115.urban.tooling_workshops");
+        if(mode==Mode::competing||mode==Mode::dual_roles||mode==Mode::blocked_head) {
+            if(mode==Mode::competing)c.seed_stock("BUILDER","R","steel",1);
+            else if(mode==Mode::blocked_head)p.material_good="wood";
+            else {
+                c.seed_actor("BUILDER-TWO",0);
+                (void)hire("R","BUILDER-TWO");
+                p.client="BUILDER";p.contractor="BUILDER-TWO";
+                p.work_required=2;
+                c.seed_stock("BUILDER-TWO","R","steel",2);
+            }
+            p.id="SECOND";p.target_site="SECOND-PLANT";
+            d.seed_building_construction(p,"vic3_115.urban.tooling_workshops");
+        }
+        p0::Policies rules;
+        rules.daily_food_units_per_person=0;rules.monthly_clothing_units_per_person=0;
+        rules.allow_endogenous_staffing=false;
+        rules.investments.push_back({"PROJECT","tools",0,1,1});
+        if(mode==Mode::competing||mode==Mode::dual_roles||mode==Mode::blocked_head)
+            rules.investments.push_back({"SECOND","tools",0,1,1});
+        p0::DailyGame game(daily::World::adopt(std::move(opening),17),rules);
+        const auto read=[&]() -> const phased::World& { return game.world().engine().base().core(); };
+        phasegh::World::Plan inspect;
+        if(mode==Mode::competing)
+            inspect[3].push_back([](phasegh::Stage& stage){
+                const auto& live=stage.phase_c();
+                verify(live.stock("BUILDER","R","steel")==1 &&
+                       live.phase_d_material_available("BUILDER","R","steel")==0,
+                       "existing local procurement must not divert held construction steel");
+            });
+        game.advance_day(inspect);
+        if(mode==Mode::competing) {
+            verify(read().construction("PROJECT").paid_work==1 &&
+                   read().construction("SECOND").paid_work==0 &&
+                   read().core().stock("BUILDER","R","steel")==0 &&
+                   read().core().financial().balanced(),
+                   "ordered construction must not overbook the same steel");
+            continue;
+        }
+        if(mode==Mode::blocked_head) {
+            verify(read().core().stock("BUILDER","R","wood")==1 &&
+                   read().core().cash("MILLER")==5 &&
+                   read().construction("SECOND").paid_work==0,
+                   "unobtainable first project blocked the next funded wood project");
+            game.advance_day();
+            verify(read().construction("PROJECT").paid_work==0 &&
+                   read().construction("SECOND").paid_work==1 &&
+                   read().core().cash("CLIENT")==0 &&
+                   read().core().stock("BUILDER","R","wood")==0,
+                   "available wood must fund only the second project's actual work");
+            continue;
+        }
+        if(mode==Mode::dual_roles) {
+            verify(read().construction("SECOND").paid_work==1 &&
+                   read().core().stock("BUILDER-TWO","R","steel")==1 &&
+                   read().core().cash("BUILDER")==20 &&
+                   read().core().stock("MILLER","R","steel")==1,
+                   "restock must leave the buyer's cash for another real stocked project");
+            game.advance_day();
+            verify(read().construction("SECOND").paid_work==2 &&
+                   read().core().cash("BUILDER")==10 &&
+                   read().core().cash("BUILDER-TWO")==20 &&
+                   read().construction("PROJECT").paid_work==0,
+                   "protected stocked project did not receive its real second invoice");
+            continue;
+        }
+        if(mode!=Mode::household)
+            verify(read().realized_batches("MANU",24000,24000)==1 &&
+                   read().core().stock("MILLER",supply_region,"iron")==0 &&
+                   read().core().stock("MILLER",supply_region,"coal")==0,
+                   "real iron and coal must produce the construction steel");
+        const bool funded=mode==Mode::funded;
+        verify(read().core().stock("BUILDER","R","steel")==(funded?1:0) &&
+               read().core().cash("BUILDER")==opening_cash-(funded?20:0) &&
+               read().core().cash("MILLER")==(funded?20:0) &&
+               read().core().cash("CLIENT")==client_cash &&
+               read().construction("PROJECT").paid_work==0,
+               "funded project must purchase local steel without assigning same-day work");
+        auto replay=p0::DailyGame(daily::SnapshotCodec::decode(
+            daily::SnapshotCodec::encode(game.world())),rules);
+        game.advance_day();replay.advance_day();
+        verify(read().construction("PROJECT").paid_work==(funded?1:0) &&
+               read().core().stock("BUILDER","R","steel")==0 &&
+               read().core().cash("CLIENT")== client_cash-(funded?10:0) &&
+               read().core().cash("BUILDER")==opening_cash-(funded?10:0) &&
+               read().core().financial().balanced() &&
+               daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+               "paid construction must consume only actually purchased steel and replay");
+        game.advance_day();
+        verify(read().construction("PROJECT").commissioned==funded &&
+               read().core().facilities().contains("READY-PLANT")==funded,
+               "only physically completed and paid project may commission");
+    } catch(const std::exception& e) {
+        failures+=std::to_string(static_cast<int>(mode))+": "+e.what()+"; ";
+    }
+    verify(failures.empty(),failures.c_str());
+}
+
 int main() {
+    construction_buys_only_funded_local_steel();
     repeated_extraction_inputs_use_one_real_stock(false);
     repeated_extraction_inputs_use_one_real_stock(true);
     repeated_recipe_inputs_share_a_single_procurement_target(true);

@@ -1794,44 +1794,56 @@ public:
         // regional headcount. Each order rereads legal/financial/staff data.
         auto construction_population=std::make_shared<
             std::optional<phasec::IntegratedWorld::P1PopulationTotals>>();
+        auto construction_staff=std::make_shared<std::map<std::string,People>>();
+        std::set<std::string> detailed_projects;
+        for(const auto& [id,package]:industry.work_packages) {
+            (void)id;
+            detailed_projects.insert(package.project);
+        }
+        const auto ordinary_construction=[projects=std::move(detailed_projects)](
+                const phased::ConstructionProject& p) {
+            return !p.permit_required&&!p.inspection_required&&
+                   !p.allow_accrued_invoice_commission&&!projects.contains(p.id);
+        };
+        const auto active_construction=[date,dim,today=world_.day_index()](
+                phasegh::Stage& gh,const Investment& investment,bool generated) {
+            auto& c=gh.phase_c();
+            const auto& domain=gh.phase_d().state();
+            const auto& p=domain.constructions.at(investment.construction_project);
+            if(generated&&p.id.starts_with("AUTO:PROJECT:")&&
+               c.outstanding_worker_wages(p.client)>0)return false;
+            if(p.ready||p.commissioned||p.accepted_work>=p.work_required ||
+               c.market(p.region,investment.output_good).price<investment.minimum_output_price)
+                return false;
+            if(!generated)return true;
+            for(const auto& [recipe_id,recipe]:domain.recipes) {
+                (void)recipe_id;
+                if(recipe.site!=p.target_site)continue;
+                const auto q=enterprise_ai::evaluate(c,domain,gh.geography().spatial(),
+                    gh.commerce(),recipe,date.day,dim,&p,today);
+                if(q.valid&&q.product==investment.output_good)return true;
+            }
+            return false;
+        };
         for(const auto& investment:decisions.investments) {
             auto work=std::make_shared<Quantity>(0);
             const bool generated=autonomous_projects.contains(investment.construction_project);
-            plan[1].push_back([investment,work,generated,date,dim,investment_rates,
-                construction_population,
+            const auto& project=industry.constructions.at(investment.construction_project);
+            const bool ordinary=ordinary_construction(project);
+            plan[1].push_back([investment,work,generated,investment_rates,
+                construction_population,construction_staff,active_construction,ordinary,
                 today=world_.day_index(),
                 collateral_credit=decisions.allow_collateralized_enterprise_credit]
                 (phasegh::Stage& gh){
                 const auto& domain=gh.phase_d().state();
                 const auto& p=domain.constructions.at(investment.construction_project);
                 auto& c=gh.phase_c();
-                // Recheck earned wages before reserving cash or drawing
-                // collateral for a previously generated expansion. Explicit
-                // orders and manually initiated projects retain their path.
-                if(generated&&p.id.starts_with("AUTO:PROJECT:")&&
-                   c.outstanding_worker_wages(p.client)>0)return;
-                if(p.ready||p.commissioned||p.accepted_work>=p.work_required ||
-                   c.market(p.region,investment.output_good).price<investment.minimum_output_price)
-                    return;
-                // Auto-construction only when a REAL recipe, local or
-                // verified routed inputs, workforce and margin substantiate it.
-                if(generated) {
-                    bool profitable=false;
-                    for(const auto& [recipe_id,recipe]:domain.recipes) {
-                        (void)recipe_id;
-                        if(recipe.site!=p.target_site)continue;
-                        const auto q=enterprise_ai::evaluate(
-                            c,domain,gh.geography().spatial(),
-                            gh.commerce(),recipe,date.day,dim,&p,today);
-                        if(q.valid && q.product==investment.output_good) {
-                            profitable=true;break;
-                        }
-                    }
-                    if(!profitable)return;
-                }
+                if(!active_construction(gh,investment,generated))return;
                 const Quantity materials=c.phase_d_material_available(
                               p.contractor,p.region,p.material_good)/p.material_per_work;
-                const People staff=c.phase_d_workforce(p.contractor);
+                const People available_staff=c.phase_d_workforce(p.contractor);
+                const People staff=ordinary?std::max<People>(0,
+                    available_staff-(*construction_staff)[p.contractor]):available_staff;
                 if(materials<=0||staff<p.workers_per_work)return;
                 Quantity work_budget=investment.maximum_daily_work;
                 const auto country=c.sovereignty(p.region);
@@ -1953,11 +1965,13 @@ public:
                         affordable});
                 }
                 if(n<=0)return;
-                gh.phase_d().plan_work(investment.construction_project,n);
+                gh.phase_d().plan_work(investment.construction_project,n,ordinary);
+                if(ordinary)(*construction_staff)[p.contractor]+=times(n,p.workers_per_work);
                 *work=n;
             });
-            plan[4].push_back([investment,work](phasegh::Stage& gh){
-                if(*work>0)gh.phase_d().perform_work(investment.construction_project,*work);
+            plan[4].push_back([investment,work,ordinary](phasegh::Stage& gh){
+                if(*work>0)
+                    gh.phase_d().perform_work(investment.construction_project,*work,ordinary);
             });
             plan[5].push_back([investment,work](phasegh::Stage& gh){
                 if(*work>0)gh.phase_d().pay_work(investment.construction_project,*work);
@@ -3834,6 +3848,112 @@ public:
                         std::make_move_iterator(supplies.cargo.begin()),
                         std::make_move_iterator(supplies.cargo.end()));
         }
+        // Refill at most one upcoming work unit per eligible ordinary project.
+        // This runs after existing Stage7 shoppers and uses the same local
+        // settlement. Today's construction already consumed its Stage1 holds.
+        if(decisions.allow_endogenous_input_procurement&&!decisions.investments.empty())
+            plan[7].push_back([orders=decisions.investments,autonomous_projects,
+                               ordinary_construction,active_construction]
+                              (phasegh::Stage& gh){
+                auto& c=gh.phase_c();
+                const auto& projects=gh.phase_d().state().constructions;
+                struct NextWork {
+                    const phased::ConstructionProject* project;
+                    Money reserve;
+                    bool stocked{};
+                };
+                std::vector<NextWork> eligible;
+                std::map<std::string,Money> invoices,keep_cash;
+                std::map<std::string,People> staff;
+                using MaterialKey=std::tuple<std::string,std::string,std::string>;
+                std::map<MaterialKey,Quantity> assigned;
+                for(const auto& order:orders) {
+                    const auto& p=projects.at(order.construction_project);
+                    if(!ordinary_construction(p)||p.client==p.contractor||
+                       c.firm_bankrupt(p.client)||c.firm_bankrupt(p.contractor)||
+                       c.outstanding_worker_wages(p.client)>0||
+                       c.outstanding_worker_wages(p.contractor)>0||
+                       !c.has_market(p.region,order.output_good)||
+                       !active_construction(gh,order,autonomous_projects.contains(p.id)))
+                        continue;
+                    const auto& country=c.sovereignty(p.region);
+                    if(!c.has_government(country))continue;
+                    const auto trait=phaseb::add_checked(c.p3_trait_modifier_ppm(
+                        country,"state_construction_mult"),c.p1_local_decree_ppm(
+                        country,p.region,"state_construction_mult"));
+                    if(trait<=-1'000'000)continue;
+                    eligible.push_back({&p,order.reserve_cash});
+                }
+                const auto can_fund=[&](const NextWork& work) {
+                    const auto& p=*work.project;
+                    const Money reserve=std::max(keep_cash[p.client],work.reserve);
+                    const Money free=c.phase_d_cash_available(p.client)-invoices[p.client];
+                    return c.phase_d_workforce(p.contractor)-staff[p.contractor]>=
+                               p.workers_per_work &&
+                           free>=reserve && free-reserve>=p.cash_price_per_work;
+                };
+                const auto assign=[&](const NextWork& work,const MaterialKey& key,Quantity target) {
+                    const auto& p=*work.project;
+                    keep_cash[p.client]=std::max(keep_cash[p.client],work.reserve);
+                    invoices[p.client]+=p.cash_price_per_work;
+                    staff[p.contractor]+=p.workers_per_work;
+                    assigned[key]=target;
+                };
+                // Protect next work already backed by real stock before new
+                // spending, including when its client buys for another job.
+                // A missing, unfillable order cannot claim labor or cash.
+                for(auto& work:eligible) {
+                    const auto& p=*work.project;
+                    if(!can_fund(work))continue;
+                    const auto key=MaterialKey{p.contractor,p.region,p.material_good};
+                    const auto target=phaseb::add_checked(assigned[key],p.material_per_work);
+                    if(local_material_shortfall(c,p.contractor,p.region,p.material_good,target)>0)
+                        continue;
+                    assign(work,key,target);
+                    work.stocked=true;
+                }
+                std::optional<phasec::IntegratedWorld::MarketSellerIndex> sellers;
+                for(const auto& work:eligible) {
+                    if(work.stocked||!can_fund(work))continue;
+                    const auto& p=*work.project;
+                    if(!c.has_market(p.region,p.material_good))continue;
+                    const auto key=MaterialKey{p.contractor,p.region,p.material_good};
+                    const auto target=phaseb::add_checked(assigned[key],p.material_per_work);
+                    const auto shortage=local_material_shortfall(
+                        c,p.contractor,p.region,p.material_good,target);
+                    if(shortage==0) {
+                        assign(work,key,target);
+                        continue;
+                    }
+                    const Money free=c.phase_d_cash_available(p.contractor)-
+                                     invoices[p.contractor];
+                    const Money held=keep_cash[p.contractor];
+                    const Money price=c.market(p.region,p.material_good).price;
+                    if(free<held||price<=0||shortage>(free-held)/price)continue;
+                    if(!sellers)sellers=c.market_seller_index();
+                    const auto source=sellers->find({p.region,p.material_good});
+                    if(source==sellers->end())continue;
+                    Quantity needed=shortage;
+                    std::vector<std::string> suppliers;
+                    for(const auto& seller:source->second) {
+                        if(seller==p.contractor)continue;
+                        const auto present=c.phase_d_material_available(
+                            seller,p.region,p.material_good);
+                        if(present<=0)continue;
+                        const auto reserved=assigned.find({seller,p.region,p.material_good});
+                        // Canonical clearing may draw the full shortage from
+                        // one supplier. Only offer its unclaimed surplus.
+                        if(reserved!=assigned.end()&&reserved->second>0&&
+                           present-reserved->second<shortage)continue;
+                        needed-=std::min(needed,present);
+                        suppliers.push_back(seller);
+                    }
+                    if(needed>0)continue;
+                    if(c.clear_household_market(p.contractor,p.region,p.material_good,
+                                                shortage,suppliers)==shortage)
+                        assign(work,key,target);
+                }
+            });
         if(jobs.empty())return world_.advance_day(plan);
         daily::World staged=world_;
         for(auto& cargo:jobs)staged.enqueue(date,std::move(cargo));
