@@ -3099,12 +3099,8 @@ public:
             ensure(supporting_parties.empty(),
                    "P1 direct executive may not invent parliamentary votes");
         } else {
-            ensure(!p4_parliament_dissolved(country),
-                   "P4 dissolved parliament cannot enact a new tax law");
-            const auto& result=legislature_for(country);
-            ensure(result.total_seats==g.chamber_seats &&
-                   coalition_seats(supporting_parties,result)>=g.quorum,
-                   "insufficient lawful national parliamentary confidence");
+            require_elected_support(country,supporting_parties,
+                "P4 dissolved parliament cannot enact a new tax law");
         }
         scheduled_country_income_tax_[month()+1][country]=ppm;
         events_.push_back("constitutional-tax-law:"+country);
@@ -3197,6 +3193,12 @@ public:
         return processed_commands_.contains(external_id);
     }
     void command_once(const std::string& external_id, const Task& command) {
+        ensure(!external_id.starts_with("P0:ELECTED-PUBLIC-BUILD:"),
+               "reserved elected public construction command");
+        record_command_once(external_id,command);
+    }
+private:
+    void record_command_once(const std::string& external_id, const Task& command) {
         ensure(stage_ >= 0 && !external_id.empty() &&
                !processed_commands_.contains(external_id),
                "duplicate or invalid command");
@@ -3204,6 +3206,7 @@ public:
         processed_commands_.insert(external_id);
         events_.push_back("command:" + external_id);
     }
+public:
     void pay(const std::string& from, const std::string& to, Money amount) {
         require_stage({3, 5, 7, 8});
         if(phase_d_reservation_mode_)
@@ -3911,6 +3914,16 @@ public:
     }
 private:
     friend class vic25::p0::DailyGame;
+    void require_elected_support(const std::string& country,
+            const std::vector<std::string>& supporting_parties,
+            const char* dissolved_error) const {
+        ensure(!p4_parliament_dissolved(country),dissolved_error);
+        const auto& government=governments_.at(country);
+        const auto& result=legislature_for(country);
+        ensure(result.total_seats==government.chamber_seats &&
+               coalition_seats(supporting_parties,result)>=government.quorum,
+               "insufficient lawful national parliamentary confidence");
+    }
     using P1PopulationTotals=std::map<std::string,People>;
     [[nodiscard]] P1PopulationTotals p1_population_totals(
         const std::string* country=nullptr)const;

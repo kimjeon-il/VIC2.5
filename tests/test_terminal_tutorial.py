@@ -560,6 +560,65 @@ def main():
                 not panel(f"load LAW-A {campaign_pending}", "quit")[0]["ok"],
                 "campaign cannot change player identity or load under an old trial")
 
+        # One elected appropriation authorizes the same treasury to place
+        # one ordinary order. It is not itself a contractor payment or work.
+        approved_save = d / "campaign-construction-approved.vic25"
+        finished_save = d / "campaign-construction-finished.vic25"
+        replay_build = d / "campaign-construction-replayed.vic25"
+        result = panel("new CAMPAIGN-A", "public-build-budget WORKERS", "step 2",
+                       "public-build", "public-build-budget OTHER", "inspect B",
+                       "public-build-budget WORKERS", "public-build", "inspect A",
+                       "public-build-budget WORKERS", f"save {approved_save}",
+                       "public-build-budget WORKERS", "public-build", "public-build",
+                       "step 1", "step 1", "step 1", f"save {finished_save}", "quit")
+        require(result[0]["ok"] and "public_construction" in result[0]["status"],
+                "shared campaign has no real construction offer")
+        require(not result[1]["ok"] and result[1]["status"] == result[0]["status"] and
+                not result[3]["ok"] and not result[4]["ok"] and
+                result[3]["status"] == result[4]["status"] == result[2]["status"],
+                "unelected, unappropriated or minority construction changed the campaign")
+        require("public_construction" not in result[5]["status"] and
+                not result[6]["ok"] and not result[7]["ok"] and
+                result[6]["status"] == result[7]["status"] == result[5]["status"],
+                "B can see or spend A's construction appropriation")
+        mandate = result[9]["status"]
+        approved = mandate["public_construction"]
+        require(result[9]["ok"] and approved["budget_approval"] == "approved" and
+                approved["state"] == "available" and approved["invoice"] == 20 and
+                approved["paid_work"] == approved["contractor_receipts"] == 0 and
+                not result[11]["ok"] and result[11]["status"] == mandate,
+                "appropriation must authorize exactly once without spending on construction")
+        queued = result[12]["status"]
+        material = result[14]["status"]["public_construction"]
+        paid = result[15]["status"]
+        completed = result[16]["status"]
+        no_build = panel(f"load CAMPAIGN-A {approved_save}", "step 3", "quit")
+        # A real cash outflow becomes an asset through D capitalization;
+        # the native recurring-cost total must not count the invoice twice.
+        require(result[12]["ok"] and queued["public_construction"]["state"] == "queued" and
+                queued["public_construction"]["contractor_receipts"] == 0 and
+                not result[13]["ok"] and result[13]["status"] == queued and
+                material["state"] == "queued" and material["contractor_steel"] == 2 and
+                material["supplier_receipts"] == 6 and material["invoice_paid"] == 0 and
+                paid["date"] == no_build[1]["status"]["date"] and
+                paid["public_construction"]["state"] == "paid" and
+                paid["public_construction"]["paid_work"] == 1 and
+                paid["public_construction"]["contractor_receipts"] == 20 and
+                paid["public_construction"]["invoice_paid"] == 20 and
+                paid["public_construction"]["contractor_steel"] == 0 and
+                paid["public_construction"]["supplier_receipts"] == 6 and
+                no_build[1]["status"]["treasury"] - paid["treasury"] == 20 and
+                paid["expenditure"] == no_build[1]["status"]["expenditure"] and
+                completed["public_construction"]["state"] == "commissioned" and
+                completed["public_construction"]["commissioned_capacity"] == 31,
+                "real same-treasury invoice, steel purchase, labor or commissioning failed")
+        resumed_build = panel(f"load CAMPAIGN-A {approved_save}", "public-build",
+                              "step 3", f"save {replay_build}", "quit")
+        require(resumed_build[0]["status"] == mandate and resumed_build[1]["status"] == queued and
+                resumed_build[2]["status"] == completed and
+                replay_build.read_bytes() == finished_save.read_bytes(),
+                "appropriation/order/payment state failed deterministic saved replay")
+
         campaign_reviews = []
         def campaign_law(*tail):
             return panel(f"load CAMPAIGN-A {campaign_done}",

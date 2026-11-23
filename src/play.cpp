@@ -105,14 +105,15 @@ phasegh::Id province(std::string_view tag) {return tag=="A"?1:2;}
 
 std::string public_builder(const std::string& tag) {return "PUBLIC-BUILDER-"+tag;}
 std::string public_steel_seller(const std::string& tag) {return "PUBLIC-STEEL-"+tag;}
-p0::PublicConstructionOffer public_offer(const std::string& tag) {
+p0::PublicConstructionOffer public_offer(const std::string& tag,
+        const std::string& region,bool elected=false) {
     p0::PublicConstructionOffer offer;
     auto& p=offer.project;
     p.id="PUBLIC-TOOLS-"+tag;p.target_site="PUBLIC-TOOLS-SITE-"+tag;
-    p.client=tag;p.contractor=public_builder(tag);p.region=trial_region(tag);
+    p.client=tag;p.contractor=public_builder(tag);p.region=region;
     p.material_good="steel";p.work_required=1;p.material_per_work=2;
     p.workers_per_work=1;p.cash_price_per_work=20;p.target_capacity=31;
-    offer.treasury_cash_reserve=40;
+    offer.treasury_cash_reserve=40;offer.elected_appropriation=elected;
     auto& recipe=offer.recipe;
     recipe.id="PUBLIC-TOOLS-METHOD-"+tag;recipe.site=p.target_site;
     recipe.inputs={{"iron",1},{"wood",1}};recipe.outputs={{"tools",1}};
@@ -122,19 +123,20 @@ p0::PublicConstructionOffer public_offer(const std::string& tag) {
 
 // An earlier budget checkpoint has neither role and keeps its original
 // policies. Never create these actors, markets or stock on a resume.
-bool budget_build_fixture(const daily::World& world,const std::string& tag) {
+bool has_public_build_fixture(const daily::World& world,const std::string& tag,
+        const std::string& region) {
     const auto& c=world.engine().base().core().core();
     const auto builder=public_builder(tag),supplier=public_steel_seller(tag);
     if(!c.has_actor(builder)&&!c.has_actor(supplier))return false;
     if(!c.has_actor(builder)||!c.has_actor(supplier)||
        c.country_treasury(tag)==builder||c.country_treasury(tag)==supplier||
-       !c.has_market(trial_region(tag),"steel")||!c.has_market(trial_region(tag),"tools"))
+       !c.has_market(region,"steel")||!c.has_market(region,"tools"))
         throw std::invalid_argument("checkpoint has an incomplete public construction trial");
     return true;
 }
 
-void seed_budget_build_fixture(phasec::IntegratedWorld& core,const std::string& tag) {
-    const std::string region=trial_region(tag);
+void seed_public_build_fixture(phasec::IntegratedWorld& core,const std::string& tag,
+        const std::string& region) {
     const auto builder=public_builder(tag),supplier=public_steel_seller(tag);
     core.seed_actor(builder,1200);core.seed_actor(supplier,0);
     core.seed_market(region,"steel",3,3,3);
@@ -180,7 +182,7 @@ daily::World trial_world(const std::string& selected,bool budget) {
         const auto price=tag==selected?30:10;
         core.seed_market(trial_region(tag),trial_good,price,price,price,0);
     }
-    if(budget)seed_budget_build_fixture(core,selected);
+    if(budget)seed_public_build_fixture(core,selected,trial_region(selected));
     core.seed_actor(trial_seller,0);
     core.seed_actor(trial_buyer,3000);
     core.seed_actor(trial_carrier,0);
@@ -210,8 +212,8 @@ p0::Policies trial_policies(const daily::World& world,const std::string& selecte
             result.public_budget.push_back({tag,providers[0],2,40});
             result.public_budget.push_back({tag,providers[1],3,40});
         }
-    if(budget&&budget_build_fixture(world,selected))
-        result.public_construction_offers.push_back(public_offer(selected));
+    if(budget&&has_public_build_fixture(world,selected,trial_region(selected)))
+        result.public_construction_offers.push_back(public_offer(selected,trial_region(selected)));
     return result;
 }
 
@@ -517,7 +519,7 @@ constexpr std::array<phaseb::Id,2> law_worker_partitions{101,102};
 constexpr phaseb::Id law_voter_partition=103;
 constexpr phasec::Money opening_contract_wage=31, proposed_floor=62;
 
-p0::Policies law_policies(LegislativeTrial trial) {
+p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
     p0::Policies p;
     p.daily_food_units_per_person=0;
     p.monthly_clothing_units_per_person=0;
@@ -528,6 +530,8 @@ p0::Policies law_policies(LegislativeTrial trial) {
         p.public_budget.push_back({"B",campaign_program_b,100,0});
         p.allow_endogenous_debt_repayment=false;
         p.autonomous_tax_step_ppm=10'000;
+        if(has_public_build_fixture(world,"A",law_region))
+            p.public_construction_offers.push_back(public_offer("A",law_region,true));
     }
     return p;
 }
@@ -623,6 +627,7 @@ daily::World law_world(LegislativeTrial trial) {
         rail.valid_through_month=24119;
         engine.seed_transport_edge(rail);
         engine.seed_route({campaign_route,campaign_seller,campaign_buyer,"ore",2,1,62,1});
+        seed_public_build_fixture(c,"A",law_region);
     }
     if(education) {
         c.p1_set_incorporation(education_home,true);
@@ -887,6 +892,41 @@ void law_action(p0::DailyGame& game,std::string_view command,std::string_view ar
     advance_panel_day(game,std::move(plan));
 }
 
+void public_build_status(std::ostringstream& out,const p0::DailyGame& game,
+        const std::string& tag,bool vote_allowed) {
+    const auto& engine=game.world().engine();
+    const auto& core=engine.base().core().core();
+    if(const auto* offer=find_public_offer(game,tag)) {
+        const auto& p=offer->project;
+        const auto& projects=engine.base().core().state().constructions;
+        const auto it=projects.find(p.id);
+        const auto* started=it==projects.end()?nullptr:&it->second;
+        const auto capacity=started&&started->commissioned
+            ?core.facility(p.target_site).capacity:0;
+        const auto steel=phaseb::mul_checked(p.work_required,p.material_per_work);
+        out<<",\"public_construction\":{\"state\":"
+           <<json_string(public_construction_state(started))
+           <<",\"invoice\":"<<phaseb::mul_checked(p.work_required,p.cash_price_per_work)
+           <<",\"treasury_reserve\":"<<offer->treasury_cash_reserve
+           <<",\"steel_required\":"<<steel
+           <<",\"steel_purchase_cost\":"<<phaseb::mul_checked(
+                steel,core.market(p.region,p.material_good).price)
+           <<",\"contractor_steel\":"<<core.stock(p.contractor,p.region,p.material_good)
+           <<",\"supplier_receipts\":"<<core.firm_finance(public_steel_seller(tag)).receipts
+           <<",\"contractor_receipts\":"<<core.firm_finance(p.contractor).receipts
+           <<",\"paid_work\":"<<(started?started->paid_work:0)
+           <<",\"invoice_paid\":"<<phaseb::mul_checked(started?started->paid_work:0,
+                    p.cash_price_per_work)
+           <<",\"commissioned_capacity\":"<<capacity;
+        if(offer->elected_appropriation) {
+            const bool approved=game.has_public_construction_budget(tag,p.id);
+            out<<",\"budget_approval\":"<<json_string(approved?"approved":"available")
+               <<",\"budget_vote_allowed\":"<<(!approved&&vote_allowed?"true":"false");
+        }
+        out<<'}';
+    }
+}
+
 std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
     const auto& world=game.world();
     const auto& engine=world.engine();
@@ -909,7 +949,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
         const auto pending=core.pending_country_tax(tag);
         const auto sibling_pending=core.pending_country_tax(other);
         const auto ready=[&] {
-            if(tag!="A"||pending||core.p4_parliament_dissolved("A"))return false;
+            if(tag!="A"||core.p4_parliament_dissolved("A"))return false;
             const auto actual=core.country_elections().find("A");
             if(actual==core.country_elections().end())return false;
             const auto quorum=core.government("A").quorum;
@@ -926,7 +966,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
             return core.cash(trial_worker_wallet(core,id));
         };
         out<<",\"player_country\":\"A\",\"can_act\":"<<(tag=="A"?"true":"false")
-           <<",\"campaign_tax_allowed\":"<<(ready?"true":"false")
+           <<",\"campaign_tax_allowed\":"<<(ready&&!pending?"true":"false")
            <<",\"income_tax_ppm\":"<<fiscal.income_tax_ppm
            <<",\"pending_income_tax_ppm\":"<<(pending?std::to_string(pending->second):"null")
            <<",\"pending_income_tax_date\":"<<(pending?json_string(month_opening(pending->first)):"null")
@@ -948,7 +988,10 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
            <<",\"in_transit_ore\":"<<transit
            <<",\"supplier_cash\":"<<core.cash(campaign_seller)
            <<",\"carrier_cash\":"<<core.cash(campaign_carrier);
-        if(tag=="A")law_status(out,core,false,campaign_scenario);
+        if(tag=="A") {
+            public_build_status(out,game,tag,ready);
+            law_status(out,core,false,campaign_scenario);
+        }
         else out<<",\"scenario\":"<<json_string(campaign_scenario)<<'}';
         return out.str();
     }
@@ -982,27 +1025,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
            <<",\"pending_civilian_spending_date\":"<<(change?json_string(month_opening(change->first)):"null")
            <<",\"public_program_paid\":"<<program_receipts(core,tag)
            <<",\"peer_public_program_paid\":"<<program_receipts(core,std::string(other_country(tag)));
-        if(const auto* offer=find_public_offer(game,tag)) {
-            const auto& p=offer->project;
-            const auto& projects=engine.base().core().state().constructions;
-            const auto it=projects.find(p.id);
-            const auto* started=it==projects.end()?nullptr:&it->second;
-            const auto capacity=started&&started->commissioned
-                ?core.facility(p.target_site).capacity:0;
-            const auto steel=phaseb::mul_checked(p.work_required,p.material_per_work);
-            out<<",\"public_construction\":{\"state\":"
-               <<json_string(public_construction_state(started))
-               <<",\"invoice\":"<<phaseb::mul_checked(p.work_required,p.cash_price_per_work)
-               <<",\"treasury_reserve\":"<<offer->treasury_cash_reserve
-               <<",\"steel_required\":"<<steel
-               <<",\"steel_purchase_cost\":"<<phaseb::mul_checked(
-                    steel,core.market(p.region,p.material_good).price)
-               <<",\"contractor_steel\":"<<core.stock(p.contractor,p.region,p.material_good)
-               <<",\"supplier_receipts\":"<<core.firm_finance(public_steel_seller(tag)).receipts
-               <<",\"contractor_receipts\":"<<core.firm_finance(p.contractor).receipts
-               <<",\"paid_work\":"<<(started?started->paid_work:0)
-               <<",\"commissioned_capacity\":"<<capacity<<'}';
-        }
+        public_build_status(out,game,tag,false);
 
     }
     const auto& commerce=engine.commerce();
@@ -1097,7 +1120,7 @@ void run_panel() {
                 const bool industry=tag==country;
                 auto next=law?open_law(resume,*law):industry?open_industry(resume):
                     open_trial(std::string(tag),resume,budget);
-                auto policy=law?law_policies(*law):industry?tutorial_policies(true):
+                auto policy=law?law_policies(next,*law):industry?tutorial_policies(true):
                     trial_policies(next,std::string(tag),budget);
                 auto replacement=std::make_unique<Session>(Session{std::string(tag),
                     p0::DailyGame(std::move(next),std::move(policy))});
@@ -1110,7 +1133,7 @@ void run_panel() {
                     throw std::invalid_argument("the inspected peer is read-only");
                 law_action(session->game,command,arg);
                 last_status=panel_status(session->game,session->tag);
-            } else if(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="public-build"||command=="save") {
+            } else if(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="public-build"||command=="public-build-budget"||command=="save") {
                 if(!session)throw std::invalid_argument("start or load a trial first");
                 if(command=="step") {
                     const auto days=command_number(arg,1,366);
@@ -1149,12 +1172,24 @@ void run_panel() {
                     propose_trial_income_tax(session->game,session->tag,command_number(arg,0,100));
                 } else if(command=="spending-cap") {
                     propose_trial_spending_cap(session->game,session->tag,command_number(arg,0,1'000'000));
+                } else if(command=="public-build-budget") {
+                    if(!is_campaign_world(session->game.world())||session->tag!="A")
+                        throw std::invalid_argument("construction budgets are only for the player in the shared campaign");
+                    if(arg.empty()||arg.find_first_of(" \t")!=arg.npos)
+                        throw std::invalid_argument("construction budget requires one elected party");
+                    const auto* offer=find_public_offer(session->game,session->tag);
+                    if(!offer)throw std::invalid_argument("this checkpoint has no public construction offer");
+                    const auto& c=session->game.world().engine().base().core().core();
+                    session->game.approve_public_construction_budget(session->tag,
+                        c.government(session->tag).prime_minister,offer->project.id,{std::string(arg)});
                 } else if(command=="public-build") {
+                    if(is_campaign_world(session->game.world())&&session->tag!="A")
+                        throw std::invalid_argument("the inspected peer is read-only");
                     if(!arg.empty())throw std::invalid_argument("public-build takes no arguments");
                     order_trial_public_build(session->game,session->tag);
                 } else save_new(session->game.world(),checkpoint_path_utf8(arg));
             } else throw std::invalid_argument("unknown or malformed panel command");
-            if(session&&(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="public-build"))
+            if(session&&(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="public-build"||command=="public-build-budget"))
                 last_status=panel_status(session->game,session->tag);
             const auto reply="{\"ok\":true,\"status\":"+last_status+'}';
             std::cout<<reply<<std::endl;

@@ -113,6 +113,7 @@ def run(exe):
             run_elected_bill(root, panel, Path(directory) / "교육 법안 공포 대기.vic25",
                              choice="A 교육 시범판")
             run_shared_campaign(root, panel, Path(directory) / "공동 캠페인 예약.vic25")
+            run_shared_construction(root, panel, Path(directory) / "공동 건설 예산 승인.vic25")
     finally:
         panel.close()
         stop = monotonic() + 3
@@ -273,7 +274,7 @@ def run_shared_campaign(root, panel, save):
     assert "B · 조회 전용" in panel.diplomacy.get()
     assert str(status["peer_treasury"]) in panel.diplomacy.get()
     assert not panel.tariff_button.winfo_ismapped()
-    assert not panel.spending_button.winfo_ismapped() and not panel.build_button.winfo_ismapped()
+    assert not panel.spending_button.winfo_ismapped()
     for _ in range(4):
         if panel.current["campaign_tax_allowed"]:
             break
@@ -333,6 +334,63 @@ def run_shared_campaign(root, panel, save):
     panel.step_button.invoke()
     wait(root, panel)
     assert panel.current == next_day
+
+
+def run_shared_construction(root, panel, save):
+    panel.country.set("A 공동 캠페인")
+    panel.new_button.invoke()
+    wait(root, panel)
+    opening = panel.current["public_construction"]
+    assert opening["budget_approval"] == "available" and opening["state"] == "available"
+    assert opening["invoice"] == 20 and opening["treasury_reserve"] == 40
+    assert opening["contractor_steel"] == 0 and opening["commissioned_capacity"] == 0
+    assert "국고 공사비 20" in panel.budget.get()
+    assert panel.build_button.winfo_ismapped() and panel.build_button.instate(["disabled"])
+    for _ in range(4):
+        if panel.current["public_construction"]["budget_vote_allowed"]:
+            break
+        panel.step_button.invoke()
+        wait(root, panel)
+    assert panel.current["public_construction"]["budget_vote_allowed"]
+    assert panel.law_party_choice.winfo_ismapped()
+    assert panel.law_party.get() == "" and panel.build_button.instate(["disabled"])
+    bill = panel.current["law_bill"]
+    panel.law_party_choice.current(next(
+        i for i, seat in enumerate(bill["seats"]) if seat["seats"] >= bill["threshold"]))
+    panel.law_party_choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+    election_day = panel.current["date"]
+    panel.country.set("B")  # This is a prospective load/new selector, not a transfer of authority.
+    panel.build_button.invoke()
+    wait(root, panel)
+    approved = panel.current
+    quote = approved["public_construction"]
+    assert approved["country"] == approved["player_country"] == "A"
+    assert approved["date"] > election_day
+    assert quote["budget_approval"] == "approved" and quote["state"] == "available"
+    assert quote["contractor_steel"] == 0 and quote["commissioned_capacity"] == 0
+    assert "건설 예산: 승인됨" in panel.budget.get()
+    assert panel.build_button.instate(["!disabled"])
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file()
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.country.set("A 공동 캠페인")
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == approved
+    assert panel.build_button.instate(["!disabled"])
+    panel.build_button.invoke()
+    wait(root, panel)
+    assert panel.current["public_construction"]["state"] == "queued"
+    assert panel.current["public_construction"]["commissioned_capacity"] == 0
+    panel._send("step 3")
+    wait(root, panel)
+    assert panel.current["public_construction"]["commissioned_capacity"] == 31
+    assert "준공" in panel.budget.get() and "지급 20" in panel.budget.get()
+    assert panel.current["public_construction"]["invoice_paid"] == 20
+    assert panel.current["peer_country"] == "B"
 
 
 def run_industry(root, panel, tariff_save):

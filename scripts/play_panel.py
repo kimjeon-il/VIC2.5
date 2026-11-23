@@ -208,16 +208,18 @@ class PlayPanel:
                 widget.grid()
             else:
                 widget.grid_remove()
-        construction = self.current.get("public_construction") if budget else None
-        self.build_button.state(
-            ["!disabled"] if ready and construction and construction["state"] == "available" else ["disabled"])
+        construction = self._build_quote(self.current)
+        build_command, build_label = self._build_action(self.current, construction)
+        self.build_button.configure(text=build_label)
+        self.build_button.state(["!disabled"] if ready and build_command else ["disabled"])
         if construction:
             self.build_button.grid()
         else:
             self.build_button.grid_remove()
         if bill:
             command, label = self._law_action(self.current)
-            voting = campaign_tax or (bill["phase"] == "submitted" and bill["vote_ready"])
+            voting = (campaign_tax or self._build_budget_vote(construction)
+                      or (bill["phase"] == "submitted" and bill["vote_ready"]))
             self.law_party_choice.configure(state="readonly" if ready and voting else "disabled")
             if voting:
                 self.law_party_choice.grid()
@@ -283,6 +285,8 @@ class PlayPanel:
                         self.notice.set("소득세 변경을 예약했습니다.")
                     elif command.startswith("spending-cap "):
                         self.notice.set("공공사업 지출 한도를 예약했습니다.")
+                    elif command.startswith("public-build-budget "):
+                        self.notice.set("건설 예산이 승인됐습니다. 공사는 아직 신청하지 않았습니다.")
                     elif command == "public-build":
                         self.notice.set("건설 신청을 접수했습니다.")
                     else:
@@ -389,9 +393,11 @@ class PlayPanel:
         elif self._legislature(status):
             perspective += " · 입법 시범판"
         headline = f"{perspective}  |  {status['date']}  |  진행 기록 {status['commit']}"
+        construction = self._build_quote(status)
+        cost_label = "누적 비용(공사비 별도)" if construction else "누적 지출"
         budget = (f"국고: {status['treasury']}\n"
                   f"누적 수입: {status['revenue']}\n"
-                  f"누적 지출: {status['expenditure']}\n"
+                  f"{cost_label}: {status['expenditure']}\n"
                   f"부채: {status['debt']}")
         if self._budget(status):
             cap = status["civilian_spending_cap"]
@@ -401,9 +407,11 @@ class PlayPanel:
             if pending is not None:
                 budget += f"\n예약 한도: {pending} ({status['pending_civilian_spending_date']} 시행)"
             self.spending.set(str(pending if pending is not None else cap if cap is not None else 0))
-        construction = status.get("public_construction")
         if construction:
             state = construction["state"]
+            if self._campaign(status):
+                budget += ("\n건설 예산: 승인됨" if construction["budget_approval"] == "approved"
+                           else "\n건설 예산: 승인 전")
             label = {"available": "미신청", "queued": "신청 접수",
                      "paid": "공사비 지급 완료", "commissioned": "준공"}[state]
             budget += f"\n공공 공구공장: {label}"
@@ -413,8 +421,10 @@ class PlayPanel:
                            f"(예상 시공사 구매비 {construction['steel_purchase_cost']})")
                 if state == "queued":
                     budget += f" · 확보 {construction['contractor_steel']}"
-            elif state == "commissioned":
-                budget += f" · 설비 용량 {construction['commissioned_capacity']}"
+            else:
+                budget += f" · 지급 {construction['invoice_paid']}"
+                if state == "commissioned":
+                    budget += f" · 설비 용량 {construction['commissioned_capacity']}"
         if factory:
             policy = ("광석을 투입해 식량을 생산합니다.\n"
                       "광석이 부족하면 생산이 멈춥니다.")
@@ -539,10 +549,29 @@ class PlayPanel:
             return
         self._send("spending-cap " + value)
 
+    def _build_quote(self, status):
+        if self._budget(status) or self._campaign_can_act(status):
+            return status.get("public_construction")
+        return None
+
+    @staticmethod
+    def _build_budget_vote(quote):
+        return bool(quote and quote["state"] == "available"
+                    and quote.get("budget_approval") == "available" and quote["budget_vote_allowed"])
+
+    def _build_action(self, status, quote):
+        build_label = "건설 신청 후 하루 진행"
+        if not quote or quote["state"] != "available":
+            return None, build_label
+        if self._campaign(status) and quote["budget_approval"] != "approved":
+            party = self._selected_bill_party(status["law_bill"]) if self._build_budget_vote(quote) else None
+            return ("public-build-budget " + party if party else None), "건설 예산 표결 후 하루 진행"
+        return "public-build", build_label
+
     def public_build(self):
-        construction = self.current.get("public_construction") if self.current else None
-        if construction and construction["state"] == "available":
-            self._send("public-build")
+        command, _ = self._build_action(self.current, self._build_quote(self.current))
+        if command:
+            self._send(command)
 
     def advance_bill(self):
         if self._legislature(self.current) or self._campaign_can_act(self.current):

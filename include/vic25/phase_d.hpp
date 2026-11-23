@@ -628,13 +628,15 @@ class Stage {
     friend class vic25::p0::DailyGame;
     void order_public_construction(const std::string& country,
             const std::string& proposer,ConstructionProject project,
-            IndustryRecipe recipe,Money cash_reserve) {
+            IndustryRecipe recipe,Money cash_reserve,bool elected) {
         must(9);
         require(c_.has_country_treasury(country)&&
                 c_.country_treasury(country)==project.client&&
                 c_.government(country).prime_minister==proposer&&
-                c_.country_tax_uses_direct_executive(country)&&
-                c_.p1_constitution(country).legislature==phasec::P1LegislatureKind::none&&
+                (elected ? (!c_.country_tax_uses_direct_executive(country)&&
+                            c_.p1_constitution(country).legislature==phasec::P1LegislatureKind::unicameral)
+                         : (c_.country_tax_uses_direct_executive(country)&&
+                            c_.p1_constitution(country).legislature==phasec::P1LegislatureKind::none))&&
                 c_.sovereignty(project.region)==country,
                 "unauthorized public construction offer");
         require(!d_.constructions.contains(project.id)&&

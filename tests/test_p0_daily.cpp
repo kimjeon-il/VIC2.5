@@ -2639,7 +2639,7 @@ static void autonomous_tax_requires_current_parliamentary_authority(bool direct_
 }
 
 static void public_construction_purchases_uses_and_pays_real_inputs() {
-    const auto trial=[](int steel,phasec::Money builder_cash,phasec::Money treasury){
+    const auto trial=[](int steel,phasec::Money builder_cash,phasec::Money treasury,bool elected=false){
         phasegh::World gh{24000};
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"RA","A");geo.seed_unit(1,"A","RA");geo.seed_assignment(1,1);
@@ -2648,7 +2648,16 @@ static void public_construction_purchases_uses_and_pays_real_inputs() {
         c.seed_actor("A",treasury);c.seed_actor("BUILDER",builder_cash);
         c.seed_actor("SELLER",0);c.seed_actor("PROVIDER",0);
         c.seed_government("A","HEAD","PM",5,3);
-        c.seed_p1_constitution("A",{phasec::P1GovernancePrinciple::monarchy,
+        if(elected) {
+            using namespace phasec;
+            c.seed_p1_constitution("A",{P1GovernancePrinciple::presidential_republic,
+                P1PowerDistribution::universal_vote,P1LegislatureKind::unicameral,"fixture"});
+            c.p4_register_party({"PEOPLES","A","HEAD",100'000,true,true});
+            const auto date=daily::to_day_index({2000,1,2});
+            c.p4_seed_contest({"HOUSE","A","national","fixture:house",
+                P4Office::legislature,P4BallotMethod::list_dhondt,P4TermMode::restart_after_poll,
+                48,1'000'000,5,date,date,-1,true,true,false});
+        } else c.seed_p1_constitution("A",{phasec::P1GovernancePrinciple::monarchy,
             phasec::P1PowerDistribution::autocracy,phasec::P1LegislatureKind::none,"fixture"});
         c.seed_market("RA","steel",3,3,3);
         c.seed_market("RA","tools",5,5,5);
@@ -2666,7 +2675,7 @@ static void public_construction_purchases_uses_and_pays_real_inputs() {
         p0::Policies policy;
         policy.daily_food_units_per_person=0;
         policy.public_budget.push_back({"A","PROVIDER",15,0});
-        policy.public_construction_offers.push_back({p,r,40});
+        policy.public_construction_offers.push_back({p,r,40,elected});
         return p0::DailyGame(daily::World::adopt(std::move(gh),81),policy);
     };
     const auto reject=[](p0::DailyGame& game,const std::string& who){
@@ -2676,6 +2685,71 @@ static void public_construction_purchases_uses_and_pays_real_inputs() {
         require_test(denied&&daily::SnapshotCodec::encode(game.world())==before,
                      "invalid public work must restore the opening world");
     };
+    auto elected=trial(2,6,200,true);
+    const auto rollback=[](const auto& game,const auto& action) {
+        const auto bytes=daily::SnapshotCodec::encode(game.world());
+        bool denied=false;
+        try{action();}catch(const std::exception&){denied=true;}
+        require_test(denied&&daily::SnapshotCodec::encode(game.world())==bytes,
+                     "invalid elected appropriation or order mutated the world");
+    };
+    const std::string id="PUBLIC-TOOLS-A";
+    const auto approve=[&](const std::string& pm,const std::vector<std::string>& parties) {
+        elected.approve_public_construction_budget("A",pm,id,parties);
+    };
+    rollback(elected,[&]{approve("PM",{"PEOPLES"});});
+    elected.advance_day();elected.advance_day();
+    require_test(c(elected).country_election("A").seats.at("PEOPLES")==5,
+                 "public construction must use actual elected seats");
+    reject(elected,"PM");
+    rollback(elected,[&]{
+        phasegh::World::Plan forged;
+        forged[9].push_back([](phasegh::Stage& gh) {
+            gh.phase_c().command_once("P0:ELECTED-PUBLIC-BUILD:approved:PUBLIC-TOOLS-A",
+                [](auto&){});
+        });
+        elected.advance_day(forged);
+    });
+    rollback(elected,[&]{approve("HEAD",{"PEOPLES"});});
+    rollback(elected,[&]{approve("PM",{});});
+    rollback(elected,[&]{approve("PM",{"PEOPLES","PEOPLES"});});
+    rollback(elected,[&]{approve("PM",{"OTHER"});});
+    approve("PM",{"PEOPLES"});
+    require_test(elected.has_public_construction_budget("A",id)&&
+                 !elected.world().engine().base().core().state().constructions.contains(id)&&
+                 c(elected).cash("BUILDER")==6,
+                 "budget approval must commit authority, not spend or order work");
+    rollback(elected,[&]{approve("PM",{"PEOPLES"});});
+    const auto approved=daily::SnapshotCodec::encode(elected.world());
+    auto changed=elected.policies();
+    ++changed.public_construction_offers.front().project.cash_price_per_work;
+    p0::DailyGame changed_offer(daily::SnapshotCodec::decode(approved),changed);
+    require_test(!changed_offer.has_public_construction_budget("A",id),
+                 "restored changed price inherited an unrelated appropriation");
+    reject(changed_offer,"PM");
+    rollback(changed_offer,[&]{
+        changed_offer.approve_public_construction_budget("A","PM",id,{"PEOPLES"});
+    });
+    p0::DailyGame elected_replay(daily::SnapshotCodec::decode(approved),elected.policies());
+    require_test(elected_replay.has_public_construction_budget("A",id),
+                 "appropriation not recognized after restore");
+    elected.order_public_construction("A","PM",id);
+    elected_replay.order_public_construction("A","PM",id);
+    reject(elected,"PM");
+    const auto ordered=daily::SnapshotCodec::encode(elected.world());
+    changed=elected.policies();
+    changed.public_construction_offers.front().elected_appropriation=false;
+    p0::DailyGame downgrade(daily::SnapshotCodec::decode(ordered),changed);
+    downgrade.advance_day();
+    require_test(c(downgrade).cash("SELLER")==0&&
+                 c(downgrade).stock("SELLER","RA","steel")==2,
+                 "restored elected project bypassed its appropriation");
+    for(int day=0;day<3;++day){elected.advance_day();elected_replay.advance_day();}
+    require_test(c(elected).cash("BUILDER")==20&&c(elected).cash("SELLER")==6&&
+                 c(elected).facilities().contains("SITE")&&
+                 daily::SnapshotCodec::encode(elected.world())==
+                     daily::SnapshotCodec::encode(elected_replay.world()),
+                 "approved ordered work did not buy, pay, commission and replay");
     auto game=trial(2,6,75);
     const auto domain=[](const p0::DailyGame& g)->const phased::World& {
         return g.world().engine().base().core();

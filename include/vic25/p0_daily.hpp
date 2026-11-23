@@ -131,6 +131,7 @@ struct PublicConstructionOffer {
     phased::ConstructionProject project;
     phased::IndustryRecipe recipe;
     Money treasury_cash_reserve{};
+    bool elected_appropriation{};
 };
 // A campaign-supplied blueprint can create a new company and a new type of
 // factory even when that region has no commissioned template to copy. The
@@ -1023,6 +1024,44 @@ class DailyGame {
     static std::string public_build_key(const std::string& id) {
         return "P0:PUBLIC-BUILD:"+id;
     }
+    // The exact immutable offer is part of the receipt, not a hash or a
+    // second appropriation ledger. Length-prefixed fields cannot collide.
+    static std::string public_budget_key(const std::string& country,
+            const PublicConstructionOffer& offer) {
+        const auto& p=offer.project;
+        const auto& r=offer.recipe;
+        std::string key="P0:ELECTED-PUBLIC-BUILD:budget:v1:";
+        const auto add=[&](const std::string& field) {
+            key+=std::to_string(field.size())+":"+field;
+        };
+        const auto number=[&](auto value){add(std::to_string(value));};
+        for(const auto* field:{&country,&p.id,&p.client,&p.contractor,&p.region,
+                              &p.material_good,&p.target_site,&r.id,&r.industry_class})
+            add(*field);
+        number(offer.treasury_cash_reserve);
+        number(p.work_required);number(p.material_per_work);number(p.target_capacity);
+        number(p.workers_per_work);number(p.cash_price_per_work);
+        number(p.permit_valid);number(p.inspected);
+        number(r.nonmarket_waste_per_batch);number(r.workers_per_batch);number(r.capacity_per_batch);
+        for(const auto* rows:{&r.inputs,&r.outputs,&r.byproducts}) {
+            number(rows->size());
+            for(const auto& row:*rows){add(row.good);number(row.per_unit);}
+        }
+        return key;
+    }
+    static std::string elected_public_approval_key(const std::string& id) {
+        return "P0:ELECTED-PUBLIC-BUILD:approved:"+id;
+    }
+    static std::string elected_public_order_key(const std::string& id) {
+        return "P0:ELECTED-PUBLIC-BUILD:ordered:"+id;
+    }
+    const PublicConstructionOffer& public_offer(const std::string& id) const {
+        const auto& offers=policies_.public_construction_offers;
+        const auto offer=std::find_if(offers.begin(),offers.end(),
+            [&](const auto& entry){return entry.project.id==id;});
+        if(offer==offers.end())throw std::invalid_argument("unknown public construction offer");
+        return *offer;
+    }
     // A program needs a real payee distinct from its actual treasury. Use
     // the same eligibility before asking investors and before moving cash.
     static bool valid_public_budget_recipient(
@@ -1038,20 +1077,53 @@ public:
       :DailyGame(std::move(world),Policies{}){}
     [[nodiscard]] const daily::World& world()const {return world_;}
     [[nodiscard]] const Policies& policies()const {return policies_;}
+    [[nodiscard]] bool has_public_construction_budget(const std::string& country,
+            const std::string& project_id) const {
+        const auto& offer=public_offer(project_id);
+        const auto& c=world_.engine().base().core().core();
+        return offer.elected_appropriation&&c.has_country_treasury(country)&&
+               c.country_treasury(country)==offer.project.client&&
+               c.sovereignty(offer.project.region)==country&&
+               c.command_processed(public_budget_key(country,offer));
+    }
+    daily::DayReport approve_public_construction_budget(const std::string& country,
+            const std::string& proposer,const std::string& project_id,
+            const std::vector<std::string>& supporting_parties) {
+        const auto& offer=public_offer(project_id);
+        phasegh::World::Plan command;
+        command[9].push_back([country,proposer,offer,supporting_parties](phasegh::Stage& gh) {
+            auto& c=gh.phase_c();
+            if(!offer.elected_appropriation||!c.has_country_treasury(country)||
+               c.country_treasury(country)!=offer.project.client||
+               c.sovereignty(offer.project.region)!=country||proposer.empty()||
+               c.government(country).prime_minister!=proposer||
+               c.country_tax_uses_direct_executive(country)||
+               c.p1_constitution(country).legislature!=phasec::P1LegislatureKind::unicameral||
+               c.command_processed(public_build_key(offer.project.id)))
+                throw std::invalid_argument("unauthorized elected public construction budget");
+            c.require_elected_support(country,supporting_parties,
+                "P4 dissolved parliament cannot appropriate construction funds");
+            c.record_command_once(elected_public_approval_key(offer.project.id),[&](auto&) {
+                c.record_command_once(public_budget_key(country,offer),[](auto&){});
+            });
+        });
+        return advance_day(command);
+    }
     daily::DayReport order_public_construction(const std::string& country,
             const std::string& proposer,const std::string& project_id) {
-        const auto offer=std::find_if(policies_.public_construction_offers.begin(),
-            policies_.public_construction_offers.end(),
-            [&](const auto& entry){return entry.project.id==project_id;});
-        if(offer==policies_.public_construction_offers.end())
-            throw std::invalid_argument("unknown public construction offer");
+        const auto& offer=public_offer(project_id);
         phasegh::World::Plan command;
-        command[9].push_back([country,proposer,offer=*offer](phasegh::Stage& gh) {
-            gh.phase_c().command_once(public_build_key(offer.project.id),
-                [&](phasec::IntegratedWorld&) {
-                    gh.phase_d().order_public_construction(country,proposer,offer.project,
-                        offer.recipe,offer.treasury_cash_reserve);
-                });
+        command[9].push_back([country,proposer,offer](phasegh::Stage& gh) {
+            auto& c=gh.phase_c();
+            if(offer.elected_appropriation&&
+               !c.command_processed(public_budget_key(country,offer)))
+                throw std::invalid_argument("missing elected public construction budget");
+            c.command_once(public_build_key(offer.project.id),[&](auto&) {
+                gh.phase_d().order_public_construction(country,proposer,offer.project,
+                    offer.recipe,offer.treasury_cash_reserve,offer.elected_appropriation);
+                if(offer.elected_appropriation)
+                    c.record_command_once(elected_public_order_key(offer.project.id),[](auto&){});
+            });
         });
         return advance_day(command);
     }
@@ -1370,6 +1442,9 @@ public:
             if(p.ready||p.commissioned||p.paid_work>=p.work_required||
                !game_c.has_country_treasury(country)||
                game_c.country_treasury(country)!=p.client||
+               (game_c.command_processed(elected_public_order_key(p.id))!=offer.elected_appropriation)||
+               (offer.elected_appropriation&&
+                !game_c.command_processed(public_budget_key(country,offer)))||
                p.client!=offer.project.client||p.contractor!=offer.project.contractor||
                p.region!=offer.project.region||p.target_site!=offer.project.target_site||
                p.material_good!=offer.project.material_good||
