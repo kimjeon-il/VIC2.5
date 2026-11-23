@@ -1742,8 +1742,8 @@ public:
                 continue;
             const auto treasury=game_c.has_government(sovereign)?
                                  game_c.country_treasury(sovereign):sovereign;
-            if(contract.employer==wallet||contract.employer==treasury||
-               wallet==treasury)continue;
+            if(contract.employer==wallet||wallet==treasury||
+               (contract.employer==treasury&&!game_c.has_government(sovereign)))continue;
             const auto employer=contract.employer;
             preplanned_payroll_slices.insert(slice_id);
             const auto purpose="P0:CONTRACT-WAGE:"+std::to_string(world_.day_index())+

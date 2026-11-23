@@ -65,6 +65,56 @@ static phasegh::World fixture() {
     gh.validate();
     return gh;
 }
+static void public_employment_pays_net_without_self_tax_revenue() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");geo.seed_unit(1,"A","R");
+    geo.seed_assignment(1,1);
+    auto& core=geo.seed_core().seed_core();
+    core.seed_actor("GOVERNMENT-WALLET",500);
+    core.seed_actor("FIRM",200);
+    core.seed_government("A","HEAD","PM",5,3);
+    core.seed_country_treasury("A","GOVERNMENT-WALLET");
+    const auto public_worker=people(gh,"R",1,"worker");
+    auto& pop=core.seed_population();
+    const auto public_household="HH:"+std::to_string(pop.slice(public_worker).key.household);
+    // Use separate native wallets despite the same region and profession.
+    const auto house=pop.household_profile({"R","private","shared",1});
+    const auto& private_slice=pop.slice(public_worker);
+    const auto private_member=pop.seed_population(private_slice.key.demographic,
+                              private_slice.key.economic,house,1,42);
+    const auto private_household="HH:"+std::to_string(house);
+    pop.hire(public_worker,1,"GOVERNMENT-WALLET","worker",3100,{});
+    pop.hire(private_member,1,"FIRM","worker",3100,{});
+    core.seed_actor(public_household,0);core.seed_actor(private_household,0);
+    p0::Policies p;p.daily_food_units_per_person=0;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),7),p);
+    const auto start=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(start),p);
+    game.advance_day();replay.advance_day();
+    const auto& paid=c(game);
+    const auto fiscal=paid.country_fiscal("A");
+    require_test(paid.cash(public_household)==90&&paid.cash(private_household)==90&&
+                 paid.cash("FIRM")==100&&fiscal.cash==420&&
+                 fiscal.realized_revenue==10&&fiscal.realized_expenditure==90&&
+                 paid.outstanding_worker_wages("GOVERNMENT-WALLET")==0&&
+                 daily::SnapshotCodec::encode(game.world())==
+                     daily::SnapshotCodec::encode(replay.world()),
+                 "public employer must pay a real net wage without taxing itself");
+    for(int i=0;i<5;++i)game.advance_day();
+    const auto short_pay=c(game).country_fiscal("A");
+    require_test(short_pay.cash==7&&short_pay.realized_revenue==20&&
+                 short_pay.realized_expenditure==543&&
+                 c(game).cash(public_household)==513&&
+                 c(game).outstanding_worker_wages("GOVERNMENT-WALLET")==30,
+                 "unfunded gross sovereign wages must remain owed after real partial payment");
+    const auto arrears=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame arrears_replay(daily::SnapshotCodec::decode(arrears),p);
+    game.advance_day();arrears_replay.advance_day();
+    require_test(daily::SnapshotCodec::encode(game.world())==
+                     daily::SnapshotCodec::encode(arrears_replay.world()),
+                 "public same-wallet arrears must survive exact resume");
+}
 static void automatic_wage_withholding_rereads_office_funding() {
     using namespace phasec;
     auto gh=fixture();
@@ -3640,6 +3690,7 @@ static void blocked_automatic_army_rear_cargo_does_not_abort_a_day() {
 
 int main(){
     try{
+        public_employment_pays_net_without_self_tax_revenue();
         automatic_wage_withholding_rereads_office_funding();
         country_tariff_ai_respects_each_sovereigns_current_law();
         tariff_ai_skips_stale_or_delegated_authority();

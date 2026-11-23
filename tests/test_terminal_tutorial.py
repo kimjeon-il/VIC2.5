@@ -619,6 +619,67 @@ def main():
                 replay_build.read_bytes() == finished_save.read_bytes(),
                 "appropriation/order/payment state failed deterministic saved replay")
 
+        # The commissioned project is not a product spawn. Follow paid
+        # B freight, actual A smelting, local purchases and ordinary work.
+        supply_checkpoint = d / "campaign-operating-chain.vic25"
+        supply_completed = d / "campaign-operating-end.vic25"
+        supply_replay = d / "campaign-operating-replay.vic25"
+        timeline = panel("new CAMPAIGN-A", "step 1", "step 1",
+                         "public-build-budget WORKERS", "public-build",
+                         f"save {supply_checkpoint}", *["step 1"] * 18,
+                         f"save {supply_completed}", "quit")
+        require(all(row["ok"] for row in timeline), "ordinary campaign chain threw during a day")
+        supply_start, transit = (row["status"] for row in timeline[:2])
+        require("supply_chain" in supply_start, "shared campaign does not expose a real supply chain")
+        initial = supply_start["supply_chain"]
+        en_route = transit["supply_chain"]
+        require(initial["ore_stock"] == initial["iron_batches"] == initial["tools_stock"] == 0 and
+                transit["in_transit_ore"] > 0 and en_route["ore_stock"] == en_route["iron_batches"] == 0,
+                "smelter used ore before the first paid cargo physically arrived")
+
+        days = [row["status"] for row in timeline[2:-2]]
+        first_iron = next((row for row in days if row["supply_chain"]["iron_batches"] > 0), None)
+        first_tool = next((row for row in days if row["supply_chain"]["tools_batches"] > 0), None)
+        require(first_iron and first_tool and first_iron["date"] < first_tool["date"] and
+                first_iron["supplier_cash"] > 0 and first_iron["carrier_cash"] > 0 and
+                first_tool["public_construction"]["state"] == "commissioned" and
+                first_tool["supply_chain"]["tools_stock"] > 0 and
+                first_tool["supply_chain"]["smelter_receipts"] > initial["smelter_receipts"] and
+                first_tool["supply_chain"]["wood_seller_cash"] > initial["wood_seller_cash"] and
+                first_tool["supply_chain"]["factory_worker_cash"] > 0,
+                "paid trade, intermediate iron and staffed public tools operation were not connected")
+        require(all(row["supply_chain"]["tools_stock"] == row["supply_chain"]["factory_worker_cash"] == 0
+                    for row in days if row["public_construction"]["state"] != "commissioned"),
+                "tools or operating wages appeared before actual commissioning")
+        later = days[-1]["supply_chain"]
+        earlier = days[-2]["supply_chain"]
+        require(later["tools_waiting_for"] == "wood" and later["factory_wood_stock"] == 0 and
+                later["wood_seller_stock"] == 0 and later["tools_batches"] == earlier["tools_batches"] > 0 and
+                later["tools_stock"] == earlier["tools_stock"] > 0 and
+                later["tools_batches"] == initial["wood_seller_stock"] and
+                later["wood_seller_cash"] > initial["wood_seller_cash"] and
+                later["factory_worker_cash"] > earlier["factory_worker_cash"] and
+                days[-1]["treasury"] >= 42 and
+                later["iron_batches"] > earlier["iron_batches"],
+                "when only wood ran out the factory should stop while the smelter still operates")
+        unbuilt = panel("new CAMPAIGN-A", "step 22", "quit")[1]["status"]
+        require(unbuilt["date"] == days[-1]["date"] and
+                unbuilt["supply_chain"]["iron_batches"] > 0 and
+                unbuilt["supply_chain"]["tools_stock"] == unbuilt["supply_chain"]["factory_worker_cash"] == 0 and
+                unbuilt["supply_chain"]["smelter_receipts"] == initial["smelter_receipts"] and
+                unbuilt["supply_chain"]["wood_seller_cash"] == initial["wood_seller_cash"] and
+                unbuilt["supply_chain"]["tools_waiting_for"] == "construction",
+                "the unbuilt control should smelt ore without buying wood or producing tools")
+
+        restarted = panel(f"load CAMPAIGN-A {supply_checkpoint}", "inspect B", "inspect A",
+                          "step 18", f"save {supply_replay}", "quit")
+        require(all(row["ok"] for row in restarted) and
+                "supply_chain" not in restarted[1]["status"] and
+                restarted[0]["status"] == restarted[2]["status"] == timeline[5]["status"] and
+                restarted[3]["status"] == days[-1] and
+                supply_replay.read_bytes() == supply_completed.read_bytes(),
+                "active trade/industry and the shortage did not resume identically after saving")
+
         campaign_reviews = []
         def campaign_law(*tail):
             return panel(f"load CAMPAIGN-A {campaign_done}",

@@ -451,6 +451,18 @@ class PlayPanel:
                 policy += "\n조회 전용"
             market = (f"도착 광석: {status['delivered_ore']}\n"
                       f"운송 중 광석: {status['in_transit_ore']}")
+            chain = status.get("supply_chain") if acting else None
+            if chain:
+                waiting = {"construction": "공구공장 준공 대기", "iron": "철 부족",
+                           "wood": "목재 부족", "staff": "인력 부족",
+                           "none": None}.get(chain.get("tools_waiting_for"))
+                market = (f"운송 중 광석: {status['in_transit_ore']}"
+                          f"\n제철소 재고: 광석 {chain['ore_stock']} · 철 {chain['iron_stock']}"
+                          f"\n공구공장 재고: 철 {chain['factory_iron_stock']} · 목재 {chain['factory_wood_stock']}"
+                          f" · 공구 {chain['tools_stock']}"
+                          f"\n목재 공급자 잔액 {chain['wood_seller_cash']}")
+                if waiting:
+                    market += f" · {waiting}"
             role = "플레이어" if status["peer_is_player"] else "조회 전용"
             diplomacy = (f"{status['peer_country']} · {role}\n"
                          f"국고: {status['peer_treasury']}\n"

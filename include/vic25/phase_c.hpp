@@ -3580,15 +3580,16 @@ public:
         const auto wallet="HH:"+std::to_string(row.key.household);
         const Money gross=vic25::daily_budget::increment(
             positive_product(job->count,job->wage_per_month),day,days_in_month);
-        if(gross<=0||wallet==treasury||wallet==employer||treasury==employer)return;
+        if(gross<=0||wallet==treasury||wallet==employer||
+           (treasury==employer&&!governed))return;
         ensure(!claim.empty()&&today>=0&&!wage_arrears_.contains(claim),
                "invalid or duplicate wage debt");
         if(!actors_.contains(wallet)) {
             register_financial_actor(wallet);
             events_.push_back("opened-earned-wage-household-wallet:"+wallet);
         }
-        phase_time_accrue_contract_wage(claim,employer,wallet,treasury,
-                                       governed?country:"",gross,today);
+        accrue_contract_wage(claim,employer,wallet,treasury,
+                            governed?country:"",gross,today,governed);
     }
     void phase_time_accrue_contract_wage(const std::string& claim_id,
                                           const std::string& employer,
@@ -3596,11 +3597,18 @@ public:
                                           const std::string& treasury,
                                           const std::string& country,
                                           Money gross,std::int64_t today) {
+        accrue_contract_wage(claim_id,employer,worker,treasury,country,gross,today,false);
+    }
+private:
+    void accrue_contract_wage(const std::string& claim_id,const std::string& employer,
+            const std::string& worker,const std::string& treasury,
+            const std::string& country,Money gross,std::int64_t today,bool live_public) {
         require_stage({5});
         ensure(!claim_id.empty()&&today>=0&&gross>0&&
                actors_.contains(employer)&&actors_.contains(worker)&&
                actors_.contains(treasury)&&employer!=worker&&
-               worker!=treasury&&employer!=treasury&&
+               worker!=treasury&&(employer!=treasury||
+                   (live_public&&has_country_treasury(country)&&country_treasury(country)==treasury))&&
                !bankrupt_firms_.contains(employer)&&
                !wage_arrears_.contains(claim_id),
                "invalid or duplicate wage debt");
@@ -3623,6 +3631,7 @@ public:
             claim_id,employer,worker,treasury,country,gross,gross,today});
         events_.push_back("earned-daily-wages-owed");
     }
+public:
     void phase_time_settle_wage_arrears(std::int64_t today=-1) {
         require_stage({5});
         std::map<std::string,std::int32_t> country_enforcement;
@@ -3652,15 +3661,23 @@ public:
                     income_tax_ppm(claim.country):income_tax_ppm_);
             const Money withholding=positive_product(paid,tax)/1'000'000;
             const Money net=paid-withholding;
+            const bool public_wage=claim.employer==claim.treasury;
             std::vector<Posting> journal{
-                {account(claim.employer,"wage_payable"),paid,0},
-                {account(claim.employer,"cash"),0,paid},
-                {account(claim.worker,"wage_receivable"),0,paid}};
+                {account(claim.employer,"wage_payable"),paid,0}};
+            const Money cash_paid=public_wage?net:paid;
+            if(cash_paid)journal.push_back({account(claim.employer,"cash"),0,cash_paid});
+            journal.push_back({account(claim.worker,"wage_receivable"),0,paid});
             if(net)journal.push_back({account(claim.worker,"cash"),net,0});
             if(withholding) {
                 journal.push_back({account(claim.worker,"expense"),withholding,0});
-                journal.push_back({account(claim.treasury,"cash"),withholding,0});
-                journal.push_back({account(claim.treasury,"revenue"),0,withholding});
+                if(public_wage) {
+                    // Consolidate an intra-treasury withholding into its
+                    // accrued payroll cost, not a fictitious tax receipt.
+                    journal.push_back({account(claim.employer,"expense"),0,withholding});
+                } else {
+                    journal.push_back({account(claim.treasury,"cash"),withholding,0});
+                    journal.push_back({account(claim.treasury,"revenue"),0,withholding});
+                }
             }
             money_.post({unique("wage-claim-paid"),
                          "settlement of previously earned wages",journal});
@@ -5573,7 +5590,11 @@ public:
                    claim.outstanding<=claim.accrued&&claim.issued_day>=0&&
                    actors_.contains(claim.employer)&&
                    actors_.contains(claim.worker)&&
-                   actors_.contains(claim.treasury),
+                   actors_.contains(claim.treasury)&&
+                   claim.employer!=claim.worker&&claim.worker!=claim.treasury&&
+                   (claim.employer!=claim.treasury||
+                    (has_country_treasury(claim.country)&&
+                     country_treasury(claim.country)==claim.treasury)),
                    "invalid earned wage creditor record");
             employer_wage_due[claim.employer]=phaseb::add_checked(
                 employer_wage_due[claim.employer],claim.outstanding);

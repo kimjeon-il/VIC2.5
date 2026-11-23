@@ -282,7 +282,7 @@ def run_shared_campaign(root, panel, save):
         wait(root, panel)
     opening = panel.current
     assert opening["campaign_tax_allowed"]
-    assert f"도착 광석: {opening['delivered_ore']}" in panel.market.get()
+    assert f"제철소 재고: 광석 {opening['delivered_ore']}" in panel.market.get()
     assert f"운송 중 광석: {opening['in_transit_ore']}" in panel.market.get()
     assert panel.law_party_choice.winfo_ismapped() and panel.law_party.get() == ""
     assert panel.tax_button.instate(["disabled"])
@@ -391,6 +391,18 @@ def run_shared_construction(root, panel, save):
     assert "준공" in panel.budget.get() and "지급 20" in panel.budget.get()
     assert panel.current["public_construction"]["invoice_paid"] == 20
     assert panel.current["peer_country"] == "B"
+    for _ in range(7):
+        if panel.current["supply_chain"]["tools_stock"] > 0:
+            break
+        panel.step_button.invoke()
+        wait(root, panel)
+    chain = panel.current["supply_chain"]
+    assert chain["tools_stock"] > 0 and chain["wood_seller_cash"] > 0
+    market = panel.market.get()
+    assert f"제철소 재고: 광석 {chain['ore_stock']} · 철 {chain['iron_stock']}" in market
+    assert f"공구공장 재고: 철 {chain['factory_iron_stock']} · 목재 {chain['factory_wood_stock']} · 공구 {chain['tools_stock']}" in market
+    assert f"목재 공급자 잔액 {chain['wood_seller_cash']}" in market
+
 
 
 def run_industry(root, panel, tariff_save):

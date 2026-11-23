@@ -136,12 +136,14 @@ bool has_public_build_fixture(const daily::World& world,const std::string& tag,
 }
 
 void seed_public_build_fixture(phasec::IntegratedWorld& core,const std::string& tag,
-        const std::string& region) {
+        const std::string& region,bool linked_supply=false) {
     const auto builder=public_builder(tag),supplier=public_steel_seller(tag);
     core.seed_actor(builder,1200);core.seed_actor(supplier,0);
     core.seed_market(region,"steel",3,3,3);
-    core.seed_market(region,"tools",20,20,20);
-    core.seed_market(region,"iron",4,4,4);
+    const auto tools_quote=linked_supply?60:20;
+    const auto iron_quote=linked_supply?40:4;
+    core.seed_market(region,"tools",tools_quote,tools_quote,tools_quote,linked_supply?3:0);
+    core.seed_market(region,"iron",iron_quote,iron_quote,iron_quote,linked_supply?32:0);
     core.seed_market(region,"wood",2,2,2);
     core.seed_stock(supplier,region,"steel",2);
     auto& pop=core.seed_population();
@@ -477,6 +479,7 @@ constexpr auto education_school="EDU-SCHOOL";
 constexpr auto education_home="EDU-DISTRICT";
 constexpr auto education_compare="EDU-COMPARISON";
 constexpr auto education_bill="LAW-SCHOOL-BILL";
+constexpr auto law_region="LAW-DISTRICT";
 constexpr auto campaign_scenario="campaign-v1";
 constexpr auto campaign_origin="panel:campaign-v1";
 constexpr auto campaign_region_b="CAMPAIGN-PEER-DISTRICT";
@@ -490,6 +493,25 @@ constexpr auto campaign_carrier="CAMPAIGN-CARRIER";
 constexpr auto campaign_route="CAMPAIGN-ORE-ROUTE";
 constexpr auto campaign_edge="CAMPAIGN-RAIL";
 constexpr phaseb::Id campaign_worker_b=201;
+constexpr phaseb::Id campaign_factory_worker=202;
+constexpr auto campaign_smelter="CAMPAIGN-IRON-SITE";
+constexpr auto campaign_iron_method="CAMPAIGN-IRON-METHOD";
+constexpr auto campaign_wood_seller="CAMPAIGN-WOOD-SELLER";
+
+bool has_campaign_supply(const daily::World& world) {
+    const auto& d=world.engine().base().core();
+    const auto& c=d.core();
+    if(!c.has_actor(campaign_wood_seller)&&
+       !c.facilities().contains(campaign_smelter)&&
+       !d.state().recipes.contains(campaign_iron_method))return false;
+    const auto facility=c.facilities().find(campaign_smelter);
+    const auto recipe=d.state().recipes.find(campaign_iron_method);
+    if(!c.has_actor(campaign_wood_seller)||facility==c.facilities().end()||
+       facility->second.owner!=campaign_buyer||facility->second.region!=law_region||
+       recipe==d.state().recipes.end()||recipe->second.site!=campaign_smelter)
+        throw std::invalid_argument("checkpoint has an incomplete campaign supply chain");
+    return true;
+}
 
 enum class LegislativeTrial { wage, education, education_remote, campaign };
 const char* legislative_origin(LegislativeTrial trial) {
@@ -513,7 +535,6 @@ constexpr auto law_bill="LAW-WAGE-BILL";
 constexpr auto law_domain="trial_wage_floor";
 constexpr auto law_choice="statutory-contract-minimum";
 constexpr auto law_backers="WAGE-ASSOCIATION";
-constexpr auto law_region="LAW-DISTRICT";
 constexpr auto law_employer="LAW-EMPLOYER";
 constexpr std::array<phaseb::Id,2> law_worker_partitions{101,102};
 constexpr phaseb::Id law_voter_partition=103;
@@ -530,6 +551,9 @@ p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
         p.public_budget.push_back({"B",campaign_program_b,100,0});
         p.allow_endogenous_debt_repayment=false;
         p.autonomous_tax_step_ppm=10'000;
+        p.allow_endogenous_staffing=has_campaign_supply(world);
+        if(p.allow_endogenous_staffing)
+            p.staffing.push_back({campaign_buyer,law_region,1,31,true});
         if(has_public_build_fixture(world,"A",law_region))
             p.public_construction_offers.push_back(public_offer("A",law_region,true));
     }
@@ -554,7 +578,8 @@ daily::World law_world(LegislativeTrial trial) {
         geo.seed_province(2,campaign_region_b,"B");geo.seed_unit(2,"B",campaign_region_b);
         geo.seed_assignment(2,2);
     }
-    auto& c=geo.seed_core().seed_core();
+    auto& industry=geo.seed_core();
+    auto& c=industry.seed_core();
     c.seed_actor("A",campaign?100:0);c.seed_actor(law_employer,campaign?80'000:1'000);
     c.seed_government("A","LAW-HEAD","LAW-PM",5,3);
     c.seed_p1_constitution("A",{P1GovernancePrinciple::parliamentary_republic,
@@ -584,7 +609,13 @@ daily::World law_world(LegislativeTrial trial) {
         phaseb::Service::civilian});
     if(!education)for(const auto id:law_worker_partitions) {
         const auto h=pop.household_profile({law_region,"worker-"+std::to_string(id),"shared",1});
-        const auto worker=pop.seed_population(demo,e,h,1,id);
+        // The campaign has no wage-trial manual hiring command. Leave its
+        // comparison cohort inactive so the operating factory recruits from
+        // its one funded, eligible vacancy cohort instead.
+        const auto profile=campaign&&id!=law_worker_partitions.front()?
+            pop.economic_profile({law_region,"not_assigned","inactive","ineligible",
+                                  pop.default_education()}):e;
+        const auto worker=pop.seed_population(demo,profile,h,1,id);
         if(campaign&&id==law_worker_partitions.front())
             pop.hire(worker,1,law_employer,"worker",3100,{});
         c.seed_actor("HH:"+std::to_string(h),0);
@@ -627,7 +658,22 @@ daily::World law_world(LegislativeTrial trial) {
         rail.valid_through_month=24119;
         engine.seed_transport_edge(rail);
         engine.seed_route({campaign_route,campaign_seller,campaign_buyer,"ore",2,1,62,1});
-        seed_public_build_fixture(c,"A",law_region);
+        seed_public_build_fixture(c,"A",law_region,true);
+        c.seed_actor(campaign_wood_seller,0);
+        c.seed_stock(campaign_wood_seller,law_region,"wood",2);
+        c.seed_production_facility(campaign_smelter,campaign_buyer,law_region,31);
+        phased::IndustryRecipe iron;
+        iron.id=campaign_iron_method;iron.site=campaign_smelter;
+        iron.inputs={{"ore",1}};iron.outputs={{"iron",1}};
+        iron.workers_per_batch=iron.capacity_per_batch=1;
+        industry.seed_recipe(iron);
+        const auto smelter_home=pop.household_profile({law_region,"smelter-worker","shared",1});
+        const auto smelter_worker=pop.seed_population(demo,e,smelter_home,1);
+        c.seed_actor("HH:"+std::to_string(smelter_home),0);
+        pop.hire(smelter_worker,1,campaign_buyer,"worker",31,{});
+        const auto factory_home=pop.household_profile({law_region,"factory-workforce","shared",1});
+        pop.seed_population(demo,e,factory_home,1,campaign_factory_worker);
+        c.seed_actor("HH:"+std::to_string(factory_home),0);
     }
     if(education) {
         c.p1_set_incorporation(education_home,true);
@@ -724,6 +770,46 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
             throw std::invalid_argument("checkpoint lacks the shared campaign institutions");
     }
     return w;
+}
+
+void campaign_supply_status(std::ostringstream& out,const daily::World& world) {
+    if(!has_campaign_supply(world))return;
+    const auto& domain=world.engine().base().core();
+    const auto& c=domain.core();
+    const auto& factory=public_offer("A",law_region,true);
+    const auto& factory_id=factory.project.target_site;
+    Quantity iron_batches=0,tools_batches=0;
+    for(const auto& run:domain.state().actual_production_runs) {
+        if(run.recipe==campaign_iron_method)
+            iron_batches=phaseb::add_checked(iron_batches,run.batches);
+        else if(run.recipe==factory.recipe.id)
+            tools_batches=phaseb::add_checked(tools_batches,run.batches);
+    }
+    const auto known_material=[&](const std::string& good) {
+        if(c.stock("A",law_region,good)>0)return true;
+        return std::any_of(c.physical_inventory().begin(),c.physical_inventory().end(),
+            [&](const auto& item) {
+                const auto& key=item.first;
+                return key.region_id==law_region&&key.good_id==good&&
+                       item.second>0&&c.has_actor(key.holder_id);
+            });
+    };
+    const auto reason=!c.facilities().contains(factory_id)?"construction":
+                      c.phase_d_workforce("A")<=0?"staff":
+                      !known_material("iron")?"iron":!known_material("wood")?"wood":"none";
+    const auto worker=law_slice(c,campaign_factory_worker);
+    out<<R"(,"supply_chain":{"ore_stock":)"<<c.stock(campaign_buyer,law_region,"ore")
+       <<R"(,"iron_stock":)"<<c.stock(campaign_buyer,law_region,"iron")
+       <<R"(,"factory_iron_stock":)"<<c.stock("A",law_region,"iron")
+       <<R"(,"factory_wood_stock":)"<<c.stock("A",law_region,"wood")
+       <<R"(,"tools_stock":)"<<c.stock("A",law_region,"tools")
+       <<R"(,"wood_seller_stock":)"<<c.stock(campaign_wood_seller,law_region,"wood")
+       <<R"(,"wood_seller_cash":)"<<c.cash(campaign_wood_seller)
+       <<R"(,"smelter_cash":)"<<c.cash(campaign_buyer)
+       <<R"(,"smelter_receipts":)"<<c.firm_finance(campaign_buyer).receipts
+       <<R"(,"factory_worker_cash":)"<<c.cash(trial_worker_wallet(c,worker))
+       <<R"(,"iron_batches":)"<<iron_batches<<R"(,"tools_batches":)"<<tools_batches
+       <<R"(,"tools_waiting_for":)"<<json_string(reason)<<'}';
 }
 
 std::string day_label(std::int64_t day) {
@@ -989,6 +1075,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
            <<",\"supplier_cash\":"<<core.cash(campaign_seller)
            <<",\"carrier_cash\":"<<core.cash(campaign_carrier);
         if(tag=="A") {
+            campaign_supply_status(out,world);
             public_build_status(out,game,tag,ready);
             law_status(out,core,false,campaign_scenario);
         }
