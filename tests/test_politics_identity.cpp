@@ -1966,6 +1966,120 @@ static void daily_migration_checks_receiving_law_without_an_origin_government() 
     run(false,false); // registered route with no political rate rows at all
 }
 
+static void effective_receiving_law_opens_actual_daily_migration() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.set_dataset("fixture:dated-receiving-border");
+    geo.seed_province(1,"SOURCE","A");
+    geo.seed_province(2,"TARGET","B");
+    geo.seed_unit(1,"A","ORIGIN");geo.seed_assignment(1,1);
+    geo.seed_unit(2,"B","RECEIVER");geo.seed_assignment(2,2);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_actor("B",0);
+    c.seed_government("B","HEAD","PRIME",5,3);
+    c.seed_p1_constitution("B",{P1GovernancePrinciple::monarchy,
+        P1PowerDistribution::autocracy,P1LegislatureKind::none,"fixture:constitution"});
+    law(c,"B","migration","closed_borders");
+
+    auto& pop=c.seed_population();
+    const auto home=pop.household_profile({"SOURCE","mixed","shared",50});
+    const auto dem=pop.demographic_profile({"SOURCE",23640,phaseb::Sex::male,
+        "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+    const auto econ=pop.economic_profile({"SOURCE","worker","wage","employee",
+                                          pop.default_education()});
+    const auto worker=pop.seed_population(dem,econ,home,100);
+    const auto wallet="HH:"+std::to_string(home);
+    c.seed_actor(wallet,37);
+    c.seed_stock(wallet,"SOURCE","grain",6);
+    c.seed_shares("company:origin",wallet,10);
+    phaseb::DemographyRules rates;
+    rates.fertility_ppm=rates.infant_death_ppm=rates.child_death_ppm=0;
+    rates.adult_death_ppm=rates.senior_death_ppm=rates.very_old_death_ppm=0;
+    rates.illness_incidence_ppm=rates.accident_ppm=0;
+    rates.primary_access_ppm=rates.secondary_access_ppm=rates.tertiary_access_ppm=0;
+    rates.adult_literacy_access_ppm=rates.training_ppm=0;
+    rates.migration_ppm=310'000;
+    rates.destination_by_region["SOURCE"]="TARGET";
+    c.enable_demography(rates);
+
+    const auto opening=daily::World::adopt(std::move(gh),19);
+    const auto save=daily::SnapshotCodec::encode(opening);
+    auto reform=daily::SnapshotCodec::decode(save);
+    auto closed=daily::SnapshotCodec::decode(save);
+    const auto january1=reform.day_index();
+    const auto due=january1+2;
+    const auto opening_events=view(reform).people().events().size();
+    const auto verify=[&](const daily::World& world,bool open) {
+        const auto& live=view(world);
+        const auto& people=live.people();
+        People source=0,target=0;
+        phaseb::Id destination{};
+        for(const auto& [id,slice]:people.slices()) {
+            const auto& d=people.demographic(slice.key.demographic);
+            const auto& h=people.household(slice.key.household);
+            check(h.region==d.region,"migration must preserve matched household residence");
+            if(d.region=="SOURCE") {
+                source+=slice.count;
+                check(slice.key.household==home,"origin household custody changed");
+            } else if(d.region=="TARGET") {
+                target+=slice.count;
+                destination=id;
+                check(slice.key.household!=home&&d.citizenship=="citizen"&&
+                      !live.has_actor("HH:"+std::to_string(slice.key.household)),
+                      "residence alone must not create a destination financial wallet");
+            }
+        }
+        check(live.sovereignty("SOURCE")=="A"&&live.sovereignty("TARGET")=="B"&&
+              live.p2_migration_permitted(worker,"TARGET")==open&&
+              source==(open?99:100)&&target==(open?1:0)&&
+              people.population()==100&&people.validate(),
+              "dated receiving law failed to govern real cross-sovereign residence");
+        const auto& events=people.events();
+        check(events.size()==opening_events+(open?1:0),
+              "dated border created a POP event before lawful native migration");
+        if(open) {
+            const auto& event=events.back();
+            check(event.kind==phaseb::EventKind::migration&&event.from==worker&&
+                  event.to==destination&&event.count==1,
+                  "receiving law did not trigger the expected native move");
+        }
+        check(live.cash(wallet)==37&&live.cash("B")==0&&live.financial().balanced()&&
+              live.stock(wallet,"SOURCE","grain")==6&&live.stock(wallet,"TARGET","grain")==0&&
+              live.shares("company:origin",wallet)==10&&live.shares("company:origin","B")==0,
+              "ordinary relocation must not allocate savings, property, or goods");
+    };
+
+    phasegh::World::Plan schedule;
+    schedule[9].push_back([=](phasegh::Stage& stage) {
+        auto& live=stage.phase_c();
+        P2Bill bill;
+        bill.id="OPEN-RECEIVING-BORDER";bill.country="B";bill.proposer="PRIME";
+        bill.legal_basis="fixture:dated receiving border";bill.effective_day=due;
+        bill.proposed_base={"B-OPEN-BORDER","B","migration","national",
+            "no_migration_controls","fixture:scheduled receiving reform"};
+        live.p2_submit_bill(std::move(bill),january1);
+        live.p2_approve_bill("OPEN-RECEIVING-BORDER",{});
+        live.p2_promulgate_bill("OPEN-RECEIVING-BORDER","HEAD",january1);
+    });
+    reform.advance_day(schedule);closed.advance_day();
+    verify(reform,false);verify(closed,false);
+    reform.advance_day();closed.advance_day();
+    verify(reform,false);verify(closed,false);
+    check(reform.day_index()==due&&closed.day_index()==due&&
+          view(reform).p2_has_due(due)&&!view(closed).p2_has_due(due),
+          "the same unprocessed effective day must retain a pending reform only in the authorized branch");
+    const auto pending=daily::SnapshotCodec::encode(reform);
+    auto replay=daily::SnapshotCodec::decode(pending);
+    check(daily::SnapshotCodec::encode(replay)==pending,
+          "opening the effective morning changed the native checkpoint");
+    reform.advance_day();closed.advance_day();replay.advance_day();
+    verify(reform,true);verify(closed,false);verify(replay,true);
+    check(reform.date()==closed.date()&&
+          view(reform).p2_bills().at("OPEN-RECEIVING-BORDER").status==P2BillStatus::effective&&
+          daily::SnapshotCodec::encode(reform)==daily::SnapshotCodec::encode(replay),
+          "receiving bill did not take effect on its calendar date and replay exactly");
+}
+
 static void land_reform_restricts_only_peasant_internal_migration() {
     const auto run=[](const std::string& choice,bool domestic,bool restricted,
                       const std::string& borders="no_migration_controls") {
@@ -2531,6 +2645,7 @@ int main(){
         national_heritage_amendments_change_real_pop_wages();
         physical_migration_and_law_block();
         daily_migration_checks_receiving_law_without_an_origin_government();
+        effective_receiving_law_opens_actual_daily_migration();
         land_reform_restricts_only_peasant_internal_migration();
         abolition_preserves_real_people_and_membership();
         economic_law_restricts_real_company_ownership();
