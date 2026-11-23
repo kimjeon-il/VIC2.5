@@ -51,6 +51,7 @@ class PlayPanel:
     BUDGETS = {"A 예산 시범판": "BUDGET-A", "B 예산 시범판": "BUDGET-B"}
     LEGISLATURE = "A 입법 시범판"
     EDUCATION = "A 교육 시범판"
+    CAMPAIGN = "A 공동 캠페인"
 
     @classmethod
     def _protocol_tag(cls, choice):
@@ -58,6 +59,8 @@ class PlayPanel:
             return "LAW-A"
         if choice == cls.EDUCATION:
             return "EDU-A"
+        if choice == cls.CAMPAIGN:
+            return "CAMPAIGN-A"
         return "TUT" if choice == cls.FACTORY else cls.BUDGETS.get(choice, choice)
 
     def __init__(self, root, executable):
@@ -92,7 +95,7 @@ class PlayPanel:
         setup = ttk.Frame(frame, padding=(0, 10))
         setup.grid(row=2, sticky="ew")
         ttk.Label(setup, text="시작·불러올 국가/시나리오:").grid(row=0, column=0, padx=(0, 6))
-        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE, self.EDUCATION),
+        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE, self.EDUCATION, self.CAMPAIGN),
                                      width=16, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
         self.new_button = ttk.Button(setup, text="새로 시작", command=self.new)
@@ -173,18 +176,27 @@ class PlayPanel:
             widget.state(["!disabled"] if ready and self.current else ["disabled"])
         factory = self._industry(self.current)
         legislature = self._legislature(self.current)
-        direct_actions = not (factory or legislature)
+        campaign = self._campaign(self.current)
+        direct_actions = not (factory or legislature or campaign)
+        can_campaign_act = self._campaign_can_act(self.current)
+        bill = self.current.get("law_bill") if legislature or can_campaign_act else None
+        campaign_tax = bool(can_campaign_act and self.current["campaign_tax_allowed"])
+        campaign_party = self._selected_bill_party(bill) if campaign_tax and bill else None
         for widget in (self.tariff_label, self.tariff_button, self.tariff_entry):
             widget.state(["!disabled"] if ready and self.current and direct_actions else ["disabled"])
             if direct_actions:
                 widget.grid()
             else:
                 widget.grid_remove()
-        tax_ready = (ready and self.current and direct_actions
-                     and self.current["pending_income_tax_ppm"] is None)
+        direct_tax = (ready and self.current and direct_actions
+                      and self.current["pending_income_tax_ppm"] is None)
+        self.tax_button.configure(text="소득세 표결 후 하루 진행" if campaign
+                                  else "소득세 제출 후 하루 진행")
         for widget in (self.tax_label, self.tax_entry, self.tax_button):
-            widget.state(["!disabled"] if tax_ready else ["disabled"])
-            if direct_actions:
+            can_edit = (campaign_tax and ready and (campaign_party or widget is not self.tax_button)
+                        if campaign else direct_tax)
+            widget.state(["!disabled"] if can_edit else ["disabled"])
+            if direct_actions or can_campaign_act:
                 widget.grid()
             else:
                 widget.grid_remove()
@@ -203,10 +215,9 @@ class PlayPanel:
             self.build_button.grid()
         else:
             self.build_button.grid_remove()
-        if legislature:
-            bill = self.current["law_bill"]
+        if bill:
             command, label = self._law_action(self.current)
-            voting = bill["phase"] == "submitted" and bill["vote_ready"]
+            voting = campaign_tax or (bill["phase"] == "submitted" and bill["vote_ready"])
             self.law_party_choice.configure(state="readonly" if ready and voting else "disabled")
             if voting:
                 self.law_party_choice.grid()
@@ -261,6 +272,8 @@ class PlayPanel:
                             choice = self.FACTORY
                         elif self._budget(self.current):
                             choice += " 예산 시범판"
+                        elif self._campaign(self.current):
+                            choice = self.CAMPAIGN
                         elif self._education(self.current):
                             choice = self.EDUCATION
                         elif self._legislature(self.current):
@@ -304,8 +317,25 @@ class PlayPanel:
         return bool(status and status.get("scenario") == "education-v1")
 
     @staticmethod
+    def _campaign(status):
+        return bool(status and status.get("scenario") == "campaign-v1")
+
+    @classmethod
+    def _campaign_can_act(cls, status):
+        return cls._campaign(status) and status["can_act"] and status["country"] == status["player_country"]
+
+    @staticmethod
     def _seat_label(seat):
         return f"{seat['party']} ({seat['seats']}석)"
+
+    def _selected_bill_party(self, bill):
+        chosen = self.law_party.get()
+        for seat in bill["seats"]:
+            party = seat["party"]
+            if (seat["seats"] > 0 and chosen == self._seat_label(seat)
+                    and party and not any(char.isspace() for char in party)):
+                return party
+        return None
 
     def _law_action(self, status):
         bill = status["law_bill"]
@@ -313,13 +343,8 @@ class PlayPanel:
         if phase == "available":
             return ("bill-introduce" if bill["seats"] else None, "법안 발의 후 하루 진행")
         if phase == "submitted" and bill["vote_ready"]:
-            chosen = self.law_party.get()
-            for seat in bill["seats"]:
-                party = seat["party"]
-                if (seat["seats"] > 0 and chosen == self._seat_label(seat)
-                        and party and not any(char.isspace() for char in party)):
-                    return ("bill-approve " + party, "선택 정당으로 표결 후 하루 진행")
-            return (None, "선택 정당으로 표결 후 하루 진행")
+            party = self._selected_bill_party(bill)
+            return ("bill-approve " + party if party else None, "선택 정당으로 표결 후 하루 진행")
         if phase == "approved":
             return ("bill-promulgate", "공포 후 하루 진행")
         if phase in ("submitted", "promulgated"):
@@ -335,10 +360,29 @@ class PlayPanel:
             return (None, label)
         return (None, "추가 법안 조치 없음")
 
+    def _bill_text(self, bill, proposal):
+        phase = {"available": "발의 전", "submitted": "심의 중", "approved": "가결",
+                 "promulgated": "공포됨", "effective": "시행 중", "rejected": "부결"}[bill["phase"]]
+        if bill["phase"] == "submitted" and bill["vote_ready"]:
+            phase = "표결 가능"
+        policy = f"{proposal}: {phase}\n가결 기준: {bill['threshold']}석"
+        if bill["seats"]:
+            policy += "\n" + " · ".join(f"{s['party']}: {s['seats']}석" for s in bill["seats"])
+        else:
+            policy += "\n선거 결과 대기 중"
+        if bill["next_review"]:
+            policy += f"\n다음 심의일: {bill['next_review']}"
+        if bill["effective_date"]:
+            policy += f"\n시행일: {bill['effective_date']}"
+        self.law_party_choice.configure(values=tuple(self._seat_label(s) for s in bill["seats"]))
+        return policy
+
     def _show(self, status):
         factory = self._industry(status)
         perspective = self.FACTORY if factory else f"국가 {status['country']}"
-        if self._budget(status):
+        if self._campaign(status):
+            perspective += " · 공동 캠페인"
+        elif self._budget(status):
             perspective += " · 예산 시범판"
         elif self._education(status):
             perspective += " · 교육 시범판"
@@ -383,23 +427,32 @@ class PlayPanel:
                          "실제 국고 지급액을 보여줍니다.\n"
                          "일정 금액은 국고에 남겨 둡니다.")
             titles = ("재정", "생산 조건", "공장 재고·생산", "공공사업 지급")
-        elif self._legislature(status):
-            bill = status["law_bill"]
-            phase = {"available": "발의 전", "submitted": "심의 중", "approved": "가결",
-                     "promulgated": "공포됨", "effective": "시행 중", "rejected": "부결"}[bill["phase"]]
-            if bill["phase"] == "submitted" and bill["vote_ready"]:
-                phase = "표결 가능"
-            proposal = "공립학교 법안" if self._education(status) else "최저임금 법안"
-            policy = f"{proposal}: {phase}\n가결 기준: {bill['threshold']}석"
-            if bill["seats"]:
-                policy += "\n" + " · ".join(f"{s['party']}: {s['seats']}석" for s in bill["seats"])
+        elif self._campaign(status):
+            acting = self._campaign_can_act(status)
+            budget += f"\n플레이어 조작 국가: {status['player_country']}"
+            policy = f"소득세율: {self._percent(status['income_tax_ppm'])}%"
+            pending = status["pending_income_tax_ppm"]
+            if pending is not None:
+                policy += f"\n소득세 예약: {self._percent(pending)}% ({status['pending_income_tax_date']} 시행)"
+            if acting and "law_bill" in status:
+                policy += "\n" + self._bill_text(status["law_bill"], "최저임금 법안")
+                self.tax.set(self._percent(status["income_tax_ppm"]))
             else:
-                policy += "\n선거 결과 대기 중"
-            if bill["next_review"]:
-                policy += f"\n다음 심의일: {bill['next_review']}"
-            if bill["effective_date"]:
-                policy += f"\n시행일: {bill['effective_date']}"
-            self.law_party_choice.configure(values=tuple(self._seat_label(s) for s in bill["seats"]))
+                policy += "\n조회 전용"
+            market = (f"도착 광석: {status['delivered_ore']}\n"
+                      f"운송 중 광석: {status['in_transit_ore']}")
+            role = "플레이어" if status["peer_is_player"] else "조회 전용"
+            diplomacy = (f"{status['peer_country']} · {role}\n"
+                         f"국고: {status['peer_treasury']}\n"
+                         f"소득세율: {self._percent(status['peer_income_tax_ppm'])}%")
+            peer_pending = status["peer_pending_income_tax_ppm"]
+            if peer_pending is not None:
+                diplomacy += (f"\n소득세 예약: {self._percent(peer_pending)}% "
+                              f"({status['peer_pending_income_tax_date']} 시행)")
+            titles = ("재정", "소득세·의회", "공동 교역", "다른 나라")
+        elif self._legislature(status):
+            proposal = "공립학교 법안" if self._education(status) else "최저임금 법안"
+            policy = self._bill_text(status["law_bill"], proposal)
             if self._education(status):
                 education = status["education"]
                 market = (f"현지 운영 인력: {education['local_staff']}명\n"
@@ -437,7 +490,7 @@ class PlayPanel:
         self.policy.set(policy)
         self.market.set(market)
         self.diplomacy.set(diplomacy or "현재 분쟁 없음.")
-        if not factory and not self._legislature(status):
+        if not factory and not self._legislature(status) and not self._campaign(status):
             self.tariff.set(self._percent(status["tariff_ppm"]))
             self.tax.set(self._percent(status["income_tax_ppm"] if pending_tax is None else pending_tax))
         self.current = status
@@ -450,7 +503,8 @@ class PlayPanel:
             self._send("step 1")
 
     def set_tariff(self):
-        if not self.current or self._industry(self.current) or self._legislature(self.current):
+        if (not self.current or self._industry(self.current) or self._legislature(self.current)
+                or self._campaign(self.current)):
             return
         value = self.tariff.get().strip()
         if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > 100:
@@ -466,7 +520,15 @@ class PlayPanel:
         if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > 100:
             self.notice.set("오류: 소득세율을 0부터 100 사이의 정수로 입력하세요.")
             return
-        self._send("income-tax " + value)
+        if self._campaign(self.current):
+            if not self._campaign_can_act(self.current) or not self.current["campaign_tax_allowed"]:
+                return
+            party = self._selected_bill_party(self.current["law_bill"])
+            if not party:
+                return
+            self._send("income-tax " + value + " " + party)
+        else:
+            self._send("income-tax " + value)
 
     def set_spending_cap(self):
         if not self._budget(self.current) or self.current["pending_civilian_spending_cap"] is not None:
@@ -483,7 +545,7 @@ class PlayPanel:
             self._send("public-build")
 
     def advance_bill(self):
-        if self._legislature(self.current):
+        if self._legislature(self.current) or self._campaign_can_act(self.current):
             command, _ = self._law_action(self.current)
             if command:
                 self._send(command)

@@ -24,6 +24,7 @@ def run(exe):
     assert play_panel.PlayPanel._protocol_tag("공장 시범판") == "TUT"
     assert play_panel.PlayPanel._protocol_tag("A 입법 시범판") == "LAW-A"
     assert play_panel.PlayPanel._protocol_tag("A 교육 시범판") == "EDU-A"
+    assert play_panel.PlayPanel._protocol_tag("A 공동 캠페인") == "CAMPAIGN-A"
     root = tk.Tk()
     panel = play_panel.PlayPanel(root, exe)
     try:
@@ -111,6 +112,7 @@ def run(exe):
             run_elected_bill(root, panel, Path(directory) / "선출 의회 공포 대기.vic25")
             run_elected_bill(root, panel, Path(directory) / "교육 법안 공포 대기.vic25",
                              choice="A 교육 시범판")
+            run_shared_campaign(root, panel, Path(directory) / "공동 캠페인 예약.vic25")
     finally:
         panel.close()
         stop = monotonic() + 3
@@ -258,6 +260,79 @@ def run_elected_bill(root, panel, save, choice="A 입법 시범판"):
     else:
         assert panel.current["minimum_monthly_contract_wage"] == 62
         assert "월 최저임금: 62" in panel.policy.get()
+
+
+def run_shared_campaign(root, panel, save):
+    panel.country.set("A 공동 캠페인")
+    panel.new_button.invoke()
+    wait(root, panel)
+    status = panel.current
+    assert status["scenario"] == "campaign-v1"
+    assert status["country"] == status["player_country"] == "A" and status["can_act"]
+    assert status["peer_country"] == "B" and not status["peer_is_player"]
+    assert "B · 조회 전용" in panel.diplomacy.get()
+    assert str(status["peer_treasury"]) in panel.diplomacy.get()
+    assert not panel.tariff_button.winfo_ismapped()
+    assert not panel.spending_button.winfo_ismapped() and not panel.build_button.winfo_ismapped()
+    for _ in range(4):
+        if panel.current["campaign_tax_allowed"]:
+            break
+        panel.step_button.invoke()
+        wait(root, panel)
+    opening = panel.current
+    assert opening["campaign_tax_allowed"]
+    assert f"도착 광석: {opening['delivered_ore']}" in panel.market.get()
+    assert f"운송 중 광석: {opening['in_transit_ore']}" in panel.market.get()
+    assert panel.law_party_choice.winfo_ismapped() and panel.law_party.get() == ""
+    assert panel.tax_button.instate(["disabled"])
+    seats = opening["law_bill"]["seats"]
+    threshold = opening["law_bill"]["threshold"]
+    panel.law_party_choice.current(next(i for i, seat in enumerate(seats) if seat["seats"] >= threshold))
+    panel.law_party_choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+    panel.country.set("B")  # Prospective scenario selector must not transfer authority.
+    panel.tax.set("15")
+    panel.tax_button.invoke()
+    wait(root, panel)
+    pending = panel.current
+    assert pending["country"] == pending["player_country"] == "A"
+    assert pending["pending_income_tax_ppm"] == 150_000
+    assert pending["pending_income_tax_date"] in panel.policy.get()
+    assert pending["peer_pending_income_tax_ppm"] is None
+    assert panel.tax_button.instate(["disabled"])
+    assert panel.law_action_button.instate(["!disabled"])
+    panel.law_action_button.invoke()
+    wait(root, panel)
+    assert panel.current["law_bill"]["phase"] == "submitted"
+    # Use the existing batch step to reach (not process) the tax date.
+    due = date.fromisoformat(panel.current["pending_income_tax_date"])
+    today = date.fromisoformat(panel.current["date"])
+    if today < due:
+        panel._send(f"step {(due - today).days}")
+        wait(root, panel)
+    pending = panel.current
+    assert pending["date"] == due.isoformat() and pending["in_transit_ore"] > 0
+    assert pending["peer_pending_income_tax_ppm"] is None
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file()
+    panel.step_button.invoke()
+    wait(root, panel)
+    next_day = panel.current
+    assert next_day["date"] > pending["date"]
+    assert next_day["income_tax_ppm"] == 150_000
+    assert next_day["peer_pending_income_tax_ppm"] == 110_000
+    assert next_day["peer_pending_income_tax_date"] in panel.diplomacy.get()
+    assert next_day["delivered_ore"] > pending["delivered_ore"]
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.country.set("A 공동 캠페인")
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == pending and panel.country.get() == "A 공동 캠페인"
+    panel.step_button.invoke()
+    wait(root, panel)
+    assert panel.current == next_day
 
 
 def run_industry(root, panel, tariff_save):

@@ -498,6 +498,94 @@ def main():
                 school_replay.read_bytes() == school_effective.read_bytes(),
                 "education checkpoint origin replay changed real payroll or demographic attainment")
 
+        campaign_pending = d / "campaign-pending.vic25"
+        campaign_inspected = d / "campaign-inspected.vic25"
+        campaign_done = d / "campaign-done.vic25"
+        campaign_replay = d / "campaign-replay.vic25"
+        campaign = panel("new CAMPAIGN-A", "income-tax 13 WORKERS", "step 2",
+                         "bill-introduce", "income-tax 13 OTHER", "step 26",
+                         "income-tax 13 WORKERS", "step 1", f"save {campaign_pending}",
+                         "inspect B", "bill-introduce", "income-tax 27 B-MAJORITY",
+                         f"save {campaign_inspected}", "inspect A", "step 1",
+                         "step 28", "step 1", f"save {campaign_done}", "quit")
+        fresh = campaign[0]["status"]
+        require(campaign[0]["ok"] and fresh["scenario"] == "campaign-v1" and
+                fresh["player_country"] == "A" and fresh["country"] == "A" and
+                not fresh["peer_is_player"] and fresh["peer_country"] == "B",
+                "single common-world campaign is unavailable")
+        require(not campaign[1]["ok"] and campaign[1]["status"] == fresh and
+                not campaign[4]["ok"] and campaign[4]["status"] == campaign[3]["status"] and
+                campaign[3]["status"]["law_bill"]["phase"] == "submitted",
+                "campaign needs actual elections, an ordinary P2 bill and valid selected tax quorum")
+        morning = campaign[7]["status"]
+        require(morning["date"] == "2000-02-01" and morning["income_tax_ppm"] == 100000 and
+                morning["law_bill"]["phase"] == "submitted" and
+                morning["pending_income_tax_ppm"] == 130000 and
+                morning["pending_income_tax_date"] == "2000-02-01" and
+                morning["peer_pending_income_tax_ppm"] is None and morning["peer_debt"] == 100 and
+                morning["peer_income_tax_ppm"] == 100000 and morning["in_transit_ore"] > 0 and
+                morning["delivered_ore"] > 0 and morning["supplier_cash"] > 0 and
+                morning["carrier_cash"] > 0 and morning["public_program_paid"] > 0,
+                "one campaign checkpoint needs pending elected tax, real paid freight and B's real pressure")
+        inspect = campaign[9]["status"]
+        require(inspect["country"] == "B" and inspect["player_country"] == "A" and
+                not inspect["can_act"] and not inspect["campaign_tax_allowed"] and
+                not campaign[10]["ok"] and not campaign[11]["ok"] and
+                campaign[10]["status"] == campaign[11]["status"] == inspect and
+                campaign_pending.read_bytes() == campaign_inspected.read_bytes() and
+                campaign[13]["status"] == morning,
+                "B inspection or a command issued while inspecting B changed authoritative state")
+        feb = campaign[14]["status"]
+        require(feb["date"] == "2000-02-02" and feb["income_tax_ppm"] == 130000 and
+                feb["revenue"] - morning["revenue"] == 13 and
+                feb["household_cash"] - morning["household_cash"] == 93 and
+                feb["peer_pending_income_tax_ppm"] == 110000 and
+                feb["peer_pending_income_tax_date"] == "2000-03-01" and
+                feb["delivered_ore"] > morning["delivered_ore"],
+                "ordinary resumed day needs actual arrival and a fresh independent B decision")
+        mar_open = campaign[15]["status"]
+        mar_closed = campaign[16]["status"]
+        require(mar_open["date"] == "2000-03-01" and mar_closed["peer_income_tax_ppm"] == 110000 and
+                mar_closed["peer_revenue"] - mar_open["peer_revenue"] == 11 and
+                mar_closed["peer_household_cash"] - mar_open["peer_household_cash"] == 89,
+                "B's own enacted tax did not reach its actual treasury and payroll")
+        campaign_saved = panel(f"load CAMPAIGN-A {campaign_pending}", "step 1", "step 28",
+                               "step 1", f"save {campaign_replay}", "quit")
+        require(campaign_saved[0]["status"] == morning and campaign_saved[1]["status"] == feb and
+                campaign_saved[3]["status"] == mar_closed and
+                campaign_replay.read_bytes() == campaign_done.read_bytes(),
+                "one loaded world lost a pending action, paid cargo or AI deterministic replay")
+
+        require(not panel("new CAMPAIGN-B", "quit")[0]["ok"] and
+                not panel(f"load LAW-A {campaign_pending}", "quit")[0]["ok"],
+                "campaign cannot change player identity or load under an old trial")
+
+        campaign_reviews = []
+        def campaign_law(*tail):
+            return panel(f"load CAMPAIGN-A {campaign_done}",
+                         *(f"step {n}" for n in campaign_reviews), *tail, "quit")
+        for _ in range(12):
+            waiting_vote = campaign_law()[-2]["status"]
+            if waiting_vote["law_bill"]["vote_ready"]:
+                break
+            review = waiting_vote["law_bill"]["next_review"]
+            require(review, "the campaign wage bill was not reviewed natively")
+            campaign_reviews.append((civil_date.fromisoformat(review) -
+                                     civil_date.fromisoformat(waiting_vote["date"])).days+1)
+        else:
+            raise AssertionError("shared campaign's actual wage bill never became vote-ready")
+        refused, voted, pending_wage, active_wage = campaign_law("bill-approve OTHER",
+            "bill-approve WORKERS", "bill-promulgate", "step 1")[-5:-1]
+        require(not refused["ok"] and refused["status"] == waiting_vote and voted["ok"] and
+                pending_wage["status"]["law_bill"]["effective_date"] == pending_wage["status"]["date"] and
+                pending_wage["status"]["minimum_monthly_contract_wage"] == 0 and
+                active_wage["status"]["law_bill"]["phase"] == "effective" and
+                active_wage["status"]["minimum_monthly_contract_wage"] == 62 and
+                active_wage["status"]["workers"][0]["contract_wage"] == 3100 and
+                active_wage["status"]["peer_is_player"] is False and
+                active_wage["status"]["delivered_ore"] > morning["delivered_ore"],
+                "the shared world did not enact an actual voted ordinary wage statute")
+
         replies = panel("status", "new A", "status", "tariff 21",
                         "tariff 10", "step 30", f"save {panel_save}",
                         f"load B {panel_save}", f"load A {corrupt}",
