@@ -1613,10 +1613,14 @@ public:
         if(date.day==1 && decisions.autonomous_tax_step_ppm>0)
             plan[9].push_back(
                 [step=decisions.autonomous_tax_step_ppm,
-                 ceiling=decisions.autonomous_tax_ceiling_ppm](phasegh::Stage& gh) {
+                 ceiling=decisions.autonomous_tax_ceiling_ppm,
+                 players=decisions.player_controlled_countries](phasegh::Stage& gh) {
                     auto& c=gh.phase_c();
                     for(const auto& [country,gov]:c.governments()) {
-                        if(!c.has_country_treasury(country) ||
+                        // Current session selection applies from its first day;
+                        // the committed Phase C mark also survives native reload.
+                        if(players.contains(country)||c.p1_is_player_country(country)||
+                           !c.has_country_treasury(country)||
                            c.has_pending_country_tax(country))continue;
                         const auto ballot=c.country_elections().find(country);
                         if(ballot==c.country_elections().end())continue;

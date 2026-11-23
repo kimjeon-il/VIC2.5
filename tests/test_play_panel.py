@@ -75,6 +75,7 @@ def run(exe):
             wait(root, panel)
             assert panel.current["country"] == "B"
             assert panel.current["max_tariff_ppm"] == 400_000 and "40%" in panel.policy.get()
+            run_income_tax(root, panel, Path(directory) / "소득세 예약.vic25")
             run_industry(root, panel, save)
     finally:
         panel.close()
@@ -88,6 +89,45 @@ def run(exe):
                 break
             sleep(0.01)
         assert panel.engine.process.poll() is not None, "native child did not exit"
+
+
+def run_income_tax(root, panel, save):
+    panel.country.set("A")
+    panel.new_button.invoke()
+    wait(root, panel)
+    opening = panel.current
+    assert opening["income_tax_ppm"] == 100_000
+    assert "소득세율: 10%" in panel.policy.get()
+    assert panel.tax_button.instate(["!disabled"]) and panel.tax_button.winfo_ismapped()
+    # The selector is a prospective new/load choice, not the active government.
+    panel.country.set("B")
+    panel.tax.set("15")
+    panel.tax_button.invoke()
+    wait(root, panel)
+    pending = panel.current
+    assert pending["country"] == "A" and pending["date"] == "2000-01-02"
+    assert pending["income_tax_ppm"] == 100_000 and pending["pending_income_tax_ppm"] == 150_000
+    assert pending["pending_income_tax_date"] == "2000-02-01"
+    assert "15%" in panel.policy.get() and "2000-02-01" in panel.policy.get()
+    assert panel.tax_button.instate(["disabled"])
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file()
+    panel.step_button.invoke()
+    wait(root, panel)
+    assert panel.current["date"] == "2000-01-03"
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.country.set("A")
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == pending
+    panel._send("step 31")
+    wait(root, panel)
+    assert panel.current["income_tax_ppm"] == 150_000
+    assert panel.current["pending_income_tax_ppm"] is None
+    assert "소득세율: 15%" in panel.policy.get()
+    assert panel.tax_button.instate(["!disabled"])
 
 
 def run_industry(root, panel, tariff_save):
@@ -108,6 +148,7 @@ def run_industry(root, panel, tariff_save):
         assert f"배치당 필요한 광석: {status['ore_per_batch']}" in panel.market.get()
         assert f"공공사업 지급처 잔액: {status['public_works_cash']}" in panel.diplomacy.get()
         assert panel.tariff_button.instate(["disabled"]) and not panel.tariff_button.winfo_ismapped()
+        assert panel.tax_button.instate(["disabled"]) and not panel.tax_button.winfo_ismapped()
         return status
 
     state((8, 4, 0, 100, 0, 0))

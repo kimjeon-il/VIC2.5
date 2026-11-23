@@ -60,9 +60,10 @@ class PlayPanel:
         self.disconnected = False
         self.country = tk.StringVar(root, "A")
         self.tariff = tk.StringVar(root, "0")
+        self.tax = tk.StringVar(root, "0")
         self.heading = tk.StringVar(root, "열린 시범 시나리오 없음")
         self.budget = tk.StringVar(root, "국가를 선택하고 시나리오를 시작하세요.")
-        self.policy = tk.StringVar(root, "법률과 관세 정보 없음")
+        self.policy = tk.StringVar(root, "법률·관세·세금 정보 없음")
         self.market = tk.StringVar(root, "시장 정보 없음")
         self.diplomacy = tk.StringVar(root, "외교 정보 없음")
         self.notice = tk.StringVar(root, "국가 또는 공장 시범판을 선택한 뒤 시작하거나 저장본을 불러오세요.")
@@ -80,7 +81,7 @@ class PlayPanel:
         ttk.Label(frame, text="가상 시나리오 · 실제 역사 지도 없음").grid(row=1, sticky="w")
         setup = ttk.Frame(frame, padding=(0, 10))
         setup.grid(row=2, sticky="ew")
-        ttk.Label(setup, text="국가·시나리오:").grid(row=0, column=0, padx=(0, 6))
+        ttk.Label(setup, text="시작·불러올 국가/시나리오:").grid(row=0, column=0, padx=(0, 6))
         self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY),
                                      width=13, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
@@ -98,7 +99,7 @@ class PlayPanel:
         frame.rowconfigure(4, weight=1)
         self.cards = []
         for i, (name, value) in enumerate((
-            ("재정", self.budget), ("법률·관세", self.policy),
+            ("재정", self.budget), ("법률·관세·세금", self.policy),
             ("광석 시장", self.market), ("외교", self.diplomacy),
         )):
             card = ttk.LabelFrame(details, text=name, padding=(10, 6))
@@ -120,6 +121,13 @@ class PlayPanel:
         self.tariff_button = ttk.Button(actions, text="관세 적용 후 하루 진행", command=self.set_tariff)
         self.tariff_button.grid(row=0, column=3)
         self.tariff_entry.bind("<Return>", lambda event: self.set_tariff())
+        self.tax_label = ttk.Label(actions, text="소득세율(%):")
+        self.tax_label.grid(row=1, column=1, pady=(4, 0))
+        self.tax_entry = ttk.Entry(actions, textvariable=self.tax, width=9)
+        self.tax_entry.grid(row=1, column=2, padx=5, pady=(4, 0))
+        self.tax_button = ttk.Button(actions, text="소득세 제출 후 하루 진행", command=self.set_income_tax)
+        self.tax_button.grid(row=1, column=3, pady=(4, 0))
+        self.tax_entry.bind("<Return>", lambda event: self.set_income_tax())
         ttk.Separator(frame).grid(row=6, sticky="ew")
         notice = ttk.Label(frame, textvariable=self.notice, justify="left", wraplength=500)
         notice.grid(row=7, sticky="ew", pady=(5, 0))
@@ -141,6 +149,13 @@ class PlayPanel:
         factory = self._industry(self.current)
         for widget in (self.tariff_label, self.tariff_button, self.tariff_entry):
             widget.state(["!disabled"] if ready and self.current and not factory else ["disabled"])
+            if factory:
+                widget.grid_remove()
+            else:
+                widget.grid()
+        tax_ready = ready and self.current and not factory and self.current["pending_income_tax_ppm"] is None
+        for widget in (self.tax_label, self.tax_entry, self.tax_button):
+            widget.state(["!disabled"] if tax_ready else ["disabled"])
             if factory:
                 widget.grid_remove()
             else:
@@ -182,7 +197,10 @@ class PlayPanel:
                     if command.startswith(("new ", "load ")):
                         self.country.set(self.FACTORY if self._industry(self.current)
                                          else self.current["country"])
-                    self.notice.set("저장했습니다." if command.startswith("save ") else "준비됐습니다.")
+                    if command.startswith("income-tax "):
+                        self.notice.set("소득세 변경을 예약했습니다.")
+                    else:
+                        self.notice.set("저장했습니다." if command.startswith("save ") else "준비됐습니다.")
                 except (KeyError, TypeError, ValueError):
                     self.disconnected = True
                     self.notice.set("오류: 게임 엔진에서 잘못된 상태를 받았습니다.")
@@ -223,13 +241,18 @@ class PlayPanel:
         else:
             policy = (f"무역법: {status['law']}\n"
                       f"수입 관세율: {self._percent(status['tariff_ppm'])}%\n"
-                      f"법정 상한: {self._percent(status['max_tariff_ppm'])}%")
+                      f"법정 상한: {self._percent(status['max_tariff_ppm'])}%\n"
+                      f"소득세율: {self._percent(status['income_tax_ppm'])}%")
+            pending_tax = status["pending_income_tax_ppm"]
+            if pending_tax is not None:
+                policy += (f"\n예약: {self._percent(pending_tax)}% "
+                           f"({status['pending_income_tax_date']} 시행)")
             market = (f"광석 시세: {status['ore_price']}\n"
                       f"수입업자 도착 광석: {status['delivered_ore']}\n"
                       f"운송 중 광석: {status['in_transit_ore']}\n"
                       f"납부된 광석 관세(수입에 포함): {status['paid_duty']}")
             diplomacy = "\n".join(f"{war['opponent']}: {war['state']}" for war in status["wars"])
-            titles = ("재정", "법률·관세", "광석 시장", "외교")
+            titles = ("재정", "법률·관세·세금", "광석 시장", "외교")
         for card, title in zip(self.cards, titles):
             card.configure(text=title)
         self.heading.set(headline)
@@ -239,6 +262,7 @@ class PlayPanel:
         self.diplomacy.set(diplomacy or "현재 분쟁 없음.")
         if not factory:
             self.tariff.set(self._percent(status["tariff_ppm"]))
+            self.tax.set(self._percent(status["income_tax_ppm"] if pending_tax is None else pending_tax))
         self.current = status
 
     def new(self):
@@ -256,6 +280,16 @@ class PlayPanel:
             self.notice.set("오류: 관세율을 0부터 100 사이의 정수로 입력하세요.")
             return
         self._send("tariff " + value)
+
+    def set_income_tax(self):
+        if (not self.current or self._industry(self.current)
+                or self.current["pending_income_tax_ppm"] is not None):
+            return
+        value = self.tax.get().strip()
+        if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > 100:
+            self.notice.set("오류: 소득세율을 0부터 100 사이의 정수로 입력하세요.")
+            return
+        self._send("income-tax " + value)
 
     def _file(self, verb, path):
         if not path:

@@ -2503,6 +2503,9 @@ public:
     void p3_seed_movement(P3Movement);
     void p1_register_political_character(PoliticalCharacter);
     void p1_mark_player_country(const std::string&,bool);
+    [[nodiscard]] bool p1_is_player_country(const std::string& country)const {
+        return p1_player_countries_.contains(country);
+    }
     [[nodiscard]] P1AuthorityBudget p1_authority_budget(const std::string&)const;
     void p1_activate_mandate(P1PoliticalMandate,std::int64_t);
     [[nodiscard]] std::int32_t p1_region_decree_bonus_ppm(
@@ -2930,6 +2933,18 @@ public:
     }
     [[nodiscard]] const std::map<std::string,GovernmentState>&
             governments()const {return governments_;}
+    // Stage0 applies the effective month's entry. It is still pending at
+    // the committed month boundary before that native day has run.
+    [[nodiscard]] std::optional<std::pair<std::int64_t,int>>
+    pending_country_tax(const std::string& country)const {
+        for(auto scheduled=scheduled_country_income_tax_.lower_bound(month());
+            scheduled!=scheduled_country_income_tax_.end();++scheduled) {
+            const auto rate=scheduled->second.find(country);
+            if(rate!=scheduled->second.end())
+                return std::pair{scheduled->first,rate->second};
+        }
+        return std::nullopt;
+    }
     [[nodiscard]] bool has_pending_country_tax(const std::string& country)const {
         const auto scheduled=scheduled_country_income_tax_.find(month()+1);
         return scheduled!=scheduled_country_income_tax_.end() &&

@@ -170,6 +170,59 @@ def main():
             require(len(replies) == len(commands), f"unexpected panel replies: {replies}")
             return replies
 
+        tax_start = d / "예약 전 소득세.sav"
+        tax_pending = d / "예약 소득세.sav"
+        tax_failed = d / "중복 거절 소득세.sav"
+        tax_effective = d / "그대로 진행 소득세.sav"
+        tax_replayed = d / "불러오기 소득세.sav"
+        taxes = panel("new A", f"save {tax_start}", "income-tax 101",
+                      "income-tax 15", f"save {tax_pending}", "income-tax 20",
+                      f"save {tax_failed}", "step 30", "step 1",
+                      f"save {tax_effective}", "quit")
+        tax_open = taxes[0]["status"]
+        require(tax_open.get("income_tax_ppm") == 100000
+                and tax_open.get("pending_income_tax_ppm") is None,
+                "the selected country must expose its actual opening income-tax rate")
+        require(not taxes[2]["ok"] and taxes[2]["status"] == tax_open,
+                "invalid income-tax order must not advance the trial")
+        proposed = taxes[3]["status"]
+        require(taxes[3]["ok"] and proposed["date"] == "2000-01-02"
+                and proposed["income_tax_ppm"] == 100000
+                and proposed["pending_income_tax_ppm"] == 150000
+                and proposed["pending_income_tax_date"] == "2000-02-01",
+                f"native tax proposal must change the later schedule, not today's rate: {taxes[3]}")
+        require(not taxes[5]["ok"] and "duplicate" in taxes[5]["error"]
+                and taxes[5]["status"] == proposed
+                and tax_pending.read_bytes() == tax_failed.read_bytes(),
+                "a duplicate pending income-tax bill must be rejected atomically")
+        require(taxes[7]["status"]["date"] == "2000-02-01"
+                and taxes[7]["status"]["income_tax_ppm"] == 100000
+                and taxes[7]["status"]["pending_income_tax_ppm"] == 150000,
+                "an unprocessed Feb 1 must still expose the effective-day tax order")
+        effective = taxes[8]["status"]
+        require(effective["date"] == "2000-02-02" and effective["income_tax_ppm"] == 150000
+                and effective["pending_income_tax_ppm"] is None,
+                f"lawful income tax must start on the processed effective day: {effective}")
+        rerun = panel(f"load B {tax_pending}", f"load A {tax_pending}",
+                      "step 31", f"save {tax_replayed}", "quit")
+        require(not rerun[0]["ok"] and rerun[0]["status"] is None
+                and rerun[1]["status"] == proposed and rerun[2]["status"] == effective
+                and tax_effective.read_bytes() == tax_replayed.read_bytes(),
+                "pending and effective policy failed exact selected-country native save replay")
+        cli_tax_save = d / "터미널 소득세.sav"
+        cli_tax = run(f"income-tax 15\nsave {cli_tax_save}\nquit\n", *flags, "A")
+        terminal_tax_status = trade_status(cli_tax)
+        require(not cli_tax.stderr
+                and terminal_tax_status["pending_income_tax_ppm"] == "150000"
+                and terminal_tax_status["pending_income_tax_date"] == "2000-02-01"
+                and cli_tax_save.read_bytes() == tax_pending.read_bytes(),
+                "the terminal action and graphical protocol must use the same native law path")
+        b_tax = panel("new B", "income-tax 20", "step 31", "quit")
+        require(b_tax[1]["status"]["country"] == "B"
+                and b_tax[1]["status"]["pending_income_tax_ppm"] == 200000
+                and b_tax[2]["status"]["income_tax_ppm"] == 200000,
+                "second selected country must independently use its own native authority")
+
         replies = panel("status", "new A", "status", "tariff 21",
                         "tariff 10", "step 30", f"save {panel_save}",
                         f"load B {panel_save}", f"load A {corrupt}",

@@ -129,11 +129,12 @@ daily::World trial_world(const std::string& selected) {
     return daily::World::adopt(std::move(engine),2025,trial_origin(selected));
 }
 
-p0::Policies trial_policies() {
+p0::Policies trial_policies(const std::string& selected) {
     p0::Policies result;
     result.daily_food_units_per_person=0;
     result.monthly_clothing_units_per_person=0;
     result.auto_national_budgets_from_actual_services=false;
+    result.player_controlled_countries.insert(selected);
     return result;
 }
 
@@ -152,9 +153,17 @@ void verify_trial(const daily::World& world,const std::string& tag) {
 }
 
 void trial_help() {
-    std::cout<<"Commands: status | step [days] | tariff <percent> | save <new path> | help | quit\n"
+    std::cout<<"Commands: status | step [days] | tariff <percent> | income-tax <percent> | save <new path> | help | quit\n"
              <<"Set the selected country's import duty on ore (whole percent); a lawful order advances one day.\n"
+             <<"A lawful income-tax order advances one day and takes effect at the opening of the next month.\n"
              <<"Resume: vic25_play --trial tariff-v1 --country A|B --resume <save>\n";
+}
+
+std::string month_opening(std::int64_t month) {
+    const auto date=daily::from_legacy_month(month);
+    std::ostringstream out;
+    out<<std::setfill('0')<<std::setw(4)<<date.year<<'-'<<std::setw(2)<<date.month<<"-01";
+    return out.str();
 }
 
 void trial_status(const p0::DailyGame& game,const std::string& selected) {
@@ -164,6 +173,7 @@ void trial_status(const p0::DailyGame& game,const std::string& selected) {
     const auto& c=engine.base().core().core();
     const auto& tariffs=engine.diplomacy().tariffs;
     const auto current=tariffs.find({selected,trial_good});
+    const auto pending=c.pending_country_tax(selected);
     const auto cap=c.p2_rule(selected,selected,
         phasec::P2ClauseKind::maximum_import_tariff_ppm).value_or(1'000'000);
     phasec::Money duties=0;
@@ -175,6 +185,9 @@ void trial_status(const p0::DailyGame& game,const std::string& selected) {
              <<" country="<<selected<<" treasury="<<c.country_fiscal(selected).cash
              <<" max_tariff_ppm="<<cap<<" tariff_ppm="
              <<(current==tariffs.end()?0:current->second.ppm)
+             <<" income_tax_ppm="<<c.income_tax_ppm(selected)
+             <<" pending_income_tax_ppm="<<(pending?std::to_string(pending->second):"-")
+             <<" pending_income_tax_date="<<(pending?month_opening(pending->first):"-")
              <<" paid_duty="<<duties
              <<" delivered_ore="<<c.stock(trial_buyer,trial_region(selected),trial_good)
              <<" native_commit="<<engine.commit_id()<<'\n';
@@ -259,6 +272,18 @@ void set_trial_tariff(p0::DailyGame& game,const std::string& tag,int percent) {
     game.advance_day(order);
 }
 
+void propose_trial_income_tax(p0::DailyGame& game,const std::string& tag,int percent) {
+    const auto ppm=percent*10'000;
+    phasegh::World::Plan order;
+    order[9].push_back([tag,ppm](phasegh::Stage& stage){
+        auto& c=stage.phase_c();
+        // This trial is a direct executive government. Never invent a
+        // parliamentary vote; the same native authority and limits apply.
+        c.propose_tax_law(tag,c.government(tag).prime_minister,{},ppm);
+    });
+    game.advance_day(order);
+}
+
 daily::World load_panel_checkpoint(const fs::path& resume) {
     if(!fs::is_regular_file(resume)||fs::file_size(resume)>850'000'000)
         throw std::invalid_argument("resume must use a regular file within the native save limit");
@@ -338,6 +363,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
     const auto cap=core.p2_rule(tag,tag,
         phasec::P2ClauseKind::maximum_import_tariff_ppm).value_or(1'000'000);
     const auto rate=tariffs.find({tag,trial_good});
+    const auto pending=core.pending_country_tax(tag);
     const auto law=core.p2_laws().find("TRIAL-CUSTOMS-"+tag);
     const auto law_label=law!=core.p2_laws().end()&&core.p2_is_active_base(law->first)
         ?law->first:"";
@@ -351,6 +377,9 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
             transit=phaseb::add_checked(transit,cargo.quantity);
     out<<",\"tariff_ppm\":"<<(rate==tariffs.end()?0:rate->second.ppm)
        <<",\"max_tariff_ppm\":"<<cap
+       <<",\"income_tax_ppm\":"<<fiscal.income_tax_ppm
+       <<",\"pending_income_tax_ppm\":"<<(pending?std::to_string(pending->second):"null")
+       <<",\"pending_income_tax_date\":"<<(pending?json_string(month_opening(pending->first)):"null")
        <<",\"law\":"<<json_string(law_label)
        <<",\"ore_price\":"<<core.market(region,trial_good).price
        <<",\"paid_duty\":"<<duty
@@ -411,10 +440,10 @@ void run_panel() {
                 const bool industry=tag==country;
                 auto next=industry?open_industry(resume):open_trial(std::string(tag),resume);
                 auto replacement=std::make_unique<Session>(Session{std::string(tag),
-                    p0::DailyGame(std::move(next),industry?tutorial_policies(true):trial_policies())});
+                    p0::DailyGame(std::move(next),industry?tutorial_policies(true):trial_policies(std::string(tag)))});
                 last_status=panel_status(replacement->game,replacement->tag);
                 session=std::move(replacement);
-            } else if(command=="step"||command=="tariff"||command=="save") {
+            } else if(command=="step"||command=="tariff"||command=="income-tax"||command=="save") {
                 if(!session)throw std::invalid_argument("start or load a trial first");
                 if(command=="step") {
                     const auto days=command_number(arg,1,366);
@@ -430,9 +459,13 @@ void run_panel() {
                     if(session->tag==country)
                         throw std::invalid_argument("the industry trial has no tariff order");
                     set_trial_tariff(session->game,session->tag,command_number(arg,0,100));
+                } else if(command=="income-tax") {
+                    if(session->tag==country)
+                        throw std::invalid_argument("the industry trial has no income-tax order");
+                    propose_trial_income_tax(session->game,session->tag,command_number(arg,0,100));
                 } else save_new(session->game.world(),panel_path(arg));
             } else throw std::invalid_argument("unknown or malformed panel command");
-            if(session&&(command=="step"||command=="tariff"))
+            if(session&&(command=="step"||command=="tariff"||command=="income-tax"))
                 last_status=panel_status(session->game,session->tag);
             const auto reply="{\"ok\":true,\"status\":"+last_status+'}';
             std::cout<<reply<<std::endl;
@@ -491,6 +524,10 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={}) {
                 set_trial_tariff(game,*selected,command_number(arg,0,100));
                 std::cout<<"Tariff set within the current legal ceiling. Duty is collected only on actual trade.\n";
                 show_status();
+            } else if(selected&&command=="income-tax"&&!arg.empty()) {
+                propose_trial_income_tax(game,*selected,command_number(arg,0,100));
+                std::cout<<"Income-tax change scheduled for the opening of the next month.\n";
+                show_status();
             } else if(command=="save"&&!arg.empty()) {
                 save_new(game.world(),fs::path(arg));
                 std::cout<<"saved\n";
@@ -540,7 +577,7 @@ int main(int argc,char** argv) {
             throw std::invalid_argument("resume must use a regular file within the native save limit");
         if(selected) {
             auto world=open_trial(*selected,resume);
-            run(p0::DailyGame(std::move(world),trial_policies()),selected);
+            run(p0::DailyGame(std::move(world),trial_policies(*selected)),selected);
             return 0;
         }
         auto world=resume?daily::SnapshotCodec::load(*resume):tutorial_world();

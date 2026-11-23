@@ -2638,6 +2638,123 @@ static void autonomous_tax_requires_current_parliamentary_authority(bool direct_
                  "March actual withholding or later elected B policy is wrong");
 }
 
+static void selected_players_own_tax_without_disabling_rival_ai() {
+    using namespace phasec;
+    phasegh::World gh{24000};
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"RA","A");geo.seed_province(2,"RB","B");
+    geo.seed_unit(11,"A","A-ROOT");geo.seed_unit(22,"B","B-ROOT");
+    geo.seed_assignment(1,11);geo.seed_assignment(2,22);
+    auto& core=geo.seed_core().seed_core();
+    core.seed_actor("VENDOR",0);
+    const auto election=daily::to_day_index({2000,1,2});
+    for(const std::string country:{"A","B"}) {
+        core.seed_actor(country,0);
+        core.seed_actor(country+"-EMPLOYER",100);
+        core.seed_actor(country+"-WORKER",0);
+        core.seed_government(country,country+"-HEAD",country+"-PM",5,3);
+        core.seed_p1_constitution(country,{P1GovernancePrinciple::presidential_republic,
+            P1PowerDistribution::universal_vote,P1LegislatureKind::unicameral,"test:constitution"});
+        core.p4_register_party({country+"-PARTY",country,country+"-HEAD",100'000,true,true});
+        core.p4_seed_contest({country+"-HOUSE",country,"national","test:house",
+            P4Office::legislature,P4BallotMethod::list_dhondt,P4TermMode::restart_after_poll,
+            48,1'000'000,5,election,election,-1,true,true,false});
+        core.p2_seed_base({country+"-TAX-BOUND",country,"tax_fixture","national",
+            "statutory-limits","test:tax statute",P2NormTier::statute,
+            {{"income-tax-cap",country,P2ClauseKind::income_tax_max_ppm,140'000}}});
+        (void)people(gh,"R"+country,20,"worker");
+    }
+    p0::Policies policies;
+    policies.autonomous_tax_step_ppm=10'000;
+    policies.autonomous_tax_ceiling_ppm=200'000;
+    policies.daily_food_units_per_person=0;
+    policies.allow_endogenous_debt_repayment=false;
+    p0::DailyGame opening(daily::World::adopt(std::move(gh),92),policies);
+    opening.advance_day();
+    opening.advance_day();
+    require_test(c(opening).country_election("A").seats.at("A-PARTY")==5&&
+                 c(opening).country_election("B").seats.at("B-PARTY")==5,
+                 "tax priorities require independent real parliamentary majorities");
+    phasegh::World::Plan grounds;
+    grounds[1].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().borrow_country_budget_from_bank("A",100);
+        stage.phase_c().borrow_country_budget_from_bank("B",100);
+    });
+    grounds[5].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().spend_country_budget("A","VENDOR",100);
+        stage.phase_c().spend_country_budget("B","VENDOR",100);
+    });
+    opening.advance_day(grounds);
+    while(opening.world().date()<daily::Date{2000,2,1})opening.advance_day();
+    require_test(c(opening).country_fiscal("A").bank_debt==100&&c(opening).cash("A")==0&&
+                 c(opening).country_fiscal("B").bank_debt==100&&c(opening).cash("B")==0&&
+                 c(opening).cash("VENDOR")==200&&!c(opening).has_pending_country_tax("A")&&
+                 !c(opening).has_pending_country_tax("B"),
+                 "both governments must have the same actual taxable-policy trigger");
+
+    // First controlled day: no player mark has yet been committed to Phase C.
+    auto selected=policies;
+    selected.player_controlled_countries.insert("A");
+    p0::DailyGame game(opening.world(),selected);
+    const auto before=daily::SnapshotCodec::encode(game.world());
+    require_test(!c(game).p1_is_player_country("A")&&!c(game).p1_is_player_country("B"),
+                 "first player command must precede any committed control mark");
+    const auto order=[](int rate,const std::string& proposer) {
+        phasegh::World::Plan commands;
+        commands[9].push_back([=](phasegh::Stage& stage) {
+            stage.phase_c().propose_tax_law("A",proposer,{"A-PARTY"},rate);
+        });
+        return commands;
+    };
+    const auto check_rejected=[&](int rate,const std::string& proposer,
+                                  std::string_view expected) {
+        bool invalid=false;
+        try {game.advance_day(order(rate,proposer));}
+        catch(const std::exception& e) {
+            invalid=std::string_view(e.what()).find(expected)!=std::string_view::npos;
+        }
+        require_test(invalid&&daily::SnapshotCodec::encode(game.world())==before&&
+                     !c(game).has_pending_country_tax("B"),
+                     "an unlawful player tax changed the date, world, or rival pending rate");
+    };
+    check_rejected(150'000,"A-PM","outside binding legal rate limits");
+    check_rejected(130'000,"A-HEAD","unauthorized or duplicate national income-tax bill");
+    game.advance_day(order(130'000,"A-PM"));
+    const auto march=c(game).month()+1;
+    require_test(c(game).pending_country_tax("A")==std::pair{march,130'000}&&
+                 c(game).pending_country_tax("B")==std::pair{march,110'000}&&
+                 c(game).income_tax_ppm("A")==100'000&&c(game).income_tax_ppm("B")==100'000,
+                 "lawful player and rival proposals must both wait for the new month");
+
+    // The created Phase C player mark, not the outer Policies object,
+    // must retain the selection after loading a committed checkpoint.
+    const auto saved=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(saved),policies);
+    while(game.world().date()<daily::Date{2000,3,1}) {
+        game.advance_day(); replay.advance_day();
+    }
+    require_test(c(replay).p1_is_player_country("A")&&!c(replay).p1_is_player_country("B")&&
+                 c(replay).month()==march&&c(replay).income_tax_ppm("A")==100'000&&
+                 c(replay).pending_country_tax("A")==std::pair{march,130'000}&&
+                 c(replay).pending_country_tax("B")==std::pair{march,110'000},
+                 "unprocessed new-month morning must show the actual pending rates");
+    phasegh::World::Plan payroll;
+    payroll[5].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().wages_under_law("A-EMPLOYER","A-WORKER","A",100,"A");
+        stage.phase_c().wages_under_law("B-EMPLOYER","B-WORKER","B",100,"B");
+    });
+    game.advance_day(payroll); replay.advance_day(payroll);
+    require_test(c(game).income_tax_ppm("A")==130'000&&c(game).income_tax_ppm("B")==110'000&&
+                 c(game).cash("A")==13&&c(game).cash("A-WORKER")==87&&
+                 c(game).cash("B")==11&&c(game).cash("B-WORKER")==89&&
+                 c(game).cash("VENDOR")==200&&c(game).outstanding_loan("A")==100&&
+                 c(game).outstanding_loan("B")==100&&!c(game).pending_country_tax("A")&&
+                 c(game).pending_country_tax("B")==std::pair{march+1,120'000}&&
+                 daily::SnapshotCodec::encode(game.world())==
+                   daily::SnapshotCodec::encode(replay.world()),
+                 "the saved player/rival selection must preserve real rates, receipts, and replay");
+}
+
 static void p1_autocracy_uses_real_institution_and_rejects_false_votes() {
     auto opening=fixture();
     auto& c=opening.seed_geography().seed_core().seed_core();
@@ -3137,6 +3254,7 @@ int main(){
         p1_parliamentary_cabinet_next_day_and_save();
         autonomous_tax_requires_current_parliamentary_authority(false);
         autonomous_tax_requires_current_parliamentary_authority(true);
+        selected_players_own_tax_without_disabling_rival_ai();
         p1_autocracy_uses_real_institution_and_rejects_false_votes();
         native_autonomous_h_crisis_and_organization_funding();
         explicit_and_automatic_dues_keep_live_payment_priority();
