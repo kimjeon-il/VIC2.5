@@ -402,7 +402,8 @@ std::pair<std::string_view,std::string_view> panel_token(std::string_view line) 
     return {line.substr(0,split),split==line.npos?std::string_view{}:trim(line.substr(split+1))};
 }
 
-fs::path panel_path(std::string_view value) {
+// Both Play stdin protocols carry checkpoint paths as UTF-8.
+fs::path checkpoint_path_utf8(std::string_view value) {
     if(value.empty()||value.find('\0')!=value.npos)
         throw std::invalid_argument("enter a nonempty checkpoint path");
     return fs::path(std::u8string(value.begin(),value.end()));
@@ -436,7 +437,7 @@ void run_panel() {
                 const auto [tag,path]=panel_token(arg);
                 if((tag!="A"&&tag!="B"&&tag!=country)||(command=="new"&&!path.empty()))
                     throw std::invalid_argument("select trial country A, B, or TUT");
-                const auto resume=command=="load"?std::optional{panel_path(path)}:std::nullopt;
+                const auto resume=command=="load"?std::optional{checkpoint_path_utf8(path)}:std::nullopt;
                 const bool industry=tag==country;
                 auto next=industry?open_industry(resume):open_trial(std::string(tag),resume);
                 auto replacement=std::make_unique<Session>(Session{std::string(tag),
@@ -463,7 +464,7 @@ void run_panel() {
                     if(session->tag==country)
                         throw std::invalid_argument("the industry trial has no income-tax order");
                     propose_trial_income_tax(session->game,session->tag,command_number(arg,0,100));
-                } else save_new(session->game.world(),panel_path(arg));
+                } else save_new(session->game.world(),checkpoint_path_utf8(arg));
             } else throw std::invalid_argument("unknown or malformed panel command");
             if(session&&(command=="step"||command=="tariff"||command=="income-tax"))
                 last_status=panel_status(session->game,session->tag);
@@ -529,7 +530,7 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={}) {
                 std::cout<<"Income-tax change scheduled for the opening of the next month.\n";
                 show_status();
             } else if(command=="save"&&!arg.empty()) {
-                save_new(game.world(),fs::path(arg));
+                save_new(game.world(),checkpoint_path_utf8(arg));
                 std::cout<<"saved\n";
             } else throw std::invalid_argument("unknown or malformed command; type help");
         }catch(const std::exception& e) {
