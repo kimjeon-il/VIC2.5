@@ -497,6 +497,12 @@ constexpr phaseb::Id campaign_factory_worker=202;
 constexpr auto campaign_smelter="CAMPAIGN-IRON-SITE";
 constexpr auto campaign_iron_method="CAMPAIGN-IRON-METHOD";
 constexpr auto campaign_wood_seller="CAMPAIGN-WOOD-SELLER";
+constexpr auto campaign_tool_buyer="CAMPAIGN-FITTINGS-WORKSHOP";
+constexpr auto campaign_tool_buyer_site="CAMPAIGN-FITTINGS-SITE";
+constexpr auto campaign_tool_buyer_recipe="CAMPAIGN-FITTINGS-METHOD";
+constexpr auto campaign_fittings="wooden_fittings";
+constexpr auto campaign_boards="sawn_boards";
+
 
 bool has_campaign_supply(const daily::World& world) {
     const auto& d=world.engine().base().core();
@@ -510,6 +516,31 @@ bool has_campaign_supply(const daily::World& world) {
        facility->second.owner!=campaign_buyer||facility->second.region!=law_region||
        recipe==d.state().recipes.end()||recipe->second.site!=campaign_smelter)
         throw std::invalid_argument("checkpoint has an incomplete campaign supply chain");
+    return true;
+}
+
+bool has_campaign_workshop(const daily::World& world) {
+    const auto& domain=world.engine().base().core();
+    const auto& core=domain.core();
+    const bool buyer=core.has_actor(campaign_tool_buyer);
+    const auto site=core.facilities().find(campaign_tool_buyer_site);
+    const auto recipe=domain.state().recipes.find(campaign_tool_buyer_recipe);
+    if(!buyer&&site==core.facilities().end()&&recipe==domain.state().recipes.end())return false;
+    const auto exactly=[](const phased::Input& input,const char* good) {
+        return input.good==good&&input.per_unit==1;
+    };
+    if(!buyer||site==core.facilities().end()||site->second.owner!=campaign_tool_buyer||
+       site->second.region!=law_region||recipe==domain.state().recipes.end()||
+       !has_campaign_supply(world))
+        throw std::invalid_argument("checkpoint has an incomplete campaign workshop");
+    const auto& method=recipe->second;
+    if(method.site!=campaign_tool_buyer_site||method.inputs.size()!=2||
+       !exactly(method.inputs[0],"tools")||!exactly(method.inputs[1],campaign_boards)||
+       method.outputs.size()!=1||!exactly(method.outputs.front(),campaign_fittings)||
+       !method.byproducts.empty()||
+       !core.has_market(law_region,"tools")||!core.has_market(law_region,campaign_boards)||
+       !core.has_market(law_region,campaign_fittings))
+        throw std::invalid_argument("checkpoint has a mismatched campaign workshop");
     return true;
 }
 
@@ -554,6 +585,8 @@ p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
         p.allow_endogenous_staffing=has_campaign_supply(world);
         if(p.allow_endogenous_staffing)
             p.staffing.push_back({campaign_buyer,law_region,1,31,true});
+        if(has_campaign_workshop(world))
+            p.staffing.push_back({campaign_tool_buyer,law_region,1,31,true});
         if(has_public_build_fixture(world,"A",law_region))
             p.public_construction_offers.push_back(public_offer("A",law_region,true));
     }
@@ -674,6 +707,24 @@ daily::World law_world(LegislativeTrial trial) {
         const auto factory_home=pop.household_profile({law_region,"factory-workforce","shared",1});
         pop.seed_population(demo,e,factory_home,1,campaign_factory_worker);
         c.seed_actor("HH:"+std::to_string(factory_home),0);
+
+        // One independent shop, one local board, and enough own cash for
+        // one tool plus its operating wages. It never starts with any tools.
+        c.seed_actor(campaign_tool_buyer,85);
+        c.seed_market(law_region,campaign_boards,4,4,4);
+        c.seed_market(law_region,campaign_fittings,90,90,90,1);
+        c.seed_stock(campaign_tool_buyer,law_region,campaign_boards,1);
+        c.seed_production_facility(campaign_tool_buyer_site,campaign_tool_buyer,law_region,31);
+        phased::IndustryRecipe fittings;
+        fittings.id=campaign_tool_buyer_recipe;fittings.site=campaign_tool_buyer_site;
+        fittings.inputs={{"tools",1},{campaign_boards,1}};
+        fittings.outputs={{campaign_fittings,1}};
+        fittings.workers_per_batch=fittings.capacity_per_batch=1;
+        industry.seed_recipe(fittings);
+        const auto shop_home=pop.household_profile({law_region,"workshop-worker","shared",1});
+        const auto shop_worker=pop.seed_population(demo,e,shop_home,1);
+        c.seed_actor("HH:"+std::to_string(shop_home),0);
+        pop.hire(shop_worker,1,campaign_tool_buyer,"worker",31,{});
     }
     if(education) {
         c.p1_set_incorporation(education_home,true);
@@ -778,12 +829,14 @@ void campaign_supply_status(std::ostringstream& out,const daily::World& world) {
     const auto& c=domain.core();
     const auto& factory=public_offer("A",law_region,true);
     const auto& factory_id=factory.project.target_site;
-    Quantity iron_batches=0,tools_batches=0;
+    Quantity iron_batches=0,tools_batches=0,tool_buyer_batches=0;
     for(const auto& run:domain.state().actual_production_runs) {
         if(run.recipe==campaign_iron_method)
             iron_batches=phaseb::add_checked(iron_batches,run.batches);
         else if(run.recipe==factory.recipe.id)
             tools_batches=phaseb::add_checked(tools_batches,run.batches);
+        else if(run.recipe==campaign_tool_buyer_recipe)
+            tool_buyer_batches=phaseb::add_checked(tool_buyer_batches,run.batches);
     }
     const auto known_material=[&](const std::string& good) {
         if(c.stock("A",law_region,good)>0)return true;
@@ -809,7 +862,18 @@ void campaign_supply_status(std::ostringstream& out,const daily::World& world) {
        <<R"(,"smelter_receipts":)"<<c.firm_finance(campaign_buyer).receipts
        <<R"(,"factory_worker_cash":)"<<c.cash(trial_worker_wallet(c,worker))
        <<R"(,"iron_batches":)"<<iron_batches<<R"(,"tools_batches":)"<<tools_batches
-       <<R"(,"tools_waiting_for":)"<<json_string(reason)<<'}';
+       <<R"(,"tools_waiting_for":)"<<json_string(reason);
+    if(has_campaign_workshop(world)) {
+        const auto shop_tools=c.stock(campaign_tool_buyer,law_region,"tools");
+        // The authored shop starts with no tools and can only buy this
+        // maker's output. Its sole recipe consumes one tool per actual run.
+        out<<R"(,"tools_sold":)"<<phaseb::add_checked(shop_tools,tool_buyer_batches)
+           <<R"(,"tool_buyer_cash":)"<<c.cash(campaign_tool_buyer)
+           <<R"(,"tool_buyer_tools_stock":)"<<shop_tools
+           <<R"(,"tool_buyer_output_stock":)"<<c.stock(campaign_tool_buyer,law_region,campaign_fittings)
+           <<R"(,"tool_buyer_batches":)"<<tool_buyer_batches;
+    }
+    out<<'}';
 }
 
 std::string day_label(std::int64_t day) {

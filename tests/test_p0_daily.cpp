@@ -65,6 +65,50 @@ static phasegh::World fixture() {
     gh.validate();
     return gh;
 }
+static void independent_workshop_must_pay_before_using_a_tool() {
+    const auto scenario=[](phasec::Money own_cash) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");geo.seed_unit(1,"A","R");
+        geo.seed_assignment(1,1);
+        auto& industry=geo.seed_core();
+        auto& core=industry.seed_core();
+        core.seed_actor("A",0);core.seed_actor("WORKSHOP",own_cash);
+        core.seed_government("A","HEAD","PM",5,3);
+        core.seed_market("R","tools",60,60,60);
+        core.seed_market("R","boards",4,4,4);
+        core.seed_market("R","fittings",90,90,90,1);
+        core.seed_stock("A","R","tools",1);
+        core.seed_stock("WORKSHOP","R","boards",1);
+        core.seed_production_facility("SITE","WORKSHOP","R",31);
+        const auto worker=people(gh,"R",1,"worker");
+        auto& pop=core.seed_population();
+        const auto wallet="HH:"+std::to_string(pop.slice(worker).key.household);
+        core.seed_actor(wallet,0);
+        pop.hire(worker,1,"WORKSHOP","worker",31,{});
+        phased::IndustryRecipe r;r.id="FITTINGS";r.site="SITE";
+        r.inputs={{"tools",1},{"boards",1}};r.outputs={{"fittings",1}};
+        r.workers_per_batch=r.capacity_per_batch=1;
+        industry.seed_recipe(r);
+        p0::Policies policies;policies.daily_food_units_per_person=0;
+        return p0::DailyGame(daily::World::adopt(std::move(gh),55),policies);
+    };
+    auto funded=scenario(61), short_cash=scenario(60);
+    funded.advance_day();short_cash.advance_day();
+    const auto& f=c(funded);
+    const auto& u=c(short_cash);
+    require_test(f.cash("A")==60&&f.country_fiscal("A").realized_revenue==60&&
+                 f.cash("WORKSHOP")==0&&f.stock("A","R","tools")==0&&
+                 f.stock("WORKSHOP","R","tools")==0&&
+                 f.stock("WORKSHOP","R","boards")==0&&
+                 f.stock("WORKSHOP","R","fittings")==1&&
+                 u.cash("A")==0&&u.country_fiscal("A").realized_revenue==0&&
+                 u.cash("WORKSHOP")==59&&u.stock("A","R","tools")==1&&
+                 u.stock("WORKSHOP","R","tools")==0&&
+                 u.stock("WORKSHOP","R","boards")==1&&
+                 u.stock("WORKSHOP","R","fittings")==0,
+                 "the workshop must afford the physical tool and ordinary payroll");
+}
 static void public_employment_pays_net_without_self_tax_revenue() {
     phasegh::World gh(24000);
     auto& geo=gh.seed_geography();
@@ -3690,6 +3734,7 @@ static void blocked_automatic_army_rear_cargo_does_not_abort_a_day() {
 
 int main(){
     try{
+        independent_workshop_must_pay_before_using_a_tool();
         public_employment_pays_net_without_self_tax_revenue();
         automatic_wage_withholding_rereads_office_funding();
         country_tariff_ai_respects_each_sovereigns_current_law();

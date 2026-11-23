@@ -633,6 +633,10 @@ def main():
         require("supply_chain" in supply_start, "shared campaign does not expose a real supply chain")
         initial = supply_start["supply_chain"]
         en_route = transit["supply_chain"]
+        require(initial.get("tool_buyer_cash", 0) > 0 and
+                initial["tools_sold"] == initial["tool_buyer_batches"] ==
+                initial["tool_buyer_tools_stock"] == initial["tool_buyer_output_stock"] == 0,
+                "campaign has no independently funded domestic tool buyer")
         require(initial["ore_stock"] == initial["iron_batches"] == initial["tools_stock"] == 0 and
                 transit["in_transit_ore"] > 0 and en_route["ore_stock"] == en_route["iron_batches"] == 0,
                 "smelter used ore before the first paid cargo physically arrived")
@@ -643,7 +647,7 @@ def main():
         require(first_iron and first_tool and first_iron["date"] < first_tool["date"] and
                 first_iron["supplier_cash"] > 0 and first_iron["carrier_cash"] > 0 and
                 first_tool["public_construction"]["state"] == "commissioned" and
-                first_tool["supply_chain"]["tools_stock"] > 0 and
+                first_tool["supply_chain"]["tools_stock"] + first_tool["supply_chain"]["tools_sold"] > 0 and
                 first_tool["supply_chain"]["smelter_receipts"] > initial["smelter_receipts"] and
                 first_tool["supply_chain"]["wood_seller_cash"] > initial["wood_seller_cash"] and
                 first_tool["supply_chain"]["factory_worker_cash"] > 0,
@@ -670,6 +674,20 @@ def main():
                 unbuilt["supply_chain"]["wood_seller_cash"] == initial["wood_seller_cash"] and
                 unbuilt["supply_chain"]["tools_waiting_for"] == "construction",
                 "the unbuilt control should smelt ore without buying wood or producing tools")
+        tool_sale = next((row for row in days if row["supply_chain"]["tools_sold"]), None)
+        downstream = next((row for row in days if row["supply_chain"]["tool_buyer_batches"]), None)
+        require(tool_sale and downstream and
+                first_tool["date"] <= tool_sale["date"] < downstream["date"] and
+                tool_sale["supply_chain"]["tool_buyer_tools_stock"] == 1 and
+                tool_sale["supply_chain"]["tool_buyer_output_stock"] == 0 and
+                downstream["supply_chain"]["tool_buyer_output_stock"] == 1 and
+                later["tool_buyer_batches"] == later["tools_sold"] == 1 and
+                later["tool_buyer_tools_stock"] == 0 and
+                later["tools_stock"] + later["tools_sold"] == later["tools_batches"] and
+                later["tool_buyer_cash"] < initial["tool_buyer_cash"] and
+                days[-1]["revenue"] - unbuilt["revenue"] == 60 and
+                unbuilt["supply_chain"]["tools_sold"] == unbuilt["supply_chain"]["tool_buyer_batches"] == 0,
+                "domestic shop did not pay 60 to the public maker and physically use one tool")
 
         restarted = panel(f"load CAMPAIGN-A {supply_checkpoint}", "inspect B", "inspect A",
                           "step 18", f"save {supply_replay}", "quit")
@@ -679,6 +697,16 @@ def main():
                 restarted[3]["status"] == days[-1] and
                 supply_replay.read_bytes() == supply_completed.read_bytes(),
                 "active trade/industry and the shortage did not resume identically after saving")
+        purchased_checkpoint = d / "campaign-tool-purchased.vic25"
+        purchased = panel(f"load CAMPAIGN-A {supply_checkpoint}", "step 4",
+                          f"save {purchased_checkpoint}", "quit")
+        require(all(row["ok"] for row in purchased) and purchased[1]["status"] == tool_sale,
+                "tool purchase needs to remain in the shop before any downstream output")
+        after_purchase = panel(f"load CAMPAIGN-A {purchased_checkpoint}", "step 1", "quit")
+        require(all(row["ok"] for row in after_purchase) and
+                after_purchase[0]["status"] == tool_sale and
+                after_purchase[1]["status"] == downstream,
+                "resuming a paid physical tool should consume it once without repeating payment")
 
         campaign_reviews = []
         def campaign_law(*tail):

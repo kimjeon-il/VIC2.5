@@ -463,6 +463,10 @@ class PlayPanel:
                           f"\n목재 공급자 잔액 {chain['wood_seller_cash']}")
                 if waiting:
                     market += f" · {waiting}"
+                tools_sold = chain.get("tools_sold")
+                buyer_output = chain.get("tool_buyer_output_stock")
+                if tools_sold is not None and buyer_output is not None:
+                    market += f"\n공구 판매량 {tools_sold} · 목공소 목재 부품 재고 {buyer_output}"
             role = "플레이어" if status["peer_is_player"] else "조회 전용"
             diplomacy = (f"{status['peer_country']} · {role}\n"
                          f"국고: {status['peer_treasury']}\n"
