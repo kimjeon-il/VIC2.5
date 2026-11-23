@@ -76,6 +76,20 @@ def run(exe):
             assert panel.current["country"] == "B"
             assert panel.current["max_tariff_ppm"] == 400_000 and "40%" in panel.policy.get()
             run_income_tax(root, panel, Path(directory) / "소득세 예약.vic25")
+            panel.country.set("A 예산 시범판")
+            panel.new_button.invoke()
+            wait(root, panel)
+            assert panel.current["scenario"] == "budget-v1"
+            assert panel.spending_button.winfo_ismapped() and panel.spending_button.instate(["!disabled"])
+            assert panel.tax_button.instate(["!disabled"]) and panel.tariff_button.instate(["!disabled"])
+            panel.spending.set("0")
+            panel.spending_button.invoke()
+            wait(root, panel)
+            assert panel.current["pending_civilian_spending_cap"] == 0
+            assert "예약 한도: 0" in panel.budget.get()
+            panel._send("step 31")
+            wait(root, panel)
+            assert panel.current["civilian_spending_cap"] == 0 and "하루 한도: 0" in panel.budget.get()
             run_industry(root, panel, save)
     finally:
         panel.close()
@@ -149,6 +163,7 @@ def run_industry(root, panel, tariff_save):
         assert f"공공사업 지급처 잔액: {status['public_works_cash']}" in panel.diplomacy.get()
         assert panel.tariff_button.instate(["disabled"]) and not panel.tariff_button.winfo_ismapped()
         assert panel.tax_button.instate(["disabled"]) and not panel.tax_button.winfo_ismapped()
+        assert not panel.spending_button.winfo_ismapped()
         return status
 
     state((8, 4, 0, 100, 0, 0))

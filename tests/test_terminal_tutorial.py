@@ -223,6 +223,70 @@ def main():
                 and b_tax[2]["status"]["income_tax_ppm"] == 200000,
                 "second selected country must independently use its own native authority")
 
+        budget_pending = d / "예산 예약.sav"
+        budget_final = d / "예산 시행.sav"
+        budget_replayed = d / "예산 재실행.sav"
+        budgets = panel("new BUDGET-A", "spending-cap -1", "spending-cap 0",
+                        f"save {budget_pending}", "spending-cap 3", "step 30",
+                        "step 1", f"save {budget_final}", "quit")
+        require(budgets[0]["ok"], "the selected country's funded public spending trial must open")
+        budget_open = budgets[0]["status"]
+        require(budget_open["country"] == "A" and budget_open["scenario"] == "budget-v1"
+                and budget_open["treasury"] == 200 and budget_open["public_program_paid"] == 0
+                and budget_open["civilian_spending_cap"] is None,
+                f"wrong native spending trial opening: {budget_open}")
+        require(not budgets[1]["ok"] and budgets[1]["status"] == budget_open,
+                "negative cap changed the actual budget")
+        pending = budgets[2]["status"]
+        require(budgets[2]["ok"] and pending["public_program_paid"] == 5
+                and pending["pending_civilian_spending_cap"] == 0
+                and pending["pending_civilian_spending_date"] == "2000-02-01"
+                and pending["civilian_spending_cap"] is None,
+                "zero must be stored as a real next-month limit, not a missing value")
+        require(not budgets[4]["ok"] and budgets[4]["status"] == pending,
+                "duplicate active-month spending submission was not rejected atomically")
+        boundary, settled = budgets[5]["status"], budgets[6]["status"]
+        require(boundary["public_program_paid"] == 155
+                and boundary["pending_civilian_spending_cap"] == 0
+                and settled["public_program_paid"] == 155 and settled["treasury"] == 45
+                and settled["civilian_spending_cap"] == 0
+                and settled["pending_civilian_spending_cap"] is None
+                and settled["peer_public_program_paid"] == 160,
+                f"zero must stop only that government's real February payments: {settled}")
+        budget_resume = panel(f"load A {budget_pending}", f"load BUDGET-B {budget_pending}",
+                              f"load BUDGET-A {budget_pending}", "step 31",
+                              f"save {budget_replayed}", "quit")
+        require(not budget_resume[0]["ok"] and not budget_resume[1]["ok"]
+                and budget_resume[2]["status"] == pending
+                and budget_resume[3]["status"] == settled
+                and budget_final.read_bytes() == budget_replayed.read_bytes(),
+                "pending public spending did not survive exact country/scenario replay")
+        positive = panel("new BUDGET-B", "spending-cap 3", "step 31", "step 4", "quit")
+        require(positive[2]["status"]["public_program_paid"] == 158
+                and positive[2]["status"]["civilian_spending_cap"] == 3
+                and positive[3]["status"]["public_program_paid"] == 160
+                and positive[3]["status"]["treasury"] == 40,
+                "both programs must share one daily cap and stop at actual treasury reserve")
+        budget_cli = run("spending-cap 3\nstep 31\nquit\n",
+                         "--trial", "budget-v1", "--country", "B")
+        require(not budget_cli.stderr
+                and trade_status(budget_cli)["civilian_spending_cap"] == "3"
+                and trade_status(budget_cli)["public_program_paid"] == "158",
+                "standalone budget trial did not use the same native spending order")
+        same_country = panel("new BUDGET-A", "tariff 10", "income-tax 15",
+                             "spending-cap 2", "step 29", "quit")
+        combined = same_country[4]["status"]
+        require(all(reply["ok"] for reply in same_country)
+                and combined["tariff_ppm"] == 100000 and combined["paid_duty"] > 0
+                and combined["income_tax_ppm"] == 150000
+                and combined["civilian_spending_cap"] == 2,
+                "tariff, tax and public spending must operate together for the same trial government")
+        legacy_spending = panel(f"load BUDGET-A {a_split}", "new A", "spending-cap 3", "quit")
+        require(not legacy_spending[0]["ok"] and legacy_spending[0]["status"] is None
+                and not legacy_spending[2]["ok"]
+                and legacy_spending[2]["status"] == legacy_spending[1]["status"],
+                "legacy tariff scenario must not create native spending accounts")
+
         replies = panel("status", "new A", "status", "tariff 21",
                         "tariff 10", "step 30", f"save {panel_save}",
                         f"load B {panel_save}", f"load A {corrupt}",

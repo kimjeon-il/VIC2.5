@@ -465,6 +465,12 @@ struct SnapshotCodec {
             ar(w.scheduled_country_income_tax_);
             ar(w.country_treasuries_);
         }
+        if(!w.civilian_spending_cap_grants_.empty()) {
+            ar(std::string("VIC25_PHASEC_CIVILIAN_SPENDING_CAP_1"));
+            ar(w.civilian_spending_cap_grants_);
+            ar(w.civilian_spending_caps_);
+            ar(w.pending_civilian_spending_caps_);
+        }
         if(w.bank_interest_annual_ppm_!=0||
            !w.bank_interest_fraction_.empty()) {
             ar(std::string("VIC25_PHASEC_BANK_INTEREST_1"));
@@ -694,6 +700,7 @@ struct SnapshotCodec {
         IntegratedWorld w;
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
+             seen_civilian_spending=false,
              seen_birth_days=false,seen_wages=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p1_capacities=false,seen_p1_bureaucracy=false,
@@ -727,6 +734,17 @@ struct SnapshotCodec {
                    w.scheduled_country_income_tax_.size()>1'000'000 ||
                    w.country_treasuries_.size()>100'000)
                     throw std::runtime_error("oversized country fiscal extension");
+            } else if(extension=="VIC25_PHASEC_CIVILIAN_SPENDING_CAP_1"&&
+                      !seen_civilian_spending) {
+                seen_civilian_spending=true;
+                ar(w.civilian_spending_cap_grants_);
+                ar(w.civilian_spending_caps_);
+                ar(w.pending_civilian_spending_caps_);
+                const auto grants=w.civilian_spending_cap_grants_.size();
+                if(grants==0||grants>100'000||
+                   w.civilian_spending_caps_.size()>grants||
+                   w.pending_civilian_spending_caps_.size()>grants)
+                    throw std::runtime_error("invalid civilian spending cap extension");
             } else if(extension=="VIC25_PHASEC_BANK_INTEREST_1"&&!seen_interest) {
                 seen_interest=true;
                 ar(w.bank_interest_annual_ppm_);

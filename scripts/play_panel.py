@@ -47,10 +47,11 @@ class NativeEngine:
 
 class PlayPanel:
     FACTORY = "공장 시범판"
+    BUDGETS = {"A 예산 시범판": "BUDGET-A", "B 예산 시범판": "BUDGET-B"}
 
     @classmethod
     def _protocol_tag(cls, choice):
-        return "TUT" if choice == cls.FACTORY else choice
+        return "TUT" if choice == cls.FACTORY else cls.BUDGETS.get(choice, choice)
 
     def __init__(self, root, executable):
         self.root = root
@@ -61,6 +62,7 @@ class PlayPanel:
         self.country = tk.StringVar(root, "A")
         self.tariff = tk.StringVar(root, "0")
         self.tax = tk.StringVar(root, "0")
+        self.spending = tk.StringVar(root, "0")
         self.heading = tk.StringVar(root, "열린 시범 시나리오 없음")
         self.budget = tk.StringVar(root, "국가를 선택하고 시나리오를 시작하세요.")
         self.policy = tk.StringVar(root, "법률·관세·세금 정보 없음")
@@ -82,8 +84,8 @@ class PlayPanel:
         setup = ttk.Frame(frame, padding=(0, 10))
         setup.grid(row=2, sticky="ew")
         ttk.Label(setup, text="시작·불러올 국가/시나리오:").grid(row=0, column=0, padx=(0, 6))
-        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY),
-                                     width=13, state="readonly")
+        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY, *self.BUDGETS),
+                                     width=16, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
         self.new_button = ttk.Button(setup, text="새로 시작", command=self.new)
         self.load_button = ttk.Button(setup, text="불러오기…", command=self.load)
@@ -128,6 +130,13 @@ class PlayPanel:
         self.tax_button = ttk.Button(actions, text="소득세 제출 후 하루 진행", command=self.set_income_tax)
         self.tax_button.grid(row=1, column=3, pady=(4, 0))
         self.tax_entry.bind("<Return>", lambda event: self.set_income_tax())
+        self.spending_label = ttk.Label(actions, text="하루 공공사업 한도:")
+        self.spending_label.grid(row=2, column=1, pady=(4, 0))
+        self.spending_entry = ttk.Entry(actions, textvariable=self.spending, width=9)
+        self.spending_entry.grid(row=2, column=2, padx=5, pady=(4, 0))
+        self.spending_button = ttk.Button(actions, text="지출 한도 제출 후 하루 진행", command=self.set_spending_cap)
+        self.spending_button.grid(row=2, column=3, pady=(4, 0))
+        self.spending_entry.bind("<Return>", lambda event: self.set_spending_cap())
         ttk.Separator(frame).grid(row=6, sticky="ew")
         notice = ttk.Label(frame, textvariable=self.notice, justify="left", wraplength=500)
         notice.grid(row=7, sticky="ew", pady=(5, 0))
@@ -160,6 +169,14 @@ class PlayPanel:
                 widget.grid_remove()
             else:
                 widget.grid()
+        budget = self._budget(self.current)
+        spending_ready = ready and budget and self.current["pending_civilian_spending_cap"] is None
+        for widget in (self.spending_label, self.spending_entry, self.spending_button):
+            widget.state(["!disabled"] if spending_ready else ["disabled"])
+            if budget:
+                widget.grid()
+            else:
+                widget.grid_remove()
         self.selector.configure(state="readonly" if ready else "disabled")
 
     def _send(self, command):
@@ -195,10 +212,16 @@ class PlayPanel:
                 try:
                     self._show(reply["status"])
                     if command.startswith(("new ", "load ")):
-                        self.country.set(self.FACTORY if self._industry(self.current)
-                                         else self.current["country"])
+                        choice = self.current["country"]
+                        if self._industry(self.current):
+                            choice = self.FACTORY
+                        elif self._budget(self.current):
+                            choice += " 예산 시범판"
+                        self.country.set(choice)
                     if command.startswith("income-tax "):
                         self.notice.set("소득세 변경을 예약했습니다.")
+                    elif command.startswith("spending-cap "):
+                        self.notice.set("공공사업 지출 한도를 예약했습니다.")
                     else:
                         self.notice.set("저장했습니다." if command.startswith("save ") else "준비됐습니다.")
                 except (KeyError, TypeError, ValueError):
@@ -218,14 +241,28 @@ class PlayPanel:
     def _industry(status):
         return bool(status and status.get("scenario") == "industry-v1")
 
+    @staticmethod
+    def _budget(status):
+        return bool(status and status.get("scenario") == "budget-v1")
+
     def _show(self, status):
         factory = self._industry(status)
         perspective = self.FACTORY if factory else f"국가 {status['country']}"
+        if self._budget(status):
+            perspective += " · 예산 시범판"
         headline = f"{perspective}  |  {status['date']}  |  진행 기록 {status['commit']}"
         budget = (f"국고: {status['treasury']}\n"
                   f"누적 수입: {status['revenue']}\n"
                   f"누적 지출: {status['expenditure']}\n"
                   f"부채: {status['debt']}")
+        if self._budget(status):
+            cap = status["civilian_spending_cap"]
+            pending = status["pending_civilian_spending_cap"]
+            budget += f"\n공공사업 하루 한도: {cap if cap is not None else '미설정'}"
+            budget += f"\n공공사업 누적 지급: {status['public_program_paid']}"
+            if pending is not None:
+                budget += f"\n예약 한도: {pending} ({status['pending_civilian_spending_date']} 시행)"
+            self.spending.set(str(pending if pending is not None else cap if cap is not None else 0))
         if factory:
             policy = ("광석을 투입해 식량을 생산합니다.\n"
                       "광석이 부족하면 생산이 멈춥니다.")
@@ -290,6 +327,15 @@ class PlayPanel:
             self.notice.set("오류: 소득세율을 0부터 100 사이의 정수로 입력하세요.")
             return
         self._send("income-tax " + value)
+
+    def set_spending_cap(self):
+        if not self._budget(self.current) or self.current["pending_civilian_spending_cap"] is not None:
+            return
+        value = self.spending.get().strip()
+        if not value or not value.isascii() or not value.isdecimal() or len(value) > 7 or int(value) > 1_000_000:
+            self.notice.set("오류: 하루 지출 한도를 0부터 1000000 사이의 정수로 입력하세요.")
+            return
+        self._send("spending-cap " + value)
 
     def _file(self, verb, path):
         if not path:

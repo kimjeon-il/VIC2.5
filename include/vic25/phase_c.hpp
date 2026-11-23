@@ -2995,6 +2995,47 @@ public:
                 -money_.balance(account(treasury,"revenue")),
                 money_.balance(account(treasury,"expense"))};
     }
+    // Scenario-defined civilian funding authority, not a universal
+    // appropriation power or a substitute for parliamentary approval.
+    void seed_civilian_spending_cap_authority(const std::string& country) {
+        ensure(stage_==-1&&commit_id_==0&&has_country_treasury(country)&&
+               p1_constitutions_.contains(country)&&p1_authority(country).direct_executive&&
+               p1_constitution(country).legislature==P1LegislatureKind::none&&
+               !civilian_spending_cap_grants_.contains(country),
+               "invalid civilian funding authority seed");
+        civilian_spending_cap_grants_.insert(country);
+    }
+    [[nodiscard]] bool has_civilian_spending_cap_authority(
+            const std::string& country)const {
+        return civilian_spending_cap_grants_.contains(country)&&
+               has_country_treasury(country)&&p1_constitutions_.contains(country)&&p1_authority(country).direct_executive&&
+               p1_constitution(country).legislature==P1LegislatureKind::none;
+    }
+    [[nodiscard]] std::optional<Money> civilian_spending_cap(
+            const std::string& country)const {
+        const auto cap=civilian_spending_caps_.find(country);
+        if(cap==civilian_spending_caps_.end())return std::nullopt;
+        return cap->second;
+    }
+    [[nodiscard]] std::optional<std::pair<std::int64_t,Money>>
+    pending_civilian_spending_cap(const std::string& country)const {
+        const auto cap=pending_civilian_spending_caps_.find(country);
+        if(cap==pending_civilian_spending_caps_.end())return std::nullopt;
+        return cap->second;
+    }
+    void propose_civilian_spending_cap(const std::string& country,
+            const std::string& proposer,Money daily_cap) {
+        require_stage({9});
+        ensure(daily_cap>=0,"invalid civilian spending cap");
+        ensure(has_civilian_spending_cap_authority(country)&&
+               government(country).prime_minister==proposer,
+               "unauthorized civilian spending cap");
+        ensure(!pending_civilian_spending_caps_.contains(country),
+               "duplicate pending civilian spending cap");
+        pending_civilian_spending_caps_.emplace(country,
+            std::pair{phaseb::add_checked(month(),1),daily_cap});
+        events_.push_back("civilian-spending-cap-scheduled:"+country);
+    }
     void spend_country_budget(const std::string& country,
                               const std::string& recipient,Money amount) {
         require_stage({5,7,8});
@@ -5398,6 +5439,16 @@ public:
                 ensure(governments_.contains(country)&&ppm>=0&&ppm<=1'000'000,
                        "invalid scheduled country tax rate");
         }
+        for(const auto& country:civilian_spending_cap_grants_)
+            ensure(has_country_treasury(country)&&p1_constitutions_.contains(country),
+                   "invalid civilian spending cap grant");
+        for(const auto& [country,cap]:civilian_spending_caps_)
+            ensure(civilian_spending_cap_grants_.contains(country)&&cap>=0,
+                   "invalid active civilian spending cap");
+        for(const auto& [country,cap]:pending_civilian_spending_caps_)
+            ensure(civilian_spending_cap_grants_.contains(country)&&cap.second>=0&&
+                   cap.first>=month()&&cap.first-month()<=1,
+                   "invalid dated civilian spending cap");
         std::set<std::string> assigned_treasuries;
         for(const auto& [country,wallet]:country_treasuries_)
             ensure(governments_.contains(country)&&actors_.contains(wallet)&&
@@ -5821,6 +5872,9 @@ private:
     // Country-scoped tax policies and treasury identities only; country cash,
     // loans and spending remain authoritative in the C financial ledger.
     std::map<std::string,int> country_income_tax_;
+    std::set<std::string> civilian_spending_cap_grants_;
+    std::map<std::string,Money> civilian_spending_caps_;
+    std::map<std::string,std::pair<std::int64_t,Money>> pending_civilian_spending_caps_;
     std::map<std::int64_t,std::map<std::string,int>> scheduled_country_income_tax_;
     std::map<std::string,std::string> country_treasuries_;
     bool conscription_enabled_{true};
@@ -6081,6 +6135,13 @@ private:
                 country_income_tax_[country]=ppm;
             }
             scheduled_country_income_tax_.erase(taxes);
+        }
+        for(auto it=pending_civilian_spending_caps_.begin();
+            it!=pending_civilian_spending_caps_.end();) {
+            if(it->second.first!=month()) { ++it; continue; }
+            civilian_spending_caps_[it->first]=it->second.second;
+            events_.push_back("civilian-spending-cap-effective:"+it->first);
+            it=pending_civilian_spending_caps_.erase(it);
         }
         for (auto& [key, cargo] : shipments_) {
             (void)key;

@@ -1,5 +1,6 @@
 #include "vic25/daily_snapshot.hpp"
 #include "vic25/p0_daily.hpp"
+#include <array>
 #include <charconv>
 #include <filesystem>
 #include <iomanip>
@@ -77,34 +78,50 @@ p0::Policies tutorial_policies(bool industry_trial=false) {
 }
 
 constexpr auto trial="tariff-v1";
+constexpr auto budget_scenario="budget-v1";
 constexpr auto trial_route="TRIAL-ORE";
 constexpr auto trial_seller="TRIAL-SELLER";
 constexpr auto trial_buyer="TRIAL-IMPORTER";
 constexpr auto trial_carrier="TRIAL-CARRIER";
 constexpr auto trial_good="ore";
 
-std::string trial_origin(std::string_view tag) {
-    return "trial:tariff-v1:"+std::string(tag);
+std::string trial_origin(std::string_view tag,bool budget=false) {
+    return std::string(budget?"trial:budget-v1:":"trial:tariff-v1:")+std::string(tag);
+}
+bool budget_world(const daily::World& world) {
+    return world.migration_origin().starts_with("trial:budget-v1:");
+}
+std::array<std::string,2> budget_providers(const std::string& tag) {
+    return {"PUBLIC-SERVICE-"+tag,"PUBLIC-PROGRAM-"+tag};
+}
+phasec::Money program_receipts(const phasec::IntegratedWorld& core,const std::string& tag) {
+    const auto providers=budget_providers(tag);
+    return phaseb::add_checked(core.firm_finance(providers[0]).receipts,
+                               core.firm_finance(providers[1]).receipts);
 }
 const char* trial_region(std::string_view tag) {return tag=="A"?"DISTRICT-A":"DISTRICT-B";}
 std::string_view other_country(std::string_view tag) {return tag=="A"?"B":"A";}
 phasegh::Id province(std::string_view tag) {return tag=="A"?1:2;}
 
-daily::World trial_world(const std::string& selected) {
+daily::World trial_world(const std::string& selected,bool budget) {
     using namespace phasec;
     phasegh::World engine{24000};
     auto& geo=engine.seed_geography();
-    geo.set_dataset(trial_origin(selected));
+    geo.set_dataset(trial_origin(selected,budget));
     auto& core=geo.seed_core().seed_core();
     for(const std::string tag:{"A","B"}) {
         const auto id=province(tag);
         geo.seed_province(id,trial_region(tag),tag);
         geo.seed_unit(id,tag,trial_region(tag));
         geo.seed_assignment(id,id);
-        core.seed_actor(tag,100);
+        core.seed_actor(tag,budget?200:100);
         core.seed_government(tag,"HEAD-"+tag,"PM-"+tag,5,3);
         core.seed_p1_constitution(tag,{P1GovernancePrinciple::monarchy,
             P1PowerDistribution::autocracy,P1LegislatureKind::none,"trial:constitution"});
+        if(budget) {
+            for(const auto& provider:budget_providers(tag))core.seed_actor(provider,0);
+            core.seed_civilian_spending_cap_authority(tag);
+        }
         core.p2_seed_base({"TRIAL-CUSTOMS-"+tag,tag,"trial_customs","national",
             "synthetic-import-ceiling","trial:customs-statute",P2NormTier::statute,
             {{"ore-tariff-ceiling",tag,P2ClauseKind::maximum_import_tariff_ppm,
@@ -126,37 +143,57 @@ daily::World trial_world(const std::string& selected) {
     edge.valid_from_month=24000;edge.valid_through_month=24011;
     engine.seed_transport_edge(edge);
     engine.seed_route({trial_route,trial_seller,trial_buyer,trial_good,from,to,31,1});
-    return daily::World::adopt(std::move(engine),2025,trial_origin(selected));
+    return daily::World::adopt(std::move(engine),2025,trial_origin(selected,budget));
 }
 
-p0::Policies trial_policies(const std::string& selected) {
+p0::Policies trial_policies(const std::string& selected,bool budget=false) {
     p0::Policies result;
     result.daily_food_units_per_person=0;
     result.monthly_clothing_units_per_person=0;
-    result.auto_national_budgets_from_actual_services=false;
+    result.auto_national_budgets_from_actual_services=budget;
     result.player_controlled_countries.insert(selected);
+    if(budget)
+        for(const std::string tag:{"A","B"}) {
+            const auto providers=budget_providers(tag);
+            result.public_budget.push_back({tag,providers[0],2,40});
+            result.public_budget.push_back({tag,providers[1],3,40});
+        }
     return result;
 }
 
-void verify_trial(const daily::World& world,const std::string& tag) {
+void verify_trial(const daily::World& world,const std::string& tag,bool budget) {
     const auto& engine=world.engine();
     const auto& routes=engine.commerce().routes;
     const auto it=routes.find(trial_route);
-    if(world.migration_origin()!=trial_origin(tag)||
-       engine.base().spatial().dataset_hash!=trial_origin(tag)||
+    if(world.migration_origin()!=trial_origin(tag,budget)||
+       engine.base().spatial().dataset_hash!=trial_origin(tag,budget)||
        routes.size()!=1||it==routes.end()||
        it->second.origin!=province(other_country(tag))||
        it->second.destination!=province(tag)||
        it->second.buyer!=trial_buyer||it->second.seller!=trial_seller||
        it->second.good!=trial_good)
         throw std::invalid_argument("checkpoint does not belong to the selected trial country");
+    if(budget) {
+        const auto& core=engine.base().core().core();
+        for(const std::string side:{"A","B"}) {
+            if(!core.has_country_treasury(side)||core.country_treasury(side)!=side||
+               !core.has_civilian_spending_cap_authority(side))
+                throw std::invalid_argument("checkpoint does not contain the spending trial authorities");
+            for(const auto& provider:budget_providers(side))
+                if(!core.has_actor(provider))
+                    throw std::invalid_argument("checkpoint does not contain the spending trial providers");
+        }
+    }
 }
 
-void trial_help() {
+void trial_help(bool budget) {
     std::cout<<"Commands: status | step [days] | tariff <percent> | income-tax <percent> | save <new path> | help | quit\n"
              <<"Set the selected country's import duty on ore (whole percent); a lawful order advances one day.\n"
              <<"A lawful income-tax order advances one day and takes effect at the opening of the next month.\n"
-             <<"Resume: vic25_play --trial tariff-v1 --country A|B --resume <save>\n";
+             <<"Resume: vic25_play --trial "<<(budget?budget_scenario:trial)
+             <<" --country A|B --resume <save>\n";
+    if(budget)
+        std::cout<<"spending-cap <amount>: schedule a daily public-program limit starting next month.\n";
 }
 
 std::string month_opening(std::int64_t month) {
@@ -190,7 +227,16 @@ void trial_status(const p0::DailyGame& game,const std::string& selected) {
              <<" pending_income_tax_date="<<(pending?month_opening(pending->first):"-")
              <<" paid_duty="<<duties
              <<" delivered_ore="<<c.stock(trial_buyer,trial_region(selected),trial_good)
-             <<" native_commit="<<engine.commit_id()<<'\n';
+             <<" native_commit="<<engine.commit_id();
+    if(budget_world(world)) {
+        const auto limit=c.civilian_spending_cap(selected);
+        const auto change=c.pending_civilian_spending_cap(selected);
+        std::cout<<" civilian_spending_cap="<<(limit?std::to_string(*limit):"-")
+                 <<" pending_civilian_spending_cap="<<(change?std::to_string(change->second):"-")
+                 <<" pending_civilian_spending_date="<<(change?month_opening(change->first):"-")
+                 <<" public_program_paid="<<program_receipts(c,selected);
+    }
+    std::cout<<'\n';
 }
 
 void help() {
@@ -284,15 +330,26 @@ void propose_trial_income_tax(p0::DailyGame& game,const std::string& tag,int per
     game.advance_day(order);
 }
 
+void propose_trial_spending_cap(p0::DailyGame& game,const std::string& tag,phasec::Money cap) {
+    if(!budget_world(game.world()))
+        throw std::invalid_argument("this trial has no public spending order");
+    phasegh::World::Plan order;
+    order[9].push_back([tag,cap](phasegh::Stage& stage){
+        auto& c=stage.phase_c();
+        c.propose_civilian_spending_cap(tag,c.government(tag).prime_minister,cap);
+    });
+    game.advance_day(order);
+}
+
 daily::World load_panel_checkpoint(const fs::path& resume) {
     if(!fs::is_regular_file(resume)||fs::file_size(resume)>850'000'000)
         throw std::invalid_argument("resume must use a regular file within the native save limit");
     return daily::SnapshotCodec::load(resume);
 }
 
-daily::World open_trial(const std::string& tag,const std::optional<fs::path>& resume) {
-    auto world=resume?load_panel_checkpoint(*resume):trial_world(tag);
-    verify_trial(world,tag);
+daily::World open_trial(const std::string& tag,const std::optional<fs::path>& resume,bool budget=false) {
+    auto world=resume?load_panel_checkpoint(*resume):trial_world(tag,budget);
+    verify_trial(world,tag,budget);
     return world;
 }
 
@@ -356,6 +413,16 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
            <<",\"ore_insufficient\":"<<(ore<per_batch?"true":"false")
            <<",\"public_works_cash\":"<<core.cash(works)<<'}';
         return out.str();
+    }
+    if(budget_world(world)) {
+        const auto cap=core.civilian_spending_cap(tag);
+        const auto change=core.pending_civilian_spending_cap(tag);
+        out<<",\"scenario\":"<<json_string(budget_scenario)
+           <<",\"civilian_spending_cap\":"<<(cap?std::to_string(*cap):"null")
+           <<",\"pending_civilian_spending_cap\":"<<(change?std::to_string(change->second):"null")
+           <<",\"pending_civilian_spending_date\":"<<(change?json_string(month_opening(change->first)):"null")
+           <<",\"public_program_paid\":"<<program_receipts(core,tag)
+           <<",\"peer_public_program_paid\":"<<program_receipts(core,std::string(other_country(tag)));
     }
     const auto& commerce=engine.commerce();
     const auto& tariffs=engine.diplomacy().tariffs;
@@ -434,17 +501,19 @@ void run_panel() {
             if(command=="quit"&&arg.empty())quit=true;
             else if(command=="status"&&arg.empty()) {}
             else if(command=="new"||command=="load") {
-                const auto [tag,path]=panel_token(arg);
+                const auto [choice,path]=panel_token(arg);
+                const bool budget=choice=="BUDGET-A"||choice=="BUDGET-B";
+                const auto tag=budget?choice.substr(7):choice;
                 if((tag!="A"&&tag!="B"&&tag!=country)||(command=="new"&&!path.empty()))
-                    throw std::invalid_argument("select trial country A, B, or TUT");
+                    throw std::invalid_argument("select A, B, TUT, BUDGET-A or BUDGET-B");
                 const auto resume=command=="load"?std::optional{checkpoint_path_utf8(path)}:std::nullopt;
                 const bool industry=tag==country;
-                auto next=industry?open_industry(resume):open_trial(std::string(tag),resume);
+                auto next=industry?open_industry(resume):open_trial(std::string(tag),resume,budget);
                 auto replacement=std::make_unique<Session>(Session{std::string(tag),
-                    p0::DailyGame(std::move(next),industry?tutorial_policies(true):trial_policies(std::string(tag)))});
+                    p0::DailyGame(std::move(next),industry?tutorial_policies(true):trial_policies(std::string(tag),budget))});
                 last_status=panel_status(replacement->game,replacement->tag);
                 session=std::move(replacement);
-            } else if(command=="step"||command=="tariff"||command=="income-tax"||command=="save") {
+            } else if(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="save") {
                 if(!session)throw std::invalid_argument("start or load a trial first");
                 if(command=="step") {
                     const auto days=command_number(arg,1,366);
@@ -464,9 +533,11 @@ void run_panel() {
                     if(session->tag==country)
                         throw std::invalid_argument("the industry trial has no income-tax order");
                     propose_trial_income_tax(session->game,session->tag,command_number(arg,0,100));
+                } else if(command=="spending-cap") {
+                    propose_trial_spending_cap(session->game,session->tag,command_number(arg,0,1'000'000));
                 } else save_new(session->game.world(),checkpoint_path_utf8(arg));
             } else throw std::invalid_argument("unknown or malformed panel command");
-            if(session&&(command=="step"||command=="tariff"||command=="income-tax"))
+            if(session&&(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"))
                 last_status=panel_status(session->game,session->tag);
             const auto reply="{\"ok\":true,\"status\":"+last_status+'}';
             std::cout<<reply<<std::endl;
@@ -496,10 +567,11 @@ void buy(p0::DailyGame& game,int quantity) {
 }
 
 void run(p0::DailyGame game,const std::optional<std::string>& selected={}) {
-    const auto show_help=[&] {if(selected)trial_help();else help();};
+    const auto show_help=[&] {if(selected)trial_help(budget_world(game.world()));else help();};
     const auto show_status=[&] {if(selected)trial_status(game,*selected);else status(game);};
     if(selected)
-        std::cout<<"VIC2.5 tariff-v1: synthetic two-country trial (not a historical campaign)\n";
+        std::cout<<"VIC2.5 "<<(budget_world(game.world())?budget_scenario:trial)
+                 <<": synthetic two-country trial (not a historical campaign)\n";
     else std::cout<<"VIC2.5 market-v1: synthetic market tutorial (not a historical campaign)\n";
     show_help();
     show_status();
@@ -529,6 +601,9 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={}) {
                 propose_trial_income_tax(game,*selected,command_number(arg,0,100));
                 std::cout<<"Income-tax change scheduled for the opening of the next month.\n";
                 show_status();
+            } else if(selected&&command=="spending-cap"&&!arg.empty()) {
+                propose_trial_spending_cap(game,*selected,command_number(arg,0,1'000'000));
+                show_status();
             } else if(command=="save"&&!arg.empty()) {
                 save_new(game.world(),checkpoint_path_utf8(arg));
                 std::cout<<"saved\n";
@@ -544,13 +619,13 @@ int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string_view(argv[1])=="--panel-stdio") {run_panel(); return 0;}
         std::optional<fs::path> resume;
-        bool explicit_tutorial=false,explicit_trial=false;
+        bool explicit_tutorial=false,explicit_trial=false,budget=false;
         std::optional<std::string> selected;
         for(int i=1;i<argc;++i) {
             const std::string_view flag(argv[i]);
             if(flag=="--help"&&argc==2) {
                 std::cout<<"Usage: vic25_play [--tutorial market-v1 [--resume <save>]]\n"
-                           "       vic25_play --trial tariff-v1 --country A|B [--resume <save>]\n";
+                           "       vic25_play --trial tariff-v1|budget-v1 --country A|B [--resume <save>]\n";
                 help();
                 return 0;
             }
@@ -560,8 +635,10 @@ int main(int argc,char** argv) {
                     throw std::invalid_argument("unknown tutorial; choose market-v1");
             } else if(flag=="--trial"&&!explicit_trial&&i+1<argc) {
                 explicit_trial=true;
-                if(std::string_view(argv[++i])!=trial)
-                    throw std::invalid_argument("unknown trial; choose tariff-v1");
+                const std::string_view name(argv[++i]);
+                budget=name==budget_scenario;
+                if(name!=trial&&!budget)
+                    throw std::invalid_argument("unknown trial; choose tariff-v1 or budget-v1");
             } else if(flag=="--country"&&!selected&&i+1<argc) {
                 selected=argv[++i];
                 if(*selected!="A"&&*selected!="B")
@@ -571,14 +648,14 @@ int main(int argc,char** argv) {
             } else throw std::invalid_argument("invalid launch argument; use --help");
         }
         if(explicit_trial!=selected.has_value()||(explicit_trial&&explicit_tutorial))
-            throw std::invalid_argument("choose --trial tariff-v1 --country A|B separately from --tutorial");
+            throw std::invalid_argument("choose --trial tariff-v1 or budget-v1 with --country A|B separately from --tutorial");
         if(resume&&!explicit_tutorial&&!explicit_trial)
             throw std::invalid_argument("resume requires --tutorial market-v1");
         if(resume&&(!fs::is_regular_file(*resume)||fs::file_size(*resume)>850'000'000))
             throw std::invalid_argument("resume must use a regular file within the native save limit");
         if(selected) {
-            auto world=open_trial(*selected,resume);
-            run(p0::DailyGame(std::move(world),trial_policies(*selected)),selected);
+            auto world=open_trial(*selected,resume,budget);
+            run(p0::DailyGame(std::move(world),trial_policies(*selected,budget)),selected);
             return 0;
         }
         auto world=resume?daily::SnapshotCodec::load(*resume):tutorial_world();

@@ -1256,6 +1256,101 @@ static void automatic_program_finance_requires_an_actual_distinct_payee() {
           "explicit freeze and balanced legal debt must remain authoritative");
 }
 
+static void dated_civilian_cap_limits_combined_real_cash_payments() {
+    const auto core=[](const p0::DailyGame& x)->const phasec::IntegratedWorld& {
+        return x.world().engine().base().core().core();
+    };
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    auto& c=geo.seed_core().seed_core();
+    p0::Policies policy;
+    policy.daily_food_units_per_person=0;
+    unsigned id=0;
+    for(const std::string tag:{"A","B","C"}) {
+        ++id;
+        geo.seed_province(id,"R"+tag,tag);
+        geo.seed_unit(id,tag,"R"+tag);
+        geo.seed_assignment(id,id);
+        c.seed_actor(tag,1000);
+        c.seed_government(tag,tag+"-HEAD",tag+"-PM",5,3);
+        c.seed_p1_constitution(tag,{phasec::P1GovernancePrinciple::monarchy,
+            phasec::P1PowerDistribution::autocracy,phasec::P1LegislatureKind::none,
+            "fixture:direct executive"});
+        c.p1_mark_player_country(tag,true);
+        if(tag!="B")c.seed_civilian_spending_cap_authority(tag);
+        for(const std::string suffix:{"-X","-Y"}) {
+            c.seed_actor(tag+suffix,0);
+            policy.public_budget.push_back({tag,tag+suffix,2,0});
+        }
+    }
+    policy.national_budget_envelopes.push_back({"C",1,3,0,1,1,0,0,365,false,true});
+    p0::DailyGame game(daily::World::adopt(std::move(gh),205),policy);
+    const auto command=[](phasec::Money cap,bool first) {
+        phasegh::World::Plan plan;
+        plan[9].push_back([=](phasegh::Stage& stage) {
+            stage.phase_c().propose_civilian_spending_cap("A","A-PM",cap);
+            if(first)stage.phase_c().propose_civilian_spending_cap("C","C-PM",0);
+        });
+        return plan;
+    };
+    const auto reject=[&](const std::string& country,const std::string& pm,
+                          phasec::Money cap,const char* reason) {
+        const auto before=daily::SnapshotCodec::encode(game.world());
+        phasegh::World::Plan request;
+        request[9].push_back([=](phasegh::Stage& stage) {
+            stage.phase_c().propose_civilian_spending_cap(country,pm,cap);
+        });
+        bool caught=false;
+        try { game.advance_day(request); }
+        catch(const std::exception& e) {
+            caught=std::string_view(e.what()).find(reason)!=std::string_view::npos;
+        }
+        check(caught&&daily::SnapshotCodec::encode(game.world())==before,
+              "invalid cap unexpectedly moved any treasury or calendar");
+    };
+    reject("A","A-PM",-1,"invalid civilian spending cap");
+    reject("A","B-PM",3,"unauthorized civilian spending cap");
+    reject("B","B-PM",3,"unauthorized civilian spending cap");
+    game.advance_day(command(3,true));
+    reject("A","A-PM",0,"duplicate pending civilian spending cap");
+    check(core(game).cash("A")==996&&core(game).cash("B")==996&&
+          core(game).cash("C")==997,"next-month cap changed today's actual cash");
+    while(game.world().date()<daily::Date{2000,2,1})game.advance_day();
+    const auto saved=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(saved),policy);
+    check(core(replay).has_civilian_spending_cap_authority("A")&&
+          !core(replay).has_civilian_spending_cap_authority("B")&&
+          !core(replay).civilian_spending_cap("A")&&
+          core(replay).pending_civilian_spending_cap("A")==
+              std::pair{core(replay).month(),phasec::Money{3}},
+          "unprocessed first of month must retain the authoritative pending cap");
+    game.advance_day(command(0,false));replay.advance_day(command(0,false));
+    const auto& c1=core(game);
+    check(c1.civilian_spending_cap("A")==3&&c1.civilian_spending_cap("C")==0&&
+          c1.pending_civilian_spending_cap("A")==
+              std::pair{c1.month()+1,phasec::Money{0}}&&c1.cash("A")==873&&c1.cash("A-X")==64&&c1.cash("A-Y")==63&&
+          c1.cash("B")==872&&c1.cash("B-X")==64&&c1.cash("B-Y")==64&&
+          c1.cash("C")==904&&c1.cash("C-X")==64&&c1.cash("C-Y")==32,
+          "civilian cap failed to bind two real payees to one sovereign envelope");
+    while(game.world().date()<daily::Date{2000,3,1}) {
+        game.advance_day();replay.advance_day();
+    }
+    const auto last=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame march(daily::SnapshotCodec::decode(last),policy);
+    const auto before_a=core(game).country_fiscal("A");
+    const auto before_b=core(game).cash("B");
+    const auto before_c=core(game).cash("C");
+    game.advance_day();replay.advance_day();march.advance_day();
+    const auto& after=core(game);
+    check(after.cash("A")==before_a.cash&&
+          after.country_fiscal("A").realized_expenditure==before_a.realized_expenditure&&
+          after.cash("B")==before_b-4&&after.cash("C")==before_c-3&&
+          after.sovereign_bonds().empty()&&after.financial().balanced()&&
+          daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world())&&
+          daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(march.world()),
+          "zero cap escaped daily envelope, touched rival cash, or failed save replay");
+}
+
 static void known_birthdays_change_actual_daily_staffing_and_payroll(int mode=0) {
     using namespace vic25;
     constexpr std::int64_t start=24000;
@@ -1489,6 +1584,7 @@ int main(){
     try{
         known_future_month_birthday_does_not_end_opening_job_early();
         known_future_month_birthday_does_not_end_opening_job_early(true);
+        dated_civilian_cap_limits_combined_real_cash_payments();
         known_birthdays_change_actual_daily_staffing_and_payroll();
         known_birthdays_change_actual_daily_staffing_and_payroll(1);
         known_birthdays_change_actual_daily_staffing_and_payroll(2);

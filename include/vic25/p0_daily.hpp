@@ -1387,6 +1387,10 @@ public:
                         fiscal.unpaid_coupons,
                         c.matured_sovereign_bond_principal(country,today));
                     if(real_need<=0&&debt_service<=0)continue;
+                    // Preserve the zero envelope for otherwise payable
+                    // programs; absence would bypass the shared Stage5 cap.
+                    if(const auto cap=c.civilian_spending_cap(country))
+                        real_need=std::min(real_need,*cap);
                     const Money observed_receipts=std::max<Money>(
                         0,fiscal.realized_revenue);
                     // The cumulative borrowing ceiling is anchored to
