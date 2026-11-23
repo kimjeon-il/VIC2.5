@@ -596,6 +596,171 @@ static void self_funded_expansion_commissions_and_sells_real_output() {
     }
 }
 
+static void sale_funded_expansion_adds_a_real_taxpaying_worker() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","STATE");geo.seed_unit(1,"STATE","DISTRICT");
+    geo.seed_assignment(1,1);
+    auto& industrial=geo.seed_core();
+    auto& c=industrial.seed_core();
+    c.seed_actor("STATE",0);c.seed_actor("MAKER",30);c.seed_actor("BUILDER",1000);
+    c.seed_government("STATE","HEAD","PM",5,3);
+    c.seed_market("R","food",25,25,25);c.seed_market("R","ore",1,1,1);
+    c.seed_market("R","steel",1,1,1);
+    c.seed_production_facility("EXISTING","MAKER","R",31);
+    c.seed_stock("MAKER","R","ore",31);c.seed_stock("BUILDER","R","steel",8);
+    auto add_worker=[&](const std::string& owner,const std::string& family,phasec::Money wage) {
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"R",family,"shared",1});
+        const auto e=pop.economic_profile({"R","worker","wage","employee",pop.default_education()});
+        const auto d=pop.demographic_profile({"R",23700,phaseb::Sex::female,
+            "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+        const auto resident=pop.seed_population(d,e,h,1);
+        const auto wallet="HH:"+std::to_string(h);
+        c.seed_actor(wallet,0);
+        if(wage>0)pop.hire(resident,1,owner,"worker",wage*31,{});
+        return std::pair{resident,wallet};
+    };
+    const auto worker=add_worker("MAKER","maker",10);
+    const auto idle=add_worker("MAKER","previously-idle",0);
+    const auto buyer=add_worker("BUILDER","buyer",60);
+    const auto helper=add_worker("BUILDER","builder",10);
+    phased::ConstructionProject original;
+    original.id="FARM_TEMPLATE";original.client="MAKER";original.contractor="BUILDER";
+    original.region="R";original.target_site="EXISTING";original.material_good="steel";
+    original.work_required=original.material_per_work=original.workers_per_work=1;
+    original.cash_price_per_work=30;original.target_capacity=31;
+    original.accepted_work=original.paid_work=original.capitalized_work=1;
+    original.capitalized_value=30;original.commissioned=true;
+    industrial.seed_construction(original);
+    phased::IndustryRecipe method;
+    method.id="FOOD";method.site="EXISTING";method.inputs={{"ore",1}};
+    method.outputs={{"food",1}};method.workers_per_batch=method.capacity_per_batch=1;
+    industrial.seed_recipe(method);
+    p0::Policies policy;
+    policy.daily_food_units_per_person=3;policy.monthly_clothing_units_per_person=0;
+    policy.allow_endogenous_input_procurement=false;
+    policy.allow_endogenous_investment_credit=false;
+    policy.allow_collateralized_enterprise_credit=false;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),54),policy);
+    auto staff_disabled=policy;
+    staff_disabled.allow_endogenous_staffing=false;
+    auto no_hire=p0::DailyGame(
+        daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(game.world())),
+        staff_disabled);
+    std::optional<p0::DailyGame> replay;
+    std::string new_project,new_site,new_recipe;
+    Quantity previous_batches=0,previous_food=0;
+    phasec::Money previous_receipts=0;
+    bool saw_unpaid_draft=false,saw_paid_work=false,saw_sold_new_output=false;
+    int idle_paid_days=0;
+    for(int tick=1;tick<=12;++tick) {
+        game.advance_day();
+        no_hire.advance_day();
+        const auto& disabled_domain=no_hire.world().engine().base().core();
+        const auto& disabled=disabled_domain.core();
+        check(disabled.people().jobs().size()==3 &&
+              !disabled.people().job(idle.first) &&
+              disabled.cash("STATE")==8*tick,
+              "recipe comparison must not bypass the disabled hiring policy");
+        if(replay) {
+            replay->advance_day();
+            check(daily::SnapshotCodec::encode(game.world())==
+                  daily::SnapshotCodec::encode(replay->world()),
+                  "precommission expansion save replay changed real future transactions");
+        }
+        const auto& domain=game.world().engine().base().core();
+        const auto& live=domain.core();
+        const auto maker=live.firm_finance("MAKER");
+        const auto& jobs=live.people().jobs();
+        const auto new_job=jobs.find(idle.first);
+        const bool hired=new_job!=jobs.end();
+        if(hired) {
+            check(new_job->second.employer=="MAKER" &&
+                  !new_project.empty()&&domain.construction(new_project).commissioned,
+                  "the formerly idle POP must fill commissioned production demand");
+            if(new_job->second.wage_per_month!=310)
+                throw std::runtime_error("new hire did not receive the funded regional wage: "+
+                    std::to_string(new_job->second.wage_per_month));
+            ++idle_paid_days;
+        }
+        check(jobs.size()==static_cast<std::size_t>(3+(hired?1:0)) &&
+              jobs.at(worker.first).employer=="MAKER" &&
+              jobs.at(buyer.first).employer=="BUILDER" &&
+              jobs.at(helper.first).employer=="BUILDER",
+              "new employment must not transfer an existing job");
+        check(live.cash(idle.second)==9*idle_paid_days &&
+              live.cash("STATE")==8*tick+idle_paid_days,
+              "new employee net pay and actual national income tax must accrue");
+        const auto total=live.cash("MAKER")+live.cash("BUILDER")+live.cash("STATE")+
+            live.cash(worker.second)+live.cash(idle.second)+
+            live.cash(buyer.second)+live.cash(helper.second);
+        check(total==1030&&maker.outstanding_wages==0&&live.outstanding_loan("MAKER")==0,
+              "hire and expansion must conserve total real cash without a new loan or arrear");
+        Quantity batches=0,new_batches=0;
+        for(const auto& r:domain.state().actual_production_runs) {
+            batches+=r.batches;
+            if(!new_recipe.empty()&&r.recipe==new_recipe)new_batches+=r.batches;
+        }
+        if(new_project.empty())
+            for(const auto& [id,project]:domain.state().constructions)
+                if(id.starts_with("AUTO:PROJECT:")) {
+                    new_project=id;new_site=project.target_site;
+                    for(const auto& [rid,recipe]:domain.state().recipes)
+                        if(recipe.site==new_site)new_recipe=rid;
+                    check(!new_recipe.empty()&&maker.receipts>0&&!hired&&
+                          project.paid_work==0&&!live.facilities().contains(new_site),
+                          "autonomous draft preceded observed revenue or created a free plant");
+                    saw_unpaid_draft=true;
+                }
+        check(maker.receipts%25==0&&
+              live.stock("MAKER","R","food")+maker.receipts/25==batches&&
+              live.stock("MAKER","R","ore")+batches==31,
+              "real food purchases and physical production did not reconcile");
+        const auto paid_capex=new_project.empty()?0:
+            domain.construction(new_project).paid_work*30;
+        check(maker.cash==30+maker.receipts-10*tick-10*idle_paid_days-paid_capex&&
+              live.cash("BUILDER")==1000-70*tick+paid_capex,
+              "payroll, sales and paid construction must balance on original wallets");
+        if(tick==1)
+            check(maker.receipts==25 && live.cash(buyer.second)==29 &&
+                  !hired && paid_capex==0,
+                  "real wage-funded food purchase must precede expansion and recruitment");
+        if(!new_project.empty()) {
+            const auto& project=domain.construction(new_project);
+            if(project.paid_work>0&&!saw_paid_work) {
+                check(project.paid_work==1&&project.capitalized_value==30&&
+                      live.stock("BUILDER","R","steel")==7&&!project.commissioned&&
+                      !live.facilities().contains(new_site),
+                      "paid work must consume material and capitalize before any new plant exists");
+                saw_paid_work=true;
+                const auto save=daily::SnapshotCodec::encode(game.world());
+                replay.emplace(daily::SnapshotCodec::decode(save),policy);
+                check(daily::SnapshotCodec::encode(replay->world())==save,
+                      "precommission project checkpoint changed on reload");
+            }
+            if(new_batches>0) {
+                check(project.commissioned&&live.facility(new_site).owner=="MAKER"&&
+                      saw_paid_work&&previous_food==0&&
+                      live.stock("MAKER","R","food")==0&&
+                      maker.receipts-previous_receipts==50&&batches-previous_batches==2&&hired,
+                      "newly commissioned plant did not add actually sold output");
+                check(disabled_domain.construction(new_project).commissioned &&
+                      disabled.phase_d_workforce("MAKER")==1 &&
+                      disabled.firm_finance("MAKER").receipts+25==maker.receipts,
+                      "commissioning alone must not create additional labor or sales");
+                saw_sold_new_output=true;
+                break;
+            }
+        }
+        previous_batches=batches;
+        previous_food=live.stock("MAKER","R","food");
+        previous_receipts=maker.receipts;
+    }
+    check(saw_unpaid_draft&&saw_paid_work&&saw_sold_new_output&&idle_paid_days>0,
+          "actual earnings must finance expansion, additional output and a new paid job");
+}
+
 int main() {
     try {
         quote_requires_real_supply_and_verified_route();
@@ -605,6 +770,7 @@ int main() {
         selected_recipe_drives_production_hiring_and_restock(true);
         sales_fund_expansion_on_an_ordinary_day();
         self_funded_expansion_commissions_and_sells_real_output();
+        sale_funded_expansion_adds_a_real_taxpaying_worker();
         std::cout<<"P2 enterprise market/logistics/secured construction cases PASS\n";
         return 0;
     }catch(const std::exception& e) {

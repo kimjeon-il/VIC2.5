@@ -1523,7 +1523,7 @@ static void explicit_and_automatic_dues_keep_live_payment_priority() {
 
 
 static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
-    const auto build=[](bool expires) {
+    const auto build=[](bool expires,bool replacement=false) {
         phasegh::World gh(24000);
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"SOURCE","A");
@@ -1535,6 +1535,7 @@ static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
         auto& c=d.seed_core();
         for(const auto* actor:{"A","B","MINE","RAIL"})c.seed_actor(actor,0);
         c.seed_actor("FACTORY",4000);
+        if(replacement)c.seed_actor("NEW-RAIL",0);
         c.seed_government("A","HEAD-A","PM-A",5,3);
         c.seed_government("B","HEAD-B","PM-B",5,3);
         c.seed_market("SOURCE","ore",10,10,10);
@@ -1565,8 +1566,14 @@ static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
         rail.id="sole-service";rail.carrier="RAIL";rail.from=1;rail.to=2;
         rail.monthly_capacity=62;rail.freight_per_unit=1;rail.transit_days=2;
         rail.mode="rail";rail.evidence_id="fixture:dated-rail-service";
-        rail.valid_from_month=24000;rail.valid_through_month=expires?24000:24001;
+        rail.valid_from_month=24000;rail.valid_through_month=expires?24000:24002;
         gh.seed_transport_edge(rail);
+        if(replacement) {
+            rail.id="replacement-service";rail.carrier="NEW-RAIL";
+            rail.freight_per_unit=3;rail.evidence_id="fixture:replacement-dated-rail-service";
+            rail.valid_from_month=rail.valid_through_month=24002;
+            gh.seed_transport_edge(rail);
+        }
         gh.seed_route({"ORE","MINE","FACTORY","ore",1,2,62,1});
 
         p0::Policies rules;
@@ -1580,6 +1587,7 @@ static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
     };
     auto [open,buyer]=build(false);
     auto [cut,cut_buyer]=build(true);
+    auto [recover,recover_buyer]=build(true,true);
     const auto tools_batches=[](const p0::DailyGame& g) {
         Quantity n=0;
         for(const auto& run:g.world().engine().base().core().state().actual_production_runs)
@@ -1589,7 +1597,7 @@ static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
     const auto& freight=[](const p0::DailyGame& g) -> const phasegh::TradeState& {
         return g.world().engine().commerce();
     };
-    for(int i=0;i<31;++i){open.advance_day();cut.advance_day();}
+    for(int i=0;i<31;++i){open.advance_day();cut.advance_day();recover.advance_day();}
     const auto old_batches=tools_batches(cut);
     const auto old_fills=freight(cut).fills.size();
     require_test(cut.world().date()==daily::Date{2000,2,1} && cut_buyer==buyer &&
@@ -1601,15 +1609,30 @@ static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
                  c(cut).cash(buyer)<10000 && c(cut).cash("MINE")>0 &&
                  c(cut).cash("RAIL")>0,
                  "both operating lines must have paid cargo, actual tools and household fulfillment");
+    require_test(recover_buyer==buyer && tools_batches(recover)==old_batches &&
+                 freight(recover).fills.size()==old_fills &&
+                 !freight(recover).daily_shipments.empty() &&
+                 c(recover).cash(buyer)==c(cut).cash(buyer) &&
+                 c(recover).cash("NEW-RAIL")==0,
+                 "dormant March service must not change paid January freight");
+    auto replay=p0::DailyGame(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(recover.world())),recover.policies());
+    const auto step_recovery=[&](const phasegh::World::Plan& audit={}) {
+        recover.advance_day(audit);replay.advance_day(audit);
+        require_test(c(recover).financial().balanced() &&
+                     daily::SnapshotCodec::encode(recover.world())==
+                     daily::SnapshotCodec::encode(replay.world()),
+                     "freight expiry and replacement must replay on the original ledger");
+    };
     const auto closing_customer_cash=c(cut).cash(buyer);
     const auto old_in_flight=freight(cut).daily_shipments.size();
-    cut.advance_day();open.advance_day();
+    cut.advance_day();open.advance_day();step_recovery();
     require_test(freight(cut).daily_shipments.size()<old_in_flight &&
                  freight(cut).fills.size()==old_fills &&
                  tools_batches(cut)>old_batches &&
                  c(cut).cash(buyer)<closing_customer_cash,
                  "expiry must honor in-flight cargo and sale without dispatching new goods");
-    for(int i=0;i<7;++i){open.advance_day();cut.advance_day();}
+    for(int i=0;i<7;++i){open.advance_day();cut.advance_day();step_recovery();}
     require_test(freight(cut).daily_shipments.empty() &&
                  freight(cut).fills.size()==old_fills &&
                  freight(open).fills.size()>old_fills &&
@@ -1621,6 +1644,77 @@ static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
                      "PORT","tools",open.world().day_index())==0 &&
                  c(cut).market("PORT","tools").price>c(open).market("PORT","tools").price,
                  "loss of the sole real link must cut production and paid sales, and raise the solvent shortage price");
+
+    while(recover.world().date()<daily::Date{2000,3,1}) {
+        cut.advance_day();step_recovery();
+        require_test(tools_batches(recover)==tools_batches(cut) &&
+                     freight(recover).fills.size()==old_fills &&
+                     freight(recover).daily_shipments.empty() &&
+                     c(recover).cash(buyer)==c(cut).cash(buyer) &&
+                     c(recover).cash("NEW-RAIL")==0,
+                     "February customers cannot buy output from a replacement freight service that is still closed");
+    }
+    const auto drought_batches=tools_batches(recover);
+    const auto drought_cash=c(recover).cash(buyer);
+    const auto drought_receipts=c(recover).firm_finance("FACTORY").receipts;
+    const auto old_carrier_cash=c(recover).cash("RAIL");
+    const auto seller_cash=c(recover).cash("MINE");
+    const auto seller_ore=c(recover).stock("MINE","SOURCE","ore");
+    const auto departure_day=recover.world().day_index();
+    step_recovery();cut.advance_day();
+    require_test(freight(recover).fills.size()==old_fills+1 &&
+                 freight(recover).daily_shipments.size()==1,
+                 "opening the verified replacement must create exactly one real paid departure");
+    const auto& fill=freight(recover).fills.back();
+    const auto& pending=freight(recover).daily_shipments.at(fill.execution_id);
+    const auto fill_id=fill.execution_id;
+    const auto arrival_day=pending.arrival_day;
+    const auto transit_holder="TRANSIT:DAY:"+pending.current_leg_id;
+    require_test(fill.physical_path==std::vector<std::string>{"replacement-service"} &&
+                 fill.shipped && fill.quantity==2 && fill.goods_value==20 && fill.freight_paid==6 &&
+                 arrival_day==departure_day+2 &&
+                 c(recover).cash("MINE")==seller_cash+20 &&
+                 c(recover).cash("RAIL")==old_carrier_cash &&
+                 c(recover).cash("NEW-RAIL")==6 &&
+                 c(recover).stock("MINE","SOURCE","ore")==seller_ore-2 &&
+                 c(recover).stock(transit_holder,"in_transit","ore")==2 &&
+                 c(recover).stock("FACTORY","PORT","ore")==0 &&
+                 tools_batches(recover)==drought_batches &&
+                 c(recover).cash(buyer)==drought_cash,
+                 "paid replacement cargo must exist in transit, never at the factory before arrival");
+    // Reload after the replacement actually departed, not only before expiry.
+    replay=p0::DailyGame(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(recover.world())),recover.policies());
+    while(recover.world().day_index()<arrival_day) {
+        step_recovery();cut.advance_day();
+        require_test(c(recover).stock(transit_holder,"in_transit","ore")==2 &&
+                     c(recover).stock("FACTORY","PORT","ore")==0 &&
+                     tools_batches(recover)==drought_batches &&
+                     c(recover).cash(buyer)==drought_cash,
+                     "in-transit replacement material must not relieve the real factory or customer shortage");
+    }
+    const auto paid_price=c(recover).market("PORT","tools").price;
+    phasegh::World::Plan audit;
+    audit[1].push_back([transit_holder](phasegh::Stage& stage){
+        const auto& core=stage.phase_c();
+        require_test(core.stock(transit_holder,"in_transit","ore")==0 &&
+                     core.stock("FACTORY","PORT","ore")==2,
+                     "the replacement must deliver its physical ore before using it in manufacturing");
+    });
+    audit[8].push_back([](phasegh::Stage& stage){
+        require_test(stage.phase_c().market("PORT","tools").delivered==2,
+                     "both previously unsatisfied customers must receive real finished tools");
+    });
+    step_recovery(audit);cut.advance_day();
+    require_test(!freight(recover).daily_shipments.contains(fill_id) &&
+                 tools_batches(recover)==drought_batches+1 &&
+                 c(recover).stock("FACTORY","PORT","ore")==0 &&
+                 c(recover).firm_finance("FACTORY").receipts==drought_receipts+2*paid_price &&
+                 c(recover).cash(buyer)==drought_cash-2*paid_price &&
+                 c(recover).previous_daily_solvent_unmet("PORT","tools",recover.world().day_index())==0 &&
+                 tools_batches(cut)==drought_batches && c(cut).cash(buyer)==drought_cash &&
+                 c(cut).previous_daily_solvent_unmet("PORT","tools",cut.world().day_index())==2,
+                 "only genuine arrival may restore actual production, consumer deliveries and factory receipts");
 }
 
 static void producer_import_counts_real_on_site_and_inbound_stock_once() {

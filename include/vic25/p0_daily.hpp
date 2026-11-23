@@ -1087,39 +1087,6 @@ public:
         std::set<std::string> planned_operating_recipes;
         for(const auto& policy:decisions.manufacturers)
             planned_operating_recipes.insert(policy.recipe);
-        // Hire from real regional POP only where an operating recipe
-        // demonstrates demand and a locally observed wage. No worker spawn.
-        if(decisions.allow_autonomous_recipe_comparison) {
-            std::map<std::pair<std::string,std::string>,People> wanted_by_owner;
-            for(const auto& policy:decisions.manufacturers) {
-                if(!autonomous_operating_recipes.contains(policy.recipe))continue;
-                const auto& recipe=industry.recipes.at(policy.recipe);
-                const auto& f=game_c.facility(recipe.site);
-                if(game_c.firm_bankrupt(f.owner))continue;
-                const auto key=std::make_pair(f.owner,f.region);
-                wanted_by_owner[key]=phaseb::add_checked(
-                    wanted_by_owner[key],recipe.workers_per_batch);
-            }
-            for(const auto& [key,wanted]:wanted_by_owner) {
-                const auto& [employer,region]=key;
-                if(std::any_of(decisions.staffing.begin(),decisions.staffing.end(),
-                     [&](const Staffing& p){return p.employer==employer &&
-                                                    p.region==region;}) ||
-                   game_c.phase_d_workforce(employer)>=wanted ||
-                   game_c.phase_d_cash_available(employer)<=0)
-                    continue;
-                Money monthly_wage=0;
-                for(const auto& [id,job]:game_c.people().jobs()) {
-                    if(job.count<=0||job.wage_per_month<=0)continue;
-                    const auto& slice=game_c.people().slice(id);
-                    if(game_c.people().demographic(slice.key.demographic).region==region)
-                        monthly_wage=std::max(monthly_wage,job.wage_per_month);
-                }
-                if(monthly_wage<=0)continue; // no invented wage observations
-                decisions.staffing.push_back(
-                    Staffing{employer,region,wanted,monthly_wage});
-            }
-        }
         std::set<std::string> autonomous_extractors;
         for(const auto& [id,site]:industry.resource_sites) {
             if(std::any_of(decisions.extractors.begin(),
@@ -1149,7 +1116,9 @@ public:
         if(decisions.allow_endogenous_staffing) {
             // A commissioned site may recruit from the existing unemployed
             // POP pool. The monthly capacity is prorated to a day; no worker,
-            // employer deposit or labor contract is manufactured.
+            // employer deposit or labor contract is manufactured. Both chosen
+            // and explicitly selected recipes use this one funded hiring
+            // path; enabling recipe comparison never overrides staffing.
             std::map<std::tuple<std::string,std::string,std::string>,People> site_jobs;
             std::map<std::pair<std::string,std::string>,Money> regional_wages;
             for(const auto& recipe_id:planned_operating_recipes) {
