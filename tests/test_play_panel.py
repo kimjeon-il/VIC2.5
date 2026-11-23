@@ -23,6 +23,7 @@ def wait(root, panel):
 def run(exe):
     assert play_panel.PlayPanel._protocol_tag("공장 시범판") == "TUT"
     assert play_panel.PlayPanel._protocol_tag("A 입법 시범판") == "LAW-A"
+    assert play_panel.PlayPanel._protocol_tag("A 교육 시범판") == "EDU-A"
     root = tk.Tk()
     panel = play_panel.PlayPanel(root, exe)
     try:
@@ -108,6 +109,8 @@ def run(exe):
             assert "준공" in panel.budget.get()
             run_industry(root, panel, save)
             run_elected_bill(root, panel, Path(directory) / "선출 의회 공포 대기.vic25")
+            run_elected_bill(root, panel, Path(directory) / "교육 법안 공포 대기.vic25",
+                             choice="A 교육 시범판")
     finally:
         panel.close()
         stop = monotonic() + 3
@@ -161,11 +164,13 @@ def run_income_tax(root, panel, save):
     assert panel.tax_button.instate(["!disabled"])
 
 
-def run_elected_bill(root, panel, save):
-    panel.country.set("A 입법 시범판")
+def run_elected_bill(root, panel, save, choice="A 입법 시범판"):
+    education = choice == "A 교육 시범판"
+    scenario = "education-v1" if education else "law-v1"
+    panel.country.set(choice)
     panel.new_button.invoke()
     wait(root, panel)
-    assert panel.current["scenario"] == "law-v1"
+    assert panel.current["scenario"] == scenario
     assert not panel.tax_button.winfo_ismapped() and not panel.tariff_button.winfo_ismapped()
     for _ in range(4):
         if panel.current["law_bill"]["seats"]:
@@ -183,7 +188,7 @@ def run_elected_bill(root, panel, save):
     panel.country.set("B")  # Prospective chooser must not change the incumbent trial.
     panel.law_action_button.invoke()
     wait(root, panel)
-    assert panel.current["country"] == "A" and panel.current["scenario"] == "law-v1"
+    assert panel.current["country"] == "A" and panel.current["scenario"] == scenario
     assert panel.current["law_bill"]["phase"] == "submitted"
     for _ in range(12):
         bill = panel.current["law_bill"]
@@ -219,7 +224,8 @@ def run_elected_bill(root, panel, save):
     pending = panel.current
     assert pending["law_bill"]["phase"] == "promulgated"
     assert pending["law_bill"]["effective_date"] in panel.policy.get()
-    assert pending["minimum_monthly_contract_wage"] == opening["minimum_monthly_contract_wage"]
+    if not education:
+        assert pending["minimum_monthly_contract_wage"] == opening["minimum_monthly_contract_wage"]
     assert panel.law_action_button.cget("text") == "시행일까지 진행"
     assert panel.law_action_button.instate(["!disabled"])
     with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
@@ -227,18 +233,31 @@ def run_elected_bill(root, panel, save):
         wait(root, panel)
         assert save.is_file()
     with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
-        panel.country.set("A 입법 시범판")
+        panel.country.set(choice)
         panel.load_button.invoke()
         wait(root, panel)
-        assert panel.current == pending and panel.country.get() == "A 입법 시범판"
+        assert panel.current == pending and panel.country.get() == choice
     today = date.fromisoformat(pending["date"])
     effective = date.fromisoformat(pending["law_bill"]["effective_date"])
     assert effective >= today
     panel.law_action_button.invoke()
     wait(root, panel)
     assert panel.current["law_bill"]["phase"] == "effective"
-    assert panel.current["minimum_monthly_contract_wage"] == 62
-    assert "월 최저임금: 62" in panel.policy.get()
+    if education:
+        values = panel.current["education"]
+        assert values["local_staff"] > 0
+        assert f"현지 운영 인력: {values['local_staff']}명" in panel.market.get()
+        assert values["usable_slots"] > 0
+        assert values["school_primary"] > values["comparison_primary"] > 0
+        assert values["staff_cash"] > opening["education"]["staff_cash"]
+        assert f"운영 가능 정원: {values['usable_slots']}" in panel.market.get()
+        assert f"학교 운영자 잔액: {values['operator_cash']}" in panel.market.get()
+        assert f"운영 인력 지갑 잔액: {values['staff_cash']}" in panel.market.get()
+        assert f"학교 지역: {values['school_primary']}명" in panel.diplomacy.get()
+        assert f"비편입 비교 지역: {values['comparison_primary']}명" in panel.diplomacy.get()
+    else:
+        assert panel.current["minimum_monthly_contract_wage"] == 62
+        assert "월 최저임금: 62" in panel.policy.get()
 
 
 def run_industry(root, panel, tariff_save):

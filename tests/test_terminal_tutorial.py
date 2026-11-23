@@ -433,6 +433,71 @@ def main():
                 effective_law.read_bytes() == replayed_law.read_bytes(),
                 "law scenario cross-load, pending reopening, or exact paid replay failed")
 
+        # The school trial shares real elected legislation and adds no
+        # independent enrollment, classroom, or education wallet.
+        school_pending = d / "education-pending.vic25"
+        school_effective = d / "education-effective.vic25"
+        school_replay = d / "education-replay.vic25"
+        school_steps = []
+        def run_school(choice, *tail):
+            return panel(f"new {choice}", "step 2", "bill-introduce",
+                         *(f"step {days}" for days in school_steps), *tail, "quit")
+        for _ in range(12):
+            current = run_school("EDU-A")[-2]
+            require(current["ok"] and current["status"]["scenario"] == "education-v1",
+                    "elected education trial unavailable")
+            school_status = current["status"]
+            if school_status["law_bill"]["vote_ready"]:
+                break
+            review = school_status["law_bill"]["next_review"]
+            require(review, "native school bill failed before a vote")
+            school_steps.append((civil_date.fromisoformat(review) -
+                                 civil_date.fromisoformat(school_status["date"])).days + 1)
+        else:
+            raise AssertionError("native movement-backed school bill never became ready")
+        school_tail = ("bill-approve WORKERS", "bill-promulgate")
+        stayed_closed, closed_after = run_school("EDU-A", "step 2", "step 1")[-3:-1]
+        rows = run_school("EDU-A", *school_tail, f"save {school_pending}", "step 1",
+                          f"save {school_effective}")[-6:-1]
+        passed, school_notice, _, school_next, _ = rows
+        before = school_notice["status"]
+        actual = school_next["status"]
+        remote_before, remote_after = run_school("EDU-REMOTE-A", *school_tail, "step 1")[-3:-1]
+        inactive = remote_after["status"]
+        require(passed["ok"] and passed["status"]["law_bill"]["phase"] == "approved" and
+                before["law_bill"]["effective_date"] == before["date"] and
+                before["education"]["usable_slots"] == 0 and
+                before["education"]["school_primary"] == before["education"]["comparison_primary"] == 0 and
+                stayed_closed["status"]["date"] == before["date"],
+                "schooling changed before real approval and processing its effective day")
+        require(actual["date"] == inactive["date"] == closed_after["status"]["date"] and
+                actual["law_bill"]["phase"] == inactive["law_bill"]["phase"] == "effective" and
+                before["education"]["local_staff"] == actual["education"]["local_staff"] == 2 and
+                inactive["education"]["local_staff"] == 0 and
+                actual["education"]["usable_slots"] == 10 and
+                actual["education"]["school_primary"] > actual["education"]["comparison_primary"] > 0 and
+                inactive["education"]["usable_slots"] == 0 and
+                inactive["education"]["school_primary"] == inactive["education"]["comparison_primary"] ==
+                    actual["education"]["comparison_primary"] and
+                closed_after["status"]["education"]["school_primary"] ==
+                    closed_after["status"]["education"]["comparison_primary"] == 0,
+                "actual aggregate access, law-only access, and forbidden control were not distinct")
+        for earlier, later in ((before, actual), (remote_before["status"], inactive),
+                               (stayed_closed["status"], closed_after["status"])):
+            early, late = earlier["education"], later["education"]
+            require(early["operator_cash"] - late["operator_cash"] ==
+                    late["staff_cash"] - early["staff_cash"] > 0 and late["operator_cash"] > 0,
+                    "matched same-date staff payroll did not move real operator funds")
+        require(actual["education"]["staff_cash"] == inactive["education"]["staff_cash"] ==
+                closed_after["status"]["education"]["staff_cash"],
+                "matched controls paid different ordinary labor")
+        school_reload = panel(f"load LAW-A {school_pending}", f"load EDU-REMOTE-A {school_pending}",
+                              f"load EDU-A {school_pending}", "step 1", f"save {school_replay}", "quit")
+        require(not school_reload[0]["ok"] and not school_reload[1]["ok"] and
+                school_reload[2]["status"] == before and school_reload[3]["status"] == actual and
+                school_replay.read_bytes() == school_effective.read_bytes(),
+                "education checkpoint origin replay changed real payroll or demographic attainment")
+
         replies = panel("status", "new A", "status", "tariff 21",
                         "tariff 10", "step 30", f"save {panel_save}",
                         f"load B {panel_save}", f"load A {corrupt}",

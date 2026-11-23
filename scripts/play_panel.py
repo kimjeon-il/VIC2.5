@@ -50,11 +50,14 @@ class PlayPanel:
     FACTORY = "공장 시범판"
     BUDGETS = {"A 예산 시범판": "BUDGET-A", "B 예산 시범판": "BUDGET-B"}
     LEGISLATURE = "A 입법 시범판"
+    EDUCATION = "A 교육 시범판"
 
     @classmethod
     def _protocol_tag(cls, choice):
         if choice == cls.LEGISLATURE:
             return "LAW-A"
+        if choice == cls.EDUCATION:
+            return "EDU-A"
         return "TUT" if choice == cls.FACTORY else cls.BUDGETS.get(choice, choice)
 
     def __init__(self, root, executable):
@@ -89,7 +92,7 @@ class PlayPanel:
         setup = ttk.Frame(frame, padding=(0, 10))
         setup.grid(row=2, sticky="ew")
         ttk.Label(setup, text="시작·불러올 국가/시나리오:").grid(row=0, column=0, padx=(0, 6))
-        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE),
+        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE, self.EDUCATION),
                                      width=16, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
         self.new_button = ttk.Button(setup, text="새로 시작", command=self.new)
@@ -258,6 +261,8 @@ class PlayPanel:
                             choice = self.FACTORY
                         elif self._budget(self.current):
                             choice += " 예산 시범판"
+                        elif self._education(self.current):
+                            choice = self.EDUCATION
                         elif self._legislature(self.current):
                             choice = self.LEGISLATURE
                         self.country.set(choice)
@@ -292,7 +297,11 @@ class PlayPanel:
 
     @staticmethod
     def _legislature(status):
-        return bool(status and status.get("scenario") == "law-v1")
+        return bool(status and status.get("scenario") in ("law-v1", "education-v1"))
+
+    @staticmethod
+    def _education(status):
+        return bool(status and status.get("scenario") == "education-v1")
 
     @staticmethod
     def _seat_label(seat):
@@ -331,6 +340,8 @@ class PlayPanel:
         perspective = self.FACTORY if factory else f"국가 {status['country']}"
         if self._budget(status):
             perspective += " · 예산 시범판"
+        elif self._education(status):
+            perspective += " · 교육 시범판"
         elif self._legislature(status):
             perspective += " · 입법 시범판"
         headline = f"{perspective}  |  {status['date']}  |  진행 기록 {status['commit']}"
@@ -378,7 +389,8 @@ class PlayPanel:
                      "promulgated": "공포됨", "effective": "시행 중", "rejected": "부결"}[bill["phase"]]
             if bill["phase"] == "submitted" and bill["vote_ready"]:
                 phase = "표결 가능"
-            policy = f"최저임금 법안: {phase}\n가결 기준: {bill['threshold']}석"
+            proposal = "공립학교 법안" if self._education(status) else "최저임금 법안"
+            policy = f"{proposal}: {phase}\n가결 기준: {bill['threshold']}석"
             if bill["seats"]:
                 policy += "\n" + " · ".join(f"{s['party']}: {s['seats']}석" for s in bill["seats"])
             else:
@@ -387,12 +399,22 @@ class PlayPanel:
                 policy += f"\n다음 심의일: {bill['next_review']}"
             if bill["effective_date"]:
                 policy += f"\n시행일: {bill['effective_date']}"
-            minimum = status["minimum_monthly_contract_wage"]
-            policy += f"\n월 최저임금: {minimum if minimum else '없음'}"
             self.law_party_choice.configure(values=tuple(self._seat_label(s) for s in bill["seats"]))
-            market = "새 근로계약에 적용합니다. 기존 계약의 임금은 자동으로 바뀌지 않습니다."
-            diplomacy = "선출 의회에서 지지 정당을 명시적으로 골라 표결합니다."
-            titles = ("재정", "최저임금 법안·의석", "근로계약 적용", "의회 조작")
+            if self._education(status):
+                education = status["education"]
+                market = (f"현지 운영 인력: {education['local_staff']}명\n"
+                          f"운영 가능 정원: {education['usable_slots']}\n"
+                          f"학교 운영자 잔액: {education['operator_cash']}\n"
+                          f"운영 인력 지갑 잔액: {education['staff_cash']}")
+                diplomacy = (f"학교 지역: {education['school_primary']}명\n"
+                             f"비편입 비교 지역: {education['comparison_primary']}명")
+                titles = ("재정", "교육 법안·의석", "학교 운영", "초등교육 이상 취득")
+            else:
+                minimum = status["minimum_monthly_contract_wage"]
+                policy += f"\n월 최저임금: {minimum if minimum else '없음'}"
+                market = "새 근로계약에 적용합니다. 기존 계약의 임금은 자동으로 바뀌지 않습니다."
+                diplomacy = "선출 의회에서 지지 정당을 명시적으로 골라 표결합니다."
+                titles = ("재정", "최저임금 법안·의석", "근로계약 적용", "의회 조작")
         else:
             policy = (f"무역법: {status['law']}\n"
                       f"수입 관세율: {self._percent(status['tariff_ppm'])}%\n"

@@ -468,6 +468,28 @@ std::string json_string(std::string_view value) {
 // intentionally does not change the authority of the trade/budget trials.
 constexpr auto law_trial="law-v1";
 constexpr auto law_origin="panel:law-v1:A";
+constexpr auto education_trial="education-v1";
+constexpr auto education_origin="panel:education-v1:A";
+constexpr auto education_remote_origin="panel:education-v1:remote:A";
+constexpr auto education_school="EDU-SCHOOL";
+constexpr auto education_home="EDU-DISTRICT";
+constexpr auto education_compare="EDU-COMPARISON";
+constexpr auto education_bill="LAW-SCHOOL-BILL";
+enum class LegislativeTrial { wage, education, education_remote };
+const char* legislative_origin(LegislativeTrial trial) {
+    switch(trial) {
+        case LegislativeTrial::wage:return law_origin;
+        case LegislativeTrial::education:return education_origin;
+        case LegislativeTrial::education_remote:return education_remote_origin;
+    }
+    throw std::logic_error("unknown legislative trial");
+}
+std::optional<LegislativeTrial> legislative_trial(std::string_view choice) {
+    if(choice=="LAW-A")return LegislativeTrial::wage;
+    if(choice=="EDU-A")return LegislativeTrial::education;
+    if(choice=="EDU-REMOTE-A")return LegislativeTrial::education_remote;
+    return std::nullopt;
+}
 constexpr auto law_chamber="LAW-ASSEMBLY";
 constexpr auto law_bill="LAW-WAGE-BILL";
 constexpr auto law_domain="trial_wage_floor";
@@ -488,13 +510,18 @@ p0::Policies law_policies() {
     return p;
 }
 
-daily::World law_world() {
+daily::World law_world(LegislativeTrial trial) {
     using namespace phasec;
     phasegh::World engine(24000);
     auto& geo=engine.seed_geography();
-    geo.set_dataset(law_origin);
+    const bool education=trial!=LegislativeTrial::wage;
+    geo.set_dataset(legislative_origin(trial));
     geo.seed_province(1,law_region,"A");geo.seed_unit(1,"A",law_region);
     geo.seed_assignment(1,1);
+    if(education) {
+        geo.seed_province(2,education_home,"A");geo.seed_assignment(2,1);
+        geo.seed_province(3,education_compare,"A");geo.seed_assignment(3,1);
+    }
     auto& c=geo.seed_core().seed_core();
     c.seed_actor("A",0);c.seed_actor(law_employer,1'000);
     c.seed_government("A","LAW-HEAD","LAW-PM",5,3);
@@ -512,7 +539,9 @@ daily::World law_world() {
     c.p3_seed_group({"A",law_backers,"","","",P3GroupType::custom,0,0});
     c.p4_set_official_affiliation("A",law_backers,"WORKERS",daily::to_day_index({2000,1,1}));
     c.seed_p1_coalition("A",{{law_backers},{"WORKERS"},false});
-    c.p3_seed_movement({"WAGE-REFORM","A",law_domain,law_choice,"",
+    c.p3_seed_movement({education?"SCHOOL-REFORM":"WAGE-REFORM","A",
+        education?"education_system":law_domain,education?"public_schools":law_choice,
+        education?law_region:"",
         P3MovementGoal::legal_reform,{law_backers},{},900'000,100'000,true});
 
     auto& pop=c.seed_population();
@@ -521,17 +550,62 @@ daily::World law_world() {
     const auto demo=pop.demographic_profile({law_region,23700,phaseb::Sex::female,
         "trial-culture","trial-faith","citizen","free",pop.default_health(),
         phaseb::Service::civilian});
-    for(const auto id:law_worker_partitions) {
+    if(!education)for(const auto id:law_worker_partitions) {
         const auto h=pop.household_profile({law_region,"worker-"+std::to_string(id),"shared",1});
         pop.seed_population(demo,e,h,1,id);
         c.seed_actor("HH:"+std::to_string(h),0);
     }
     const auto political_household=pop.household_profile({law_region,"electorate","shared",1000});
     pop.seed_population(demo,e,political_household,1000,law_voter_partition);
-    return daily::World::adopt(std::move(engine),31,law_origin);
+    if(education) {
+        c.p1_set_incorporation(education_home,true);
+        c.p1_set_incorporation(education_compare,false);
+        c.p2_seed_base({"EDU-OPENING-LAW","A","education_system","national",
+            "no_schools","trial:opening-school-statute"});
+        c.seed_public_institution(education_school,law_employer,education_home,"paper",50,5);
+        c.seed_p1_institution("A",education_school,P1InstitutionKind::education,2);
+        for(const auto* region:{education_home,education_compare}) {
+            const auto child_home=pop.household_profile({region,"children","shared",10'000});
+            const auto youth=pop.economic_profile({region,"not_assigned","inactive",
+                                                   "ineligible",pop.default_education()});
+            // Avoid assuming the bill's future start month: each region has
+            // comparable primary-age cohorts with one for each birth month.
+            for(int birth=23904;birth<23916;++birth) {
+                const auto d=pop.demographic_profile({region,birth,phaseb::Sex::female,
+                    "trial-culture","trial-faith","citizen","free",pop.default_health(),
+                    phaseb::Service::civilian});
+                pop.seed_population(d,youth,child_home,10'000);
+            }
+        }
+        const auto* workplace=trial==LegislativeTrial::education_remote?
+            education_compare:education_home;
+        const auto staff_home=pop.household_profile({workplace,"school-staff","shared",2});
+        const auto staff_profile=pop.economic_profile({workplace,"worker","wage",
+                                                      "employee",pop.default_education()});
+        const auto mature=pop.demographic_profile({workplace,23700,phaseb::Sex::female,
+            "trial-culture","trial-faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto staff=pop.seed_population(mature,staff_profile,staff_home,2);
+        pop.hire(staff,2,law_employer,"worker",31,{});
+        c.seed_actor("HH:"+std::to_string(staff_home),0);
+        phaseb::DemographyRules rates;
+        rates.fertility_ppm=rates.infant_death_ppm=rates.child_death_ppm=0;
+        rates.adult_death_ppm=rates.senior_death_ppm=rates.very_old_death_ppm=0;
+        rates.illness_incidence_ppm=rates.accident_ppm=rates.training_ppm=0;
+        rates.secondary_access_ppm=rates.tertiary_access_ppm=rates.adult_literacy_access_ppm=0;
+        rates.primary_access_ppm=310'000;
+        c.enable_demography(rates);
+    }
+    return daily::World::adopt(std::move(engine),31,legislative_origin(trial));
 }
 
-bool is_law_world(const daily::World& w) {return w.migration_origin()==law_origin;}
+bool is_education_world(const daily::World& w) {
+    return w.migration_origin()==education_origin||w.migration_origin()==education_remote_origin;
+}
+bool is_law_world(const daily::World& w) {
+    return w.migration_origin()==law_origin||is_education_world(w);
+}
+
 
 phaseb::Id law_slice(const phasec::IntegratedWorld& c,phaseb::Id partition) {
     for(const auto& [id,slice]:c.people().slices())
@@ -545,19 +619,22 @@ std::string trial_worker_wallet(const phasec::IntegratedWorld& c,phaseb::Id work
     return "HH:"+std::to_string(c.people().slice(worker).key.household);
 }
 
-daily::World open_law(const std::optional<fs::path>& resume) {
-    auto w=resume?load_panel_checkpoint(*resume):law_world();
+daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial trial) {
+    auto w=resume?load_panel_checkpoint(*resume):law_world(trial);
     const auto& c=w.engine().base().core().core();
     const auto valid_worker=[&](auto partition) {
         const auto id=law_slice(c,partition);
         return c.people().slice(id).count==1&&c.has_actor(trial_worker_wallet(c,id));
     };
-    if(!is_law_world(w)||w.engine().base().spatial().dataset_hash!=law_origin||
+    if(w.migration_origin()!=legislative_origin(trial)||
+       w.engine().base().spatial().dataset_hash!=legislative_origin(trial)||
        !c.has_country_treasury("A")||!c.has_actor(law_employer)||
        c.p1_constitution("A").legislature!=phasec::P1LegislatureKind::unicameral||
        !c.p4_contests().contains(law_chamber)||c.p4_contest(law_chamber).country!="A"||
        c.people().slice(law_slice(c,law_voter_partition)).count!=1000||
-       !std::all_of(law_worker_partitions.begin(),law_worker_partitions.end(),valid_worker))
+       (!is_education_world(w)&&
+        !std::all_of(law_worker_partitions.begin(),law_worker_partitions.end(),valid_worker))||
+       (is_education_world(w)&&!c.public_institutions().contains(education_school)))
         throw std::invalid_argument("checkpoint does not belong to the elected law trial");
     return w;
 }
@@ -570,10 +647,11 @@ std::string day_label(std::int64_t day) {
     return out.str();
 }
 
-void law_status(std::ostringstream& out,const phasec::IntegratedWorld& c) {
+void law_status(std::ostringstream& out,const phasec::IntegratedWorld& c,bool education) {
     using phasec::P2BillStatus;
-    const auto bill=c.p2_bills().find(law_bill);
-    const auto process=c.p2_enactments().find(law_bill);
+    const auto* bill_id=education?education_bill:law_bill;
+    const auto bill=c.p2_bills().find(bill_id);
+    const auto process=c.p2_enactments().find(bill_id);
     const auto result=c.country_elections().find("A");
     const auto phase=[&] {
         if(bill==c.p2_bills().end())return "available";
@@ -587,15 +665,16 @@ void law_status(std::ostringstream& out,const phasec::IntegratedWorld& c) {
         return "rejected";
     }();
     const bool ready=bill!=c.p2_bills().end()&&
-        bill->second.status==P2BillStatus::submitted&&c.p2_enactment_ready(law_bill)&&
+        bill->second.status==P2BillStatus::submitted&&c.p2_enactment_ready(bill_id)&&
         !c.p4_parliament_dissolved("A")&&result!=c.country_elections().end();
     const auto next=process==c.p2_enactments().end()?-1:process->second.next_review_day;
     const auto effective=bill==c.p2_bills().end()?-1:bill->second.effective_day;
-    out<<",\"scenario\":"<<json_string(law_trial)
-       <<",\"minimum_monthly_contract_wage\":"<<c.p2_rule("A","A",
-           phasec::P2ClauseKind::minimum_monthly_contract_wage).value_or(0)
-       <<",\"employer_cash\":"<<c.cash(law_employer)
-       <<",\"law_bill\":{\"phase\":"<<json_string(phase)
+    out<<",\"scenario\":"<<json_string(education?education_trial:law_trial);
+    if(!education)
+        out<<",\"minimum_monthly_contract_wage\":"<<c.p2_rule("A","A",
+            phasec::P2ClauseKind::minimum_monthly_contract_wage).value_or(0)
+           <<",\"employer_cash\":"<<c.cash(law_employer);
+    out       <<",\"law_bill\":{\"phase\":"<<json_string(phase)
        <<",\"vote_ready\":"<<(ready?"true":"false")
        <<",\"next_review\":"<<(next<0?"null":json_string(day_label(next)))
        <<",\"effective_date\":"<<(effective<0?"null":json_string(day_label(effective)))
@@ -607,7 +686,31 @@ void law_status(std::ostringstream& out,const phasec::IntegratedWorld& c) {
             first=false;
             out<<"{\"party\":"<<json_string(party)<<",\"seats\":"<<seats<<'}';
         }
-    out<<"]},\"workers\":[";
+    out<<"]}";
+    if(education) {
+        People primary=0,comparison=0;
+        phasec::Money staff_cash=0;
+        std::set<std::string> staff_wallets;
+        for(const auto& [id,row]:c.people().slices()) {
+            const auto& pop=c.people();
+            const auto& d=pop.demographic(row.key.demographic);
+            if(d.birth_month>=23904&&d.birth_month<23916&&
+               pop.education(pop.economic(row.key.economic).education).school>=phaseb::School::primary) {
+                if(d.region==education_home)primary+=row.count;
+                else if(d.region==education_compare)comparison+=row.count;
+            }
+            if(const auto* job=pop.job(id);job&&job->employer==law_employer)
+                staff_wallets.insert(trial_worker_wallet(c,id));
+        }
+        for(const auto& wallet:staff_wallets)staff_cash+=c.cash(wallet);
+        const auto capacity=c.p1_institution_capacity(education_school);
+        out<<",\"education\":{\"usable_slots\":"<<capacity.usable_slots
+           <<",\"local_staff\":"<<capacity.employed_staff
+           <<",\"school_primary\":"<<primary<<",\"comparison_primary\":"<<comparison
+           <<",\"operator_cash\":"<<c.cash(law_employer)<<",\"staff_cash\":"<<staff_cash<<"}}";
+        return;
+    }
+    out<<",\"workers\":[";
     first=true;
     for(const auto partition:law_worker_partitions) {
         const auto worker=law_slice(c,partition);
@@ -637,7 +740,9 @@ void law_action(p0::DailyGame& game,std::string_view command,std::string_view ar
         throw std::invalid_argument("this command requires the elected law trial");
     phasegh::World::Plan plan;
     const auto today=game.world().day_index();
+    const bool education=is_education_world(game.world());
     if(command=="law-hire") {
+        if(education)throw std::invalid_argument("law-hire is a wage trial fixture only");
         if(!arg.empty())throw std::invalid_argument("law-hire takes no arguments");
         // Protocol regression fixture only, not a strategy control.
         const auto& opening=game.world().engine().base().core().core();
@@ -662,24 +767,28 @@ void law_action(p0::DailyGame& game,std::string_view command,std::string_view ar
     } else {
         if((command=="bill-approve")==arg.empty()||arg.find_first_of(" \t")!=arg.npos)
             throw std::invalid_argument("bill approval requires one elected party");
-        plan[9].push_back([command=std::string(command),arg=std::string(arg),today](phasegh::Stage& stage) {
+        plan[9].push_back([command=std::string(command),arg=std::string(arg),today,education](phasegh::Stage& stage) {
             using namespace phasec;
             auto& c=stage.phase_c();
             if(!c.country_elections().contains("A")||c.p4_parliament_dissolved("A"))
                 throw std::invalid_argument("the elected legislature is not in office");
+            const auto* bill_id=education?education_bill:law_bill;
             if(command=="bill-introduce") {
                 P2Bill proposal;
-                proposal.id=law_bill;proposal.country="A";
+                proposal.id=bill_id;proposal.country="A";
                 proposal.proposer=c.government("A").prime_minister;
                 proposal.legal_basis="trial:ordinary-parliamentary-bill";
-                proposal.proposed_base={"LAW-WAGE-STATUTE","A",law_domain,"national",law_choice,
+                if(education)
+                    proposal.proposed_base={"EDU-PUBLIC-STATUTE","A","education_system",
+                        "national","public_schools","trial:public-school-statute"};
+                else proposal.proposed_base={"LAW-WAGE-STATUTE","A",law_domain,"national",law_choice,
                     "trial:minimum-monthly-contract-wage",P2NormTier::statute,
                     {{"contract-minimum","A",P2ClauseKind::minimum_monthly_contract_wage,proposed_floor}}};
                 c.p2_submit_bill(std::move(proposal),today);
             } else if(command=="bill-approve") {
-                c.p2_approve_bill(law_bill,{arg});
+                c.p2_approve_bill(bill_id,{arg});
             } else {
-                c.p2_promulgate_bill(law_bill,c.government("A").head_of_state,today);
+                c.p2_promulgate_bill(bill_id,c.government("A").head_of_state,today);
             }
         });
     }
@@ -703,7 +812,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
        <<",\"debt\":"<<phaseb::add_checked(fiscal.bank_debt,
             phaseb::add_checked(fiscal.bond_principal,fiscal.unpaid_coupons));
     if(is_law_world(world)) {
-        law_status(out,core);
+        law_status(out,core,is_education_world(world));
         return out.str();
     }
     if(tag==country) {
@@ -834,13 +943,13 @@ void run_panel() {
             else if(command=="new"||command=="load") {
                 const auto [choice,path]=panel_token(arg);
                 const bool budget=choice=="BUDGET-A"||choice=="BUDGET-B";
-                const bool law=choice=="LAW-A";
+                const auto law=legislative_trial(choice);
                 const auto tag=law?std::string_view("A"):budget?choice.substr(7):choice;
                 if((tag!="A"&&tag!="B"&&tag!=country)||(command=="new"&&!path.empty()))
-                    throw std::invalid_argument("select A, B, TUT, BUDGET-A, BUDGET-B or LAW-A");
+                    throw std::invalid_argument("select A, B, TUT, BUDGET-A, BUDGET-B, LAW-A or EDU-A");
                 const auto resume=command=="load"?std::optional{checkpoint_path_utf8(path)}:std::nullopt;
                 const bool industry=tag==country;
-                auto next=law?open_law(resume):industry?open_industry(resume):
+                auto next=law?open_law(resume,*law):industry?open_industry(resume):
                     open_trial(std::string(tag),resume,budget);
                 auto policy=law?law_policies():industry?tutorial_policies(true):
                     trial_policies(next,std::string(tag),budget);
