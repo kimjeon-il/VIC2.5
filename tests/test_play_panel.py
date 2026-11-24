@@ -391,16 +391,16 @@ def run_shared_construction(root, panel, save):
     assert "준공" in panel.budget.get() and "지급 20" in panel.budget.get()
     assert panel.current["public_construction"]["invoice_paid"] == 20
     assert panel.current["peer_country"] == "B"
-    for _ in range(10):
+    for _ in range(15):
         chain = panel.current["supply_chain"]
-        if (chain["tools_sold"] > 0 and chain["tool_buyer_batches"] > 0
-                and chain["household_fittings_bought"] > 0):
+        if chain["household_fittings_bought"] >= 2:
             break
         panel.step_button.invoke()
         wait(root, panel)
     chain = panel.current["supply_chain"]
     assert chain["tools_sold"] > 0 and chain["tool_buyer_batches"] > 0
-    assert chain["household_fittings_bought"] > 0
+    assert chain["household_fittings_bought"] >= 2
+    assert chain["board_vendor_stock"] == 0 and chain["board_vendor_receipts"] == 20
     assert chain["fittings_sales_receipts"] == 90 * chain["household_fittings_bought"]
     assert chain["wood_seller_cash"] > 0
     market = panel.market.get()
@@ -411,6 +411,7 @@ def run_shared_construction(root, panel, save):
     assert f"목공소 목재 부품 재고 {chain['tool_buyer_output_stock']}" in market
     assert f"가계 부품 구매 {chain['household_fittings_bought']}" in market
     assert f"목공소 판매대금 {chain['fittings_sales_receipts']}" in market
+    assert f"판재 판매대금 {chain['board_vendor_receipts']}" in market
 
 
 

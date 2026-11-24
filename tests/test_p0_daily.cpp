@@ -105,8 +105,8 @@ static void fitting_purchase_requires_wages_and_consumes_real_stock() {
                      daily::SnapshotCodec::encode(replay.world()),
                  "the household must earn enough actual net wages to buy and consume the fitting");
 }
-static void independent_workshop_must_pay_before_using_a_tool() {
-    const auto scenario=[](phasec::Money own_cash) {
+static void independent_workshop_must_pay_for_its_real_inputs() {
+    const auto scenario=[](phasec::Money own_cash,bool needs_board=false) {
         phasegh::World gh(24000);
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"R","A");geo.seed_unit(1,"A","R");
@@ -116,10 +116,17 @@ static void independent_workshop_must_pay_before_using_a_tool() {
         core.seed_actor("A",0);core.seed_actor("WORKSHOP",own_cash);
         core.seed_government("A","HEAD","PM",5,3);
         core.seed_market("R","tools",60,60,60);
-        core.seed_market("R","boards",4,4,4);
+        const phasec::Money board_price=needs_board?20:4;
+        core.seed_market("R","boards",board_price,board_price,board_price);
         core.seed_market("R","fittings",90,90,90,1);
-        core.seed_stock("A","R","tools",1);
-        core.seed_stock("WORKSHOP","R","boards",1);
+        if(needs_board) {
+            core.seed_actor("BOARD-VENDOR",0);
+            core.seed_stock("BOARD-VENDOR","R","boards",1);
+            core.seed_stock("WORKSHOP","R","tools",1);
+        } else {
+            core.seed_stock("A","R","tools",1);
+            core.seed_stock("WORKSHOP","R","boards",1);
+        }
         core.seed_production_facility("SITE","WORKSHOP","R",31);
         const auto worker=people(gh,"R",1,"worker");
         auto& pop=core.seed_population();
@@ -148,6 +155,23 @@ static void independent_workshop_must_pay_before_using_a_tool() {
                  u.stock("WORKSHOP","R","boards")==1&&
                  u.stock("WORKSHOP","R","fittings")==0,
                  "the workshop must afford the physical tool and ordinary payroll");
+    auto stocked=scenario(21,true), cannot_restock=scenario(20,true);
+    stocked.advance_day();cannot_restock.advance_day();
+    const auto& paid=c(stocked);
+    const auto& denied=c(cannot_restock);
+    require_test(paid.cash("WORKSHOP")==0&&paid.cash("BOARD-VENDOR")==20&&
+                 paid.firm_finance("BOARD-VENDOR").receipts==20&&
+                 paid.stock("BOARD-VENDOR","R","boards")==0&&
+                 paid.stock("WORKSHOP","R","boards")==0&&
+                 paid.stock("WORKSHOP","R","tools")==0&&
+                 paid.stock("WORKSHOP","R","fittings")==1&&
+                 denied.cash("WORKSHOP")==19&&denied.cash("BOARD-VENDOR")==0&&
+                 denied.firm_finance("BOARD-VENDOR").receipts==0&&
+                 denied.stock("BOARD-VENDOR","R","boards")==1&&
+                 denied.stock("WORKSHOP","R","boards")==0&&
+                 denied.stock("WORKSHOP","R","tools")==1&&
+                 denied.stock("WORKSHOP","R","fittings")==0,
+                 "the replacement board and output require a real affordable restock");
 }
 static void public_employment_pays_net_without_self_tax_revenue() {
     phasegh::World gh(24000);
@@ -3775,7 +3799,7 @@ static void blocked_automatic_army_rear_cargo_does_not_abort_a_day() {
 int main(){
     try{
         fitting_purchase_requires_wages_and_consumes_real_stock();
-        independent_workshop_must_pay_before_using_a_tool();
+        independent_workshop_must_pay_for_its_real_inputs();
         public_employment_pays_net_without_self_tax_revenue();
         automatic_wage_withholding_rereads_office_funding();
         country_tariff_ai_respects_each_sovereigns_current_law();

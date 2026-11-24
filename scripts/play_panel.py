@@ -467,6 +467,9 @@ class PlayPanel:
                 buyer_output = chain.get("tool_buyer_output_stock")
                 if tools_sold is not None and buyer_output is not None:
                     market += f"\n공구 판매량 {tools_sold} · 목공소 목재 부품 재고 {buyer_output}"
+                    board_receipts = chain.get("board_vendor_receipts")
+                    if board_receipts is not None:
+                        market += f" · 판재 판매대금 {board_receipts}"
                 fittings_bought = chain.get("household_fittings_bought")
                 fittings_receipts = chain.get("fittings_sales_receipts")
                 if fittings_bought is not None and fittings_receipts is not None:

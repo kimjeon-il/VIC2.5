@@ -502,6 +502,8 @@ constexpr auto campaign_tool_buyer_site="CAMPAIGN-FITTINGS-SITE";
 constexpr auto campaign_tool_buyer_recipe="CAMPAIGN-FITTINGS-METHOD";
 constexpr auto campaign_fittings="wooden_fittings";
 constexpr auto campaign_boards="sawn_boards";
+constexpr auto campaign_board_vendor="CAMPAIGN-BOARD-VENDOR";
+constexpr phasec::Money campaign_board_price=20;
 
 
 bool has_campaign_supply(const daily::World& world) {
@@ -603,6 +605,18 @@ std::optional<p0::Buyer> campaign_household_order(const daily::World& world) {
     return p0::Buyer{resident,wallet,campaign_tool_buyer,law_region,campaign_fittings,1};
 }
 
+bool has_campaign_board_vendor(const daily::World& world) {
+    const auto& c=world.engine().base().core().core();
+    if(!c.has_actor(campaign_board_vendor))return false;
+    if(!campaign_household_order(world))
+        throw std::invalid_argument("checkpoint has a board vendor without its campaign workshop");
+    const auto& quote=c.market(law_region,campaign_boards);
+    if(quote.price!=campaign_board_price||quote.floor!=campaign_board_price||
+       quote.ceiling!=campaign_board_price)
+        throw std::invalid_argument("checkpoint lacks the fixed campaign board quote");
+    return true;
+}
+
 p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
     p0::Policies p;
     p.daily_food_units_per_person=0;
@@ -621,6 +635,7 @@ p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
             p.staffing.push_back({campaign_tool_buyer,law_region,1,31,true});
         if(const auto order=campaign_household_order(world))
             p.buyers.push_back(*order);
+        (void)has_campaign_board_vendor(world);
         if(has_public_build_fixture(world,"A",law_region))
             p.public_construction_offers.push_back(public_offer("A",law_region,true));
     }
@@ -747,7 +762,10 @@ daily::World law_world(LegislativeTrial trial) {
         // One independent shop, one local board, and enough own cash for
         // one tool plus its operating wages. It never starts with any tools.
         c.seed_actor(campaign_tool_buyer,85);
-        c.seed_market(law_region,campaign_boards,4,4,4);
+        c.seed_market(law_region,campaign_boards,campaign_board_price,
+                      campaign_board_price,campaign_board_price);
+        c.seed_actor(campaign_board_vendor,0);
+        c.seed_stock(campaign_board_vendor,law_region,campaign_boards,1);
         c.seed_market(law_region,campaign_fittings,campaign_fitting_price,
                       campaign_fitting_price,campaign_fitting_price,1);
         c.seed_stock(campaign_tool_buyer,law_region,campaign_boards,1);
@@ -904,6 +922,10 @@ void campaign_supply_status(std::ostringstream& out,const daily::World& world) {
             out<<R"(,"household_fittings_bought":)"<<receipts/campaign_fitting_price
                <<R"(,"fittings_sales_receipts":)"<<receipts;
         }
+        if(has_campaign_board_vendor(world))
+            out<<R"(,"board_vendor_stock":)"<<c.stock(campaign_board_vendor,law_region,campaign_boards)
+               <<R"(,"board_vendor_receipts":)"<<c.firm_finance(campaign_board_vendor).receipts
+               <<R"(,"workshop_board_stock":)"<<c.stock(campaign_tool_buyer,law_region,campaign_boards);
     }
     out<<'}';
 }

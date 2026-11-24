@@ -633,6 +633,10 @@ def main():
         require("supply_chain" in supply_start, "shared campaign does not expose a real supply chain")
         initial = supply_start["supply_chain"]
         en_route = transit["supply_chain"]
+        require(initial.get("board_vendor_stock") == 1 and
+                initial.get("workshop_board_stock") == 1 and
+                initial.get("board_vendor_receipts") == 0,
+                "campaign has no independent seller with exactly one physical board")
         require(initial.get("household_fittings_bought") == 0 and
                 initial.get("fittings_sales_receipts") == 0 and
                 supply_start["household_cash"] == 0,
@@ -685,7 +689,7 @@ def main():
                 tool_sale["supply_chain"]["tool_buyer_tools_stock"] == 1 and
                 tool_sale["supply_chain"]["tool_buyer_output_stock"] == 0 and
                 downstream["supply_chain"]["tool_buyer_output_stock"] == 0 and
-                later["tool_buyer_batches"] == 1 and
+                later["tool_buyer_batches"] == 2 and
                 later["tool_buyer_tools_stock"] + later["tool_buyer_batches"] == later["tools_sold"] and
                 later["tools_stock"] + later["tools_sold"] == later["tools_batches"] and
                 days[-1]["revenue"] - unbuilt["revenue"] == 60 * later["tools_sold"] and
@@ -694,12 +698,30 @@ def main():
         observed = downstream["supply_chain"]
         require(tool_sale["supply_chain"]["household_fittings_bought"] == 0 and
                 tool_sale["household_cash"] > 0 and
-                observed["household_fittings_bought"] == later["household_fittings_bought"] == 1 and
-                observed["fittings_sales_receipts"] == later["fittings_sales_receipts"] == 90 and
+                observed["household_fittings_bought"] == 1 and
+                later["household_fittings_bought"] == 2 and
+                observed["fittings_sales_receipts"] == 90 and later["fittings_sales_receipts"] == 180 and
                 downstream["household_cash"] == tool_sale["household_cash"] and
-                unbuilt["household_cash"] - days[-1]["household_cash"] == 90 and
+                unbuilt["household_cash"] - days[-1]["household_cash"] == 180 and
                 unbuilt["supply_chain"]["household_fittings_bought"] == 0,
-                "ordinary wages did not fund exactly one paid fitting consumed by the household")
+                "ordinary wages did not fund the two paid fittings consumed by the household")
+        replenished = next((row for row in days if row["supply_chain"]["board_vendor_receipts"]), None)
+        second_sale = next((row for row in days if row["supply_chain"]["household_fittings_bought"] == 2), None)
+        require(replenished and second_sale and downstream["date"] <= replenished["date"] < second_sale["date"] and
+                tool_sale["supply_chain"]["tool_buyer_cash"] < 20 and
+                tool_sale["supply_chain"]["board_vendor_receipts"] == 0 and
+                tool_sale["supply_chain"]["board_vendor_stock"] == 1 and
+                replenished["supply_chain"]["board_vendor_receipts"] == 20 and
+                replenished["supply_chain"]["board_vendor_stock"] == 0 and
+                replenished["supply_chain"]["workshop_board_stock"] == 1 and
+                replenished["supply_chain"]["tool_buyer_cash"] ==
+                tool_sale["supply_chain"]["tool_buyer_cash"] + 90 - 1 - 60 - 20 and
+                second_sale["supply_chain"]["tool_buyer_cash"] ==
+                replenished["supply_chain"]["tool_buyer_cash"] + 90 - 1 and
+                later["board_vendor_stock"] == later["workshop_board_stock"] == 0 and
+                later["board_vendor_receipts"] == 20 and
+                unbuilt["supply_chain"]["board_vendor_receipts"] == 0,
+                "the first fitting receipt did not finance one real board subsequently consumed")
 
         restarted = panel(f"load CAMPAIGN-A {supply_checkpoint}", "inspect B", "inspect A",
                           "step 18", f"save {supply_replay}", "quit")
