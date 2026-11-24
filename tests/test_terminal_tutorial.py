@@ -787,6 +787,69 @@ def main():
                 and steel_replay.read_bytes() == steel_done.read_bytes(),
                 "the ordered steel project did not resume through identical paid commission")
 
+        cap_waiting = d / "campaign spending pending.vic25"
+        cap_applied = d / "campaign spending after.vic25"
+        cap_again = d / "campaign spending replay.vic25"
+        schedule = panel("new CAMPAIGN-A", "spending-cap 1 WORKERS", "step 2",
+                         "spending-cap 1 OTHER", "spending-cap 3 WORKERS",
+                         "spending-cap 1 WORKERS", "spending-cap 0 WORKERS", "inspect B",
+                         "spending-cap 0 WORKERS", "inspect A", f"save {cap_waiting}",
+                         "step 28", "step 1", f"save {cap_applied}", "quit")
+        opening, unelected, elected, minority, excess, pending_cap, duplicate, peer, read_only = (
+            row["status"] for row in schedule[:9])
+        require([r["ok"] for r in schedule] ==
+                [True, False, True, False, False, True, False, True, False, True,
+                 True, True, True, True, True]
+                and unelected == opening and minority == excess == elected
+                and duplicate == pending_cap and read_only == peer
+                and schedule[9]["status"] == pending_cap
+                and not opening["campaign_spending_cap_allowed"]
+                and elected["campaign_spending_cap_allowed"]
+                and opening["campaign_spending_cap_max"] == 2
+                and "campaign_spending_cap_allowed" not in peer
+                and "civilian_spending_cap" not in peer,
+                "unelected, minority, excess, duplicate or peer vote altered the campaign")
+        require(pending_cap["date"] == "2000-01-04"
+                and pending_cap["civilian_spending_cap"] is None
+                and pending_cap["pending_civilian_spending_cap"] == 1
+                and pending_cap["pending_civilian_spending_date"] == "2000-02-01"
+                and not pending_cap["campaign_spending_cap_allowed"],
+                "a valid majority did not schedule exactly one next-month recurring cap")
+        unchanged = panel("new CAMPAIGN-A", "step 3", "step 28", "step 1", "quit")
+        for key in ("treasury", "revenue", "expenditure", "public_program_paid"):
+            require(pending_cap[key] == unchanged[1]["status"][key]
+                    and schedule[11]["status"][key] == unchanged[2]["status"][key],
+                    "a spending vote changed actual money before its effective date")
+        zero = panel("new CAMPAIGN-A", "step 2", "spending-cap 0 WORKERS",
+                     "step 28", "step 1", "public-build-budget WORKERS",
+                     "public-build", "step 3", "quit")
+        require(all(r["ok"] for r in zero), "zero cap or subsequent construction failed")
+        outcomes = ((0, zero[3]["status"], zero[4]["status"]),
+                    (1, schedule[11]["status"], schedule[12]["status"]),
+                    (2, unchanged[2]["status"], unchanged[3]["status"]))
+        for amount, before, after in outcomes:
+            require(before["date"] == "2000-02-01" and after["date"] == "2000-02-02"
+                    and after["civilian_spending_cap"] == (None if amount == 2 else amount)
+                    and after["pending_civilian_spending_cap"] is None
+                    and after["campaign_spending_cap_allowed"]
+                    and after["public_program_paid"] - before["public_program_paid"] == amount
+                    and after["expenditure"] - before["expenditure"] == amount
+                    and after["treasury"] - before["treasury"] == 10 - amount,
+                    "effective cap bypassed actual provider payment or the national treasury")
+        for key in ("peer_treasury", "peer_revenue", "peer_debt", "peer_public_program_paid"):
+            require(len({after[key] for _, _, after in outcomes}) == 1,
+                    "A recurring cap altered B fiscal behavior at the same date")
+        require(zero[7]["status"]["public_construction"]["invoice_paid"] == 20
+                and zero[7]["status"]["public_construction"]["commissioned_capacity"] == 31
+                and zero[7]["status"]["public_program_paid"] == zero[4]["status"]["public_program_paid"],
+                "zero recurring cap must not block approved construction or restore recurring payments")
+        resumed_cap = panel(f"load CAMPAIGN-A {cap_waiting}", "step 29",
+                            f"save {cap_again}", "quit")
+        require(all(r["ok"] for r in resumed_cap) and resumed_cap[0]["status"] == pending_cap
+                and resumed_cap[1]["status"] == schedule[12]["status"]
+                and cap_again.read_bytes() == cap_applied.read_bytes(),
+                "pending elected program cap or physical ledger changed on replay")
+
         campaign_pending = d / "campaign-pending.vic25"
         campaign_inspected = d / "campaign-inspected.vic25"
         campaign_done = d / "campaign-done.vic25"
@@ -1053,7 +1116,7 @@ def main():
         mislabeled_campaign = d / "campaign-wrong-dataset.vic25"
         mislabeled_campaign.write_bytes(native_save_with_origin(
             supply_checkpoint.read_bytes(), b"panel:campaign-procurement-v2",
-            old_origin=b"panel:campaign-timber-v4"))
+            old_origin=b"panel:campaign-elected-budget-v5"))
         mismatch = panel(f"load CAMPAIGN-A {mislabeled_campaign}", "quit")
         require(not mismatch[0]["ok"],
                 "a current snapshot with only its outer origin changed was resumed under old rules")

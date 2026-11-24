@@ -118,6 +118,7 @@ def run(exe):
                              choice="A 교육 시범판")
             run_shared_campaign(root, panel, Path(directory) / "공동 캠페인 예약.vic25")
             run_shared_construction(root, panel, Path(directory) / "공동 건설 예산 승인.vic25")
+            run_shared_spending(root, panel, Path(directory) / "공동 공공사업 한도.vic25")
             run_private_expansion(root, panel, Path(directory) / "민간 증설.vic25")
             run_supply_recovery(root, panel, Path(directory) / "공급망 복구.vic25")
             run_household_staples(root, panel, Path(directory) / "가계 소비.vic25")
@@ -283,7 +284,7 @@ def run_shared_campaign(root, panel, save):
     assert "B · 조회 전용" in panel.diplomacy.get()
     assert str(status["peer_treasury"]) in panel.diplomacy.get()
     assert not panel.tariff_button.winfo_ismapped()
-    assert not panel.spending_button.winfo_ismapped()
+    assert panel.spending_button.winfo_ismapped() and panel.spending_button.instate(["disabled"])
     for _ in range(4):
         if panel.current["campaign_tax_allowed"]:
             break
@@ -343,6 +344,53 @@ def run_shared_campaign(root, panel, save):
     panel.step_button.invoke()
     wait(root, panel)
     assert panel.current == next_day
+
+
+def run_shared_spending(root, panel, save):
+    panel.country.set("A 공동 캠페인")
+    panel.new_button.invoke()
+    wait(root, panel)
+    assert panel.spending_button.winfo_ismapped() and panel.spending_button.instate(["disabled"])
+    panel._send("step 2")
+    wait(root, panel)
+    bill = panel.current["law_bill"]
+    assert panel.spending_button.instate(["disabled"]) and panel.current["campaign_spending_cap_allowed"]
+    panel.law_party_choice.current(next(i for i, seat in enumerate(bill["seats"])
+                                       if seat["seats"] >= bill["threshold"]))
+    panel.law_party_choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+    assert panel.spending_button.instate(["!disabled"])
+    panel.spending.set("0")
+    panel.spending_button.invoke()
+    wait(root, panel)
+    assert panel.current["pending_civilian_spending_cap"] == 0
+    assert "예약 한도: 0" in panel.budget.get() and panel.spending_button.instate(["disabled"])
+    due = date.fromisoformat(panel.current["pending_civilian_spending_date"])
+    today = date.fromisoformat(panel.current["date"])
+    panel._send(f"step {(due - today).days}")
+    wait(root, panel)
+    pending = panel.current
+    assert pending["civilian_spending_cap"] is None
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file()
+    panel.step_button.invoke()
+    wait(root, panel)
+    active = panel.current
+    assert active["civilian_spending_cap"] == 0
+    assert active["public_program_paid"] == pending["public_program_paid"]
+    assert "하루 한도: 0" in panel.budget.get()
+    panel._send("inspect B")
+    wait(root, panel)
+    assert panel.current["country"] == "B" and not panel.spending_button.winfo_ismapped()
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == pending
+    panel.step_button.invoke()
+    wait(root, panel)
+    assert panel.current == active
 
 
 def run_shared_construction(root, panel, save):

@@ -1726,8 +1726,134 @@ static void known_future_month_birthday_does_not_end_opening_job_early(bool miss
           "the real February 2 retirement stops only the due and future wages");
 }
 
+static void elected_cap_requires_actual_parliament_and_limits_funded_outlays() {
+    using namespace phasec;
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    auto& c=geo.seed_core().seed_core();
+    const auto election=daily::to_day_index({2000,1,2});
+    p0::Policies policy;
+    policy.daily_food_units_per_person=policy.monthly_clothing_units_per_person=0;
+    unsigned province=0;
+    for(const std::string tag:{"A","B","C"}) {
+        ++province;
+        const auto region="R"+tag;
+        geo.seed_province(province,region,tag);
+        geo.seed_unit(province,tag,region);
+        geo.seed_assignment(province,province);
+        c.seed_actor(tag,500);
+        c.seed_government(tag,tag+"-HEAD",tag+"-PM",5,3);
+        c.seed_p1_constitution(tag,tag=="C"?
+            P1Constitution{P1GovernancePrinciple::monarchy,P1PowerDistribution::autocracy,
+                           P1LegislatureKind::none,"fixture:direct executive"}:
+            P1Constitution{P1GovernancePrinciple::parliamentary_republic,P1PowerDistribution::universal_vote,
+                           P1LegislatureKind::unicameral,"fixture:elected legislature"});
+        if(tag=="C") {
+            c.seed_civilian_spending_cap_authority(tag);
+            continue;
+        }
+        c.p4_register_party({tag+"-MAJ",tag,tag+"-HEAD",700'000,true,true});
+        c.p4_register_party({tag+"-MIN",tag,tag+"-HEAD",300'000,true,true});
+        c.p4_seed_contest({tag+"-HOUSE",tag,"national","fixture:national vote",
+            P4Office::legislature,P4BallotMethod::list_dhondt,P4TermMode::restart_after_poll,
+            48,1'000'000,5,election,election,-1,true,true,false});
+        auto& pop=c.seed_population();
+        const auto d=pop.demographic_profile({region,23600,phaseb::Sex::female,
+            "citizen-culture","citizen-faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto e=pop.economic_profile({region,"worker","wage","employee",pop.default_education()});
+        const auto h=pop.household_profile({region,"voters","shared",20});
+        pop.seed_population(d,e,h,20);
+        c.seed_actor(tag+"-PROGRAM",0);
+        policy.public_budget.push_back({tag,tag+"-PROGRAM",2,0});
+    }
+    c.seed_elected_civilian_spending_cap_authority("A");
+    p0::DailyGame game(daily::World::adopt(std::move(gh),205),policy);
+    const auto state=[](const p0::DailyGame& g)->const IntegratedWorld& {
+        return g.world().engine().base().core().core();
+    };
+    const auto propose=[](const std::string& country,const std::string& pm,
+                          const std::vector<std::string>& votes,Money cap,bool direct=false) {
+        phasegh::World::Plan plan;
+        plan[9].push_back([=](phasegh::Stage& stage) {
+            if(direct)stage.phase_c().propose_civilian_spending_cap(country,pm,cap);
+            else stage.phase_c().propose_elected_civilian_spending_cap(country,pm,votes,cap);
+        });
+        return plan;
+    };
+    const auto reject=[](p0::DailyGame& game,const phasegh::World::Plan& action,const char* reason="") {
+        const auto bytes=daily::SnapshotCodec::encode(game.world());
+        bool denied=false;
+        try {game.advance_day(action);}
+        catch(const std::exception& e) {
+            denied=std::string_view(e.what()).find(reason)!=std::string_view::npos;
+        }
+        check(denied&&daily::SnapshotCodec::encode(game.world())==bytes,
+              "a rejected elected spending bill changed authoritative calendar or payout bytes");
+    };
+    const auto cap=[&](Money amount){return propose("A","A-PM",{"A-MAJ"},amount);};
+    check(state(game).has_elected_civilian_spending_cap_authority("A")&&
+          !state(game).has_elected_civilian_spending_cap_authority("B")&&
+          !state(game).has_elected_civilian_spending_cap_authority("C")&&
+          !state(game).has_civilian_spending_cap_authority("A")&&
+          state(game).has_civilian_spending_cap_authority("C"),
+          "scenario grant and live constitutional mode must not open the wrong authority");
+    reject(game,cap(1),"P1 constitutional law needs the country's own election");
+    game.advance_day();game.advance_day();
+    check(state(game).country_election("A").seats.at("A-MAJ")>=3&&
+          state(game).country_election("B").seats.at("B-MAJ")>=3,
+          "both countries must use independently elected seats");
+    reject(game,propose("A","A-PM",{},1,true));                 // no executive shortcut
+    reject(game,propose("B","B-PM",{"B-MAJ"},1));               // no scenario grant
+    reject(game,propose("A","B-PM",{"A-MAJ"},1));               // foreign head of government
+    reject(game,propose("A","A-PM",{},1));                     // no vote
+    reject(game,propose("A","A-PM",{"A-MIN"},1));               // no quorum
+    reject(game,propose("A","A-PM",{"B-MAJ"},1));               // no borrowed foreign seats
+    reject(game,propose("A","A-PM",{"A-MAJ","A-MAJ"},1));       // no duplicate vote
+    reject(game,cap(-1));
+    auto dissolved=p0::DailyGame(game.world(),policy);
+    phasegh::World::Plan dissolution;
+    const auto jan3=game.world().day_index();
+    dissolution[9].push_back([jan3](phasegh::Stage& stage) {
+        stage.phase_c().p4_dissolve("A-HOUSE","A-HEAD","fixture:authorized recollection",
+                                    jan3,daily::to_day_index({2000,1,10}));
+    });
+    dissolved.advance_day(dissolution);
+    reject(dissolved,cap(1),"P4 dissolved parliament");
+    game.advance_day(cap(1));
+    reject(game,propose("C","C-PM",{"A-MAJ"},1));               // executive grant is not elected
+    reject(game,cap(0),"duplicate pending civilian spending cap");
+    check(!state(game).civilian_spending_cap("A")&&
+          state(game).pending_civilian_spending_cap("A")==std::pair{std::int64_t{24001},Money{1}}&&
+          state(game).cash("A-PROGRAM")==6,
+          "lawful vote must schedule next month rather than cut current spending");
+    while(game.world().date()<daily::Date{2000,2,1})game.advance_day();
+    const auto saved=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(saved),policy);
+    check(state(replay).has_elected_civilian_spending_cap_authority("A")&&
+          !state(replay).has_civilian_spending_cap_authority("A")&&
+          !state(replay).civilian_spending_cap("A")&&state(replay).cash("A-PROGRAM")==62,
+          "the new month has not been processed at checkpoint time");
+    game.advance_day(cap(0));replay.advance_day(cap(0));
+    check(state(game).civilian_spending_cap("A")==1&&state(game).cash("A-PROGRAM")==63&&
+          state(game).cash("B-PROGRAM")==64&&state(game).cash("A")==437&&
+          state(game).pending_civilian_spending_cap("A")==std::pair{std::int64_t{24002},Money{0}},
+          "actual Stage 5 payment needs the effective elected limit, not the new pending vote");
+    while(game.world().date()<daily::Date{2000,3,1}) {
+        game.advance_day();replay.advance_day();
+    }
+    const auto spent=state(game).cash("A-PROGRAM");
+    game.advance_day();replay.advance_day();
+    check(state(game).civilian_spending_cap("A")==0&&!state(game).pending_civilian_spending_cap("A")&&
+          state(game).cash("A-PROGRAM")==spent&&state(game).cash("B-PROGRAM")==122&&
+          state(game).financial().balanced()&&daily::SnapshotCodec::encode(game.world())==
+             daily::SnapshotCodec::encode(replay.world()),
+          "parliamentary zero limit must stop real public payment and replay exactly");
+}
+
 int main(){
     try{
+        elected_cap_requires_actual_parliament_and_limits_funded_outlays();
         known_future_month_birthday_does_not_end_opening_job_early();
         known_future_month_birthday_does_not_end_opening_job_early(true);
         dated_civilian_cap_limits_combined_real_cash_payments();

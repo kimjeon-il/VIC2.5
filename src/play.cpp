@@ -493,11 +493,16 @@ constexpr auto legacy_campaign_origin="panel:campaign-v1";
 constexpr auto campaign_procurement_origin="panel:campaign-procurement-v2";
 constexpr auto campaign_ore_inventory_origin="panel:campaign-ore-inventory-v3";
 constexpr auto campaign_timber_balance_origin="panel:campaign-timber-v4";
+constexpr auto campaign_elected_budget_origin="panel:campaign-elected-budget-v5";
+constexpr phasec::Money campaign_public_program_limit=2;
+bool is_elected_budget_campaign(const daily::World& world) {
+    return world.migration_origin()==campaign_elected_budget_origin;
+}
 constexpr phasec::Money campaign_balanced_wood_price=4;
 constexpr Quantity campaign_balanced_regrowth=8;
 constexpr phaseb::Id campaign_workshop_worker=210;
 bool is_balanced_timber(const daily::World& world) {
-    return world.migration_origin()==campaign_timber_balance_origin;
+    return world.migration_origin()==campaign_timber_balance_origin||is_elected_budget_campaign(world);
 }
 constexpr auto supply_recovery_origin="panel:campaign-supply-v1";
 constexpr auto steel_chain_origin="panel:campaign-steel-v1";
@@ -597,7 +602,7 @@ const char* legislative_origin(LegislativeTrial trial) {
         case LegislativeTrial::wage:return law_origin;
         case LegislativeTrial::education:return education_origin;
         case LegislativeTrial::education_remote:return education_remote_origin;
-        case LegislativeTrial::campaign:return campaign_timber_balance_origin;
+        case LegislativeTrial::campaign:return campaign_elected_budget_origin;
         case LegislativeTrial::supply_recovery:return supply_recovery_origin;
         case LegislativeTrial::steel_chain:return steel_chain_origin;
     }
@@ -1029,7 +1034,7 @@ p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
     p.allow_endogenous_staffing=false;
     p.player_controlled_countries.insert("A");
     if(campaign_trial(trial)) {
-        p.public_budget.push_back({"A",campaign_program_a,2,0});
+        p.public_budget.push_back({"A",campaign_program_a,campaign_public_program_limit,0});
         p.public_budget.push_back({"B",campaign_program_b,100,0});
         p.allow_endogenous_debt_repayment=false;
         p.autonomous_tax_step_ppm=10'000;
@@ -1093,6 +1098,8 @@ daily::World law_world(LegislativeTrial trial) {
     c.seed_p1_constitution("A",{P1GovernancePrinciple::parliamentary_republic,
         P1PowerDistribution::universal_vote,P1LegislatureKind::unicameral,
         "trial:elected-legislature"});
+    if(trial==LegislativeTrial::campaign)
+        c.seed_elected_civilian_spending_cap_authority("A");
     c.p1_mark_player_country("A",true);
     c.p4_register_party({"WORKERS","A","",700'000,true,true});
     c.p4_register_party({"OTHER","A","",300'000,true,true});
@@ -1358,7 +1365,7 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
     const bool origin_matches=origin==legislative_origin(trial)||
         (trial==LegislativeTrial::campaign&&
          (origin==legacy_campaign_origin||origin==campaign_procurement_origin||
-          origin==campaign_ore_inventory_origin));
+          origin==campaign_ore_inventory_origin||origin==campaign_timber_balance_origin));
     if(!origin_matches||w.engine().base().spatial().dataset_hash!=origin||
        !c.has_country_treasury("A")||!c.has_actor(law_employer)||
        c.p1_constitution("A").legislature!=phasec::P1LegislatureKind::unicameral||
@@ -1380,6 +1387,10 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
            !c.has_actor(campaign_program_a)||!c.has_actor(campaign_program_b)||
            !c.has_actor(trial_worker_wallet(c,law_slice(c,campaign_worker_b,campaign_region_b))))
             throw std::invalid_argument("checkpoint lacks the shared campaign institutions");
+        if(is_elected_budget_campaign(w)&&
+           (!c.has_elected_civilian_spending_cap_authority("A")||
+             c.has_elected_civilian_spending_cap_authority("B")))
+            throw std::invalid_argument("checkpoint lacks the player-only elected spending authority");
         if(is_balanced_timber(w)&&(!has_campaign_timber(w)||!valid_worker(campaign_workshop_worker)))
             throw std::invalid_argument("checkpoint lacks the balanced timber campaign's labor and facilities");
         if(is_supply_recovery(w)) {
@@ -1860,6 +1871,16 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
         if(is_supply_recovery(world))supply_recovery_status(out,world);
         if(is_steel_campaign(world))steel_chain_status(out,world);
         if(tag=="A") {
+            if(is_elected_budget_campaign(world)&&core.has_elected_civilian_spending_cap_authority(tag)) {
+                const auto cap=core.civilian_spending_cap(tag);
+                const auto reserved=core.pending_civilian_spending_cap(tag);
+                out<<",\"campaign_spending_cap_allowed\":"<<(ready&&!reserved?"true":"false")
+                   <<",\"campaign_spending_cap_max\":"<<campaign_public_program_limit
+                   <<",\"civilian_spending_cap\":"<<(cap?std::to_string(*cap):"null")
+                   <<",\"pending_civilian_spending_cap\":"<<(reserved?std::to_string(reserved->second):"null")
+                   <<",\"pending_civilian_spending_date\":"
+                   <<(reserved?json_string(month_opening(reserved->first)):"null");
+            }
             campaign_supply_status(out,world);
             public_build_status(out,game,tag,ready);
             law_status(out,core,false,campaign_scenario);
@@ -2048,6 +2069,20 @@ void run_panel() {
                     if(session->tag==country)
                         throw std::invalid_argument("the industry trial has no income-tax order");
                     propose_trial_income_tax(session->game,session->tag,command_number(arg,0,100));
+                } else if(command=="spending-cap"&&is_elected_budget_campaign(session->game.world())) {
+                    if(session->tag!="A")
+                        throw std::invalid_argument("the inspected peer is read-only");
+                    const auto [amount,party]=panel_token(arg);
+                    if(party.empty()||party.find_first_of(" \t")!=party.npos)
+                        throw std::invalid_argument("campaign spending-cap requires one elected party");
+                    const auto cap=command_number(amount,0,campaign_public_program_limit);
+                    phasegh::World::Plan order;
+                    order[9].push_back([cap,party=std::string(party)](phasegh::Stage& stage) {
+                        auto& c=stage.phase_c();
+                        c.propose_elected_civilian_spending_cap("A",c.government("A").prime_minister,
+                                                               {party},cap);
+                    });
+                    advance_panel_day(session->game,std::move(order));
                 } else if(command=="spending-cap") {
                     propose_trial_spending_cap(session->game,session->tag,command_number(arg,0,1'000'000));
                 } else if(command=="public-build-budget") {

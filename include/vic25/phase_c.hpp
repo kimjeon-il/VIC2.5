@@ -3042,6 +3042,20 @@ public:
                has_country_treasury(country)&&p1_constitutions_.contains(country)&&p1_authority(country).direct_executive&&
                p1_constitution(country).legislature==P1LegislatureKind::none;
     }
+    // Both procedures use the same persisted country grant. P2 reforms
+    // may change direct authority but never remove the seeded legislature,
+    // so an elected grant cannot become an executive-only shortcut.
+    void seed_elected_civilian_spending_cap_authority(const std::string& country) {
+        ensure(stage_==-1&&commit_id_==0&&elected_civilian_spending_cap_form(country)&&
+               !civilian_spending_cap_grants_.contains(country),
+               "invalid elected civilian funding authority seed");
+        civilian_spending_cap_grants_.insert(country);
+    }
+    [[nodiscard]] bool has_elected_civilian_spending_cap_authority(
+            const std::string& country)const {
+        return civilian_spending_cap_grants_.contains(country)&&
+               elected_civilian_spending_cap_form(country);
+    }
     [[nodiscard]] std::optional<Money> civilian_spending_cap(
             const std::string& country)const {
         const auto cap=civilian_spending_caps_.find(country);
@@ -3061,12 +3075,36 @@ public:
         ensure(has_civilian_spending_cap_authority(country)&&
                government(country).prime_minister==proposer,
                "unauthorized civilian spending cap");
+        schedule_civilian_spending_cap(country,daily_cap);
+    }
+    void propose_elected_civilian_spending_cap(const std::string& country,
+            const std::string& proposer,const std::vector<std::string>& supporting_parties,
+            Money daily_cap) {
+        require_stage({9});
+        ensure(daily_cap>=0,"invalid civilian spending cap");
+        ensure(has_elected_civilian_spending_cap_authority(country)&&
+               government(country).prime_minister==proposer,
+               "unauthorized elected civilian spending cap");
+        require_elected_support(country,supporting_parties,
+            "P4 dissolved parliament cannot enact a civilian spending cap");
+        schedule_civilian_spending_cap(country,daily_cap);
+    }
+
+private:
+    [[nodiscard]] bool elected_civilian_spending_cap_form(const std::string& country)const {
+        return has_country_treasury(country)&&p1_constitutions_.contains(country)&&
+               p1_constitution(country).legislature==P1LegislatureKind::unicameral&&
+               !p1_authority(country).direct_executive;
+    }
+    void schedule_civilian_spending_cap(const std::string& country,Money daily_cap) {
         ensure(!pending_civilian_spending_caps_.contains(country),
                "duplicate pending civilian spending cap");
         pending_civilian_spending_caps_.emplace(country,
             std::pair{phaseb::add_checked(month(),1),daily_cap});
         events_.push_back("civilian-spending-cap-scheduled:"+country);
     }
+
+public:
     void spend_country_budget(const std::string& country,
                               const std::string& recipient,Money amount) {
         require_stage({5,7,8});

@@ -196,7 +196,9 @@ class PlayPanel:
         can_campaign_act = self._campaign_can_act(self.current)
         bill = self.current.get("law_bill") if legislature or can_campaign_act else None
         campaign_tax = bool(can_campaign_act and self.current["campaign_tax_allowed"])
-        campaign_party = self._selected_bill_party(bill) if campaign_tax and bill else None
+        elected_spending = self._campaign_spending_scope(self.current)
+        spending_vote = elected_spending and self.current["campaign_spending_cap_allowed"]
+        campaign_party = self._selected_bill_party(bill) if (campaign_tax or spending_vote) and bill else None
         for widget in (self.tariff_label, self.tariff_button, self.tariff_entry):
             widget.state(["!disabled"] if ready and self.current and direct_actions else ["disabled"])
             if direct_actions:
@@ -216,10 +218,15 @@ class PlayPanel:
             else:
                 widget.grid_remove()
         budget = self._budget(self.current)
-        spending_ready = ready and budget and self.current["pending_civilian_spending_cap"] is None
+        spending_ready = ready and (spending_vote or
+                    (budget and self.current["pending_civilian_spending_cap"] is None))
+        self.spending_button.configure(text="지출 한도 표결 후 하루 진행" if elected_spending
+                                       else "지출 한도 제출 후 하루 진행")
         for widget in (self.spending_label, self.spending_entry, self.spending_button):
-            widget.state(["!disabled"] if spending_ready else ["disabled"])
-            if budget:
+            can_edit = spending_ready and (not elected_spending or campaign_party or
+                                          widget is not self.spending_button)
+            widget.state(["!disabled"] if can_edit else ["disabled"])
+            if budget or elected_spending:
                 widget.grid()
             else:
                 widget.grid_remove()
@@ -233,7 +240,7 @@ class PlayPanel:
             self.build_button.grid_remove()
         if bill:
             command, label = self._law_action(self.current)
-            voting = (campaign_tax or self._build_budget_vote(construction)
+            voting = (campaign_tax or spending_vote or self._build_budget_vote(construction)
                       or (bill["phase"] == "submitted" and bill["vote_ready"]))
             self.law_party_choice.configure(state="readonly" if ready and voting else "disabled")
             if voting:
@@ -366,6 +373,10 @@ class PlayPanel:
     def _campaign_can_act(cls, status):
         return cls._campaign(status) and status["can_act"] and status["country"] == status["player_country"]
 
+    @classmethod
+    def _campaign_spending_scope(cls, status):
+        return cls._campaign_can_act(status) and "campaign_spending_cap_allowed" in status
+
     @staticmethod
     def _seat_label(seat):
         return f"{seat['party']} ({seat['seats']}석)"
@@ -448,14 +459,17 @@ class PlayPanel:
                   f"누적 수입: {status['revenue']}\n"
                   f"{cost_label}: {status['expenditure']}\n"
                   f"부채: {status['debt']}")
-        if self._budget(status):
+        elected_spending = self._campaign_spending_scope(status)
+        if self._budget(status) or elected_spending:
             cap = status["civilian_spending_cap"]
             pending = status["pending_civilian_spending_cap"]
-            budget += f"\n공공사업 하루 한도: {cap if cap is not None else '미설정'}"
+            default_cap = status["campaign_spending_cap_max"] if elected_spending else None
+            shown_cap = cap if cap is not None else default_cap
+            budget += f"\n공공사업 하루 한도: {shown_cap if shown_cap is not None else '미설정'}"
             budget += f"\n공공사업 누적 지급: {status['public_program_paid']}"
             if pending is not None:
                 budget += f"\n예약 한도: {pending} ({status['pending_civilian_spending_date']} 시행)"
-            self.spending.set(str(pending if pending is not None else cap if cap is not None else 0))
+            self.spending.set(str(pending if pending is not None else shown_cap or 0))
         if construction:
             state = construction["state"]
             if self._campaign(status):
@@ -671,13 +685,23 @@ class PlayPanel:
             self._send("income-tax " + value)
 
     def set_spending_cap(self):
-        if not self._budget(self.current) or self.current["pending_civilian_spending_cap"] is not None:
+        elected = self._campaign_spending_scope(self.current)
+        if not (elected or self._budget(self.current)) or self.current["pending_civilian_spending_cap"] is not None:
             return
+        limit = self.current["campaign_spending_cap_max"] if elected else 1_000_000
         value = self.spending.get().strip()
-        if not value or not value.isascii() or not value.isdecimal() or len(value) > 7 or int(value) > 1_000_000:
-            self.notice.set("오류: 하루 지출 한도를 0부터 1000000 사이의 정수로 입력하세요.")
+        if not value or not value.isascii() or not value.isdecimal() or len(value) > 7 or int(value) > limit:
+            self.notice.set(f"오류: 하루 지출 한도를 0부터 {limit} 사이의 정수로 입력하세요.")
             return
-        self._send("spending-cap " + value)
+        if elected:
+            if not self.current["campaign_spending_cap_allowed"]:
+                return
+            party = self._selected_bill_party(self.current["law_bill"])
+            if not party:
+                return
+            self._send("spending-cap " + value + " " + party)
+        else:
+            self._send("spending-cap " + value)
 
     def _build_quote(self, status):
         if self._budget(status) or self._campaign_can_act(status):
