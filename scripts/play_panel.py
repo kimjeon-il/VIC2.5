@@ -55,6 +55,7 @@ class PlayPanel:
     EXPANSION = "A 민간 증설 시범판"
     SUPPLY = "A 공급망 복구 시범판"
     STAPLES = "A 가계 소비 시범판"
+    STEEL = "A 철강·건설 시범판"
 
     @classmethod
     def _protocol_tag(cls, choice):
@@ -66,6 +67,8 @@ class PlayPanel:
             return "CAMPAIGN-A"
         if choice == cls.STAPLES:
             return "STAPLES-A"
+        if choice == cls.STEEL:
+            return "STEEL-A"
         if choice == cls.SUPPLY:
             return "SUPPLY-A"
         if choice == cls.EXPANSION:
@@ -105,7 +108,7 @@ class PlayPanel:
         setup.grid(row=2, sticky="ew")
         ttk.Label(setup, text="시작·불러올 국가/시나리오:").grid(row=0, column=0, padx=(0, 6))
         choices = ("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE,
-                   self.EDUCATION, self.CAMPAIGN, self.EXPANSION, self.SUPPLY, self.STAPLES)
+                   self.EDUCATION, self.CAMPAIGN, self.EXPANSION, self.SUPPLY, self.STAPLES, self.STEEL)
         self.selector = ttk.Combobox(setup, textvariable=self.country, values=choices,
                                      width=16, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
@@ -287,7 +290,10 @@ class PlayPanel:
                         elif self._budget(self.current):
                             choice += " 예산 시범판"
                         elif self._campaign(self.current):
-                            choice = self.SUPPLY if self.current.get("supply_recovery") else self.CAMPAIGN
+                            if self.current.get("steel_chain"):
+                                choice = self.STEEL
+                            else:
+                                choice = self.SUPPLY if self.current.get("supply_recovery") else self.CAMPAIGN
                         elif self._staples(self.current):
                             choice = self.STAPLES
                         elif self._expansion(self.current):
@@ -417,9 +423,13 @@ class PlayPanel:
         factory = self._industry(status)
         expansion = self._expansion(status)
         staples = self._staples(status)
-        recovery = status.get("supply_recovery") if self._campaign(status) else None
+        campaign = self._campaign(status)
+        recovery = status.get("supply_recovery") if campaign else None
+        steel = status.get("steel_chain") if campaign else None
         perspective = self.FACTORY if factory else f"국가 {status['country']}"
-        if self._campaign(status):
+        if steel:
+            perspective += " · 철강·건설 시범판"
+        elif campaign:
             perspective += " · 공급망 복구 시범판" if recovery else " · 공동 캠페인"
         elif expansion:
             perspective += " · 민간 증설 시범판"
@@ -459,7 +469,12 @@ class PlayPanel:
                            f"\n필요 철강 {construction['steel_required']} "
                            f"(예상 시공사 구매비 {construction['steel_purchase_cost']})")
                 if state == "queued":
-                    budget += f" · 확보 {construction['contractor_steel']}"
+                    held = construction["contractor_steel"]
+                    budget += f" · 확보 {held}"
+                    if steel and held < construction["steel_required"]:
+                        budget += "\n철강 조달 대기"
+                elif self._steel_shortfall(steel, construction):
+                    budget += "\n철강 생산 대기"
             else:
                 budget += f" · 지급 {construction['invoice_paid']}"
                 if state == "commissioned":
@@ -521,7 +536,13 @@ class PlayPanel:
             market = (f"도착 광석: {status['delivered_ore']}\n"
                       f"운송 중 광석: {status['in_transit_ore']}")
             chain = status.get("supply_chain") if acting else None
-            if recovery:
+            if steel:
+                market = (f"누적 석탄 채굴: {steel['coal_mined']}\n"
+                          f"제강소 재고: 철 {steel['mill_iron_stock']} · 석탄 {steel['mill_coal_stock']}\n"
+                          f"철강 재고: {steel['steel_stock']}\n"
+                          f"철강 생산: {steel['steel_produced']} · 누적 수량\n"
+                          f"제강소 판매대금: {steel['steel_receipts']}")
+            elif recovery:
                 route = {"rail": "철도", "closed": "없음", "road": "도로 우회"}[recovery["route"]]
                 market = (f"신규 운송 경로: {route}\n"
                           f"전체 운송 중 광석: {status['in_transit_ore']}\n"
@@ -566,7 +587,8 @@ class PlayPanel:
             if peer_pending is not None:
                 diplomacy += (f"\n소득세 예약: {self._percent(peer_pending)}% "
                               f"({status['peer_pending_income_tax_date']} 시행)")
-            titles = ("재정", "소득세·의회", "광석 운송·생산" if recovery else "공동 교역", "다른 나라")
+            market_title = "제강·자재 조달" if steel else "광석 운송·생산" if recovery else "공동 교역"
+            titles = ("재정", "소득세·의회", market_title, "다른 나라")
         elif self._legislature(status):
             proposal = "공립학교 법안" if self._education(status) else "최저임금 법안"
             policy = self._bill_text(status["law_bill"], proposal)
@@ -667,6 +689,10 @@ class PlayPanel:
         return bool(quote and quote["state"] == "available"
                     and quote.get("budget_approval") == "available" and quote["budget_vote_allowed"])
 
+    @staticmethod
+    def _steel_shortfall(steel, quote):
+        return bool(steel and steel["steel_stock"] + quote["contractor_steel"] < quote["steel_required"])
+
     def _build_action(self, status, quote):
         build_label = "건설 신청 후 하루 진행"
         if not quote or quote["state"] != "available":
@@ -674,6 +700,8 @@ class PlayPanel:
         if self._campaign(status) and quote["budget_approval"] != "approved":
             party = self._selected_bill_party(status["law_bill"]) if self._build_budget_vote(quote) else None
             return ("public-build-budget " + party if party else None), "건설 예산 표결 후 하루 진행"
+        if self._steel_shortfall(status.get("steel_chain"), quote):
+            return None, "철강 생산 대기"
         return "public-build", build_label
 
     def public_build(self):

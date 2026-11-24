@@ -28,6 +28,7 @@ def run(exe):
     assert play_panel.PlayPanel._protocol_tag("A 민간 증설 시범판") == "EXPANSION-A"
     assert play_panel.PlayPanel._protocol_tag("A 공급망 복구 시범판") == "SUPPLY-A"
     assert play_panel.PlayPanel._protocol_tag("A 가계 소비 시범판") == "STAPLES-A"
+    assert play_panel.PlayPanel._protocol_tag("A 철강·건설 시범판") == "STEEL-A"
     root = tk.Tk()
     panel = play_panel.PlayPanel(root, exe)
     try:
@@ -120,6 +121,7 @@ def run(exe):
             run_private_expansion(root, panel, Path(directory) / "민간 증설.vic25")
             run_supply_recovery(root, panel, Path(directory) / "공급망 복구.vic25")
             run_household_staples(root, panel, Path(directory) / "가계 소비.vic25")
+            run_steel_construction(root, panel, Path(directory) / "철강 조달.vic25")
     finally:
         panel.close()
         stop = monotonic() + 3
@@ -599,6 +601,108 @@ def run_household_staples(root, panel, save):
     panel.step_button.invoke()
     wait(root, panel)
     assert panel.current == paid
+
+
+def run_steel_construction(root, panel, save):
+    choice = "A 철강·건설 시범판"
+    panel.selector.current(panel.selector.cget("values").index(choice))
+    panel.new_button.invoke()
+    wait(root, panel)
+    assert panel.current["scenario"] == "campaign-v1"
+    assert panel.current["country"] == panel.current["player_country"] == "A"
+    assert "철강·건설 시범판" in panel.heading.get()
+    opening = panel.current
+    assert opening["steel_chain"]["steel_stock"] == 0
+    assert opening["public_construction"]["contractor_steel"] == 0
+    assert "철강 재고: 0" in panel.market.get()
+    assert "철강 생산 대기" in panel.budget.get()
+    assert panel.build_button.winfo_ismapped() and panel.build_button.instate(["disabled"])
+    for _ in range(4):
+        if panel.current["public_construction"]["budget_vote_allowed"]:
+            break
+        panel.step_button.invoke()
+        wait(root, panel)
+    assert panel.current["public_construction"]["budget_vote_allowed"]
+    bill = panel.current["law_bill"]
+    panel.law_party_choice.current(next(
+        i for i, seat in enumerate(bill["seats"]) if seat["seats"] >= bill["threshold"]))
+    panel.law_party_choice.event_generate("<<ComboboxSelected>>")
+    root.update()
+    panel.build_button.invoke()
+    wait(root, panel)
+    approved = panel.current
+    assert approved["public_construction"]["budget_approval"] == "approved"
+    assert approved["public_construction"]["invoice_paid"] == 0
+    assert "건설 예산: 승인됨" in panel.budget.get()
+    if approved["steel_chain"]["steel_stock"] < approved["public_construction"]["steel_required"]:
+        assert "철강 생산 대기" in panel.budget.get()
+        assert panel.build_button.instate(["disabled"])
+    for _ in range(10):
+        if panel.build_button.instate(["!disabled"]):
+            break
+        panel.step_button.invoke()
+        wait(root, panel)
+    ready = panel.current
+    assert ready["steel_chain"]["steel_stock"] >= ready["public_construction"]["steel_required"]
+    assert ready["public_construction"]["state"] == "available"
+    assert ready["public_construction"]["invoice_paid"] == 0
+    assert "철강 생산 대기" not in panel.budget.get()
+    assert panel.build_button.instate(["!disabled"])
+    panel.build_button.invoke()
+    wait(root, panel)
+    pending = panel.current
+    assert pending["public_construction"]["state"] == "queued"
+    assert pending["public_construction"]["commissioned_capacity"] == 0
+    assert pending["public_construction"]["invoice_paid"] == 0
+    if pending["public_construction"]["contractor_steel"] < pending["public_construction"]["steel_required"]:
+        assert "철강 조달 대기" in panel.budget.get()
+    assert "철강 생산 대기" not in panel.budget.get()
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file(), panel.notice.get()
+    steps = 0
+    purchased_before_paid = False
+    paid_before_commission = False
+    for _ in range(20):
+        panel.step_button.invoke()
+        wait(root, panel)
+        steps += 1
+        project = panel.current["public_construction"]
+        if project["state"] == "queued" and project["contractor_steel"] == project["steel_required"]:
+            assert project["invoice_paid"] == 0
+            assert f"확보 {project['contractor_steel']}" in panel.budget.get()
+            assert "철강 조달 대기" not in panel.budget.get()
+            purchased_before_paid = True
+        if project["state"] == "paid":
+            assert f"공사비 지급 완료 · 지급 {project['invoice_paid']}" in panel.budget.get()
+            assert project["invoice_paid"] == project["invoice"]
+            assert project["commissioned_capacity"] == 0
+            paid_before_commission = True
+        if project["state"] == "commissioned":
+            break
+    assert purchased_before_paid and paid_before_commission and project["state"] == "commissioned"
+    assert project["commissioned_capacity"] > 0
+    assert f"준공 · 지급 {project['invoice_paid']}" in panel.budget.get()
+    result = panel.current
+    steel = result["steel_chain"]
+    assert steel["coal_mined"] > 0 and steel["coal_receipts"] > 0
+    assert steel["steel_produced"] >= project["steel_required"]
+    assert steel["steel_receipts"] >= project["steel_purchase_cost"] > 0
+    assert f"철강 생산: {steel['steel_produced']}" in panel.market.get()
+    assert f"제강소 판매대금: {steel['steel_receipts']}" in panel.market.get()
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.country.set("A 공동 캠페인")
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == result and "오류:" in panel.notice.get()
+        panel.country.set(choice)
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == pending and panel.country.get() == choice
+    panel._send(f"step {steps}")
+    wait(root, panel)
+    assert panel.current == result
 
 
 def run_industry(root, panel, tariff_save):

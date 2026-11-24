@@ -665,6 +665,81 @@ def main():
                 and supply_again.read_bytes() == supply_complete.read_bytes(),
                 "supply-recovery save did not preserve the real delayed cargo exactly")
 
+        steel_out = d / "steel order.sav"
+        steel_done = d / "steel commissioned.sav"
+        steel_replay = d / "steel commissioned replay.sav"
+        steel_flow = panel("new STEEL-A", "step 1", "step 1", "public-build",
+                           "public-build-budget WORKERS", "step 2", "public-build",
+                           f"save {steel_out}", *["step 1"] * 5,
+                           f"save {steel_done}", "quit")
+        require(steel_flow[0]["ok"], f"steel trial launch failed: {steel_flow[0]}")
+        opening = steel_flow[0]["status"]
+        require(opening["scenario"] == "campaign-v1" and opening["peer_country"] == "B"
+                and opening["public_construction"]["invoice"] == 52
+                and opening["public_construction"]["treasury_reserve"] == 40
+                and opening["public_construction"]["steel_purchase_cost"] == 48
+                and opening["public_construction"]["contractor_steel"] == 0
+                and all(opening["steel_chain"][key] == 0 for key in
+                        ("coal_mined", "coal_stock", "mill_coal_stock", "mill_iron_stock",
+                         "steel_produced", "steel_stock", "steel_receipts")),
+                "no construction steel, processed material or coal may be granted at opening")
+        require(not steel_flow[3]["ok"] and steel_flow[3]["status"] == steel_flow[2]["status"]
+                and all(row["ok"] for i, row in enumerate(steel_flow) if i != 3),
+                f"steel campaign improperly waived elected approval or rejected a paid step: {steel_flow}")
+        paid_coal, paid_iron, mandate, queued = (steel_flow[i]["status"] for i in (1, 2, 4, 6))
+        require(paid_coal["steel_chain"]["coal_mined"] == 1
+                and paid_coal["steel_chain"]["coal_miner_cash"] == 1
+                and paid_coal["steel_chain"]["coal_receipts"] == 4
+                and paid_coal["steel_chain"]["mill_coal_stock"] == 1
+                and paid_iron["steel_chain"]["mill_coal_stock"] == 1
+                and paid_iron["steel_chain"]["mill_iron_stock"] == 1
+                and paid_iron["supply_chain"]["smelter_receipts"] == 40
+                and paid_iron["steel_chain"]["steel_produced"] == 0,
+                "physical, paid coal and iron must precede any steel batch")
+        require(mandate["public_construction"]["budget_approval"] == "approved"
+                and mandate["public_construction"]["invoice_paid"] == 0
+                and queued["public_construction"]["state"] == "queued"
+                and queued["public_construction"]["commissioned_capacity"] == 0,
+                "authority and an order are not payment or productive capacity")
+        evidence = [steel_flow[i]["status"] for i in (1, 2, 4, 5, 6, 8, 9, 10, 11, 12)]
+        first_steel = next((state for state in evidence if state["steel_chain"]["steel_produced"]), None)
+        steel_transferred = next((state for state in evidence
+                                if state["public_construction"]["contractor_steel"] == 2), None)
+        paid = next((state for state in evidence if state["public_construction"]["state"] == "paid"), None)
+        commissioned = steel_flow[12]["status"]
+        require(first_steel and steel_transferred and paid
+                and first_steel["date"] < steel_transferred["date"] < paid["date"] < commissioned["date"],
+                "smelting, contractor purchase and paid commissioning must be real separate stages")
+        work = first_steel["steel_chain"]
+        require(work["steel_batches"] >= 1 and work["steel_produced"] == 2 * work["steel_batches"]
+                and work["coal_mined"] >= 1 and work["coal_receipts"] >= 4
+                and work["coal_miner_cash"] > 0 and work["mill_worker_cash"] > 0
+                and work["mill_iron_used"] == work["mill_coal_used"] == work["steel_batches"]
+                and first_steel["supply_chain"]["smelter_receipts"] >= 40,
+                "steel must use bought coal and bought local pig iron, with real wages")
+        require(steel_transferred["public_construction"]["supplier_receipts"] == 48
+                and steel_transferred["public_construction"]["invoice_paid"] == 0
+                and steel_transferred["steel_chain"]["steel_stock"] == 0
+                and paid["public_construction"]["contractor_steel"] == 0
+                and paid["steel_chain"]["builder_worker_cash"] ==
+                    steel_transferred["steel_chain"]["builder_worker_cash"] + 1
+                and paid["public_construction"]["invoice_paid"] == 52
+                and paid["public_construction"]["contractor_receipts"] == 52
+                and paid["public_construction"]["commissioned_capacity"] == 0
+                and paid["treasury"] >= 40 and commissioned["public_construction"]["commissioned_capacity"] == 31,
+                "actual construction must consume bought steel and pay the invoice before commission")
+        no_order = panel("new STEEL-A", "step 2", "public-build-budget WORKERS", "step 5", "quit")[3]["status"]
+        require(no_order["date"] == paid["date"] and no_order["treasury"] - paid["treasury"] == 52
+                and no_order["expenditure"] == paid["expenditure"]
+                and no_order["public_construction"]["invoice_paid"] == 0,
+                "the treasury must really pay the invoice without recording it twice")
+        resume_work = panel(f"load CAMPAIGN-A {steel_out}", f"load STEEL-A {steel_out}",
+                            "step 5", f"save {steel_replay}", "quit")
+        require(not resume_work[0]["ok"] and resume_work[1]["status"] == queued
+                and resume_work[2]["status"] == commissioned and resume_work[3]["ok"]
+                and steel_replay.read_bytes() == steel_done.read_bytes(),
+                "the ordered steel project did not resume through identical paid commission")
+
         campaign_pending = d / "campaign-pending.vic25"
         campaign_inspected = d / "campaign-inspected.vic25"
         campaign_done = d / "campaign-done.vic25"

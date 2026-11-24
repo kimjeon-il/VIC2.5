@@ -105,14 +105,17 @@ phasegh::Id province(std::string_view tag) {return tag=="A"?1:2;}
 
 std::string public_builder(const std::string& tag) {return "PUBLIC-BUILDER-"+tag;}
 std::string public_steel_seller(const std::string& tag) {return "PUBLIC-STEEL-"+tag;}
+constexpr phasec::Money steel_campaign_price=24,steel_campaign_invoice=52;
+constexpr phaseb::Id steel_builder_worker=209;
 p0::PublicConstructionOffer public_offer(const std::string& tag,
-        const std::string& region,bool elected=false) {
+        const std::string& region,bool elected=false,bool manufactured_steel=false) {
     p0::PublicConstructionOffer offer;
     auto& p=offer.project;
     p.id="PUBLIC-TOOLS-"+tag;p.target_site="PUBLIC-TOOLS-SITE-"+tag;
     p.client=tag;p.contractor=public_builder(tag);p.region=region;
     p.material_good="steel";p.work_required=1;p.material_per_work=2;
-    p.workers_per_work=1;p.cash_price_per_work=20;p.target_capacity=31;
+    p.workers_per_work=1;p.cash_price_per_work=manufactured_steel?steel_campaign_invoice:20;
+    p.target_capacity=31;
     offer.treasury_cash_reserve=40;offer.elected_appropriation=elected;
     auto& recipe=offer.recipe;
     recipe.id="PUBLIC-TOOLS-METHOD-"+tag;recipe.site=p.target_site;
@@ -136,16 +139,18 @@ bool has_public_build_fixture(const daily::World& world,const std::string& tag,
 }
 
 void seed_public_build_fixture(phasec::IntegratedWorld& core,const std::string& tag,
-        const std::string& region,bool linked_supply=false) {
+        const std::string& region,bool linked_supply=false,bool manufactured_steel=false) {
     const auto builder=public_builder(tag),supplier=public_steel_seller(tag);
-    core.seed_actor(builder,1200);core.seed_actor(supplier,0);
-    core.seed_market(region,"steel",3,3,3);
+    core.seed_actor(builder,1200);core.seed_actor(supplier,manufactured_steel?200:0);
+    const auto steel_price=manufactured_steel?steel_campaign_price:3;
+    core.seed_market(region,"steel",steel_price,steel_price,steel_price,
+                     manufactured_steel?2:0);
     const auto tools_quote=linked_supply?60:20;
     const auto iron_quote=linked_supply?40:4;
     core.seed_market(region,"tools",tools_quote,tools_quote,tools_quote,linked_supply?3:0);
     core.seed_market(region,"iron",iron_quote,iron_quote,iron_quote,linked_supply?32:0);
     core.seed_market(region,"wood",2,2,2,linked_supply?3:0);
-    core.seed_stock(supplier,region,"steel",2);
+    if(!manufactured_steel)core.seed_stock(supplier,region,"steel",2);
     auto& pop=core.seed_population();
     const auto household=pop.household_profile({region,builder,"shared",1});
     const auto economy=pop.economic_profile(
@@ -153,7 +158,9 @@ void seed_public_build_fixture(phasec::IntegratedWorld& core,const std::string& 
     const auto demographic=pop.demographic_profile(
         {region,23640,phaseb::Sex::female,"trial-culture","trial-faith",
          "citizen","free",pop.default_health(),phaseb::Service::civilian});
-    const auto worker=pop.seed_population(demographic,economy,household,1);
+    const auto worker=manufactured_steel?
+        pop.seed_population(demographic,economy,household,1,steel_builder_worker):
+        pop.seed_population(demographic,economy,household,1);
     core.seed_actor("HH:"+std::to_string(household),0);
     pop.hire(worker,1,builder,"worker",31,{});
 }
@@ -483,6 +490,14 @@ constexpr auto law_region="LAW-DISTRICT";
 constexpr auto campaign_scenario="campaign-v1";
 constexpr auto campaign_origin="panel:campaign-v1";
 constexpr auto supply_recovery_origin="panel:campaign-supply-v1";
+constexpr auto steel_chain_origin="panel:campaign-steel-v1";
+constexpr auto steel_coal_owner="CAMPAIGN-COAL-OWNER";
+constexpr auto steel_coal_site="CAMPAIGN-COAL-MINE";
+constexpr auto steel_coal_source="CAMPAIGN-COAL-SEAM";
+constexpr auto steel_mill_site="CAMPAIGN-STEEL-MILL";
+constexpr auto steel_mill_method="CAMPAIGN-STEEL-METHOD";
+constexpr phasec::Money steel_coal_price=4;
+constexpr phaseb::Id steel_coal_worker=207,steel_mill_worker=208;
 constexpr auto campaign_region_b="CAMPAIGN-PEER-DISTRICT";
 constexpr auto campaign_chamber_b="CAMPAIGN-PEER-ASSEMBLY";
 constexpr auto campaign_employer_b="CAMPAIGN-PEER-EMPLOYER";
@@ -556,9 +571,13 @@ bool has_campaign_workshop(const daily::World& world) {
     return true;
 }
 
-enum class LegislativeTrial { wage, education, education_remote, campaign, supply_recovery };
+enum class LegislativeTrial { wage, education, education_remote, campaign, supply_recovery, steel_chain };
 bool campaign_trial(LegislativeTrial trial) {
-    return trial==LegislativeTrial::campaign||trial==LegislativeTrial::supply_recovery;
+    return trial==LegislativeTrial::campaign||trial==LegislativeTrial::supply_recovery||
+           trial==LegislativeTrial::steel_chain;
+}
+bool is_steel_campaign(const daily::World& world) {
+    return world.migration_origin()==steel_chain_origin;
 }
 bool is_supply_recovery(const daily::World& world) {
     return world.migration_origin()==supply_recovery_origin;
@@ -570,6 +589,7 @@ const char* legislative_origin(LegislativeTrial trial) {
         case LegislativeTrial::education_remote:return education_remote_origin;
         case LegislativeTrial::campaign:return campaign_origin;
         case LegislativeTrial::supply_recovery:return supply_recovery_origin;
+        case LegislativeTrial::steel_chain:return steel_chain_origin;
     }
     throw std::logic_error("unknown legislative trial");
 }
@@ -577,6 +597,7 @@ std::optional<LegislativeTrial> legislative_trial(std::string_view choice) {
     if(choice=="LAW-A")return LegislativeTrial::wage;
     if(choice=="CAMPAIGN-A")return LegislativeTrial::campaign;
     if(choice=="SUPPLY-A")return LegislativeTrial::supply_recovery;
+    if(choice=="STEEL-A")return LegislativeTrial::steel_chain;
     if(choice=="EDU-A")return LegislativeTrial::education;
     if(choice=="EDU-REMOTE-A")return LegislativeTrial::education_remote;
     return std::nullopt;
@@ -1019,7 +1040,8 @@ p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
             p.staffing.push_back({campaign_board_vendor,law_region,1,31,true});
         } else (void)has_campaign_board_vendor(world);
         if(has_public_build_fixture(world,"A",law_region))
-            p.public_construction_offers.push_back(public_offer("A",law_region,true));
+            p.public_construction_offers.push_back(
+                public_offer("A",law_region,true,is_steel_campaign(world)));
     }
     return p;
 }
@@ -1030,6 +1052,7 @@ daily::World law_world(LegislativeTrial trial) {
     auto& geo=engine.seed_geography();
     const bool campaign=campaign_trial(trial);
     const bool recovery=trial==LegislativeTrial::supply_recovery;
+    const bool steel_chain=trial==LegislativeTrial::steel_chain;
     const bool education=trial==LegislativeTrial::education||
                          trial==LegislativeTrial::education_remote;
     geo.set_dataset(legislative_origin(trial));
@@ -1148,7 +1171,42 @@ daily::World law_world(LegislativeTrial trial) {
             // through the shock, rather than being made to return on cue.
             pop.hire(artisan,1,law_employer,"worker",1550,{});
         }
-        seed_public_build_fixture(c,"A",law_region,true);
+        seed_public_build_fixture(c,"A",law_region,true,steel_chain);
+        if(steel_chain) {
+            // A catalog-bound coal mine and steel mill operate in the
+            // existing A district. There is no finished steel at opening.
+            industry.seed_standard_industries();
+            c.seed_actor(steel_coal_owner,100);
+            c.seed_market(law_region,"coal",steel_coal_price,steel_coal_price,
+                          steel_coal_price,1);
+            const auto title=std::string("mining_right:")+law_region+":coal";
+            c.seed_shares(title,steel_coal_owner,1);
+            geo.seed_building_in_province(steel_coal_site,steel_coal_owner,1,31,
+                                          "vic3_115.rural.coal_mines",title);
+            phased::ResourceSite coal;
+            coal.id=steel_coal_source;coal.site=steel_coal_site;
+            coal.owner=steel_coal_owner;coal.region=law_region;coal.good="coal";
+            coal.monthly_capacity=31;
+            industry.seed_building_resource_site(coal);
+            const auto mill_owner=public_steel_seller("A");
+            geo.seed_building_in_province(steel_mill_site,mill_owner,1,31,
+                                          "vic3_115.urban.steel_mills");
+            phased::IndustryRecipe steel;
+            steel.id=steel_mill_method;steel.site=steel_mill_site;steel.industry_class="MANU";
+            steel.inputs={{"iron",1},{"coal",1}};steel.outputs={{"steel",2}};
+            steel.workers_per_batch=steel.capacity_per_batch=1;
+            industry.seed_building_recipe(steel);
+            for(const auto& [label,employer,partition]:
+                std::array<std::tuple<std::string,std::string,phaseb::Id>,2>{{
+                    {"coal-miner",steel_coal_owner,steel_coal_worker},
+                    {"steelworker",mill_owner,steel_mill_worker},
+                }}) {
+                const auto home=pop.household_profile({law_region,label,"shared",1});
+                const auto resident=pop.seed_population(demo,e,home,1,partition);
+                c.seed_actor("HH:"+std::to_string(home),0);
+                pop.hire(resident,1,employer,"worker",31,{});
+            }
+        }
         // Funded employment and forest biomass, but no pre-harvested wood.
         c.seed_actor(campaign_wood_seller,32);
         c.seed_production_facility(campaign_logger_site,campaign_wood_seller,law_region,31);
@@ -1256,7 +1314,7 @@ bool is_education_world(const daily::World& w) {
     return w.migration_origin()==education_origin||w.migration_origin()==education_remote_origin;
 }
 bool is_campaign_world(const daily::World& w) {
-    return w.migration_origin()==campaign_origin||is_supply_recovery(w);
+    return w.migration_origin()==campaign_origin||is_supply_recovery(w)||is_steel_campaign(w);
 }
 bool is_law_world(const daily::World& w) {
     return w.migration_origin()==law_origin||is_education_world(w)||is_campaign_world(w);
@@ -1302,6 +1360,22 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
                !valid_worker(recovery_artisan)||!valid_worker(recovery_smelter_worker))
                 throw std::invalid_argument("checkpoint lacks the recovery route or artisan");
         }
+        if(is_steel_campaign(w)) {
+            const auto& d=w.engine().base().core();
+            const auto& stocks=d.state().resource_sites;
+            const auto source=stocks.find(steel_coal_source);
+            const auto& recipes=d.state().recipes;
+            const auto method=recipes.find(steel_mill_method);
+            if(source==stocks.end()||source->second.owner!=steel_coal_owner||
+               source->second.good!="coal"||source->second.site!=steel_coal_site||
+               source->second.region!=law_region||
+               method==recipes.end()||method->second.site!=steel_mill_site||
+               !has_public_build_fixture(w,"A",law_region)||
+               !c.has_actor(steel_coal_owner)||!c.facilities().contains(steel_mill_site)||
+               !valid_worker(steel_coal_worker)||!valid_worker(steel_mill_worker)||
+               !valid_worker(steel_builder_worker))
+                throw std::invalid_argument("checkpoint lacks its coal mine or steel mill");
+        }
     }
     return w;
 }
@@ -1339,6 +1413,40 @@ void supply_recovery_status(std::ostringstream& out,const daily::World& world) {
        <<R"(,"ore_stock":)"<<c.stock(campaign_buyer,law_region,"ore")
        <<R"(,"artisan_cash":)"<<cash(recovery_artisan)
        <<R"(,"smelter_worker_cash":)"<<cash(recovery_smelter_worker)<<'}';
+}
+
+void steel_chain_status(std::ostringstream& out,const daily::World& world) {
+    const auto& industry=world.engine().base().core();
+    const auto& d=industry.state();
+    const auto& c=industry.core();
+    const auto mill=public_steel_seller("A");
+    const auto& recipe=d.recipes.at(steel_mill_method);
+    Quantity batches=0;
+    for(const auto& run:d.actual_production_runs)
+        if(run.recipe==recipe.id)batches=phaseb::add_checked(batches,run.batches);
+    const auto work=[&](std::string_view good,const std::vector<phased::Input>& goods) {
+        Quantity used=0;
+        for(const auto& row:goods)
+            if(row.good==good)used=phaseb::add_checked(used,row.per_unit);
+        return phaseb::mul_checked(batches,used);
+    };
+    const auto worker_cash=[&](phaseb::Id partition) {
+        return c.cash(trial_worker_wallet(c,law_slice(c,partition)));
+    };
+    out<<R"(,"steel_chain":{"coal_mined":)"<<d.resource_sites.at(steel_coal_source).cumulative_output
+       <<R"(,"coal_stock":)"<<c.stock(steel_coal_owner,law_region,"coal")
+       <<R"(,"coal_receipts":)"<<c.firm_finance(steel_coal_owner).receipts
+       <<R"(,"coal_miner_cash":)"<<worker_cash(steel_coal_worker)
+       <<R"(,"mill_coal_stock":)"<<c.stock(mill,law_region,"coal")
+       <<R"(,"mill_iron_stock":)"<<c.stock(mill,law_region,"iron")
+       <<R"(,"mill_coal_used":)"<<work("coal",recipe.inputs)
+       <<R"(,"mill_iron_used":)"<<work("iron",recipe.inputs)
+       <<R"(,"mill_worker_cash":)"<<worker_cash(steel_mill_worker)
+       <<R"(,"builder_worker_cash":)"<<worker_cash(steel_builder_worker)
+       <<R"(,"steel_batches":)"<<batches
+       <<R"(,"steel_produced":)"<<work("steel",recipe.outputs)
+       <<R"(,"steel_stock":)"<<c.stock(mill,law_region,"steel")
+       <<R"(,"steel_receipts":)"<<c.firm_finance(mill).receipts<<'}';
 }
 
 void campaign_supply_status(std::ostringstream& out,const daily::World& world) {
@@ -1703,6 +1811,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
            <<",\"supplier_cash\":"<<core.cash(campaign_seller)
            <<",\"carrier_cash\":"<<core.cash(campaign_carrier);
         if(is_supply_recovery(world))supply_recovery_status(out,world);
+        if(is_steel_campaign(world))steel_chain_status(out,world);
         if(tag=="A") {
             campaign_supply_status(out,world);
             public_build_status(out,game,tag,ready);
@@ -1833,7 +1942,7 @@ void run_panel() {
                 const bool staples=choice=="STAPLES-A";
                 const auto tag=law||expansion||staples?std::string_view("A"):budget?choice.substr(7):choice;
                 if((tag!="A"&&tag!="B"&&tag!=country)||(command=="new"&&!path.empty()))
-                    throw std::invalid_argument("select A, B, TUT, BUDGET-A, BUDGET-B, LAW-A, EDU-A, CAMPAIGN-A, SUPPLY-A, EXPANSION-A or STAPLES-A");
+                    throw std::invalid_argument("select A, B, TUT, BUDGET-A, BUDGET-B, LAW-A, EDU-A, CAMPAIGN-A, SUPPLY-A, EXPANSION-A, STAPLES-A or STEEL-A");
                 const auto resume=command=="load"?std::optional{checkpoint_path_utf8(path)}:std::nullopt;
                 const bool industry=tag==country;
                 auto next=staples?open_staples(resume):expansion?open_expansion(resume):law?open_law(resume,*law):industry?open_industry(resume):
