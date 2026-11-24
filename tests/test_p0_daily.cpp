@@ -106,7 +106,8 @@ static void fitting_purchase_requires_wages_and_consumes_real_stock() {
                  "the household must earn enough actual net wages to buy and consume the fitting");
 }
 static void independent_workshop_must_pay_for_its_real_inputs() {
-    const auto scenario=[](phasec::Money own_cash,bool needs_board=false) {
+    const auto scenario=[](phasec::Money own_cash,bool needs_board=false,
+                           bool missing_input=false) {
         phasegh::World gh(24000);
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"R","A");geo.seed_unit(1,"A","R");
@@ -121,10 +122,10 @@ static void independent_workshop_must_pay_for_its_real_inputs() {
         core.seed_market("R","fittings",90,90,90,1);
         if(needs_board) {
             core.seed_actor("BOARD-VENDOR",0);
-            core.seed_stock("BOARD-VENDOR","R","boards",1);
+            if(!missing_input)core.seed_stock("BOARD-VENDOR","R","boards",1);
             core.seed_stock("WORKSHOP","R","tools",1);
         } else {
-            core.seed_stock("A","R","tools",1);
+            if(!missing_input)core.seed_stock("A","R","tools",1);
             core.seed_stock("WORKSHOP","R","boards",1);
         }
         core.seed_production_facility("SITE","WORKSHOP","R",31);
@@ -172,6 +173,21 @@ static void independent_workshop_must_pay_for_its_real_inputs() {
                  denied.stock("WORKSHOP","R","tools")==1&&
                  denied.stock("WORKSHOP","R","fittings")==0,
                  "the replacement board and output require a real affordable restock");
+    // Same solvent workshop, local prices and paid labor, but only one
+    // physical input already delivered. Cash cannot replace the other one.
+    auto tool_only=scenario(21,true,true), board_only=scenario(61,false,true);
+    tool_only.advance_day();board_only.advance_day();
+    const auto& tool=c(tool_only);
+    const auto& board=c(board_only);
+    require_test(tool.cash("WORKSHOP")==20&&tool.cash("BOARD-VENDOR")==0&&
+                 tool.stock("WORKSHOP","R","tools")==1&&
+                 tool.stock("WORKSHOP","R","boards")==0&&
+                 tool.stock("WORKSHOP","R","fittings")==0&&
+                 board.cash("WORKSHOP")==60&&board.cash("A")==0&&
+                 board.stock("WORKSHOP","R","tools")==0&&
+                 board.stock("WORKSHOP","R","boards")==1&&
+                 board.stock("WORKSHOP","R","fittings")==0,
+                 "neither a real tool nor a real board alone can make a fitting");
 }
 static void public_employment_pays_net_without_self_tax_revenue() {
     phasegh::World gh(24000);

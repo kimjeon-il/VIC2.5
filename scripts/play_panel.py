@@ -463,6 +463,13 @@ class PlayPanel:
                           f"\n목재 공급자 잔액 {chain['wood_seller_cash']}")
                 if waiting:
                     market += f" · {waiting}"
+                harvested = chain.get("logs_harvested")
+                tool_wood = chain.get("toolworks_wood_bought")
+                mill_wood = chain.get("mill_wood_bought")
+                boards = chain.get("mill_boards_produced")
+                if None not in (harvested, tool_wood, mill_wood, boards):
+                    market += (f"\n벌목 {harvested} · 원목 확보: 공구공장 {tool_wood} · 제재소 {mill_wood}"
+                               f" · 판재 생산 {boards}")
                 tools_sold = chain.get("tools_sold")
                 buyer_output = chain.get("tool_buyer_output_stock")
                 if tools_sold is not None and buyer_output is not None:

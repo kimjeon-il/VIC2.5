@@ -633,6 +633,10 @@ def main():
         require("supply_chain" in supply_start, "shared campaign does not expose a real supply chain")
         initial = supply_start["supply_chain"]
         en_route = transit["supply_chain"]
+        require(initial.get("logs_harvested") == 0 and initial["wood_seller_stock"] == 0 and
+                initial.get("mill_boards_produced") == 0 and
+                initial.get("logger_receipts") == 0,
+                "new campaign did not start a genuine unharvested native timber chain")
         require(initial.get("board_vendor_stock") == 1 and
                 initial.get("workshop_board_stock") == 1 and
                 initial.get("board_vendor_receipts") == 0,
@@ -657,71 +661,72 @@ def main():
                 first_tool["public_construction"]["state"] == "commissioned" and
                 first_tool["supply_chain"]["tools_stock"] + first_tool["supply_chain"]["tools_sold"] > 0 and
                 first_tool["supply_chain"]["smelter_receipts"] > initial["smelter_receipts"] and
-                first_tool["supply_chain"]["wood_seller_cash"] > initial["wood_seller_cash"] and
+                first_tool["supply_chain"]["logger_receipts"] > initial["logger_receipts"] and
                 first_tool["supply_chain"]["factory_worker_cash"] > 0,
                 "paid trade, intermediate iron and staffed public tools operation were not connected")
         require(all(row["supply_chain"]["tools_stock"] == row["supply_chain"]["factory_worker_cash"] == 0
                     for row in days if row["public_construction"]["state"] != "commissioned"),
                 "tools or operating wages appeared before actual commissioning")
         later = days[-1]["supply_chain"]
-        earlier = days[-2]["supply_chain"]
-        require(later["tools_waiting_for"] == "wood" and later["factory_wood_stock"] == 0 and
-                later["wood_seller_stock"] == 0 and later["tools_batches"] == earlier["tools_batches"] > 0 and
-                later["tools_stock"] == earlier["tools_stock"] and
-                later["tools_batches"] == initial["wood_seller_stock"] and
-                later["wood_seller_cash"] > initial["wood_seller_cash"] and
-                later["factory_worker_cash"] > earlier["factory_worker_cash"] and
-                days[-1]["treasury"] >= 42 and
-                later["iron_batches"] > earlier["iron_batches"],
-                "when only wood ran out the factory should stop while the smelter still operates")
         unbuilt = panel("new CAMPAIGN-A", "step 22", "quit")[1]["status"]
+        unbuilt_chain = unbuilt["supply_chain"]
         require(unbuilt["date"] == days[-1]["date"] and
-                unbuilt["supply_chain"]["iron_batches"] > 0 and
-                unbuilt["supply_chain"]["tools_stock"] == unbuilt["supply_chain"]["factory_worker_cash"] == 0 and
-                unbuilt["supply_chain"]["smelter_receipts"] == initial["smelter_receipts"] and
-                unbuilt["supply_chain"]["wood_seller_cash"] == initial["wood_seller_cash"] and
-                unbuilt["supply_chain"]["tools_waiting_for"] == "construction",
-                "the unbuilt control should smelt ore without buying wood or producing tools")
+                unbuilt_chain["iron_batches"] > 0 and
+                unbuilt_chain["tools_stock"] == unbuilt_chain["factory_worker_cash"] == 0 and
+                unbuilt_chain["smelter_receipts"] == initial["smelter_receipts"] and
+                unbuilt_chain["toolworks_wood_bought"] == 0 and
+                unbuilt_chain["household_fittings_bought"] == 0 and
+                unbuilt_chain["tools_waiting_for"] == "construction",
+                "without commissioning the other industries cannot replace tool production")
         tool_sale = next((row for row in days if row["supply_chain"]["tools_sold"]), None)
         downstream = next((row for row in days if row["supply_chain"]["tool_buyer_batches"]), None)
-        require(tool_sale and downstream and
+        before_tool_sale = days[days.index(tool_sale) - 1] if tool_sale in days[1:] else None
+        require(tool_sale and downstream and before_tool_sale and
                 first_tool["date"] <= tool_sale["date"] < downstream["date"] and
                 tool_sale["supply_chain"]["tool_buyer_tools_stock"] == 1 and
                 tool_sale["supply_chain"]["tool_buyer_output_stock"] == 0 and
                 downstream["supply_chain"]["tool_buyer_output_stock"] == 0 and
-                later["tool_buyer_batches"] == 2 and
-                later["tool_buyer_tools_stock"] + later["tool_buyer_batches"] == later["tools_sold"] and
-                later["tools_stock"] + later["tools_sold"] == later["tools_batches"] and
-                days[-1]["revenue"] - unbuilt["revenue"] == 60 * later["tools_sold"] and
-                unbuilt["supply_chain"]["tools_sold"] == unbuilt["supply_chain"]["tool_buyer_batches"] == 0,
-                "domestic shop did not pay 60 to the public maker and physically use one tool")
+                # The first tool contributes exactly 60 in addition to
+                # the same ordinary 10 income tax; aggregate later revenue
+                # can also include native raw wood resale by the treasury.
+                tool_sale["revenue"] - before_tool_sale["revenue"] == 70 and
+                days[-1]["revenue"] - unbuilt["revenue"] >= 60 * later["tools_sold"],
+                "domestic shop did not pay 60 to the public maker for each actual tool")
         observed = downstream["supply_chain"]
         require(tool_sale["supply_chain"]["household_fittings_bought"] == 0 and
                 tool_sale["household_cash"] > 0 and
                 observed["household_fittings_bought"] == 1 and
-                later["household_fittings_bought"] == 2 and
-                observed["fittings_sales_receipts"] == 90 and later["fittings_sales_receipts"] == 180 and
+                observed["fittings_sales_receipts"] == 90 and
                 downstream["household_cash"] == tool_sale["household_cash"] and
-                unbuilt["household_cash"] - days[-1]["household_cash"] == 180 and
-                unbuilt["supply_chain"]["household_fittings_bought"] == 0,
-                "ordinary wages did not fund the two paid fittings consumed by the household")
-        replenished = next((row for row in days if row["supply_chain"]["board_vendor_receipts"]), None)
-        second_sale = next((row for row in days if row["supply_chain"]["household_fittings_bought"] == 2), None)
-        require(replenished and second_sale and downstream["date"] <= replenished["date"] < second_sale["date"] and
-                tool_sale["supply_chain"]["tool_buyer_cash"] < 20 and
-                tool_sale["supply_chain"]["board_vendor_receipts"] == 0 and
-                tool_sale["supply_chain"]["board_vendor_stock"] == 1 and
-                replenished["supply_chain"]["board_vendor_receipts"] == 20 and
-                replenished["supply_chain"]["board_vendor_stock"] == 0 and
-                replenished["supply_chain"]["workshop_board_stock"] == 1 and
-                replenished["supply_chain"]["tool_buyer_cash"] ==
-                tool_sale["supply_chain"]["tool_buyer_cash"] + 90 - 1 - 60 - 20 and
-                second_sale["supply_chain"]["tool_buyer_cash"] ==
-                replenished["supply_chain"]["tool_buyer_cash"] + 90 - 1 and
-                later["board_vendor_stock"] == later["workshop_board_stock"] == 0 and
-                later["board_vendor_receipts"] == 20 and
-                unbuilt["supply_chain"]["board_vendor_receipts"] == 0,
-                "the first fitting receipt did not finance one real board subsequently consumed")
+                later["household_fittings_bought"] >= 3 and
+                later["fittings_sales_receipts"] == 90 * later["household_fittings_bought"] and
+                unbuilt["household_cash"] - days[-1]["household_cash"] == later["fittings_sales_receipts"],
+                "harvested wood and milled boards did not enable an additional wage-funded sale")
+        for row in days:
+            chain = row["supply_chain"]
+            require(chain["logs_harvested"] == chain["wood_seller_stock"] +
+                    chain["mill_wood_bought"] + chain["toolworks_wood_bought"] and
+                    chain["logger_receipts"] ==
+                    2 * (chain["mill_wood_bought"] + chain["toolworks_wood_bought"]) and
+                    chain["mill_boards_produced"] + initial["board_vendor_stock"] +
+                    initial["workshop_board_stock"] ==
+                    chain["board_vendor_stock"] + chain["workshop_board_stock"] +
+                    chain["tool_buyer_batches"] and
+                    chain["board_vendor_receipts"] == 20 * (
+                        chain["tool_buyer_batches"] + chain["workshop_board_stock"] -
+                        initial["workshop_board_stock"]) and
+                    chain["tools_sold"] == chain["tool_buyer_tools_stock"] + chain["tool_buyer_batches"] and
+                    chain["tools_batches"] == chain["tools_stock"] + chain["tools_sold"],
+                    "funded transfers and production did not conserve timber, boards and tools")
+        require(later["logger_worker_cash"] > 0 and later["mill_worker_cash"] > 0 and
+                later["mill_wood_bought"] >= later["mill_boards_produced"] > 0 and
+                later["toolworks_wood_bought"] >= later["tools_batches"] >= 3 and
+                later["board_vendor_receipts"] >= 40 and
+                later["tool_buyer_batches"] >= later["household_fittings_bought"] and
+                later["tool_buyer_cash"] == initial["tool_buyer_cash"] +
+                later["fittings_sales_receipts"] - 60 * later["tools_sold"] -
+                later["board_vendor_receipts"] - (days[-1]["commit"] - supply_start["commit"]),
+                "both staffed production routes must buy real harvests and support finished sales")
 
         restarted = panel(f"load CAMPAIGN-A {supply_checkpoint}", "inspect B", "inspect A",
                           "step 18", f"save {supply_replay}", "quit")

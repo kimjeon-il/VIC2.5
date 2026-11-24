@@ -144,7 +144,7 @@ void seed_public_build_fixture(phasec::IntegratedWorld& core,const std::string& 
     const auto iron_quote=linked_supply?40:4;
     core.seed_market(region,"tools",tools_quote,tools_quote,tools_quote,linked_supply?3:0);
     core.seed_market(region,"iron",iron_quote,iron_quote,iron_quote,linked_supply?32:0);
-    core.seed_market(region,"wood",2,2,2);
+    core.seed_market(region,"wood",2,2,2,linked_supply?3:0);
     core.seed_stock(supplier,region,"steel",2);
     auto& pop=core.seed_population();
     const auto household=pop.household_profile({region,builder,"shared",1});
@@ -501,6 +501,11 @@ constexpr auto campaign_tool_buyer="CAMPAIGN-FITTINGS-WORKSHOP";
 constexpr auto campaign_tool_buyer_site="CAMPAIGN-FITTINGS-SITE";
 constexpr auto campaign_tool_buyer_recipe="CAMPAIGN-FITTINGS-METHOD";
 constexpr auto campaign_fittings="wooden_fittings";
+constexpr auto campaign_logger_site="CAMPAIGN-LOGGER-SITE";
+constexpr auto campaign_forest="CAMPAIGN-FOREST";
+constexpr auto campaign_mill_site="CAMPAIGN-SAWMILL";
+constexpr auto campaign_mill_method="CAMPAIGN-SAWING";
+constexpr phaseb::Id campaign_logger_worker=203,campaign_mill_worker=204;
 constexpr auto campaign_boards="sawn_boards";
 constexpr auto campaign_board_vendor="CAMPAIGN-BOARD-VENDOR";
 constexpr phasec::Money campaign_board_price=20;
@@ -617,6 +622,34 @@ bool has_campaign_board_vendor(const daily::World& world) {
     return true;
 }
 
+bool has_campaign_timber(const daily::World& world) {
+    const auto& d=world.engine().base().core();
+    const auto& c=d.core();
+    const auto source=d.state().resource_sites.find(campaign_forest);
+    const auto method=d.state().recipes.find(campaign_mill_method);
+    const auto logger=c.facilities().find(campaign_logger_site);
+    const auto mill=c.facilities().find(campaign_mill_site);
+    if(source==d.state().resource_sites.end()&&method==d.state().recipes.end()&&
+       logger==c.facilities().end()&&mill==c.facilities().end())return false;
+    if(source==d.state().resource_sites.end()||method==d.state().recipes.end()||
+       logger==c.facilities().end()||mill==c.facilities().end()||
+       !has_campaign_board_vendor(world)||!c.has_market(law_region,"wood"))
+        throw std::invalid_argument("checkpoint has an incomplete native timber chain");
+    const auto& forest=source->second;
+    const auto& saw=method->second;
+    const auto& quote=c.market(law_region,"wood");
+    if(forest.site!=campaign_logger_site||forest.owner!=campaign_wood_seller||
+       forest.region!=law_region||forest.good!="wood"||!forest.renewable||
+       logger->second.owner!=campaign_wood_seller||logger->second.region!=law_region||
+       mill->second.owner!=campaign_board_vendor||mill->second.region!=law_region||
+       saw.site!=campaign_mill_site||saw.inputs.size()!=1||saw.outputs.size()!=1||
+       saw.inputs.front().good!="wood"||saw.inputs.front().per_unit!=1||
+       saw.outputs.front().good!=campaign_boards||saw.outputs.front().per_unit!=1||
+       !saw.byproducts.empty()||quote.price!=2||quote.floor!=2||quote.ceiling!=2)
+        throw std::invalid_argument("checkpoint has a mismatched native timber chain");
+    return true;
+}
+
 p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
     p0::Policies p;
     p.daily_food_units_per_person=0;
@@ -635,7 +668,10 @@ p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
             p.staffing.push_back({campaign_tool_buyer,law_region,1,31,true});
         if(const auto order=campaign_household_order(world))
             p.buyers.push_back(*order);
-        (void)has_campaign_board_vendor(world);
+        if(has_campaign_timber(world)) {
+            p.staffing.push_back({campaign_wood_seller,law_region,1,31,true});
+            p.staffing.push_back({campaign_board_vendor,law_region,1,31,true});
+        } else (void)has_campaign_board_vendor(world);
         if(has_public_build_fixture(world,"A",law_region))
             p.public_construction_offers.push_back(public_offer("A",law_region,true));
     }
@@ -743,8 +779,19 @@ daily::World law_world(LegislativeTrial trial) {
         engine.seed_transport_edge(rail);
         engine.seed_route({campaign_route,campaign_seller,campaign_buyer,"ore",2,1,62,1});
         seed_public_build_fixture(c,"A",law_region,true);
-        c.seed_actor(campaign_wood_seller,0);
-        c.seed_stock(campaign_wood_seller,law_region,"wood",2);
+        // Funded employment and forest biomass, but no pre-harvested wood.
+        c.seed_actor(campaign_wood_seller,32);
+        c.seed_production_facility(campaign_logger_site,campaign_wood_seller,law_region,31);
+        phased::ResourceSite forest;
+        forest.id=campaign_forest;forest.site=campaign_logger_site;
+        forest.owner=campaign_wood_seller;forest.region=law_region;forest.good="wood";
+        forest.monthly_capacity=31;forest.renewable=true;
+        forest.standing_biomass=forest.carrying_capacity=12;forest.renewal_per_month=3;
+        industry.seed_resource_site(forest);
+        const auto logger_home=pop.household_profile({law_region,"logger-worker","shared",1});
+        const auto logger_worker=pop.seed_population(demo,e,logger_home,1,campaign_logger_worker);
+        c.seed_actor("HH:"+std::to_string(logger_home),0);
+        pop.hire(logger_worker,1,campaign_wood_seller,"worker",31,{});
         c.seed_production_facility(campaign_smelter,campaign_buyer,law_region,31);
         phased::IndustryRecipe iron;
         iron.id=campaign_iron_method;iron.site=campaign_smelter;
@@ -763,8 +810,18 @@ daily::World law_world(LegislativeTrial trial) {
         // one tool plus its operating wages. It never starts with any tools.
         c.seed_actor(campaign_tool_buyer,85);
         c.seed_market(law_region,campaign_boards,campaign_board_price,
-                      campaign_board_price,campaign_board_price);
-        c.seed_actor(campaign_board_vendor,0);
+                      campaign_board_price,campaign_board_price,2);
+        c.seed_actor(campaign_board_vendor,24);
+        c.seed_production_facility(campaign_mill_site,campaign_board_vendor,law_region,31);
+        phased::IndustryRecipe saw;
+        saw.id=campaign_mill_method;saw.site=campaign_mill_site;
+        saw.inputs={{"wood",1}};saw.outputs={{campaign_boards,1}};
+        saw.workers_per_batch=saw.capacity_per_batch=1;
+        industry.seed_recipe(saw);
+        const auto mill_home=pop.household_profile({law_region,"sawmill-worker","shared",1});
+        const auto mill_worker=pop.seed_population(demo,e,mill_home,1,campaign_mill_worker);
+        c.seed_actor("HH:"+std::to_string(mill_home),0);
+        pop.hire(mill_worker,1,campaign_board_vendor,"worker",31,{});
         c.seed_stock(campaign_board_vendor,law_region,campaign_boards,1);
         c.seed_market(law_region,campaign_fittings,campaign_fitting_price,
                       campaign_fitting_price,campaign_fitting_price,1);
@@ -871,7 +928,7 @@ void campaign_supply_status(std::ostringstream& out,const daily::World& world) {
     const auto& c=domain.core();
     const auto& factory=public_offer("A",law_region,true);
     const auto& factory_id=factory.project.target_site;
-    Quantity iron_batches=0,tools_batches=0,tool_buyer_batches=0;
+    Quantity iron_batches=0,tools_batches=0,tool_buyer_batches=0,mill_batches=0;
     for(const auto& run:domain.state().actual_production_runs) {
         if(run.recipe==campaign_iron_method)
             iron_batches=phaseb::add_checked(iron_batches,run.batches);
@@ -879,6 +936,8 @@ void campaign_supply_status(std::ostringstream& out,const daily::World& world) {
             tools_batches=phaseb::add_checked(tools_batches,run.batches);
         else if(run.recipe==campaign_tool_buyer_recipe)
             tool_buyer_batches=phaseb::add_checked(tool_buyer_batches,run.batches);
+        else if(run.recipe==campaign_mill_method)
+            mill_batches=phaseb::add_checked(mill_batches,run.batches);
     }
     const auto known_material=[&](const std::string& good) {
         if(c.stock("A",law_region,good)>0)return true;
@@ -922,10 +981,34 @@ void campaign_supply_status(std::ostringstream& out,const daily::World& world) {
             out<<R"(,"household_fittings_bought":)"<<receipts/campaign_fitting_price
                <<R"(,"fittings_sales_receipts":)"<<receipts;
         }
-        if(has_campaign_board_vendor(world))
+        if(has_campaign_board_vendor(world)) {
+            const auto board_stock=c.stock(campaign_tool_buyer,law_region,campaign_boards);
+            // The workshop starts with one board, buys its only replacements
+            // from this mill, and consumes one per fitting. Raw timber resale
+            // is not a board receipt; report only the reconciled board units.
+            const auto board_receipts=has_campaign_timber(world)?
+                phaseb::mul_checked(phaseb::add_checked(board_stock,tool_buyer_batches)-1,
+                                    campaign_board_price):
+                c.firm_finance(campaign_board_vendor).receipts;
             out<<R"(,"board_vendor_stock":)"<<c.stock(campaign_board_vendor,law_region,campaign_boards)
-               <<R"(,"board_vendor_receipts":)"<<c.firm_finance(campaign_board_vendor).receipts
-               <<R"(,"workshop_board_stock":)"<<c.stock(campaign_tool_buyer,law_region,campaign_boards);
+               <<R"(,"board_vendor_receipts":)"<<board_receipts
+               <<R"(,"workshop_board_stock":)"<<board_stock;
+        }
+    }
+    if(has_campaign_timber(world)) {
+        // No opening wood and the named logger is the only wood source.
+        // Each mill/tool batch used one unit; the rest is current paid
+        // stock, net of any resale rather than a gross market history.
+        const auto paid_wages=[&](phaseb::Id partition) {
+            return c.cash(trial_worker_wallet(c,law_slice(c,partition)));
+        };
+        out<<R"(,"logs_harvested":)"<<domain.state().resource_sites.at(campaign_forest).cumulative_output
+           <<R"(,"logger_receipts":)"<<c.firm_finance(campaign_wood_seller).receipts
+           <<R"(,"logger_worker_cash":)"<<paid_wages(campaign_logger_worker)
+           <<R"(,"mill_worker_cash":)"<<paid_wages(campaign_mill_worker)
+           <<R"(,"mill_boards_produced":)"<<mill_batches
+           <<R"(,"mill_wood_bought":)"<<phaseb::add_checked(mill_batches,c.stock(campaign_board_vendor,law_region,"wood"))
+           <<R"(,"toolworks_wood_bought":)"<<phaseb::add_checked(tools_batches,c.stock("A",law_region,"wood"));
     }
     out<<'}';
 }

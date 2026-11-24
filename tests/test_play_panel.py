@@ -341,6 +341,7 @@ def run_shared_construction(root, panel, save):
     panel.new_button.invoke()
     wait(root, panel)
     opening = panel.current["public_construction"]
+    assert "벌목 0 · 원목 확보: 공구공장 0 · 제재소 0 · 판재 생산 0" in panel.market.get()
     assert opening["budget_approval"] == "available" and opening["state"] == "available"
     assert opening["invoice"] == 20 and opening["treasury_reserve"] == 40
     assert opening["contractor_steel"] == 0 and opening["commissioned_capacity"] == 0
@@ -393,14 +394,17 @@ def run_shared_construction(root, panel, save):
     assert panel.current["peer_country"] == "B"
     for _ in range(15):
         chain = panel.current["supply_chain"]
-        if chain["household_fittings_bought"] >= 2:
+        if chain["household_fittings_bought"] >= 3:
             break
         panel.step_button.invoke()
         wait(root, panel)
     chain = panel.current["supply_chain"]
     assert chain["tools_sold"] > 0 and chain["tool_buyer_batches"] > 0
-    assert chain["household_fittings_bought"] >= 2
-    assert chain["board_vendor_stock"] == 0 and chain["board_vendor_receipts"] == 20
+    assert chain["household_fittings_bought"] >= 3
+    assert chain["board_vendor_receipts"] >= 40
+    assert chain["logs_harvested"] > 0 and chain["logger_receipts"] > 0
+    assert chain["toolworks_wood_bought"] > 0 and chain["mill_wood_bought"] > 0
+    assert chain["mill_boards_produced"] > 0
     assert chain["fittings_sales_receipts"] == 90 * chain["household_fittings_bought"]
     assert chain["wood_seller_cash"] > 0
     market = panel.market.get()
@@ -412,6 +416,9 @@ def run_shared_construction(root, panel, save):
     assert f"가계 부품 구매 {chain['household_fittings_bought']}" in market
     assert f"목공소 판매대금 {chain['fittings_sales_receipts']}" in market
     assert f"판재 판매대금 {chain['board_vendor_receipts']}" in market
+    assert f"벌목 {chain['logs_harvested']}" in market
+    assert f"원목 확보: 공구공장 {chain['toolworks_wood_bought']} · 제재소 {chain['mill_wood_bought']}" in market
+    assert f"판재 생산 {chain['mill_boards_produced']}" in market
 
 
 
