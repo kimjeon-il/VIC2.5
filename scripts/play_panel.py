@@ -54,6 +54,7 @@ class PlayPanel:
     CAMPAIGN = "A 공동 캠페인"
     EXPANSION = "A 민간 증설 시범판"
     SUPPLY = "A 공급망 복구 시범판"
+    STAPLES = "A 가계 소비 시범판"
 
     @classmethod
     def _protocol_tag(cls, choice):
@@ -63,6 +64,8 @@ class PlayPanel:
             return "EDU-A"
         if choice == cls.CAMPAIGN:
             return "CAMPAIGN-A"
+        if choice == cls.STAPLES:
+            return "STAPLES-A"
         if choice == cls.SUPPLY:
             return "SUPPLY-A"
         if choice == cls.EXPANSION:
@@ -102,7 +105,7 @@ class PlayPanel:
         setup.grid(row=2, sticky="ew")
         ttk.Label(setup, text="시작·불러올 국가/시나리오:").grid(row=0, column=0, padx=(0, 6))
         choices = ("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE,
-                   self.EDUCATION, self.CAMPAIGN, self.EXPANSION, self.SUPPLY)
+                   self.EDUCATION, self.CAMPAIGN, self.EXPANSION, self.SUPPLY, self.STAPLES)
         self.selector = ttk.Combobox(setup, textvariable=self.country, values=choices,
                                      width=16, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
@@ -185,7 +188,8 @@ class PlayPanel:
         factory = self._industry(self.current)
         legislature = self._legislature(self.current)
         campaign = self._campaign(self.current)
-        direct_actions = not (factory or legislature or campaign or self._expansion(self.current))
+        direct_actions = not (factory or legislature or campaign or self._expansion(self.current)
+                              or self._staples(self.current))
         can_campaign_act = self._campaign_can_act(self.current)
         bill = self.current.get("law_bill") if legislature or can_campaign_act else None
         campaign_tax = bool(can_campaign_act and self.current["campaign_tax_allowed"])
@@ -284,6 +288,8 @@ class PlayPanel:
                             choice += " 예산 시범판"
                         elif self._campaign(self.current):
                             choice = self.SUPPLY if self.current.get("supply_recovery") else self.CAMPAIGN
+                        elif self._staples(self.current):
+                            choice = self.STAPLES
                         elif self._expansion(self.current):
                             choice = self.EXPANSION
                         elif self._education(self.current):
@@ -337,6 +343,18 @@ class PlayPanel:
     @staticmethod
     def _expansion(status):
         return bool(status and status.get("scenario") == "expansion-v1")
+
+    @staticmethod
+    def _staples(status):
+        return bool(status and status.get("scenario") == "staples-v1")
+
+    @staticmethod
+    def _basket_text(case):
+        return (f"누적 실수령 임금: {case['wage_received']}\n"
+                f"가계 잔액: {case['cash']}\n"
+                f"식량 구매: {case['groceries_bought']}\n"
+                f"의류 구매: {case['clothes_bought']}\n"
+                f"목재 부품 구매: {case['fittings_bought']}")
 
     @classmethod
     def _campaign_can_act(cls, status):
@@ -398,12 +416,15 @@ class PlayPanel:
     def _show(self, status):
         factory = self._industry(status)
         expansion = self._expansion(status)
+        staples = self._staples(status)
         recovery = status.get("supply_recovery") if self._campaign(status) else None
         perspective = self.FACTORY if factory else f"국가 {status['country']}"
         if self._campaign(status):
             perspective += " · 공급망 복구 시범판" if recovery else " · 공동 캠페인"
         elif expansion:
             perspective += " · 민간 증설 시범판"
+        elif staples:
+            perspective += " · 가계 소비 시범판"
         elif self._budget(status):
             perspective += " · 예산 시범판"
         elif self._education(status):
@@ -455,6 +476,14 @@ class PlayPanel:
                          "실제 국고 지급액을 보여줍니다.\n"
                          "일정 금액은 국고에 남겨 둡니다.")
             titles = ("재정", "생산 조건", "공장 재고·생산", "공공사업 지급")
+        elif staples:
+            basket = status["household_staples"]
+            policy = ("식량과 의류 우선\n"
+                      "예산이 남고 재고가 있으면 목재 부품도 구매합니다.\n"
+                      "구매 수량은 누적입니다.")
+            market = self._basket_text(basket["necessities_only"])
+            diplomacy = self._basket_text(basket["with_discretionary"])
+            titles = ("재정", "구매 순서", "낮은 임금 가계", "높은 임금 가계")
         elif expansion:
             result = status["private_expansion"]
             capacity = result["commissioned_capacity"]
@@ -578,7 +607,7 @@ class PlayPanel:
         self.policy.set(policy)
         self.market.set(market)
         self.diplomacy.set(diplomacy or "현재 분쟁 없음.")
-        if not factory and not expansion and not self._legislature(status) and not self._campaign(status):
+        if not (factory or expansion or staples or self._legislature(status) or self._campaign(status)):
             self.tariff.set(self._percent(status["tariff_ppm"]))
             self.tax.set(self._percent(status["income_tax_ppm"] if pending_tax is None else pending_tax))
         self.current = status
@@ -592,7 +621,7 @@ class PlayPanel:
 
     def set_tariff(self):
         if (not self.current or self._industry(self.current) or self._legislature(self.current)
-                or self._campaign(self.current) or self._expansion(self.current)):
+                or self._campaign(self.current) or self._expansion(self.current) or self._staples(self.current)):
             return
         value = self.tariff.get().strip()
         if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > 100:
@@ -602,7 +631,8 @@ class PlayPanel:
 
     def set_income_tax(self):
         if (not self.current or self._industry(self.current) or self._legislature(self.current)
-                or self._expansion(self.current) or self.current["pending_income_tax_ppm"] is not None):
+                or self._expansion(self.current) or self._staples(self.current)
+                or self.current["pending_income_tax_ppm"] is not None):
             return
         value = self.tax.get().strip()
         if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > 100:

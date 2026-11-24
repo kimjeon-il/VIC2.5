@@ -230,6 +230,48 @@ def main():
         require(not foreign[1]["ok"] and foreign[1]["status"] == foreign[0]["status"],
                 "foreign checkpoint replaced the private expansion scenario")
 
+        basket_open = d / "staples opening.sav"
+        basket_paid = d / "staples after payroll.sav"
+        basket_full = d / "staples full.sav"
+        basket_replay = d / "staples replay.sav"
+        samples = panel("new STAPLES-A", f"save {basket_open}", "step 1", f"save {basket_paid}",
+                        "step 2", f"save {basket_full}", "quit")
+        require(all(row["ok"] for row in samples), f"staples did not execute: {samples[0]}")
+        first, settled = samples[0]["status"], samples[2]["status"]
+        require(first["country"] == "A" and first["scenario"] == "staples-v1"
+                and first["treasury"] == 0, "staples opened as the wrong scenario or gave away wages")
+        goods = ("groceries", "clothes", "fittings")
+        for case_name, wage, cash, fitting in (("necessities_only", 45, 0, 0),
+                                               ("with_discretionary", 76, 1, 1)):
+            case = first["household_staples"][case_name]
+            require(case["wage_received"] == case["cash"] == 0
+                    and all(case[good + suffix] == 0 for good in goods
+                            for suffix in ("_made", "_stock", "_bought", "_receipts"))
+                    and (case["grain_stock"], case["fabric_stock"],
+                         case["boards_stock"], case["tools_stock"]) == (8, 8, 8, 8),
+                    "matched opening must have equal raw inputs and no free finished goods")
+            current = settled["household_staples"][case_name]
+            require((current["wage_received"], current["cash"]) == (wage, cash)
+                    and settled["treasury"] == 13 and settled["expenditure"] == 0,
+                    "private wage settlement or taxes did not use existing ledgers")
+            require((current["grain_stock"], current["fabric_stock"],
+                     current["boards_stock"], current["tools_stock"]) == (7, 7, 7, 7)
+                    and tuple(current[good + "_made"] for good in goods) == (1, 1, 1),
+                    "finished goods must be produced from equal actual material supplies")
+            require(tuple(current[good + "_bought"] for good in goods) == (1, 1, fitting)
+                    and tuple(current[good + "_receipts"] for good in goods) == (20, 25, 30 * fitting)
+                    and tuple(current[good + "_stock"] for good in goods) == (0, 0, 1 - fitting)
+                    and cash + sum(current[good + "_receipts"] for good in goods) == wage,
+                    "market purchasing must prioritize essentials over an available optional good")
+        baskets_again = panel(f"load CAMPAIGN-A {basket_open}", f"load STAPLES-A {start}",
+                              f"load STAPLES-A {basket_paid}", "step 2",
+                              f"save {basket_replay}", "quit")
+        require(not baskets_again[0]["ok"] and not baskets_again[1]["ok"]
+                and baskets_again[2]["status"] == settled
+                and baskets_again[3]["status"] == samples[4]["status"] and baskets_again[4]["ok"]
+                and basket_replay.read_bytes() == basket_full.read_bytes(),
+                "ordinary saves and staples crossed scenarios, or purchases did not replay exactly")
+
         tax_start = d / "예약 전 소득세.sav"
         tax_pending = d / "예약 소득세.sav"
         tax_failed = d / "중복 거절 소득세.sav"

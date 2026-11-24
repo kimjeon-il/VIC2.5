@@ -27,6 +27,7 @@ def run(exe):
     assert play_panel.PlayPanel._protocol_tag("A 공동 캠페인") == "CAMPAIGN-A"
     assert play_panel.PlayPanel._protocol_tag("A 민간 증설 시범판") == "EXPANSION-A"
     assert play_panel.PlayPanel._protocol_tag("A 공급망 복구 시범판") == "SUPPLY-A"
+    assert play_panel.PlayPanel._protocol_tag("A 가계 소비 시범판") == "STAPLES-A"
     root = tk.Tk()
     panel = play_panel.PlayPanel(root, exe)
     try:
@@ -118,6 +119,7 @@ def run(exe):
             run_shared_construction(root, panel, Path(directory) / "공동 건설 예산 승인.vic25")
             run_private_expansion(root, panel, Path(directory) / "민간 증설.vic25")
             run_supply_recovery(root, panel, Path(directory) / "공급망 복구.vic25")
+            run_household_staples(root, panel, Path(directory) / "가계 소비.vic25")
     finally:
         panel.close()
         stop = monotonic() + 3
@@ -547,6 +549,56 @@ def run_supply_recovery(root, panel, save):
         assert panel.current == closed and panel.country.get() == choice
     advance_to(resumed["date"])
     assert panel.current == resumed
+
+
+def run_household_staples(root, panel, save):
+    choice = "A 가계 소비 시범판"
+    panel.selector.current(panel.selector.cget("values").index(choice))
+    panel.new_button.invoke()
+    wait(root, panel)
+    opening = panel.current
+    assert opening["scenario"] == "staples-v1" and opening["country"] == "A"
+    assert "가계 소비 시범판" in panel.heading.get()
+    assert "식량과 의류 우선" in panel.policy.get()
+    assert not any(case["cash"] or case["wage_received"] or case["groceries_bought"]
+                   or case["clothes_bought"] or case["fittings_bought"]
+                   for case in opening["household_staples"].values())
+    for widget in (panel.tariff_button, panel.tax_button, panel.spending_button,
+                   panel.build_button, panel.law_action_button):
+        assert not widget.winfo_ismapped()
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file(), panel.notice.get()
+    panel.step_button.invoke()
+    wait(root, panel)
+    paid = panel.current
+    basket = paid["household_staples"]
+    for case, shown, expected in (
+        (basket["necessities_only"], panel.market.get(), (45, 0, 1, 1, 0)),
+        (basket["with_discretionary"], panel.diplomacy.get(), (76, 1, 1, 1, 1)),
+    ):
+        assert tuple(case[k] for k in ("wage_received", "cash", "groceries_bought",
+                                       "clothes_bought", "fittings_bought")) == expected
+        assert f"누적 실수령 임금: {case['wage_received']}" in shown
+        assert f"가계 잔액: {case['cash']}" in shown
+        assert f"식량 구매: {case['groceries_bought']}" in shown
+        assert f"의류 구매: {case['clothes_bought']}" in shown
+        assert f"목재 부품 구매: {case['fittings_bought']}" in shown
+        assert shown.index("식량 구매") < shown.index("목재 부품 구매")
+        assert shown.index("의류 구매") < shown.index("목재 부품 구매")
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.country.set("A 공동 캠페인")
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == paid and "오류:" in panel.notice.get()
+        panel.country.set(choice)
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == opening and panel.country.get() == choice
+    panel.step_button.invoke()
+    wait(root, panel)
+    assert panel.current == paid
 
 
 def run_industry(root, panel, tariff_save):

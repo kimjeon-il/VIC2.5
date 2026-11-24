@@ -737,6 +737,203 @@ void expansion_status(std::ostringstream& out,const daily::World& world) {
        <<",\"food_stock\":"<<c.stock(expansion_maker,expansion_region,"food")<<"}}";
 }
 
+// The two markets deliberately do not share goods, payroll or transport.
+// Only household contract pay differs; both use the same native basket.
+constexpr auto staples_origin="panel:staples-v1:A";
+constexpr auto staples_scenario="staples-v1";
+constexpr auto staples_household_class="budget-comparison-household";
+struct StaplesCase {
+    const char* key;
+    const char* region;
+    phaseb::Id district, household_partition;
+    phasec::Money contract_wage;
+};
+constexpr std::array<StaplesCase,2> staples_cases{{
+    {"necessities_only","ESSENTIALS-DISTRICT",1,401,50*31},
+    {"with_discretionary","WIDER-BASKET-DISTRICT",2,402,84*31},
+}};
+struct StaplesGood {
+    const char* key;
+    const char* good;
+    const char* input;
+    const char* archetype;
+    phasec::Money price;
+};
+constexpr std::array<StaplesGood,3> staples_goods{{
+    {"groceries","groceries","grain","vic3_115.urban.food_industries",20},
+    {"clothes","clothes","fabric","vic3_115.urban.textile_mills",25},
+    {"fittings",campaign_fittings,campaign_boards,nullptr,30},
+}};
+
+bool is_staples_world(const daily::World& world) {
+    return world.migration_origin()==staples_origin;
+}
+std::string staples_id(const StaplesCase& trial,std::string_view role) {
+    return std::string(role)+':'+trial.region;
+}
+std::string staples_seller(const StaplesCase& trial,const StaplesGood& good) {
+    return staples_id(trial,std::string("FIRM:")+good.key);
+}
+
+daily::World staples_world() {
+    phasegh::World engine(24000);
+    auto& geo=engine.seed_geography();
+    geo.set_dataset(staples_origin);
+    for(const auto& trial:staples_cases) {
+        geo.seed_province(trial.district,trial.region,"A");
+        geo.seed_unit(trial.district,"A",trial.region);
+        geo.seed_assignment(trial.district,trial.district);
+    }
+    auto& industry=geo.seed_core();
+    auto& c=industry.seed_core();
+    c.seed_actor("A",0);
+    c.seed_government("A","STAPLES-HEAD","STAPLES-PM",5,3);
+    c.p1_mark_player_country("A",true);
+    industry.seed_standard_industries();
+    auto& pop=c.seed_population();
+    for(const auto& trial:staples_cases) {
+        const auto worker=pop.economic_profile(
+            {trial.region,"worker","wage","employee",pop.default_education()});
+        const auto consumer=pop.economic_profile(
+            {trial.region,"worker","wage",staples_household_class,pop.default_education()});
+        const auto demo=pop.demographic_profile({trial.region,23700,phaseb::Sex::female,
+            "trial-culture","trial-faith","citizen","free",pop.default_health(),
+            phaseb::Service::civilian});
+        const auto add_worker=[&](const std::string& role,const std::string& employer,
+                                  phaseb::Id profile,phasec::Money pay,
+                                  phaseb::Id partition) {
+            const auto home=pop.household_profile({trial.region,role,"shared",1});
+            const auto resident=pop.seed_population(demo,profile,home,1,partition);
+            c.seed_actor("HH:"+std::to_string(home),0);
+            pop.hire(resident,1,employer,"worker",pay,{});
+        };
+        const auto employer=staples_id(trial,"EMPLOYER");
+        c.seed_actor(employer,3000);
+        add_worker("comparison-household",employer,consumer,trial.contract_wage,
+                   trial.household_partition);
+        c.seed_market(trial.region,"tools",1,1,1);
+        phaseb::Id producer_partition=trial.household_partition*10;
+        for(const auto& good:staples_goods) {
+            const auto seller=staples_seller(trial,good);
+            const auto site=staples_id(trial,std::string("SITE:")+good.key);
+            c.seed_actor(seller,200);
+            c.seed_market(trial.region,good.good,good.price,good.price,good.price);
+            c.seed_market(trial.region,good.input,1,1,1);
+            c.seed_stock(seller,trial.region,good.input,8);
+            add_worker(good.key,seller,worker,31,++producer_partition);
+            phased::IndustryRecipe method;
+            method.id=staples_id(trial,good.key);method.site=site;
+            method.inputs={{good.input,1}};method.outputs={{good.good,1}};
+            method.workers_per_batch=method.capacity_per_batch=1;
+            if(good.archetype) {
+                geo.seed_building_in_province(site,seller,trial.district,31,good.archetype);
+                method.industry_class="MANU";
+                industry.seed_building_recipe(method);
+            } else {
+                c.seed_stock(seller,trial.region,"tools",8);
+                c.seed_production_facility(site,seller,trial.region,31);
+                method.inputs.push_back({"tools",1});
+                industry.seed_recipe(method);
+            }
+        }
+    }
+    return daily::World::adopt(std::move(engine),93,staples_origin);
+}
+
+daily::World open_staples(const std::optional<fs::path>& resume) {
+    auto world=resume?load_panel_checkpoint(*resume):staples_world();
+    const auto& base=world.engine().base();
+    const auto& industry=base.core();
+    const auto& c=industry.core();
+    if(!is_staples_world(world)||base.spatial().dataset_hash!=staples_origin||
+       !c.has_country_treasury("A"))
+        throw std::invalid_argument("checkpoint does not belong to the staple household trial");
+    for(const auto& trial:staples_cases) {
+        const auto household=law_slice(c,trial.household_partition,trial.region);
+        const auto& pop=c.people().slice(household);
+        if(pop.count!=1||c.people().economic(pop.key.economic).labor_class!=staples_household_class||
+           !c.has_actor(trial_worker_wallet(c,household)))
+            throw std::invalid_argument("checkpoint lacks the matched household");
+        for(const auto& good:staples_goods) {
+            const auto seller=staples_seller(trial,good);
+            const auto method=industry.state().recipes.find(staples_id(trial,good.key));
+            if(!c.has_actor(seller)||method==industry.state().recipes.end()||
+               !c.facilities().contains(method->second.site)||
+               c.facility(method->second.site).owner!=seller||
+               c.facility(method->second.site).region!=trial.region||
+               !c.has_market(trial.region,good.good))
+                throw std::invalid_argument("checkpoint lacks a matched local supplier");
+            const auto& quote=c.market(trial.region,good.good);
+            if(quote.price!=good.price||quote.floor!=good.price||quote.ceiling!=good.price)
+                throw std::invalid_argument("checkpoint lacks the fixed matched market quote");
+        }
+    }
+    return world;
+}
+
+p0::Policies staples_policies() {
+    p0::Policies p;
+    p.daily_food_units_per_person=p.monthly_clothing_units_per_person=0;
+    p.allow_endogenous_staffing=false;
+    p.allow_endogenous_factory_expansion=false;
+    p.allow_endogenous_input_procurement=false;
+    p.allow_endogenous_investment_credit=false;
+    p.allow_collateralized_enterprise_credit=false;
+    p.household_basket={
+        {"groceries",staples_household_class,31,0},
+        {"clothes",staples_household_class,31,1},
+        {campaign_fittings,staples_household_class,31,2}
+    };
+    return p;
+}
+
+void staples_status(std::ostringstream& out,const daily::World& world) {
+    const auto& industry=world.engine().base().core();
+    const auto& c=industry.core();
+    std::map<std::string,Quantity> batches;
+    for(const auto& run:industry.state().actual_production_runs)
+        batches[run.recipe]=phaseb::add_checked(batches[run.recipe],run.batches);
+    out<<R"(,"scenario":)"<<json_string(staples_scenario)
+       <<R"(,"household_staples":{)";
+    bool first=true;
+    for(const auto& trial:staples_cases) {
+        if(!first)out<<',';
+        first=false;
+        const auto household=law_slice(c,trial.household_partition,trial.region);
+        const auto wallet=trial_worker_wallet(c,household);
+        // The only household cash inflow is paid wages, and its only
+        // non-tax cash outflows are the three isolated seller receipts.
+        // Reconcile settled net earnings, not gross wage claims in C revenue.
+        const auto cash=c.cash(wallet);
+        auto net_wages=cash;
+        std::array<phasec::Money,staples_goods.size()> receipts{};
+        for(std::size_t i=0;i<staples_goods.size();++i) {
+            receipts[i]=c.firm_finance(staples_seller(trial,staples_goods[i])).receipts;
+            net_wages=phaseb::add_checked(net_wages,receipts[i]);
+        }
+        out<<json_string(trial.key)<<R"(:{"wage_received":)"<<net_wages
+           <<R"(,"cash":)"<<cash;
+        for(std::size_t i=0;i<staples_goods.size();++i) {
+            const auto& good=staples_goods[i];
+            const auto seller=staples_seller(trial,good);
+            const auto field=[&](std::string_view suffix,auto value) {
+                out<<','<<json_string(std::string(good.key)+std::string(suffix))<<':'<<value;
+            };
+            field("_bought",receipts[i]/good.price);
+            field("_receipts",receipts[i]);
+            field("_stock",c.stock(seller,trial.region,good.good));
+            field("_made",batches[staples_id(trial,good.key)]);
+            const auto input_key=good.archetype?good.input:"boards";
+            out<<','<<json_string(std::string(input_key)+"_stock")<<':'
+               <<c.stock(seller,trial.region,good.input);
+            if(!good.archetype)
+                out<<R"(,"tools_stock":)"<<c.stock(seller,trial.region,"tools");
+        }
+        out<<'}';
+    }
+    out<<"}}";
+}
+
 std::optional<p0::Buyer> campaign_household_order(const daily::World& world) {
     const auto& c=world.engine().base().core().core();
     const auto resident=law_slice(c,law_worker_partitions.front());
@@ -1452,6 +1649,10 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
        <<",\"expenditure\":"<<fiscal.realized_expenditure
        <<",\"debt\":"<<phaseb::add_checked(fiscal.bank_debt,
             phaseb::add_checked(fiscal.bond_principal,fiscal.unpaid_coupons));
+    if(is_staples_world(world)) {
+        staples_status(out,world);
+        return out.str();
+    }
     if(is_expansion_world(world)) {
         expansion_status(out,world);
         return out.str();
@@ -1629,14 +1830,15 @@ void run_panel() {
                 const bool budget=choice=="BUDGET-A"||choice=="BUDGET-B";
                 const auto law=legislative_trial(choice);
                 const bool expansion=choice=="EXPANSION-A";
-                const auto tag=law||expansion?std::string_view("A"):budget?choice.substr(7):choice;
+                const bool staples=choice=="STAPLES-A";
+                const auto tag=law||expansion||staples?std::string_view("A"):budget?choice.substr(7):choice;
                 if((tag!="A"&&tag!="B"&&tag!=country)||(command=="new"&&!path.empty()))
-                    throw std::invalid_argument("select A, B, TUT, BUDGET-A, BUDGET-B, LAW-A, EDU-A, CAMPAIGN-A, SUPPLY-A or EXPANSION-A");
+                    throw std::invalid_argument("select A, B, TUT, BUDGET-A, BUDGET-B, LAW-A, EDU-A, CAMPAIGN-A, SUPPLY-A, EXPANSION-A or STAPLES-A");
                 const auto resume=command=="load"?std::optional{checkpoint_path_utf8(path)}:std::nullopt;
                 const bool industry=tag==country;
-                auto next=expansion?open_expansion(resume):law?open_law(resume,*law):industry?open_industry(resume):
+                auto next=staples?open_staples(resume):expansion?open_expansion(resume):law?open_law(resume,*law):industry?open_industry(resume):
                     open_trial(std::string(tag),resume,budget);
-                auto policy=expansion?expansion_policies():law?law_policies(next,*law):industry?tutorial_policies(true):
+                auto policy=staples?staples_policies():expansion?expansion_policies():law?law_policies(next,*law):industry?tutorial_policies(true):
                     trial_policies(next,std::string(tag),budget);
                 auto replacement=std::make_unique<Session>(Session{std::string(tag),
                     p0::DailyGame(std::move(next),std::move(policy))});
@@ -1651,6 +1853,8 @@ void run_panel() {
                 last_status=panel_status(session->game,session->tag);
             } else if(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="public-build"||command=="public-build-budget"||command=="save") {
                 if(!session)throw std::invalid_argument("start or load a trial first");
+                if(is_staples_world(session->game.world())&&command!="step"&&command!="save")
+                    throw std::invalid_argument("the staple household trial runs autonomously; use step or save");
                 if(is_expansion_world(session->game.world())&&command!="step"&&command!="save")
                     throw std::invalid_argument("private expansion runs autonomously; use step or save");
                 if(command=="step") {
