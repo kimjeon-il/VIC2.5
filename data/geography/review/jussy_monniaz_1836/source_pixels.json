@@ -1,0 +1,16 @@
+{
+  "source": "SITG HISTO_CARTE_TRAITE_TURIN_PARIS_ANNEXE_07_1819",
+  "export_date_utc": "2026-11-24",
+  "png_sha256": "c8b44d9d6eb07a91a3da430d262950d9eb425b6a4329d718ed1a40326dbf7752",
+  "projected_crs": "EPSG:2056",
+  "bbox_min_e_min_n_max_e_max_n": [2511000, 1121000, 2513450, 1125000],
+  "width_height": [1225, 2000],
+  "pixel_centers_column_row_zero_based": [
+    [930, 1590], [936, 1582], [942, 1573], [948, 1564], [951, 1559]
+  ],
+  "modern_comparison_only": {
+    "source": "SITG CAD_POINTFIXE_BF, survey group 802",
+    "134": [2512864.3904, 1121819.0736],
+    "135": [2512905.3582, 1121880.6052]
+  }
+}

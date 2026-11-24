@@ -115,6 +115,15 @@ def lines_of(geom):
         yield from geom.geoms
 
 
+def intersects_linear_frontier(line, frontier):
+    """A crossing may be a point, but the crossed frontier must be a line."""
+    if frontier.geom_type == "GeometryCollection":
+        return any(intersects_linear_frontier(line, part)
+                   for part in frontier.geoms)
+    return any(part.length > 0 and line.intersects(part)
+               for part in lines_of(frontier))
+
+
 def center_distance(line, clipped):
     segments = list(lines_of(clipped))
     if not segments:
@@ -184,7 +193,7 @@ def make_links(province_path, line_path):
                     from_poly, to_poly = (province_by_id[origin],
                                           province_by_id[destination])
                     common = from_poly.boundary.intersection(to_poly.boundary)
-                    if common.is_empty or not line.intersects(common):
+                    if not intersects_linear_frontier(line, common):
                         continue
                 source = "%s:%s" % (mode, sid)
                 key = (source, origin, destination, mode)

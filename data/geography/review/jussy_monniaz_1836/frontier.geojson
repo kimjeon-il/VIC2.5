@@ -1,0 +1,40 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "jussy-monniaz-1819-ink-review",
+      "properties": {
+        "status": "review_only",
+        "evidence_minutes_date": "1819-10-20",
+        "campaign_reference_date": "1836-01-01",
+        "description": "Approximate archival border ink in the vicinity of modern markers 134 and 135"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            6.30885476,
+            46.24214804
+          ],
+          [
+            6.30900733,
+            46.24229351
+          ],
+          [
+            6.30915953,
+            46.24245697
+          ],
+          [
+            6.30931173,
+            46.24262043
+          ],
+          [
+            6.30938764,
+            46.24271115
+          ]
+        ]
+      }
+    }
+  ]
+}
