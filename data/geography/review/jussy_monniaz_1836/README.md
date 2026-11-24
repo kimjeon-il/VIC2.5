@@ -45,3 +45,31 @@ The export's 2 m cell size is not the accuracy of the archival map or
 its georeferencing. No complete frontier or date-continuity claim is made.
 The [modern Le Chambet correction at markers 188–194](https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000000436720)
 is outside this marker-based sample; it is not backdated.
+
+## Local land cut across the shared frontier
+
+`cut_source.json` extends the observation by two additional red-ink
+samples to the north, from the same raster and sheet (about 23 m).
+It does not replace the original 75 m trace. The rectangular study
+window is 92 × 76 m in LV95 and lies on continuous depicted land.
+Clip the sampled stroke to its top and bottom edges by linear
+interpolation between the observed pixels; carry the same ordered
+vertices into each of the two land rings, reversing the order on
+one side. Reproject the two rings and the window using the same
+coordinate transform as the original trace. Include the seam endpoints
+also on the reprojected scope ring so its exterior exactly matches the
+land union at the stored precision.
+
+`cut_land.geojson` contains two local cuts: Swiss Geneva west of the
+stroke (3,261.2 m²) and Kingdom of Sardinia east (3,730.8 m²).
+`cut_scope.geojson` is the complete 6,992 m² study window. All four
+outer sides are **artificial cut edges**, not historical borders.
+Only the shared red-ink line is historical evidence. The cutouts are
+review data, not provinces or a map consumed by the game. There are no
+new route or boundary assignments outside the window.
+
+Run `python tests/test_monniaz_review_cut.py` to verify the committed
+rings have exactly one oppositely directed shared line and reproduce
+the stored window exterior. The independent GIS check additionally
+tested validity, no positive-area intersection, and no area difference
+between their union and the window in LV95 and stored WGS84.

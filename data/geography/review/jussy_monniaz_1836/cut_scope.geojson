@@ -1,0 +1,49 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "monniaz-artificial-study-window",
+      "properties": {
+        "status": "review_only",
+        "role": "artificial_study_extent",
+        "campaign_reference_date": "1836-01-01"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              6.30867252,
+              46.2421822
+            ],
+            [
+              6.3088929,
+              46.2421844
+            ],
+            [
+              6.30986517,
+              46.24219413
+            ],
+            [
+              6.30985097,
+              46.24287773
+            ],
+            [
+              6.30952428,
+              46.24287446
+            ],
+            [
+              6.3086583,
+              46.24286579
+            ],
+            [
+              6.30867252,
+              46.2421822
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "base_trace": "source_pixels.json",
+  "additional_observed_pixel_centers_column_row": [[954, 1554], [957, 1549]],
+  "study_window_pixel_center_space_min_column_min_row_max_column_max_row": [923, 1550, 969, 1588],
+  "shared_frontier_clipped_bottom_to_top_column_row": [
+    [931.5, 1588], [936, 1582], [942, 1573], [948, 1564],
+    [951, 1559], [954, 1554], [956.4, 1550]
+  ]
+}

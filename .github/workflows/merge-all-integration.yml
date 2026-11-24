@@ -27,6 +27,8 @@ jobs:
         run: python tests/test_oresund_review.py
       - name: Verify historical chart review tile
         run: python tests/test_oresund_review_tile.py
+      - name: Verify Monniaz historical land review cut
+        run: python tests/test_monniaz_review_cut.py
       - name: Audit G/H 238 IDs and distinction of BLOCKED versus PASS
         run: python scripts/verify_phase_gh_238.py --root . --audit
       - name: Install OpenGL test dependencies (Linux)
