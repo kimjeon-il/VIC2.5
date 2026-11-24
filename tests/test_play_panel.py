@@ -393,12 +393,15 @@ def run_shared_construction(root, panel, save):
     assert panel.current["peer_country"] == "B"
     for _ in range(10):
         chain = panel.current["supply_chain"]
-        if chain["tools_sold"] > 0 and chain["tool_buyer_output_stock"] > 0:
+        if (chain["tools_sold"] > 0 and chain["tool_buyer_batches"] > 0
+                and chain["household_fittings_bought"] > 0):
             break
         panel.step_button.invoke()
         wait(root, panel)
     chain = panel.current["supply_chain"]
-    assert chain["tools_sold"] > 0 and chain["tool_buyer_output_stock"] > 0
+    assert chain["tools_sold"] > 0 and chain["tool_buyer_batches"] > 0
+    assert chain["household_fittings_bought"] > 0
+    assert chain["fittings_sales_receipts"] == 90 * chain["household_fittings_bought"]
     assert chain["wood_seller_cash"] > 0
     market = panel.market.get()
     assert f"제철소 재고: 광석 {chain['ore_stock']} · 철 {chain['iron_stock']}" in market
@@ -406,6 +409,8 @@ def run_shared_construction(root, panel, save):
     assert f"목재 공급자 잔액 {chain['wood_seller_cash']}" in market
     assert f"공구 판매량 {chain['tools_sold']}" in market
     assert f"목공소 목재 부품 재고 {chain['tool_buyer_output_stock']}" in market
+    assert f"가계 부품 구매 {chain['household_fittings_bought']}" in market
+    assert f"목공소 판매대금 {chain['fittings_sales_receipts']}" in market
 
 
 

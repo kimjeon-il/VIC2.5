@@ -633,6 +633,10 @@ def main():
         require("supply_chain" in supply_start, "shared campaign does not expose a real supply chain")
         initial = supply_start["supply_chain"]
         en_route = transit["supply_chain"]
+        require(initial.get("household_fittings_bought") == 0 and
+                initial.get("fittings_sales_receipts") == 0 and
+                supply_start["household_cash"] == 0,
+                "campaign has no fitting demand from an initially cashless wage household")
         require(initial.get("tool_buyer_cash", 0) > 0 and
                 initial["tools_sold"] == initial["tool_buyer_batches"] ==
                 initial["tool_buyer_tools_stock"] == initial["tool_buyer_output_stock"] == 0,
@@ -659,7 +663,7 @@ def main():
         earlier = days[-2]["supply_chain"]
         require(later["tools_waiting_for"] == "wood" and later["factory_wood_stock"] == 0 and
                 later["wood_seller_stock"] == 0 and later["tools_batches"] == earlier["tools_batches"] > 0 and
-                later["tools_stock"] == earlier["tools_stock"] > 0 and
+                later["tools_stock"] == earlier["tools_stock"] and
                 later["tools_batches"] == initial["wood_seller_stock"] and
                 later["wood_seller_cash"] > initial["wood_seller_cash"] and
                 later["factory_worker_cash"] > earlier["factory_worker_cash"] and
@@ -680,14 +684,22 @@ def main():
                 first_tool["date"] <= tool_sale["date"] < downstream["date"] and
                 tool_sale["supply_chain"]["tool_buyer_tools_stock"] == 1 and
                 tool_sale["supply_chain"]["tool_buyer_output_stock"] == 0 and
-                downstream["supply_chain"]["tool_buyer_output_stock"] == 1 and
-                later["tool_buyer_batches"] == later["tools_sold"] == 1 and
-                later["tool_buyer_tools_stock"] == 0 and
+                downstream["supply_chain"]["tool_buyer_output_stock"] == 0 and
+                later["tool_buyer_batches"] == 1 and
+                later["tool_buyer_tools_stock"] + later["tool_buyer_batches"] == later["tools_sold"] and
                 later["tools_stock"] + later["tools_sold"] == later["tools_batches"] and
-                later["tool_buyer_cash"] < initial["tool_buyer_cash"] and
-                days[-1]["revenue"] - unbuilt["revenue"] == 60 and
+                days[-1]["revenue"] - unbuilt["revenue"] == 60 * later["tools_sold"] and
                 unbuilt["supply_chain"]["tools_sold"] == unbuilt["supply_chain"]["tool_buyer_batches"] == 0,
                 "domestic shop did not pay 60 to the public maker and physically use one tool")
+        observed = downstream["supply_chain"]
+        require(tool_sale["supply_chain"]["household_fittings_bought"] == 0 and
+                tool_sale["household_cash"] > 0 and
+                observed["household_fittings_bought"] == later["household_fittings_bought"] == 1 and
+                observed["fittings_sales_receipts"] == later["fittings_sales_receipts"] == 90 and
+                downstream["household_cash"] == tool_sale["household_cash"] and
+                unbuilt["household_cash"] - days[-1]["household_cash"] == 90 and
+                unbuilt["supply_chain"]["household_fittings_bought"] == 0,
+                "ordinary wages did not fund exactly one paid fitting consumed by the household")
 
         restarted = panel(f"load CAMPAIGN-A {supply_checkpoint}", "inspect B", "inspect A",
                           "step 18", f"save {supply_replay}", "quit")
@@ -702,11 +714,21 @@ def main():
                           f"save {purchased_checkpoint}", "quit")
         require(all(row["ok"] for row in purchased) and purchased[1]["status"] == tool_sale,
                 "tool purchase needs to remain in the shop before any downstream output")
-        after_purchase = panel(f"load CAMPAIGN-A {purchased_checkpoint}", "step 1", "quit")
+        retail_checkpoint = d / "campaign-fitting-sold.vic25"
+        after_purchase = panel(f"load CAMPAIGN-A {purchased_checkpoint}", "step 1",
+                               f"save {retail_checkpoint}", "quit")
         require(all(row["ok"] for row in after_purchase) and
                 after_purchase[0]["status"] == tool_sale and
                 after_purchase[1]["status"] == downstream,
                 "resuming a paid physical tool should consume it once without repeating payment")
+        retail_replayed = d / "campaign-fitting-replayed.vic25"
+        resumed_retail = panel(f"load CAMPAIGN-A {retail_checkpoint}", "step 13",
+                               f"save {retail_replayed}", "quit")
+        require(all(row["ok"] for row in resumed_retail) and
+                resumed_retail[0]["status"] == downstream and
+                resumed_retail[1]["status"] == days[-1] and
+                retail_replayed.read_bytes() == supply_completed.read_bytes(),
+                "resuming after household consumption must not repeat the fitting sale")
 
         campaign_reviews = []
         def campaign_law(*tail):

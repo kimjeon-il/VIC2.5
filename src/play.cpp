@@ -571,6 +571,38 @@ constexpr std::array<phaseb::Id,2> law_worker_partitions{101,102};
 constexpr phaseb::Id law_voter_partition=103;
 constexpr phasec::Money opening_contract_wage=31, proposed_floor=62;
 
+constexpr auto campaign_retail_household="campaign-wage-fitting-buyer";
+constexpr phasec::Money campaign_fitting_price=90;
+
+phaseb::Id law_slice(const phasec::IntegratedWorld& c,phaseb::Id partition,
+            std::string_view region=law_region) {
+    for(const auto& [id,slice]:c.people().slices())
+        if(slice.key.partition==partition&&
+           c.people().demographic(slice.key.demographic).region==region)
+            return id;
+    throw std::invalid_argument("expected legislative trial cohort is missing");
+}
+
+std::string trial_worker_wallet(const phasec::IntegratedWorld& c,phaseb::Id worker) {
+    return "HH:"+std::to_string(c.people().slice(worker).key.household);
+}
+
+std::optional<p0::Buyer> campaign_household_order(const daily::World& world) {
+    const auto& c=world.engine().base().core().core();
+    const auto resident=law_slice(c,law_worker_partitions.front());
+    const auto& slice=c.people().slice(resident);
+    const auto& house=c.people().household(slice.key.household);
+    if(house.composition!=campaign_retail_household)return std::nullopt;
+    const auto wallet=trial_worker_wallet(c,resident);
+    if(!has_campaign_workshop(world)||house.region!=law_region||!c.has_actor(wallet))
+        throw std::invalid_argument("checkpoint lacks the authored fitting buyer");
+    const auto& quote=c.market(law_region,campaign_fittings);
+    if(quote.price!=campaign_fitting_price||quote.floor!=campaign_fitting_price||
+       quote.ceiling!=campaign_fitting_price)
+        throw std::invalid_argument("checkpoint lacks the fixed campaign retail quote");
+    return p0::Buyer{resident,wallet,campaign_tool_buyer,law_region,campaign_fittings,1};
+}
+
 p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
     p0::Policies p;
     p.daily_food_units_per_person=0;
@@ -587,6 +619,8 @@ p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
             p.staffing.push_back({campaign_buyer,law_region,1,31,true});
         if(has_campaign_workshop(world))
             p.staffing.push_back({campaign_tool_buyer,law_region,1,31,true});
+        if(const auto order=campaign_household_order(world))
+            p.buyers.push_back(*order);
         if(has_public_build_fixture(world,"A",law_region))
             p.public_construction_offers.push_back(public_offer("A",law_region,true));
     }
@@ -641,7 +675,9 @@ daily::World law_world(LegislativeTrial trial) {
         "trial-culture","trial-faith","citizen","free",pop.default_health(),
         phaseb::Service::civilian});
     if(!education)for(const auto id:law_worker_partitions) {
-        const auto h=pop.household_profile({law_region,"worker-"+std::to_string(id),"shared",1});
+        const auto composition=campaign&&id==law_worker_partitions.front()?
+            std::string(campaign_retail_household):"worker-"+std::to_string(id);
+        const auto h=pop.household_profile({law_region,composition,"shared",1});
         // The campaign has no wage-trial manual hiring command. Leave its
         // comparison cohort inactive so the operating factory recruits from
         // its one funded, eligible vacancy cohort instead.
@@ -712,7 +748,8 @@ daily::World law_world(LegislativeTrial trial) {
         // one tool plus its operating wages. It never starts with any tools.
         c.seed_actor(campaign_tool_buyer,85);
         c.seed_market(law_region,campaign_boards,4,4,4);
-        c.seed_market(law_region,campaign_fittings,90,90,90,1);
+        c.seed_market(law_region,campaign_fittings,campaign_fitting_price,
+                      campaign_fitting_price,campaign_fitting_price,1);
         c.seed_stock(campaign_tool_buyer,law_region,campaign_boards,1);
         c.seed_production_facility(campaign_tool_buyer_site,campaign_tool_buyer,law_region,31);
         phased::IndustryRecipe fittings;
@@ -776,19 +813,6 @@ bool is_law_world(const daily::World& w) {
     return w.migration_origin()==law_origin||is_education_world(w)||is_campaign_world(w);
 }
 
-
-phaseb::Id law_slice(const phasec::IntegratedWorld& c,phaseb::Id partition,
-            std::string_view region=law_region) {
-    for(const auto& [id,slice]:c.people().slices())
-        if(slice.key.partition==partition&&
-           c.people().demographic(slice.key.demographic).region==region)
-            return id;
-    throw std::invalid_argument("expected legislative trial cohort is missing");
-}
-
-std::string trial_worker_wallet(const phasec::IntegratedWorld& c,phaseb::Id worker) {
-    return "HH:"+std::to_string(c.people().slice(worker).key.household);
-}
 
 daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial trial) {
     auto w=resume?load_panel_checkpoint(*resume):law_world(trial);
@@ -872,6 +896,14 @@ void campaign_supply_status(std::ostringstream& out,const daily::World& world) {
            <<R"(,"tool_buyer_tools_stock":)"<<shop_tools
            <<R"(,"tool_buyer_output_stock":)"<<c.stock(campaign_tool_buyer,law_region,campaign_fittings)
            <<R"(,"tool_buyer_batches":)"<<tool_buyer_batches;
+        if(campaign_household_order(world)) {
+            // This shop makes only fittings and the authored household is
+            // their sole buyer. Actual receipts at the immutable unit quote
+            // give the count even after Stage7 consumed the delivered stock.
+            const auto receipts=c.firm_finance(campaign_tool_buyer).receipts;
+            out<<R"(,"household_fittings_bought":)"<<receipts/campaign_fitting_price
+               <<R"(,"fittings_sales_receipts":)"<<receipts;
+        }
     }
     out<<'}';
 }

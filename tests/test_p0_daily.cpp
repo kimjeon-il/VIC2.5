@@ -65,6 +65,46 @@ static phasegh::World fixture() {
     gh.validate();
     return gh;
 }
+static void fitting_purchase_requires_wages_and_consumes_real_stock() {
+    const auto scenario=[](phasec::Money wage_per_day) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");geo.seed_unit(1,"A","R");
+        geo.seed_assignment(1,1);
+        auto& core=geo.seed_core().seed_core();
+        core.seed_actor("A",0);core.seed_actor("EMPLOYER",200);
+        core.seed_actor("WORKSHOP",0);
+        core.seed_government("A","HEAD","PM",5,3);
+        core.seed_market("R","fittings",90,90,90);
+        core.seed_stock("WORKSHOP","R","fittings",1);
+        const auto resident=people(gh,"R",1,"worker");
+        auto& pop=core.seed_population();
+        const auto wallet="HH:"+std::to_string(pop.slice(resident).key.household);
+        core.seed_actor(wallet,0);
+        pop.hire(resident,1,"EMPLOYER","worker",31*wage_per_day,{});
+        p0::Policies policies;policies.daily_food_units_per_person=0;
+        policies.buyers.push_back({resident,wallet,"WORKSHOP","R","fittings",1});
+        return std::pair{p0::DailyGame(daily::World::adopt(std::move(gh),55),policies),wallet};
+    };
+    auto [funded,paid_wallet]=scenario(100);
+    auto [short_funds,short_wallet]=scenario(98);
+    const auto opening=daily::SnapshotCodec::encode(funded.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(opening),funded.policies());
+    funded.advance_day();short_funds.advance_day();replay.advance_day();
+    const auto& f=c(funded);
+    const auto& u=c(short_funds);
+    require_test(f.cash("EMPLOYER")==100&&f.cash("A")==10&&f.cash(paid_wallet)==0&&
+                 f.cash("WORKSHOP")==90&&f.firm_finance("WORKSHOP").receipts==90&&
+                 f.stock("WORKSHOP","R","fittings")==0&&
+                 f.stock(paid_wallet,"R","fittings")==0&&
+                 u.cash("EMPLOYER")==102&&u.cash("A")==9&&u.cash(short_wallet)==89&&
+                 u.cash("WORKSHOP")==0&&u.firm_finance("WORKSHOP").receipts==0&&
+                 u.stock("WORKSHOP","R","fittings")==1&&
+                 u.stock(short_wallet,"R","fittings")==0&&
+                 daily::SnapshotCodec::encode(funded.world())==
+                     daily::SnapshotCodec::encode(replay.world()),
+                 "the household must earn enough actual net wages to buy and consume the fitting");
+}
 static void independent_workshop_must_pay_before_using_a_tool() {
     const auto scenario=[](phasec::Money own_cash) {
         phasegh::World gh(24000);
@@ -3734,6 +3774,7 @@ static void blocked_automatic_army_rear_cargo_does_not_abort_a_day() {
 
 int main(){
     try{
+        fitting_purchase_requires_wages_and_consumes_real_stock();
         independent_workshop_must_pay_before_using_a_tool();
         public_employment_pays_net_without_self_tax_revenue();
         automatic_wage_withholding_rereads_office_funding();
