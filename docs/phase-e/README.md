@@ -4,7 +4,7 @@
 - 최신 C++ 구현 브랜치: work/phase-e-cpp-integration (후속 검증 work/phase-e-v-remaining에서 수행).
 - 최신 합성 실행 상태: EV-T01~60 세부 **56 PASS / 4 BLOCKED / 0 FAIL**. EV-COMPLETE=NO.
 - Linux GCC CTest **22/22**, Windows MSVC CTest **20/20**. 실제 GPU GL3.3/context 재생성 시험은 Linux에서만 수행.
-- 실제 약 10,000개의 역사적 프로빈스 데이터셋과 국경선 교차는 **설계만**. EV-T10 DESIGN_ONLY.
+- 플레이 가능한 역사 프로빈스 지도는 아직 없다. 과거 EV-T10의 약 10,000개·합성 성능 시험은 지도 목표 수량이 아니다. 제작 기준은 [개별 프로빈스 지도 원본 확인과 보정 순서](PROVINCE_MAP_BASE_WORKFLOW.md)를 참고.
 
 ## 설계 정본
 - [E-D0 계약](E-D0_COMMON_CONTRACT.md)
