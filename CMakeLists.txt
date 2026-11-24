@@ -179,6 +179,10 @@ if (BUILD_TESTING)
     target_link_libraries(vic25_phase_e_tests PRIVATE vic25_core Threads::Threads)
     add_test(NAME vic25_phase_e_tests COMMAND vic25_phase_e_tests)
     set_tests_properties(vic25_phase_e_tests PROPERTIES TIMEOUT 240)
+
+    add_executable(vic25_province_review_rgbi_tests tests/test_province_review_rgbi.cpp)
+    target_link_libraries(vic25_province_review_rgbi_tests PRIVATE vic25_core)
+    add_test(NAME vic25_province_review_rgbi_tests COMMAND vic25_province_review_rgbi_tests)
 endif()
 
 # Optional OpenGL 3.3 raster globe. Keep headless C++ core independent.

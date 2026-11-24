@@ -93,3 +93,18 @@ python scripts/review_province_cube.py MAP.png PALETTE.csv \
   게임에서 쓸 이동·해협·인접 관계까지 승인했다는 뜻은 아니다.
 
 `python tests/test_review_province_cube.py`로 합성 CLI 검사를 실행한다.
+
+
+### 검토 타일 읽기
+
+`province_review_rgbi.hpp`는 경계가 명시된 **단일 검토용 큐브 면**만 읽는다.
+파일 외부에서 면 번호(0–5), 가로·세로 크기(각 1–1024), UV 범위
+`(u_min, v_min, u_max, v_max)`를 전달한다. 방향 조회는 기존 Phase E 면 규칙과
+각 축의 `[min, max)` 범위를 따르며, 범위를 벗어난 방향은 다른 면으로 옮기거나
+채우지 않는다. 열은 u, 행은 v이며 각 행은 네 바이트씩 연속이다.
+빈 값은 RGB까지 0인 NoData이며, 검정 육지는 별개의 불투명 표본이다.
+육지·바다·호수 분류는 RGBA 표시용 색으로 바꾼 뒤에도 원본 분류로 따로 조회할 수 있다.
+
+검사는 `ctest --test-dir BUILD -R '^vic25_province_review_rgbi_tests$'`에서
+실행한다. 이 경로는 CPU 진단용이다. 외레순드 전용 OpenGL 경로, 국가·프로빈스
+ID, 인접 그래프와 실제 캠페인 데이터는 변경하지 않는다.
