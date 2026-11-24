@@ -766,7 +766,8 @@ def main():
                 morning["pending_income_tax_date"] == "2000-02-01" and
                 morning["peer_pending_income_tax_ppm"] is None and morning["peer_debt"] == 100 and
                 morning["peer_income_tax_ppm"] == 100000 and morning["in_transit_ore"] > 0 and
-                morning["delivered_ore"] > 0 and morning["supplier_cash"] > 0 and
+                0 < morning["delivered_ore"] + morning["in_transit_ore"] <= 2 and
+                morning["supplier_cash"] > 0 and
                 morning["carrier_cash"] > 0 and morning["public_program_paid"] > 0,
                 "one campaign checkpoint needs pending elected tax, real paid freight and B's real pressure")
         inspect = campaign[9]["status"]
@@ -783,7 +784,7 @@ def main():
                 feb["household_cash"] - morning["household_cash"] == 93 and
                 feb["peer_pending_income_tax_ppm"] == 110000 and
                 feb["peer_pending_income_tax_date"] == "2000-03-01" and
-                feb["delivered_ore"] > morning["delivered_ore"],
+                feb["supply_chain"]["iron_batches"] > morning["supply_chain"]["iron_batches"],
                 "ordinary resumed day needs actual arrival and a fresh independent B decision")
         mar_open = campaign[15]["status"]
         mar_closed = campaign[16]["status"]
@@ -910,6 +911,9 @@ def main():
                     for row in days if row["public_construction"]["state"] != "commissioned"),
                 "tools or operating wages appeared before actual commissioning")
         later = days[-1]["supply_chain"]
+        require(all(row["supply_chain"]["ore_stock"] + row["in_transit_ore"] <= 2
+                    for row in (supply_start, transit, *days)) and later["iron_batches"] >= 21,
+                "the ore route must replenish a bounded physical buffer without stalling smelting")
         unbuilt = panel("new CAMPAIGN-A", "step 22", "quit")[1]["status"]
         unbuilt_chain = unbuilt["supply_chain"]
         require(unbuilt["date"] == days[-1]["date"] and
@@ -960,6 +964,11 @@ def main():
                     chain["tools_sold"] == chain["tool_buyer_tools_stock"] + chain["tool_buyer_batches"] and
                     chain["tools_batches"] == chain["tools_stock"] + chain["tools_sold"],
                     "funded transfers and production did not conserve timber, boards and tools")
+            ore_owned = chain["ore_stock"] + row["in_transit_ore"]
+            ore_bought = ore_owned + chain["iron_batches"]
+            require(ore_owned <= 2 and row["supplier_cash"] == 10 * ore_bought and
+                    row["carrier_cash"] == 2 * ore_bought,
+                    "paid ore must be in transit, held or used by the real smelter")
         require(later["mill_boards_produced"] >= 4 and later["household_fittings_bought"] >= 6,
                 "preventing the excess purchase must free real boards and additional paid fittings")
         require(later["logger_worker_cash"] > 0 and later["mill_worker_cash"] > 0 and
@@ -980,10 +989,27 @@ def main():
                 restarted[3]["status"] == days[-1] and
                 supply_replay.read_bytes() == supply_completed.read_bytes(),
                 "active trade/industry and the shortage did not resume identically after saving")
+        # Once the mill reaches its finished-stock target, two full idle
+        # months must not spend any more on this standing import.
+        days_to_march = (civil_date(2000, 3, 1) -
+                         civil_date.fromisoformat(days[-1]["date"])).days
+        quiet = panel(f"load CAMPAIGN-A {supply_completed}", f"step {days_to_march}",
+                      "step 31", "step 30", "quit")
+        march, april, may = (row["status"] for row in quiet[1:4])
+        require(all(row["ok"] for row in quiet) and
+                [row["date"] for row in (march, april, may)] ==
+                    ["2000-03-01", "2000-04-01", "2000-05-01"] and
+                march["supply_chain"]["iron_batches"] >= 44 and
+                all(row["supplier_cash"] == march["supplier_cash"] and
+                    row["carrier_cash"] == march["carrier_cash"] and
+                    row["supply_chain"]["iron_batches"] == march["supply_chain"]["iron_batches"] and
+                    row["supply_chain"]["ore_stock"] == 2 and row["in_transit_ore"] == 0
+                    for row in (march, april, may)),
+                "an idle, fully supplied smelter must not pay for further ore or trips")
         mislabeled_campaign = d / "campaign-wrong-dataset.vic25"
         mislabeled_campaign.write_bytes(native_save_with_origin(
-            supply_checkpoint.read_bytes(), b"panel:campaign-v1",
-            old_origin=b"panel:campaign-procurement-v2"))
+            supply_checkpoint.read_bytes(), b"panel:campaign-procurement-v2",
+            old_origin=b"panel:campaign-ore-inventory-v3"))
         mismatch = panel(f"load CAMPAIGN-A {mislabeled_campaign}", "quit")
         require(not mismatch[0]["ok"],
                 "a current snapshot with only its outer origin changed was resumed under old rules")
@@ -1031,7 +1057,7 @@ def main():
                 active_wage["status"]["minimum_monthly_contract_wage"] == 62 and
                 active_wage["status"]["workers"][0]["contract_wage"] == 3100 and
                 active_wage["status"]["peer_is_player"] is False and
-                active_wage["status"]["delivered_ore"] > morning["delivered_ore"],
+                active_wage["status"]["supply_chain"]["iron_batches"] > morning["supply_chain"]["iron_batches"],
                 "the shared world did not enact an actual voted ordinary wage statute")
 
         replies = panel("status", "new A", "status", "tariff 21",

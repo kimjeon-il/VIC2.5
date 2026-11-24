@@ -334,7 +334,7 @@ def run_shared_campaign(root, panel, save):
     assert next_day["income_tax_ppm"] == 150_000
     assert next_day["peer_pending_income_tax_ppm"] == 110_000
     assert next_day["peer_pending_income_tax_date"] in panel.diplomacy.get()
-    assert next_day["delivered_ore"] > pending["delivered_ore"]
+    assert next_day["supply_chain"]["iron_batches"] > pending["supply_chain"]["iron_batches"]
     with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
         panel.country.set("A 공동 캠페인")
         panel.load_button.invoke()

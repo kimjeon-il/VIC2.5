@@ -888,8 +888,142 @@ static void inactive_producer_leaves_scarce_input_for_real_work(bool stocked_ope
           "the post-sale procurement replay must be byte exact");
 }
 
+static void standing_ore_replenishment_uses_physical_destination_and_transit() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"ORIGIN","B");geo.seed_unit(1,"B","SOURCE");
+    geo.seed_assignment(1,1);
+    geo.seed_province(2,"PORT","A");geo.seed_unit(2,"A","DESTINATION");
+    geo.seed_assignment(2,2);
+    auto& industrial=geo.seed_core();
+    auto& c=industrial.seed_core();
+    for(const auto* actor:{"A","B","MINE-1","MINE-2","MINE-3","RAIL"})
+        c.seed_actor(actor,0);
+    c.seed_actor("MILL",500);c.seed_actor("OTHER",500);
+    c.seed_government("A","HEAD-A","PM-A",5,3);
+    c.seed_government("B","HEAD-B","PM-B",5,3);
+    c.seed_market("ORIGIN","ore",10,10,10);
+    c.seed_market("PORT","ore",30,30,30);
+    c.seed_market("PORT","tools",80,80,80);
+    for(const auto* seller:{"MINE-1","MINE-2","MINE-3"})
+        c.seed_stock(seller,"ORIGIN","ore",20);
+    c.seed_stock("MILL","PORT","ore",2);
+    c.seed_production_facility("WORKS","MILL","PORT",31);
+    phased::IndustryRecipe mill;
+    mill.id="TOOLS";mill.site="WORKS";mill.inputs={{"ore",1}};
+    mill.outputs={{"tools",1}};mill.workers_per_batch=mill.capacity_per_batch=1;
+    industrial.seed_recipe(mill);
+    const auto operator_id=worker(gh,"PORT","MILL",1,true,31);
+    const auto wallet="HH:"+std::to_string(c.people().slice(operator_id).key.household);
+    gh.seed_verified_geographic_link("RAIL-LINK",1,2,"rail");
+    phasegh::TransportEdge edge;
+    edge.id=edge.carrier="RAIL";edge.from=1;edge.to=2;edge.mode="rail";
+    edge.monthly_capacity=186;edge.freight_per_unit=2;edge.transit_days=3;
+    edge.evidence_id="fixture:native-three-day-rail";
+    edge.valid_from_month=24000;edge.valid_through_month=24002;
+    gh.seed_transport_edge(edge);
+    gh.seed_route({"A-PRIMARY","MINE-1","MILL","ore",1,2,62,1});
+    gh.seed_route({"B-ALTERNATE","MINE-2","MILL","ore",1,2,62,1});
+    gh.seed_route({"C-UNRELATED","MINE-3","OTHER","ore",1,2,62,1});
+    p0::Policies legacy;
+    legacy.daily_food_units_per_person=legacy.monthly_clothing_units_per_person=0;
+    legacy.allow_endogenous_input_procurement=false;
+    legacy.allow_endogenous_staffing=false;
+    legacy.manufacturers.push_back({"TOOLS",4});
+    auto policy=legacy;
+    policy.standing_route_stock_targets={{"A-PRIMARY",2},{"B-ALTERNATE",2}};
+    auto opening=daily::World::adopt(std::move(gh),93);
+    p0::DailyGame reserved(opening,policy),game(opening,policy),
+                  unbounded(std::move(opening),legacy);
+    struct Observation {
+        Quantity mill_ore{}, mill_cargo{}, other_ore{}, other_cargo{}, output{};
+        Quantity primary{}, alternate{}, unrelated{};
+        phasec::Money mill{}, worker{}, rail{}, seller{};
+    };
+    auto observe=[&](const p0::DailyGame& view) {
+        const auto& engine=view.world().engine();
+        const auto& core=engine.base().core().core();
+        Observation v;
+        v.mill_ore=core.stock("MILL","PORT","ore");
+        v.other_ore=core.stock("OTHER","PORT","ore");
+        v.output=core.stock("MILL","PORT","tools");
+        v.mill=core.cash("MILL");v.worker=core.cash(wallet);
+        v.rail=core.cash("RAIL");v.seller=core.cash("MINE-1");
+        for(const auto& [id,cargo]:engine.commerce().daily_shipments) {
+            (void)id;
+            if(cargo.buyer=="MILL")v.mill_cargo+=cargo.quantity;
+            if(cargo.buyer=="OTHER")v.other_cargo+=cargo.quantity;
+        }
+        for(const auto& fill:engine.commerce().fills) {
+            if(fill.route_id=="A-PRIMARY")v.primary+=fill.quantity;
+            if(fill.route_id=="B-ALTERNATE")v.alternate+=fill.quantity;
+            if(fill.route_id=="C-UNRELATED")v.unrelated+=fill.quantity;
+        }
+        Quantity total_raw=v.mill_ore+v.mill_cargo+v.other_ore+v.other_cargo;
+        phasec::Money total_cash=v.mill+v.worker+v.rail+core.cash("OTHER");
+        for(const auto* seller:{"MINE-1","MINE-2","MINE-3"}) {
+            total_raw+=core.stock(seller,"ORIGIN","ore");
+            total_cash+=core.cash(seller);
+        }
+        check(total_raw+v.output==62&&total_cash==1000&&core.financial().balanced(),
+              "replenishment changed the canonical ore or money ledger");
+        return v;
+    };
+    phasegh::World::Plan reserved_stock;
+    reserved_stock[1].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().phase_d_reserve_material("MILL","PORT","ore","contracted",1);
+    });
+    reserved_stock[7].push_back([](phasegh::Stage& stage) {
+        stage.phase_c().phase_g_release_reserved_goods("MILL","PORT","ore","contracted",1);
+    });
+    reserved.advance_day(reserved_stock);
+    const auto backed=observe(reserved);
+    check(backed.primary==1&&backed.alternate==0&&backed.mill_ore==1&&
+          backed.mill_cargo==1&&backed.output==1,
+          "only free local ore counts: a separately reserved unit cannot supply the target");
+    game.advance_day();unbounded.advance_day();
+    const auto first=observe(game),ordinary=observe(unbounded);
+    check(ordinary.primary==2&&ordinary.alternate==2&&ordinary.unrelated==2,
+          "the unrestricted control must still purchase every funded rail slot");
+    check(first.primary==0&&first.alternate==0&&first.unrelated==2&&
+          first.mill_ore==1&&first.output==1,
+          "actual stock at target must block standing purchases without disabling real production");
+    game.advance_day();
+    const auto dispatched=observe(game);
+    check(dispatched.primary==1&&dispatched.alternate==0&&dispatched.unrelated==4&&
+          dispatched.mill_ore==0&&dispatched.mill_cargo==1&&dispatched.output==2&&
+          dispatched.mill==486&&dispatched.seller==10&&dispatched.rail-first.rail==6,
+          "use should reopen one real shipment, counting the earlier same-key reservation");
+    const auto checkpoint=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(checkpoint),policy);
+    auto advance=[&] {
+        game.advance_day();replay.advance_day();
+        check(daily::SnapshotCodec::encode(game.world())==
+              daily::SnapshotCodec::encode(replay.world()),
+              "the standing route target and pending real rail cargo did not replay");
+        return observe(game);
+    };
+    const auto second_dispatch=advance();
+    check(second_dispatch.primary==2&&second_dispatch.alternate==0&&
+          second_dispatch.mill_ore==0&&second_dispatch.mill_cargo==2&&second_dispatch.output==2,
+          "a funded native cargo must count toward target without appearing as usable stock");
+    const auto full_in_transit=advance();
+    check(full_in_transit.primary==2&&full_in_transit.alternate==0&&
+          full_in_transit.mill_ore==0&&full_in_transit.mill_cargo==2&&full_in_transit.output==2,
+          "two physically travelling parcels must suppress purchases despite zero local stock");
+    const auto arrived=advance();
+    check(arrived.primary==2&&arrived.alternate==0&&arrived.unrelated==10&&
+          arrived.mill_cargo==1&&arrived.mill_ore==0&&arrived.output==3&&arrived.worker==5,
+          "paid rail cargo must actually arrive on its third day before becoming output");
+    const auto renewed=advance();
+    check(renewed.primary==3&&renewed.alternate==0&&renewed.unrelated==12&&
+          renewed.mill_cargo==1&&renewed.mill_ore==0&&renewed.output==4,
+          "actual material consumption after arrival must reopen bounded replenishment");
+}
+
 int main() {
     try {
+        standing_ore_replenishment_uses_physical_destination_and_transit();
         inactive_producer_leaves_scarce_input_for_real_work(true);
         inactive_producer_leaves_scarce_input_for_real_work(false);
         quote_requires_real_supply_and_verified_route();

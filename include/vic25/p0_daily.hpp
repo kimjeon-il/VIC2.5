@@ -371,6 +371,8 @@ struct Policies {
     std::vector<OldAgePensionProgram> old_age_pensions;
     // New ordinary campaigns opt in without changing older saved policies.
     bool gate_local_input_procurement_by_production{false};
+    // Optional native-day target for an existing standing trade route.
+    std::map<std::string,Quantity> standing_route_stock_targets;
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -379,6 +381,9 @@ struct Policies {
            monthly_clothing_units_per_person<0 ||
            autonomous_factory_cash_reserve<0||staffing_cash_reserve<0)
             throw std::invalid_argument("P0_INVALID_AUTONOMOUS_FISCAL_RULE");
+        for(const auto& [route,target]:standing_route_stock_targets)
+            if(route.empty()||target<=0)
+                throw std::invalid_argument("P0_INVALID_STANDING_ROUTE_TARGET");
         std::set<std::pair<std::string,std::string>> seen_merchant_offices;
         for(const auto& merchant:merchant_offices)
             if(merchant.trader.empty()||merchant.market_region.empty()||
@@ -3917,6 +3922,11 @@ public:
                 for(const auto& [unit,policy]:c.peacetime_military_programs())
                     if(!at_war.contains(policy.country))
                         c.peacetime_military_support(unit);
+            });
+        if(!decisions.standing_route_stock_targets.empty())
+            plan[1].push_back([targets=decisions.standing_route_stock_targets](phasegh::Stage& gh) {
+                for(const auto& [route,target]:targets)
+                    gh.register_standing_route_stock_target(route,target);
             });
         if(decisions.allow_endogenous_input_procurement)
             plan[1].push_back([recipes=std::move(autonomous_operating_recipes),

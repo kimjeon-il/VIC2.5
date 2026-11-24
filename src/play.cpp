@@ -490,6 +490,7 @@ constexpr auto law_region="LAW-DISTRICT";
 constexpr auto campaign_scenario="campaign-v1";
 constexpr auto legacy_campaign_origin="panel:campaign-v1";
 constexpr auto campaign_procurement_origin="panel:campaign-procurement-v2";
+constexpr auto campaign_ore_inventory_origin="panel:campaign-ore-inventory-v3";
 constexpr auto supply_recovery_origin="panel:campaign-supply-v1";
 constexpr auto steel_chain_origin="panel:campaign-steel-v1";
 constexpr auto steel_coal_owner="CAMPAIGN-COAL-OWNER";
@@ -588,7 +589,7 @@ const char* legislative_origin(LegislativeTrial trial) {
         case LegislativeTrial::wage:return law_origin;
         case LegislativeTrial::education:return education_origin;
         case LegislativeTrial::education_remote:return education_remote_origin;
-        case LegislativeTrial::campaign:return campaign_procurement_origin;
+        case LegislativeTrial::campaign:return campaign_ore_inventory_origin;
         case LegislativeTrial::supply_recovery:return supply_recovery_origin;
         case LegislativeTrial::steel_chain:return steel_chain_origin;
     }
@@ -1024,8 +1025,10 @@ p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
         p.allow_endogenous_debt_repayment=false;
         p.autonomous_tax_step_ppm=10'000;
         p.allow_endogenous_staffing=has_campaign_supply(world);
+        const bool buffered_ore=world.migration_origin()==campaign_ore_inventory_origin;
         p.gate_local_input_procurement_by_production=
-            world.migration_origin()==campaign_procurement_origin;
+            buffered_ore||world.migration_origin()==campaign_procurement_origin;
+        if(buffered_ore)p.standing_route_stock_targets.emplace(campaign_route,2);
         if(p.allow_endogenous_staffing)
             p.staffing.push_back({campaign_buyer,law_region,1,31,true});
         if(has_campaign_workshop(world))
@@ -1319,6 +1322,7 @@ bool is_education_world(const daily::World& w) {
 bool is_campaign_world(const daily::World& w) {
     return w.migration_origin()==legacy_campaign_origin||
            w.migration_origin()==campaign_procurement_origin||
+           w.migration_origin()==campaign_ore_inventory_origin||
            is_supply_recovery(w)||is_steel_campaign(w);
 }
 bool is_law_world(const daily::World& w) {
@@ -1337,7 +1341,8 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
     // checkpoint. Do not migrate its origin or reprovision its supply chain.
     const auto& origin=w.migration_origin();
     const bool origin_matches=origin==legislative_origin(trial)||
-        (trial==LegislativeTrial::campaign&&origin==legacy_campaign_origin);
+        (trial==LegislativeTrial::campaign&&
+         (origin==legacy_campaign_origin||origin==campaign_procurement_origin));
     if(!origin_matches||w.engine().base().spatial().dataset_hash!=origin||
        !c.has_country_treasury("A")||!c.has_actor(law_employer)||
        c.p1_constitution("A").legislature!=phasec::P1LegislatureKind::unicameral||

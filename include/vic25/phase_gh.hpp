@@ -531,6 +531,9 @@ class Stage {
     // Shared by Stage1 callbacks and discovery, never committed or saved.
     std::map<std::tuple<std::string,std::string,std::string>,ProductionInputNeed>
         production_input_needs_;
+    // Native-day standing-route targets are scoped to this Stage 1 only;
+    // the trade ledger and its snapshot schema are unchanged.
+    std::map<std::string,Quantity> standing_route_stock_targets_;
     // Cumulative allowance: never regrant a full month of quota daily.
     Quantity day_budget(Quantity total,Quantity used)const {
         if(day_of_month_<=0)return total; // historical stand-alone month engine
@@ -1116,6 +1119,12 @@ public:
 
     void plan_autonomous_trade();
     void plan_market_discovery();
+    void register_standing_route_stock_target(const std::string& route,Quantity target) {
+        at(1);
+        require(day_of_month_>0&&target>0&&trade_.routes.contains(route)&&
+                standing_route_stock_targets_.try_emplace(route,target).second,
+                "G_ERR_INVALID_STANDING_ROUTE_TARGET");
+    }
     void register_production_input_need(
             const std::string& trader,const std::string& region,
             const std::string& good,Quantity units,Money ceiling,Money payroll) {
@@ -2039,6 +2048,31 @@ inline void Stage::plan_autonomous_trade() {
         const auto& from=core.sovereignty(origin);
         const auto& to=core.sovereignty(dest);
         if(!commercial_trade_allowed(from,to))continue;
+        Quantity replenishment_limit=route.maximum_quantity;
+        if(const auto target=standing_route_stock_targets_.find(id);
+           target!=standing_route_stock_targets_.end()) {
+            Quantity gap=target->second;
+            const auto credit=[&](Quantity available) {
+                gap-=std::min(gap,available);
+            };
+            credit(core.phase_d_material_available(route.buyer,dest,route.good));
+            for(const auto& [cargo_id,cargo]:trade_.daily_shipments) {
+                (void)cargo_id;
+                if(gap==0)break;
+                if(cargo.buyer==route.buyer&&cargo.destination==dest&&cargo.good==route.good)
+                    credit(cargo.quantity-cargo.loss);
+            }
+            // Earlier accepted contracts and standing orders already hold
+            // real buyer cash and seller stock. Count only the same bucket
+            // so later routes cannot each promise to refill the same hole.
+            for(const auto& order:trade_.pending) {
+                if(gap==0)break;
+                if(order.buyer==route.buyer&&order.destination_region==dest&&order.good==route.good)
+                    credit(order.quantity-order.confirmed_arrival_loss);
+            }
+            if(gap==0)continue;
+            replenishment_limit=gap;
+        }
         const auto& source_quote=core.market(origin,route.good);
         const auto& target_quote=core.market(dest,route.good);
         const auto ppm=duty_rate(from,to,route.good);
@@ -2068,7 +2102,7 @@ inline void Stage::plan_autonomous_trade() {
         const Quantity available_on_day=day_budget(route.maximum_quantity,used_in_month);
         const Quantity qty=lawful_trade_quantity(from,to,route.good,
              std::min({available_on_day,max_route,available_stock,
-                       available_cash/landed_unit}));
+                       available_cash/landed_unit,replenishment_limit}));
         if(qty<=0)continue;
         const Money goods_cost=phaseb::mul_checked(qty,price);
         const Money duty=phaseb::mul_checked(goods_cost,ppm)/1'000'000;
