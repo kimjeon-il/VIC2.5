@@ -172,6 +172,64 @@ def main():
             require(len(replies) == len(commands), f"unexpected panel replies: {replies}")
             return replies
 
+        # Private investment relies on earned sales, not free construction,
+        # and the grown facility must pay a previously idle worker.
+        private_work = d / "private paid work.sav"
+        private_end = d / "private sold output.sav"
+        private_replay = d / "private replay.sav"
+        steps = panel("new EXPANSION-A", "step 1", *["step 1"] * 11, "quit")
+        require(steps[0]["ok"], f"private expansion launch failed: {steps[0]}")
+        trace = [row["status"] for row in steps[:-1]]
+        require(all(row["ok"] for row in steps), "private expansion rejected an ordinary day")
+        require(trace[0]["scenario"] == "expansion-v1" and
+                trace[0]["private_expansion"] == {
+                    "maker_cash": 30, "sales_receipts": 0, "builder_cash": 1000,
+                    "builder_steel": 8, "paid_construction": 0, "commissioned_capacity": 0,
+                    "new_worker_cash": 0, "new_worker_employed": False,
+                    "expansion_batches": 0, "food_stock": 0,
+                }, "the scenario grants a sale, job or completed plant at opening")
+        ledgers = [row["private_expansion"] for row in trace]
+        require(ledgers[1]["sales_receipts"] == 25 and ledgers[1]["maker_cash"] == 45
+                and ledgers[1]["paid_construction"] == 0
+                and ledgers[1]["commissioned_capacity"] == 0,
+                "a wage-funded sale must settle first: without it the maker has only 20")
+        paid = next((i for i, row in enumerate(ledgers) if row["paid_construction"]), None)
+        traded = next((i for i, row in enumerate(ledgers) if row["expansion_batches"]), None)
+        require(paid is not None and traded is not None and 1 < paid < traded,
+                "the buyer-funded expansion did not progress from payment to new output")
+        require(ledgers[paid]["paid_construction"] == 30 and ledgers[paid]["builder_steel"] == 7
+                and ledgers[paid]["builder_cash"] == 1000 - 70 * paid + 30
+                and trace[paid]["treasury"] == 8 * paid and trace[paid]["expenditure"] == 0
+                and trace[paid]["debt"] == 0 and ledgers[paid]["commissioned_capacity"] == 0
+                and not ledgers[paid]["new_worker_employed"],
+                "paid work must transfer the actual invoice and consume steel before commissioning")
+        event = ledgers[traded]
+        # Both sold units happen to come from the new mill; the economy
+        # gains one sale versus the established mill's prior paid day.
+        formerly_sold = (ledgers[traded-1]["sales_receipts"] -
+                         ledgers[traded-2]["sales_receipts"]) // 25
+        now_sold = (event["sales_receipts"] - ledgers[traded-1]["sales_receipts"]) // 25
+        require(event["commissioned_capacity"] == 31 and event["new_worker_employed"]
+                and event["new_worker_cash"] == 9 and trace[traded]["treasury"] == 8 * traded + 1
+                and event["expansion_batches"] == 2 and ledgers[traded-1]["food_stock"] == 0
+                and event["food_stock"] == 0 and formerly_sold == 1 and now_sold == 2
+                and event["sales_receipts"] - ledgers[traded-1]["sales_receipts"] == 50,
+                "extra output must settle in the market, and the actual new payroll must remit tax")
+        require(event["maker_cash"] == 30 + event["sales_receipts"] - 10 * traded
+                - 10 - event["paid_construction"],
+                "sales, wages and capex did not reconcile on the maker's actual wallet")
+        first = panel("new EXPANSION-A", f"step {paid}", f"save {private_work}",
+                      f"step {traded-paid}", f"save {private_end}", "quit")
+        second = panel(f"load EXPANSION-A {private_work}", f"step {traded-paid}",
+                       f"save {private_replay}", "quit")
+        require(all(row["ok"] for row in first + second)
+                and second[0]["status"] == trace[paid] and second[1]["status"] == trace[traded]
+                and private_end.read_bytes() == private_replay.read_bytes(),
+                "paid but uncommissioned construction changed across save/replay")
+        foreign = panel("new EXPANSION-A", f"load EXPANSION-A {start}", "quit")
+        require(not foreign[1]["ok"] and foreign[1]["status"] == foreign[0]["status"],
+                "foreign checkpoint replaced the private expansion scenario")
+
         tax_start = d / "예약 전 소득세.sav"
         tax_pending = d / "예약 소득세.sav"
         tax_failed = d / "중복 거절 소득세.sav"

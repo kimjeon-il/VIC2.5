@@ -52,6 +52,7 @@ class PlayPanel:
     LEGISLATURE = "A 입법 시범판"
     EDUCATION = "A 교육 시범판"
     CAMPAIGN = "A 공동 캠페인"
+    EXPANSION = "A 민간 증설 시범판"
 
     @classmethod
     def _protocol_tag(cls, choice):
@@ -61,6 +62,8 @@ class PlayPanel:
             return "EDU-A"
         if choice == cls.CAMPAIGN:
             return "CAMPAIGN-A"
+        if choice == cls.EXPANSION:
+            return "EXPANSION-A"
         return "TUT" if choice == cls.FACTORY else cls.BUDGETS.get(choice, choice)
 
     def __init__(self, root, executable):
@@ -95,7 +98,9 @@ class PlayPanel:
         setup = ttk.Frame(frame, padding=(0, 10))
         setup.grid(row=2, sticky="ew")
         ttk.Label(setup, text="시작·불러올 국가/시나리오:").grid(row=0, column=0, padx=(0, 6))
-        self.selector = ttk.Combobox(setup, textvariable=self.country, values=("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE, self.EDUCATION, self.CAMPAIGN),
+        choices = ("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE,
+                   self.EDUCATION, self.CAMPAIGN, self.EXPANSION)
+        self.selector = ttk.Combobox(setup, textvariable=self.country, values=choices,
                                      width=16, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
         self.new_button = ttk.Button(setup, text="새로 시작", command=self.new)
@@ -177,7 +182,7 @@ class PlayPanel:
         factory = self._industry(self.current)
         legislature = self._legislature(self.current)
         campaign = self._campaign(self.current)
-        direct_actions = not (factory or legislature or campaign)
+        direct_actions = not (factory or legislature or campaign or self._expansion(self.current))
         can_campaign_act = self._campaign_can_act(self.current)
         bill = self.current.get("law_bill") if legislature or can_campaign_act else None
         campaign_tax = bool(can_campaign_act and self.current["campaign_tax_allowed"])
@@ -276,6 +281,8 @@ class PlayPanel:
                             choice += " 예산 시범판"
                         elif self._campaign(self.current):
                             choice = self.CAMPAIGN
+                        elif self._expansion(self.current):
+                            choice = self.EXPANSION
                         elif self._education(self.current):
                             choice = self.EDUCATION
                         elif self._legislature(self.current):
@@ -323,6 +330,10 @@ class PlayPanel:
     @staticmethod
     def _campaign(status):
         return bool(status and status.get("scenario") == "campaign-v1")
+
+    @staticmethod
+    def _expansion(status):
+        return bool(status and status.get("scenario") == "expansion-v1")
 
     @classmethod
     def _campaign_can_act(cls, status):
@@ -383,9 +394,12 @@ class PlayPanel:
 
     def _show(self, status):
         factory = self._industry(status)
+        expansion = self._expansion(status)
         perspective = self.FACTORY if factory else f"국가 {status['country']}"
         if self._campaign(status):
             perspective += " · 공동 캠페인"
+        elif expansion:
+            perspective += " · 민간 증설 시범판"
         elif self._budget(status):
             perspective += " · 예산 시범판"
         elif self._education(status):
@@ -437,6 +451,28 @@ class PlayPanel:
                          "실제 국고 지급액을 보여줍니다.\n"
                          "일정 금액은 국고에 남겨 둡니다.")
             titles = ("재정", "생산 조건", "공장 재고·생산", "공공사업 지급")
+        elif expansion:
+            result = status["private_expansion"]
+            capacity = result["commissioned_capacity"]
+            paid = result["paid_construction"]
+            if capacity:
+                construction_state = "준공 완료"
+            elif paid:
+                construction_state = "준공 대기"
+            else:
+                construction_state = "증설 대기"
+            policy = (f"{construction_state}\n"
+                      f"공사비 지급: {paid}\n"
+                      f"준공 설비 용량: {capacity}\n"
+                      f"시공사 철강 재고: {result['builder_steel']}")
+            market = (f"식량 업체 잔액: {result['maker_cash']}\n"
+                      f"누적 판매대금: {result['sales_receipts']}\n"
+                      f"증설 설비 생산 횟수: {result['expansion_batches']}\n"
+                      f"식량 재고: {result['food_stock']}")
+            employment = "고용됨" if result["new_worker_employed"] else "미고용"
+            diplomacy = (f"신규 직원: {employment}\n"
+                         f"신규 직원 지갑 잔액: {result['new_worker_cash']}")
+            titles = ("재정", "민간 공사", "식량 생산·판매", "고용")
         elif self._campaign(status):
             acting = self._campaign_can_act(status)
             budget += f"\n플레이어 조작 국가: {status['player_country']}"
@@ -530,7 +566,7 @@ class PlayPanel:
         self.policy.set(policy)
         self.market.set(market)
         self.diplomacy.set(diplomacy or "현재 분쟁 없음.")
-        if not factory and not self._legislature(status) and not self._campaign(status):
+        if not factory and not expansion and not self._legislature(status) and not self._campaign(status):
             self.tariff.set(self._percent(status["tariff_ppm"]))
             self.tax.set(self._percent(status["income_tax_ppm"] if pending_tax is None else pending_tax))
         self.current = status
@@ -544,7 +580,7 @@ class PlayPanel:
 
     def set_tariff(self):
         if (not self.current or self._industry(self.current) or self._legislature(self.current)
-                or self._campaign(self.current)):
+                or self._campaign(self.current) or self._expansion(self.current)):
             return
         value = self.tariff.get().strip()
         if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > 100:
@@ -554,7 +590,7 @@ class PlayPanel:
 
     def set_income_tax(self):
         if (not self.current or self._industry(self.current) or self._legislature(self.current)
-                or self.current["pending_income_tax_ppm"] is not None):
+                or self._expansion(self.current) or self.current["pending_income_tax_ppm"] is not None):
             return
         value = self.tax.get().strip()
         if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > 100:

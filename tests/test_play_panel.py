@@ -25,6 +25,7 @@ def run(exe):
     assert play_panel.PlayPanel._protocol_tag("A 입법 시범판") == "LAW-A"
     assert play_panel.PlayPanel._protocol_tag("A 교육 시범판") == "EDU-A"
     assert play_panel.PlayPanel._protocol_tag("A 공동 캠페인") == "CAMPAIGN-A"
+    assert play_panel.PlayPanel._protocol_tag("A 민간 증설 시범판") == "EXPANSION-A"
     root = tk.Tk()
     panel = play_panel.PlayPanel(root, exe)
     try:
@@ -114,6 +115,7 @@ def run(exe):
                              choice="A 교육 시범판")
             run_shared_campaign(root, panel, Path(directory) / "공동 캠페인 예약.vic25")
             run_shared_construction(root, panel, Path(directory) / "공동 건설 예산 승인.vic25")
+            run_private_expansion(root, panel, Path(directory) / "민간 증설.vic25")
     finally:
         panel.close()
         stop = monotonic() + 3
@@ -420,6 +422,62 @@ def run_shared_construction(root, panel, save):
     assert f"원목 확보: 공구공장 {chain['toolworks_wood_bought']} · 제재소 {chain['mill_wood_bought']}" in market
     assert f"판재 생산 {chain['mill_boards_produced']}" in market
 
+
+def run_private_expansion(root, panel, save):
+    choice = "A 민간 증설 시범판"
+    panel.selector.current(panel.selector.cget("values").index(choice))
+    panel.new_button.invoke()
+    wait(root, panel)
+    opening = panel.current
+    assert opening["country"] == "A" and opening["scenario"] == "expansion-v1"
+    assert "민간 증설 시범판" in panel.heading.get()
+    assert opening["private_expansion"]["paid_construction"] == 0
+    assert opening["private_expansion"]["commissioned_capacity"] == 0
+    assert "증설 대기" in panel.policy.get() and "미고용" in panel.diplomacy.get()
+    for widget in (panel.tariff_button, panel.tax_button, panel.spending_button,
+                   panel.build_button, panel.law_action_button):
+        assert not widget.winfo_ismapped()
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file(), panel.notice.get()
+
+    steps = 0
+    seen_paid_before_commission = False
+    for _ in range(25):
+        panel.step_button.invoke()
+        wait(root, panel)
+        steps += 1
+        result = panel.current["private_expansion"]
+        if result["paid_construction"] and not result["commissioned_capacity"]:
+            assert "준공 대기" in panel.policy.get()
+            seen_paid_before_commission = True
+        if result["expansion_batches"] and result["new_worker_cash"] and result["new_worker_employed"]:
+            break
+    assert seen_paid_before_commission
+    assert "준공 완료" in panel.policy.get()
+    assert result["paid_construction"] > 0 and result["commissioned_capacity"] > 0
+    assert result["sales_receipts"] > 0 and result["expansion_batches"] > 0
+    assert result["new_worker_employed"] and result["new_worker_cash"] > 0
+    assert f"공사비 지급: {result['paid_construction']}" in panel.policy.get()
+    assert f"준공 설비 용량: {result['commissioned_capacity']}" in panel.policy.get()
+    assert f"누적 판매대금: {result['sales_receipts']}" in panel.market.get()
+    assert f"증설 설비 생산 횟수: {result['expansion_batches']}" in panel.market.get()
+    assert "신규 직원: 고용됨" in panel.diplomacy.get()
+    assert f"신규 직원 지갑 잔액: {result['new_worker_cash']}" in panel.diplomacy.get()
+    reached = panel.current
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.country.set("A 공동 캠페인")
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == reached and "오류:" in panel.notice.get()
+        panel.country.set(choice)
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == opening and panel.country.get() == choice
+    panel._send(f"step {steps}")
+    wait(root, panel)
+    assert panel.current == reached
 
 
 def run_industry(root, panel, tariff_save):

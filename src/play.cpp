@@ -594,6 +594,136 @@ std::string trial_worker_wallet(const phasec::IntegratedWorld& c,phaseb::Id work
     return "HH:"+std::to_string(c.people().slice(worker).key.household);
 }
 
+// A separate small economy: yesterday's private earnings can finance
+// today's expansion without changing the shared campaign or its saves.
+constexpr auto expansion_scenario="expansion-v1";
+constexpr auto expansion_origin="panel:expansion-v1:A";
+constexpr auto expansion_region="MILL-DISTRICT";
+constexpr auto expansion_maker="PRIVATE-MILL";
+constexpr auto expansion_builder="PRIVATE-BUILDER";
+constexpr auto expansion_site="OPENING-MILL";
+constexpr auto expansion_method="GRAIN-MILLING";
+constexpr auto expansion_template="OPENING-MILL-TEMPLATE";
+constexpr phaseb::Id expansion_recruit=301;
+
+bool is_expansion_world(const daily::World& world) {
+    return world.migration_origin()==expansion_origin;
+}
+
+daily::World expansion_world() {
+    phasegh::World engine(24000);
+    auto& geo=engine.seed_geography();
+    geo.set_dataset(expansion_origin);
+    geo.seed_province(1,expansion_region,"A");
+    geo.seed_unit(1,"A",expansion_region);geo.seed_assignment(1,1);
+    auto& industry=geo.seed_core();
+    auto& c=industry.seed_core();
+    c.seed_actor("A",0);
+    c.seed_actor(expansion_maker,30);
+    c.seed_actor(expansion_builder,1000);
+    c.seed_government("A","MILL-HEAD","MILL-PM",5,3);
+    c.p1_mark_player_country("A",true);
+    c.seed_market(expansion_region,"food",25,25,25);
+    c.seed_market(expansion_region,"grain",1,1,1);
+    c.seed_market(expansion_region,"steel",1,1,1);
+    c.seed_production_facility(expansion_site,expansion_maker,expansion_region,31);
+    c.seed_stock(expansion_maker,expansion_region,"grain",31);
+    c.seed_stock(expansion_builder,expansion_region,"steel",8);
+    auto& pop=c.seed_population();
+    const auto economic=pop.economic_profile({expansion_region,"worker","wage","employee",
+                                              pop.default_education()});
+    const auto demographic=pop.demographic_profile({expansion_region,23700,phaseb::Sex::female,
+        "trial-culture","trial-faith","citizen","free",pop.default_health(),
+        phaseb::Service::civilian});
+    auto add_worker=[&](const std::string& owner,const std::string& family,
+                        phasec::Money daily_wage,phaseb::Id partition) {
+        const auto home=pop.household_profile({expansion_region,family,"shared",1});
+        const auto resident=pop.seed_population(demographic,economic,home,1,partition);
+        c.seed_actor("HH:"+std::to_string(home),0);
+        if(daily_wage)pop.hire(resident,1,owner,"worker",daily_wage*31,{});
+    };
+    add_worker(expansion_maker,"mill-worker",10,302);
+    add_worker(expansion_maker,"idle-recruit",0,expansion_recruit);
+    add_worker(expansion_builder,"contractor-worker",60,303);
+    add_worker(expansion_builder,"contractor-helper",10,304);
+    // Describe the already operating mill. Normal enterprise AI decides
+    // when it can pay for the next one; no work or funds are granted later.
+    phased::ConstructionProject original;
+    original.id=expansion_template;original.client=expansion_maker;
+    original.contractor=expansion_builder;original.region=expansion_region;
+    original.target_site=expansion_site;original.material_good="steel";
+    original.work_required=original.material_per_work=original.workers_per_work=1;
+    original.cash_price_per_work=30;original.target_capacity=31;
+    original.accepted_work=original.paid_work=original.capitalized_work=1;
+    original.capitalized_value=30;original.commissioned=true;
+    industry.seed_construction(original);
+    phased::IndustryRecipe recipe;
+    recipe.id=expansion_method;recipe.site=expansion_site;
+    recipe.inputs={{"grain",1}};recipe.outputs={{"food",1}};
+    recipe.workers_per_batch=recipe.capacity_per_batch=1;
+    industry.seed_recipe(recipe);
+    return daily::World::adopt(std::move(engine),54,expansion_origin);
+}
+
+daily::World open_expansion(const std::optional<fs::path>& resume) {
+    auto world=resume?load_panel_checkpoint(*resume):expansion_world();
+    const auto& base=world.engine().base();
+    const auto& industry=base.core();
+    const auto& c=industry.core();
+    if(!is_expansion_world(world)||base.spatial().dataset_hash!=expansion_origin||
+       !c.has_country_treasury("A")||!c.has_actor(expansion_maker)||
+       !c.has_actor(expansion_builder)||!c.facilities().contains(expansion_site)||
+       c.facility(expansion_site).owner!=expansion_maker||
+       c.facility(expansion_site).region!=expansion_region||
+       !industry.state().constructions.contains(expansion_template)||
+       !industry.state().recipes.contains(expansion_method)||
+       industry.state().recipes.at(expansion_method).site!=expansion_site||
+       !c.has_actor(trial_worker_wallet(c,law_slice(c,expansion_recruit,expansion_region))))
+        throw std::invalid_argument("checkpoint does not belong to the private expansion trial");
+    return world;
+}
+
+p0::Policies expansion_policies() {
+    p0::Policies p;
+    p.daily_food_units_per_person=3;
+    p.monthly_clothing_units_per_person=0;
+    p.allow_endogenous_input_procurement=false;
+    p.allow_endogenous_investment_credit=false;
+    p.allow_collateralized_enterprise_credit=false;
+    return p;
+}
+
+void expansion_status(std::ostringstream& out,const daily::World& world) {
+    const auto& industry=world.engine().base().core();
+    const auto& c=industry.core();
+    const auto& domain=industry.state();
+    phasec::Money paid=0;
+    Quantity capacity=0,batches=0;
+    for(const auto& [id,project]:domain.constructions) {
+        if(id==expansion_template||project.client!=expansion_maker||
+           project.region!=expansion_region)continue;
+        paid=phaseb::add_checked(paid,project.capitalized_value);
+        if(!project.commissioned)continue;
+        capacity=phaseb::add_checked(capacity,c.facility(project.target_site).capacity);
+        for(const auto& run:domain.actual_production_runs)
+            if(domain.recipes.at(run.recipe).site==project.target_site)
+                batches=phaseb::add_checked(batches,run.batches);
+    }
+    const auto worker=law_slice(c,expansion_recruit,expansion_region);
+    const auto* job=c.people().job(worker);
+    out<<",\"scenario\":"<<json_string(expansion_scenario)
+       <<",\"private_expansion\":{\"maker_cash\":"<<c.cash(expansion_maker)
+       <<",\"sales_receipts\":"<<c.firm_finance(expansion_maker).receipts
+       <<",\"builder_cash\":"<<c.cash(expansion_builder)
+       <<",\"builder_steel\":"<<c.stock(expansion_builder,expansion_region,"steel")
+       <<",\"paid_construction\":"<<paid
+       <<",\"commissioned_capacity\":"<<capacity
+       <<",\"new_worker_cash\":"<<c.cash(trial_worker_wallet(c,worker))
+       <<",\"new_worker_employed\":"<<(job&&job->employer==expansion_maker?"true":"false")
+       <<",\"expansion_batches\":"<<batches
+       <<",\"food_stock\":"<<c.stock(expansion_maker,expansion_region,"food")<<"}}";
+}
+
 std::optional<p0::Buyer> campaign_household_order(const daily::World& world) {
     const auto& c=world.engine().base().core().core();
     const auto resident=law_slice(c,law_worker_partitions.front());
@@ -1230,6 +1360,10 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
        <<",\"expenditure\":"<<fiscal.realized_expenditure
        <<",\"debt\":"<<phaseb::add_checked(fiscal.bank_debt,
             phaseb::add_checked(fiscal.bond_principal,fiscal.unpaid_coupons));
+    if(is_expansion_world(world)) {
+        expansion_status(out,world);
+        return out.str();
+    }
     if(is_campaign_world(world)) {
         const std::string other(other_country(tag));
         const auto sibling=core.country_fiscal(other);
@@ -1401,14 +1535,15 @@ void run_panel() {
                 const auto [choice,path]=panel_token(arg);
                 const bool budget=choice=="BUDGET-A"||choice=="BUDGET-B";
                 const auto law=legislative_trial(choice);
-                const auto tag=law?std::string_view("A"):budget?choice.substr(7):choice;
+                const bool expansion=choice=="EXPANSION-A";
+                const auto tag=law||expansion?std::string_view("A"):budget?choice.substr(7):choice;
                 if((tag!="A"&&tag!="B"&&tag!=country)||(command=="new"&&!path.empty()))
-                    throw std::invalid_argument("select A, B, TUT, BUDGET-A, BUDGET-B, LAW-A, EDU-A or CAMPAIGN-A");
+                    throw std::invalid_argument("select A, B, TUT, BUDGET-A, BUDGET-B, LAW-A, EDU-A, CAMPAIGN-A or EXPANSION-A");
                 const auto resume=command=="load"?std::optional{checkpoint_path_utf8(path)}:std::nullopt;
                 const bool industry=tag==country;
-                auto next=law?open_law(resume,*law):industry?open_industry(resume):
+                auto next=expansion?open_expansion(resume):law?open_law(resume,*law):industry?open_industry(resume):
                     open_trial(std::string(tag),resume,budget);
-                auto policy=law?law_policies(next,*law):industry?tutorial_policies(true):
+                auto policy=expansion?expansion_policies():law?law_policies(next,*law):industry?tutorial_policies(true):
                     trial_policies(next,std::string(tag),budget);
                 auto replacement=std::make_unique<Session>(Session{std::string(tag),
                     p0::DailyGame(std::move(next),std::move(policy))});
@@ -1423,6 +1558,8 @@ void run_panel() {
                 last_status=panel_status(session->game,session->tag);
             } else if(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="public-build"||command=="public-build-budget"||command=="save") {
                 if(!session)throw std::invalid_argument("start or load a trial first");
+                if(is_expansion_world(session->game.world())&&command!="step"&&command!="save")
+                    throw std::invalid_argument("private expansion runs autonomously; use step or save");
                 if(command=="step") {
                     const auto days=command_number(arg,1,366);
                     try {
