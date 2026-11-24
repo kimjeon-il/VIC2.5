@@ -712,6 +712,71 @@ def main():
                 and timber_replay.read_bytes() == timber_final.read_bytes(),
                 "later timber and household cash must replay at an actual calendar boundary")
 
+        tariff_open = d / "campaign ore booked.sav"
+        tariff_pending = d / "campaign ore rate set.sav"
+        tariff_done = d / "campaign paid ore duty.sav"
+        tariff_replay = d / "campaign ore duty replay.sav"
+        tariff_untouched = d / "campaign ore invalid attempts.sav"
+        trade = panel("new CAMPAIGN-A", "step 1", f"save {tariff_open}", "tariff 20",
+                      f"save {tariff_pending}", "inspect B", "tariff 0", "inspect A",
+                      "tariff 101", "tariff -1", "step 1", f"save {tariff_done}", "quit")
+        require(trade[3]["ok"], f"the common campaign must permit its own canonical ore tariff: {trade[3]}")
+        require(all(row["ok"] == (i not in {6, 8, 9}) for i, row in enumerate(trade)),
+                "tariff, save, bounds or read-only peer authority failed")
+        base, loaded, changed, peer, charged = (trade[i]["status"] for i in (0, 1, 3, 5, 10))
+        require(base["campaign_ore_tariff_allowed"] and base["tariff_ppm"] == base["paid_duty"] == 0
+                and base["max_tariff_ppm"] == 1_000_000 and loaded["in_transit_ore"] == 2
+                and loaded["supply_chain"]["iron_batches"] == 0 and loaded["supplier_cash"] == 20,
+                "the initial rate, lawful maximum and already paid rail cargo must be visible")
+        require(changed["tariff_ppm"] == 200_000 and changed["paid_duty"] == 0
+                and changed["supply_chain"]["iron_batches"] == changed["supply_chain"]["ore_stock"] == 1
+                and changed["in_transit_ore"] == 0
+                and changed["supplier_cash"] == loaded["supplier_cash"]
+                and changed["carrier_cash"] == loaded["carrier_cash"],
+                "a rate change must not retroactively charge the two previously booked units")
+        require(peer["country"] == "B" and not peer["can_act"]
+                and "campaign_ore_tariff_allowed" not in peer and "paid_duty" not in peer
+                and trade[6]["status"] == peer
+                and all(trade[i]["status"] == changed for i in (7, 8, 9)),
+                "read-only B or out-of-bounds percentages changed the game")
+        controls = panel(f"load CAMPAIGN-A {tariff_open}", "tariff 0", "step 1", "quit")
+        zero = controls[2]["status"]
+        require(all(row["ok"] for row in controls) and controls[1]["status"]["paid_duty"] == 0
+                and charged["date"] == zero["date"] and zero["paid_duty"] == 0
+                and charged["paid_duty"] == 2
+                and charged["treasury"] - zero["treasury"] == 2
+                and charged["revenue"] - zero["revenue"] == 2
+                and zero["supply_chain"]["smelter_cash"] - charged["supply_chain"]["smelter_cash"] == 2
+                and charged["supplier_cash"] == zero["supplier_cash"] == loaded["supplier_cash"] + 10
+                and charged["carrier_cash"] == zero["carrier_cash"] == loaded["carrier_cash"] + 2
+                and charged["in_transit_ore"] == zero["in_transit_ore"] == 1
+                and charged["supply_chain"]["iron_batches"] == zero["supply_chain"]["iron_batches"],
+                "the canonical duty must settle on subsequent ore without altering the matched rail shipment")
+        reloaded = panel(f"load CAMPAIGN-A {tariff_pending}", "inspect B", "tariff 0",
+                         "inspect A", "tariff 101", "tariff -1", f"save {tariff_untouched}",
+                         "step 1", f"save {tariff_replay}", "quit")
+        require(all(row["ok"] == (i not in {2, 4, 5}) for i, row in enumerate(reloaded))
+                and reloaded[0]["status"] == changed and reloaded[7]["status"] == charged
+                and tariff_untouched.read_bytes() == tariff_pending.read_bytes()
+                and tariff_replay.read_bytes() == tariff_done.read_bytes(),
+                "invalid requests mutated the rate checkpoint, or paid duty did not replay exactly")
+        restored_zero = panel(f"load CAMPAIGN-A {tariff_done}", "tariff 0", "quit")
+        require(all(row["ok"] for row in restored_zero)
+                and restored_zero[1]["status"]["tariff_ppm"] == 0
+                and restored_zero[1]["status"]["paid_duty"] == 2,
+                "returning to zero must not erase the duty already paid before the old parcel arrives")
+        optional = panel("new SUPPLY-A", "tariff 20", "quit")
+        require(optional[0]["ok"] and not optional[1]["ok"]
+                and "campaign_ore_tariff_allowed" not in optional[0]["status"]
+                and optional[1]["status"] == optional[0]["status"],
+                "the new ordinary policy must not leak into an existing optional campaign")
+        opening_order = panel("new CAMPAIGN-A", "tariff 100", "quit")
+        at_max = opening_order[1]["status"]
+        require(opening_order[1]["ok"] and at_max["tariff_ppm"] == 1_000_000
+                and at_max["paid_duty"] == 20 and at_max["peer_debt"] == 100
+                and at_max["in_transit_ore"] == 2,
+                "the lawful maximum tariff must retain the authored B financing on the opening day")
+
         steel_out = d / "steel order.sav"
         steel_done = d / "steel commissioned.sav"
         steel_replay = d / "steel commissioned replay.sav"
@@ -1116,7 +1181,7 @@ def main():
         mislabeled_campaign = d / "campaign-wrong-dataset.vic25"
         mislabeled_campaign.write_bytes(native_save_with_origin(
             supply_checkpoint.read_bytes(), b"panel:campaign-procurement-v2",
-            old_origin=b"panel:campaign-elected-budget-v5"))
+            old_origin=b"panel:campaign-ore-tariff-v6"))
         mismatch = panel(f"load CAMPAIGN-A {mislabeled_campaign}", "quit")
         require(not mismatch[0]["ok"],
                 "a current snapshot with only its outer origin changed was resumed under old rules")

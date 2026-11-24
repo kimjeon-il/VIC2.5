@@ -119,6 +119,7 @@ def run(exe):
             run_shared_campaign(root, panel, Path(directory) / "공동 캠페인 예약.vic25")
             run_shared_construction(root, panel, Path(directory) / "공동 건설 예산 승인.vic25")
             run_shared_spending(root, panel, Path(directory) / "공동 공공사업 한도.vic25")
+            run_shared_tariff(root, panel, Path(directory) / "공동 광석 관세.vic25")
             run_private_expansion(root, panel, Path(directory) / "민간 증설.vic25")
             run_supply_recovery(root, panel, Path(directory) / "공급망 복구.vic25")
             run_household_staples(root, panel, Path(directory) / "가계 소비.vic25")
@@ -283,7 +284,7 @@ def run_shared_campaign(root, panel, save):
     assert status["peer_country"] == "B" and not status["peer_is_player"]
     assert "B · 조회 전용" in panel.diplomacy.get()
     assert str(status["peer_treasury"]) in panel.diplomacy.get()
-    assert not panel.tariff_button.winfo_ismapped()
+    assert panel.tariff_button.winfo_ismapped() and panel.tariff_button.instate(["!disabled"])
     assert panel.spending_button.winfo_ismapped() and panel.spending_button.instate(["disabled"])
     for _ in range(4):
         if panel.current["campaign_tax_allowed"]:
@@ -344,6 +345,42 @@ def run_shared_campaign(root, panel, save):
     panel.step_button.invoke()
     wait(root, panel)
     assert panel.current == next_day
+
+
+def run_shared_tariff(root, panel, save):
+    panel.country.set("A 공동 캠페인")
+    panel.new_button.invoke()
+    wait(root, panel)
+    assert panel.current["campaign_ore_tariff_allowed"] and panel.tariff_button.winfo_ismapped()
+    assert panel.tariff_button.instate(["!disabled"])
+    panel.step_button.invoke()
+    wait(root, panel)
+    dispatch = panel.current
+    assert dispatch["in_transit_ore"] == 2 and dispatch["paid_duty"] == 0
+    panel.tariff.set("20")
+    panel.tariff_button.invoke()
+    wait(root, panel)
+    adopted = panel.current
+    assert adopted["tariff_ppm"] == 200_000 and adopted["paid_duty"] == 0
+    assert "광석 수입 관세: 20%" in panel.market.get()
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file()
+    panel.step_button.invoke()
+    wait(root, panel)
+    settled = panel.current
+    assert settled["paid_duty"] == 2 and "누적 관세 징수: 2" in panel.market.get()
+    panel._send("inspect B")
+    wait(root, panel)
+    assert panel.current["country"] == "B" and not panel.tariff_button.winfo_ismapped()
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == adopted
+    panel.step_button.invoke()
+    wait(root, panel)
+    assert panel.current == settled
 
 
 def run_shared_spending(root, panel, save):

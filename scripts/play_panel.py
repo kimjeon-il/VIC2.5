@@ -199,10 +199,15 @@ class PlayPanel:
         elected_spending = self._campaign_spending_scope(self.current)
         spending_vote = elected_spending and self.current["campaign_spending_cap_allowed"]
         campaign_party = self._selected_bill_party(bill) if (campaign_tax or spending_vote) and bill else None
+        campaign_tariff = self._campaign_tariff_scope(self.current)
+        can_set_tariff = campaign_tariff and self.current["campaign_ore_tariff_allowed"]
+        self.tariff_label.configure(text="광석 수입 관세율(%):" if campaign_tariff else "수입 관세율(%):")
         for widget in (self.tariff_label, self.tariff_button, self.tariff_entry):
-            widget.state(["!disabled"] if ready and self.current and direct_actions else ["disabled"])
-            if direct_actions:
-                widget.grid()
+            enabled = ready and self.current and (direct_actions or can_set_tariff)
+            widget.state(["!disabled"] if enabled else ["disabled"])
+            if direct_actions or campaign_tariff:
+                # Row 0 is the elected party picker in the shared campaign.
+                widget.grid(row=4 if campaign_tariff else 0, pady=(4, 0) if campaign_tariff else 0)
             else:
                 widget.grid_remove()
         direct_tax = (ready and self.current and direct_actions
@@ -372,6 +377,10 @@ class PlayPanel:
     @classmethod
     def _campaign_can_act(cls, status):
         return cls._campaign(status) and status["can_act"] and status["country"] == status["player_country"]
+
+    @classmethod
+    def _campaign_tariff_scope(cls, status):
+        return cls._campaign_can_act(status) and "campaign_ore_tariff_allowed" in status
 
     @classmethod
     def _campaign_spending_scope(cls, status):
@@ -593,6 +602,12 @@ class PlayPanel:
                 fittings_receipts = chain.get("fittings_sales_receipts")
                 if fittings_bought is not None and fittings_receipts is not None:
                     market += f"\n가계 부품 구매 {fittings_bought} · 목공소 판매대금 {fittings_receipts}"
+            if self._campaign_tariff_scope(status):
+                tariff = self._percent(status["tariff_ppm"])
+                limit = self._percent(status["max_tariff_ppm"])
+                self.tariff.set(tariff)
+                market = (f"광석 수입 관세: {tariff}% (상한 {limit}%)"
+                          f" · 누적 관세 징수: {status['paid_duty']}\n" + market)
             role = "플레이어" if status["peer_is_player"] else "조회 전용"
             diplomacy = (f"{status['peer_country']} · {role}\n"
                          f"국고: {status['peer_treasury']}\n"
@@ -657,11 +672,16 @@ class PlayPanel:
 
     def set_tariff(self):
         if (not self.current or self._industry(self.current) or self._legislature(self.current)
-                or self._campaign(self.current) or self._expansion(self.current) or self._staples(self.current)):
+                or self._expansion(self.current) or self._staples(self.current)):
             return
+        shared = self._campaign(self.current)
+        if shared and (not self._campaign_tariff_scope(self.current)
+                       or not self.current["campaign_ore_tariff_allowed"]):
+            return
+        limit = self.current["max_tariff_ppm"] // 10_000 if shared else 100
         value = self.tariff.get().strip()
-        if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > 100:
-            self.notice.set("오류: 관세율을 0부터 100 사이의 정수로 입력하세요.")
+        if not value or not value.isascii() or not value.isdecimal() or len(value) > 3 or int(value) > limit:
+            self.notice.set(f"오류: 관세율을 0부터 {limit} 사이의 정수로 입력하세요.")
             return
         self._send("tariff " + value)
 

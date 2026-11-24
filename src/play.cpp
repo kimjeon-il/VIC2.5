@@ -402,15 +402,20 @@ void save_new(const daily::World& world,const fs::path& destination) {
     cleanup();
 }
 
-void set_trial_tariff(p0::DailyGame& game,const std::string& tag,int percent) {
+phasegh::World::Plan ore_tariff_order(const p0::DailyGame& game,const std::string& tag,
+        int percent,std::string_view command_prefix) {
     const auto ppm=percent*10'000;
-    const auto key="TRIAL-TARIFF:"+std::to_string(game.world().day_index());
+    const auto key=std::string(command_prefix)+std::to_string(game.world().day_index());
     phasegh::World::Plan order;
     order[0].push_back([tag,ppm,key](phasegh::Stage& stage){
         stage.adopt_tariff_daily(key,tag,trial_good,ppm,
             stage.phase_c().government(tag).prime_minister);
     });
-    game.advance_day(order);
+    return order;
+}
+
+void set_trial_tariff(p0::DailyGame& game,const std::string& tag,int percent) {
+    game.advance_day(ore_tariff_order(game,tag,percent,"TRIAL-TARIFF:"));
 }
 
 void propose_trial_income_tax(p0::DailyGame& game,const std::string& tag,int percent) {
@@ -494,9 +499,14 @@ constexpr auto campaign_procurement_origin="panel:campaign-procurement-v2";
 constexpr auto campaign_ore_inventory_origin="panel:campaign-ore-inventory-v3";
 constexpr auto campaign_timber_balance_origin="panel:campaign-timber-v4";
 constexpr auto campaign_elected_budget_origin="panel:campaign-elected-budget-v5";
+constexpr auto campaign_ore_tariff_origin="panel:campaign-ore-tariff-v6";
+bool is_ore_tariff_campaign(const daily::World& world) {
+    return world.migration_origin()==campaign_ore_tariff_origin;
+}
 constexpr phasec::Money campaign_public_program_limit=2;
 bool is_elected_budget_campaign(const daily::World& world) {
-    return world.migration_origin()==campaign_elected_budget_origin;
+    return world.migration_origin()==campaign_elected_budget_origin||
+           is_ore_tariff_campaign(world);
 }
 constexpr phasec::Money campaign_balanced_wood_price=4;
 constexpr Quantity campaign_balanced_regrowth=8;
@@ -602,7 +612,7 @@ const char* legislative_origin(LegislativeTrial trial) {
         case LegislativeTrial::wage:return law_origin;
         case LegislativeTrial::education:return education_origin;
         case LegislativeTrial::education_remote:return education_remote_origin;
-        case LegislativeTrial::campaign:return campaign_elected_budget_origin;
+        case LegislativeTrial::campaign:return campaign_ore_tariff_origin;
         case LegislativeTrial::supply_recovery:return supply_recovery_origin;
         case LegislativeTrial::steel_chain:return steel_chain_origin;
     }
@@ -1365,7 +1375,8 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
     const bool origin_matches=origin==legislative_origin(trial)||
         (trial==LegislativeTrial::campaign&&
          (origin==legacy_campaign_origin||origin==campaign_procurement_origin||
-          origin==campaign_ore_inventory_origin||origin==campaign_timber_balance_origin));
+          origin==campaign_ore_inventory_origin||origin==campaign_timber_balance_origin||
+          origin==campaign_elected_budget_origin));
     if(!origin_matches||w.engine().base().spatial().dataset_hash!=origin||
        !c.has_country_treasury("A")||!c.has_actor(law_employer)||
        c.p1_constitution("A").legislature!=phasec::P1LegislatureKind::unicameral||
@@ -1871,6 +1882,27 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
         if(is_supply_recovery(world))supply_recovery_status(out,world);
         if(is_steel_campaign(world))steel_chain_status(out,world);
         if(tag=="A") {
+            if(is_ore_tariff_campaign(world)) {
+                const auto& diplomacy=engine.diplomacy();
+                const auto rate=diplomacy.tariffs.find({tag,trial_good});
+                const auto cap=core.p2_rule(tag,tag,
+                    phasec::P2ClauseKind::maximum_import_tariff_ppm).value_or(1'000'000);
+                phasec::Money duty=0;
+                for(const auto& receipt:engine.commerce().customs)
+                    if(receipt.importer==tag&&receipt.good==trial_good)
+                        duty=phaseb::add_checked(duty,receipt.paid);
+                // Show the same effective foreign-policy authority the H
+                // command will validate at the start of the processing day.
+                const bool can_decree=!core.government(tag).prime_minister.empty()&&
+                    std::none_of(diplomacy.protectorates.begin(),diplomacy.protectorates.end(),
+                        [&](const auto& entry) {
+                            const auto& link=entry.second;
+                            return link.active&&link.dependent==tag&&link.exclusive_foreign_policy;
+                        });
+                out<<",\"campaign_ore_tariff_allowed\":"<<(can_decree?"true":"false")
+                   <<",\"tariff_ppm\":"<<(rate==diplomacy.tariffs.end()?0:rate->second.ppm)
+                   <<",\"max_tariff_ppm\":"<<cap<<",\"paid_duty\":"<<duty;
+            }
             if(is_elected_budget_campaign(world)&&core.has_elected_civilian_spending_cap_authority(tag)) {
                 const auto cap=core.civilian_spending_cap(tag);
                 const auto reserved=core.pending_civilian_spending_cap(tag);
@@ -2044,6 +2076,11 @@ void run_panel() {
                         last_status=panel_status(session->game,session->tag);
                         throw;
                     }
+                } else if(command=="tariff"&&is_ore_tariff_campaign(session->game.world())) {
+                    if(session->tag!="A")
+                        throw std::invalid_argument("the inspected peer is read-only");
+                    advance_panel_day(session->game,ore_tariff_order(session->game,session->tag,
+                        command_number(arg,0,100),"CAMPAIGN-ORE-TARIFF:"));
                 } else if(command=="tariff") {
                     if(is_law_world(session->game.world()))
                         throw std::invalid_argument("the elected law trial has no direct tariff order");
