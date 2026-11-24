@@ -26,6 +26,7 @@ def run(exe):
     assert play_panel.PlayPanel._protocol_tag("A 교육 시범판") == "EDU-A"
     assert play_panel.PlayPanel._protocol_tag("A 공동 캠페인") == "CAMPAIGN-A"
     assert play_panel.PlayPanel._protocol_tag("A 민간 증설 시범판") == "EXPANSION-A"
+    assert play_panel.PlayPanel._protocol_tag("A 공급망 복구 시범판") == "SUPPLY-A"
     root = tk.Tk()
     panel = play_panel.PlayPanel(root, exe)
     try:
@@ -116,6 +117,7 @@ def run(exe):
             run_shared_campaign(root, panel, Path(directory) / "공동 캠페인 예약.vic25")
             run_shared_construction(root, panel, Path(directory) / "공동 건설 예산 승인.vic25")
             run_private_expansion(root, panel, Path(directory) / "민간 증설.vic25")
+            run_supply_recovery(root, panel, Path(directory) / "공급망 복구.vic25")
     finally:
         panel.close()
         stop = monotonic() + 3
@@ -271,6 +273,7 @@ def run_shared_campaign(root, panel, save):
     wait(root, panel)
     status = panel.current
     assert status["scenario"] == "campaign-v1"
+    assert "supply_recovery" not in status and "신규 운송 경로" not in panel.market.get()
     assert status["country"] == status["player_country"] == "A" and status["can_act"]
     assert status["peer_country"] == "B" and not status["peer_is_player"]
     assert "B · 조회 전용" in panel.diplomacy.get()
@@ -478,6 +481,72 @@ def run_private_expansion(root, panel, save):
     panel._send(f"step {steps}")
     wait(root, panel)
     assert panel.current == reached
+
+
+def run_supply_recovery(root, panel, save):
+    choice = "A 공급망 복구 시범판"
+    panel.selector.current(panel.selector.cget("values").index(choice))
+    panel.new_button.invoke()
+    wait(root, panel)
+    assert panel.current["scenario"] == "campaign-v1"
+    assert panel.current["country"] == panel.current["player_country"] == "A"
+    assert "공급망 복구 시범판" in panel.heading.get()
+    assert panel.current["supply_recovery"]["route"] == "rail"
+    assert "신규 운송 경로: 철도" in panel.market.get()
+    assert "B · 조회 전용" in panel.diplomacy.get()
+
+    def advance_to(target):
+        days = (date.fromisoformat(target) - date.fromisoformat(panel.current["date"])).days
+        assert days > 0
+        panel._send(f"step {days}")
+        wait(root, panel)
+        assert panel.current["date"] == target
+
+    advance_to("2000-02-01")
+    assert panel.current["supply_recovery"]["route"] == "closed"
+    assert "신규 운송 경로: 없음" in panel.market.get()
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file(), panel.notice.get()
+    closed = panel.current
+    advance_to("2000-03-01")
+    ready = panel.current["supply_recovery"]
+    assert ready["route"] == "road" and ready["road_in_transit_ore"] == 0
+    assert "신규 운송 경로: 도로 우회" in panel.market.get()
+    panel.step_button.invoke()
+    wait(root, panel)
+    pending = panel.current["supply_recovery"]
+    assert pending["road_in_transit_ore"] > 0 and pending["road_freight_paid"] > 0
+    assert pending["iron_batches"] == ready["iron_batches"]
+    assert pending["smelter_receipts"] == ready["smelter_receipts"]
+    assert f"도로 운송 중 광석: {pending['road_in_transit_ore']}" in panel.market.get()
+    assert f"도로 운임 지급: {pending['road_freight_paid']}" in panel.market.get()
+    assert f"제철소 광석 재고: {pending['ore_stock']}" in panel.market.get()
+    for _ in range(5):
+        state = panel.current["supply_recovery"]
+        if state["iron_batches"] > pending["iron_batches"]:
+            break
+        panel.step_button.invoke()
+        wait(root, panel)
+    resumed = panel.current
+    state = resumed["supply_recovery"]
+    assert state["iron_batches"] > pending["iron_batches"]
+    assert state["smelter_receipts"] > pending["smelter_receipts"]
+    assert f"철 생산 횟수: {state['iron_batches']}" in panel.market.get()
+    assert f"철 판매대금: {state['smelter_receipts']}" in panel.market.get()
+
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.country.set("A 공동 캠페인")
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == resumed and "오류:" in panel.notice.get()
+        panel.country.set(choice)
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == closed and panel.country.get() == choice
+    advance_to(resumed["date"])
+    assert panel.current == resumed
 
 
 def run_industry(root, panel, tariff_save):

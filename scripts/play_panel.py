@@ -53,6 +53,7 @@ class PlayPanel:
     EDUCATION = "A 교육 시범판"
     CAMPAIGN = "A 공동 캠페인"
     EXPANSION = "A 민간 증설 시범판"
+    SUPPLY = "A 공급망 복구 시범판"
 
     @classmethod
     def _protocol_tag(cls, choice):
@@ -62,6 +63,8 @@ class PlayPanel:
             return "EDU-A"
         if choice == cls.CAMPAIGN:
             return "CAMPAIGN-A"
+        if choice == cls.SUPPLY:
+            return "SUPPLY-A"
         if choice == cls.EXPANSION:
             return "EXPANSION-A"
         return "TUT" if choice == cls.FACTORY else cls.BUDGETS.get(choice, choice)
@@ -99,7 +102,7 @@ class PlayPanel:
         setup.grid(row=2, sticky="ew")
         ttk.Label(setup, text="시작·불러올 국가/시나리오:").grid(row=0, column=0, padx=(0, 6))
         choices = ("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE,
-                   self.EDUCATION, self.CAMPAIGN, self.EXPANSION)
+                   self.EDUCATION, self.CAMPAIGN, self.EXPANSION, self.SUPPLY)
         self.selector = ttk.Combobox(setup, textvariable=self.country, values=choices,
                                      width=16, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
@@ -280,7 +283,7 @@ class PlayPanel:
                         elif self._budget(self.current):
                             choice += " 예산 시범판"
                         elif self._campaign(self.current):
-                            choice = self.CAMPAIGN
+                            choice = self.SUPPLY if self.current.get("supply_recovery") else self.CAMPAIGN
                         elif self._expansion(self.current):
                             choice = self.EXPANSION
                         elif self._education(self.current):
@@ -395,9 +398,10 @@ class PlayPanel:
     def _show(self, status):
         factory = self._industry(status)
         expansion = self._expansion(status)
+        recovery = status.get("supply_recovery") if self._campaign(status) else None
         perspective = self.FACTORY if factory else f"국가 {status['country']}"
         if self._campaign(status):
-            perspective += " · 공동 캠페인"
+            perspective += " · 공급망 복구 시범판" if recovery else " · 공동 캠페인"
         elif expansion:
             perspective += " · 민간 증설 시범판"
         elif self._budget(status):
@@ -488,7 +492,15 @@ class PlayPanel:
             market = (f"도착 광석: {status['delivered_ore']}\n"
                       f"운송 중 광석: {status['in_transit_ore']}")
             chain = status.get("supply_chain") if acting else None
-            if chain:
+            if recovery:
+                route = {"rail": "철도", "closed": "없음", "road": "도로 우회"}[recovery["route"]]
+                market = (f"신규 운송 경로: {route}\n"
+                          f"전체 운송 중 광석: {status['in_transit_ore']}\n"
+                          f"도로 운송 중 광석: {recovery['road_in_transit_ore']}\n"
+                          f"도로 운임 지급: {recovery['road_freight_paid']}\n"
+                          f"A 제철소 광석 재고: {recovery['ore_stock']}\n"
+                          f"철 생산 횟수: {recovery['iron_batches']} · 철 판매대금: {recovery['smelter_receipts']}")
+            elif chain:
                 waiting = {"construction": "공구공장 준공 대기", "iron": "철 부족",
                            "wood": "목재 부족", "staff": "인력 부족",
                            "none": None}.get(chain.get("tools_waiting_for"))
@@ -525,7 +537,7 @@ class PlayPanel:
             if peer_pending is not None:
                 diplomacy += (f"\n소득세 예약: {self._percent(peer_pending)}% "
                               f"({status['peer_pending_income_tax_date']} 시행)")
-            titles = ("재정", "소득세·의회", "공동 교역", "다른 나라")
+            titles = ("재정", "소득세·의회", "광석 운송·생산" if recovery else "공동 교역", "다른 나라")
         elif self._legislature(status):
             proposal = "공립학교 법안" if self._education(status) else "최저임금 법안"
             policy = self._bill_text(status["law_bill"], proposal)

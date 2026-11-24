@@ -556,6 +556,73 @@ def main():
                 school_replay.read_bytes() == school_effective.read_bytes(),
                 "education checkpoint origin replay changed real payroll or demographic attainment")
 
+        # Same A/B institutions, but a grounded rail link is out of
+        # service before an alternate road becomes available. Observe actual
+        # stock and industry ledgers, not the date/route label alone.
+        outage = d / "rail outage.vic25"
+        arriving = d / "road cargo.vic25"
+        supply_complete = d / "supply recovery.vic25"
+        supply_again = d / "supply replay.vic25"
+        flow = panel("new SUPPLY-A", "step 20", "step 11", "step 1", "step 6",
+                     f"save {outage}", "inspect B", "inspect A", "step 22", "step 1",
+                     f"save {arriving}", "step 1", "step 1", "step 1",
+                     f"save {supply_complete}", "quit")
+        require(all(row["ok"] for row in flow), f"supply recovery did not execute: {flow}")
+        (opening, rail, last_rail_cargo, rail_arrived, stalled, _, peer, _,
+         reopening, dispatched, _, en_route_a, en_route_b, recovered) = [
+            row["status"] for row in flow[:14]
+        ]
+        def supply(row):
+            require(row["scenario"] == "campaign-v1", "supply is not the shared campaign")
+            return row["supply_recovery"]
+        require(supply(opening)["route"] == "rail" and supply(opening)["iron_batches"] == 0
+                and opening["peer_country"] == "B", "the variant must begin with the shared rail economy")
+        require(supply(rail)["iron_batches"] > 0 and supply(rail)["smelter_receipts"] > 0
+                and rail["carrier_cash"] > 0 and supply(rail)["road_freight_paid"] == 0,
+                "the ordinary railway never carried real inputs to paid domestic sales")
+        require(last_rail_cargo["date"] == "2000-02-01"
+                and supply(last_rail_cargo)["route"] == "closed"
+                and last_rail_cargo["in_transit_ore"] == 1
+                and rail_arrived["in_transit_ore"] == 0
+                and rail_arrived["supplier_cash"] == last_rail_cargo["supplier_cash"]
+                and rail_arrived["carrier_cash"] == last_rail_cargo["carrier_cash"]
+                and supply(rail_arrived)["iron_batches"] == supply(last_rail_cargo)["iron_batches"] + 1
+                and supply(rail_arrived)["smelter_receipts"] == supply(last_rail_cargo)["smelter_receipts"] + 40,
+                "rail closure must honor an already paid shipment without booking a new departure")
+        require(supply(stalled)["route"] == "closed" and supply(stalled)["ore_stock"] == 0
+                and stalled["in_transit_ore"] == 0 and supply(stalled)["artisan_cash"] >= 40
+                and supply(stalled)["smelter_worker_cash"] > supply(rail)["smelter_worker_cash"],
+                "the ore shortage must leave the funded workforce and payable orders intact")
+        require(peer["country"] == "B" and not peer["can_act"] and supply(peer) == supply(stalled),
+                "peer inspection must read the very same disruption")
+        require(reopening["date"] == "2000-03-01" and supply(reopening)["route"] == "road"
+                and reopening["supplier_cash"] == stalled["supplier_cash"]
+                and supply(reopening)["iron_batches"] == supply(stalled)["iron_batches"]
+                and supply(reopening)["smelter_receipts"] == supply(stalled)["smelter_receipts"],
+                "ore purchases and paid iron production did not actually stop through the gap")
+        for row in (dispatched, en_route_a, en_route_b):
+            require(supply(row)["road_freight_paid"] > 0 and supply(row)["road_in_transit_ore"] > 0
+                    and supply(row)["ore_stock"] == 0
+                    and supply(row)["iron_batches"] == supply(stalled)["iron_batches"]
+                    and supply(row)["smelter_receipts"] == supply(stalled)["smelter_receipts"],
+                    "paid road cargo was available to the smelter before the three-day trip ended")
+        require(dispatched["supplier_cash"] - reopening["supplier_cash"] == 10
+                and supply(dispatched)["road_freight_paid"] == 5
+                and supply(dispatched)["road_in_transit_ore"] == 1
+                and dispatched["carrier_cash"] == reopening["carrier_cash"],
+                "the new road's real cargo purchase and freight did not settle to the right wallets")
+        require(recovered["date"] == "2000-03-05"
+                and supply(recovered)["iron_batches"] == supply(stalled)["iron_batches"] + 1
+                and supply(recovered)["smelter_receipts"] == supply(stalled)["smelter_receipts"] + 40
+                and supply(recovered)["artisan_cash"] == supply(en_route_b)["artisan_cash"] + 45 - 40,
+                "physically restored ore did not become smelted and paid output")
+        supply_replay = panel(f"load CAMPAIGN-A {outage}", f"load SUPPLY-A {arriving}",
+                              "step 3", f"save {supply_again}", "quit")
+        require(not supply_replay[0]["ok"] and supply_replay[1]["status"] == dispatched
+                and supply_replay[2]["status"] == recovered and supply_replay[3]["ok"]
+                and supply_again.read_bytes() == supply_complete.read_bytes(),
+                "supply-recovery save did not preserve the real delayed cargo exactly")
+
         campaign_pending = d / "campaign-pending.vic25"
         campaign_inspected = d / "campaign-inspected.vic25"
         campaign_done = d / "campaign-done.vic25"
