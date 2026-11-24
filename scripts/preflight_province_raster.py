@@ -2,6 +2,7 @@
 
 import argparse
 from collections import Counter
+from contextlib import contextmanager
 import csv
 import json
 from pathlib import Path
@@ -197,7 +198,9 @@ def check_png_header(png):
             stream.seek(int.from_bytes(chunk[:4], "big") + 4, 1)
 
 
-def inspect_png(png, palette, reader):
+@contextmanager
+def open_png_rows(png, reader):
+    """Open RGB rows for callers sharing the same exact-class decoder."""
     check_png_header(png)
     if reader == "gdal":
         from osgeo import gdal
@@ -217,7 +220,8 @@ def inspect_png(png, palette, reader):
                                      band_list=bands, buf_pixel_space=3,
                                      buf_line_space=3 * width, buf_band_space=1)
                     for y in range(height))
-            return inspect(width, height, rows, palette)
+            yield width, height, rows
+        return
     from PIL import Image
     try:
         with Image.open(png, formats=("PNG",)) as image:
@@ -227,10 +231,14 @@ def inspect_png(png, palette, reader):
             rgb = image.convert("RGB") if image.mode == "P" else image
             width, height = rgb.size
             rows = (rgb.crop((0, y, width, y + 1)).tobytes() for y in range(height))
-            return inspect(width, height, rows, palette)
+            yield width, height, rows
     except Image.DecompressionBombError as error:
         raise ValueError(str(error)) from error
 
+
+def inspect_png(png, palette, reader):
+    with open_png_rows(png, reader) as (width, height, rows):
+        return inspect(width, height, rows, palette)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
