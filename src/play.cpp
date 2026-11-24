@@ -139,7 +139,8 @@ bool has_public_build_fixture(const daily::World& world,const std::string& tag,
 }
 
 void seed_public_build_fixture(phasec::IntegratedWorld& core,const std::string& tag,
-        const std::string& region,bool linked_supply=false,bool manufactured_steel=false) {
+        const std::string& region,bool linked_supply=false,bool manufactured_steel=false,
+        phasec::Money wood_price=2) {
     const auto builder=public_builder(tag),supplier=public_steel_seller(tag);
     core.seed_actor(builder,1200);core.seed_actor(supplier,manufactured_steel?200:0);
     const auto steel_price=manufactured_steel?steel_campaign_price:3;
@@ -149,7 +150,7 @@ void seed_public_build_fixture(phasec::IntegratedWorld& core,const std::string& 
     const auto iron_quote=linked_supply?40:4;
     core.seed_market(region,"tools",tools_quote,tools_quote,tools_quote,linked_supply?3:0);
     core.seed_market(region,"iron",iron_quote,iron_quote,iron_quote,linked_supply?32:0);
-    core.seed_market(region,"wood",2,2,2,linked_supply?3:0);
+    core.seed_market(region,"wood",wood_price,wood_price,wood_price,linked_supply?3:0);
     if(!manufactured_steel)core.seed_stock(supplier,region,"steel",2);
     auto& pop=core.seed_population();
     const auto household=pop.household_profile({region,builder,"shared",1});
@@ -491,6 +492,13 @@ constexpr auto campaign_scenario="campaign-v1";
 constexpr auto legacy_campaign_origin="panel:campaign-v1";
 constexpr auto campaign_procurement_origin="panel:campaign-procurement-v2";
 constexpr auto campaign_ore_inventory_origin="panel:campaign-ore-inventory-v3";
+constexpr auto campaign_timber_balance_origin="panel:campaign-timber-v4";
+constexpr phasec::Money campaign_balanced_wood_price=4;
+constexpr Quantity campaign_balanced_regrowth=8;
+constexpr phaseb::Id campaign_workshop_worker=210;
+bool is_balanced_timber(const daily::World& world) {
+    return world.migration_origin()==campaign_timber_balance_origin;
+}
 constexpr auto supply_recovery_origin="panel:campaign-supply-v1";
 constexpr auto steel_chain_origin="panel:campaign-steel-v1";
 constexpr auto steel_coal_owner="CAMPAIGN-COAL-OWNER";
@@ -589,7 +597,7 @@ const char* legislative_origin(LegislativeTrial trial) {
         case LegislativeTrial::wage:return law_origin;
         case LegislativeTrial::education:return education_origin;
         case LegislativeTrial::education_remote:return education_remote_origin;
-        case LegislativeTrial::campaign:return campaign_ore_inventory_origin;
+        case LegislativeTrial::campaign:return campaign_timber_balance_origin;
         case LegislativeTrial::supply_recovery:return supply_recovery_origin;
         case LegislativeTrial::steel_chain:return steel_chain_origin;
     }
@@ -1001,6 +1009,7 @@ bool has_campaign_timber(const daily::World& world) {
     const auto& forest=source->second;
     const auto& saw=method->second;
     const auto& quote=c.market(law_region,"wood");
+    const auto price=is_balanced_timber(world)?campaign_balanced_wood_price:2;
     if(forest.site!=campaign_logger_site||forest.owner!=campaign_wood_seller||
        forest.region!=law_region||forest.good!="wood"||!forest.renewable||
        logger->second.owner!=campaign_wood_seller||logger->second.region!=law_region||
@@ -1008,7 +1017,7 @@ bool has_campaign_timber(const daily::World& world) {
        saw.site!=campaign_mill_site||saw.inputs.size()!=1||saw.outputs.size()!=1||
        saw.inputs.front().good!="wood"||saw.inputs.front().per_unit!=1||
        saw.outputs.front().good!=campaign_boards||saw.outputs.front().per_unit!=1||
-       !saw.byproducts.empty()||quote.price!=2||quote.floor!=2||quote.ceiling!=2)
+       !saw.byproducts.empty()||quote.price!=price||quote.floor!=price||quote.ceiling!=price)
         throw std::invalid_argument("checkpoint has a mismatched native timber chain");
     return true;
 }
@@ -1025,7 +1034,8 @@ p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
         p.allow_endogenous_debt_repayment=false;
         p.autonomous_tax_step_ppm=10'000;
         p.allow_endogenous_staffing=has_campaign_supply(world);
-        const bool buffered_ore=world.migration_origin()==campaign_ore_inventory_origin;
+        const bool buffered_ore=world.migration_origin()==campaign_ore_inventory_origin||
+                                is_balanced_timber(world);
         p.gate_local_input_procurement_by_production=
             buffered_ore||world.migration_origin()==campaign_procurement_origin;
         if(buffered_ore)p.standing_route_stock_targets.emplace(campaign_route,2);
@@ -1059,6 +1069,7 @@ daily::World law_world(LegislativeTrial trial) {
     const bool campaign=campaign_trial(trial);
     const bool recovery=trial==LegislativeTrial::supply_recovery;
     const bool steel_chain=trial==LegislativeTrial::steel_chain;
+    const bool balanced_timber=trial==LegislativeTrial::campaign;
     const bool education=trial==LegislativeTrial::education||
                          trial==LegislativeTrial::education_remote;
     geo.set_dataset(legislative_origin(trial));
@@ -1177,7 +1188,8 @@ daily::World law_world(LegislativeTrial trial) {
             // through the shock, rather than being made to return on cue.
             pop.hire(artisan,1,law_employer,"worker",1550,{});
         }
-        seed_public_build_fixture(c,"A",law_region,true,steel_chain);
+        seed_public_build_fixture(c,"A",law_region,true,steel_chain,
+                                  balanced_timber?campaign_balanced_wood_price:2);
         if(steel_chain) {
             // A catalog-bound coal mine and steel mill operate in the
             // existing A district. There is no finished steel at opening.
@@ -1220,7 +1232,8 @@ daily::World law_world(LegislativeTrial trial) {
         forest.id=campaign_forest;forest.site=campaign_logger_site;
         forest.owner=campaign_wood_seller;forest.region=law_region;forest.good="wood";
         forest.monthly_capacity=31;forest.renewable=true;
-        forest.standing_biomass=forest.carrying_capacity=12;forest.renewal_per_month=3;
+        forest.standing_biomass=forest.carrying_capacity=12;
+        forest.renewal_per_month=balanced_timber?campaign_balanced_regrowth:3;
         industry.seed_resource_site(forest);
         const auto logger_home=pop.household_profile({law_region,"logger-worker","shared",1});
         const auto logger_worker=pop.seed_population(demo,e,logger_home,1,campaign_logger_worker);
@@ -1270,7 +1283,9 @@ daily::World law_world(LegislativeTrial trial) {
         fittings.workers_per_batch=fittings.capacity_per_batch=1;
         industry.seed_recipe(fittings);
         const auto shop_home=pop.household_profile({law_region,"workshop-worker","shared",1});
-        const auto shop_worker=pop.seed_population(demo,e,shop_home,1);
+        const auto shop_worker=balanced_timber?
+            pop.seed_population(demo,e,shop_home,1,campaign_workshop_worker):
+            pop.seed_population(demo,e,shop_home,1);
         c.seed_actor("HH:"+std::to_string(shop_home),0);
         pop.hire(shop_worker,1,campaign_tool_buyer,"worker",31,{});
     }
@@ -1323,7 +1338,7 @@ bool is_campaign_world(const daily::World& w) {
     return w.migration_origin()==legacy_campaign_origin||
            w.migration_origin()==campaign_procurement_origin||
            w.migration_origin()==campaign_ore_inventory_origin||
-           is_supply_recovery(w)||is_steel_campaign(w);
+           is_balanced_timber(w)||is_supply_recovery(w)||is_steel_campaign(w);
 }
 bool is_law_world(const daily::World& w) {
     return w.migration_origin()==law_origin||is_education_world(w)||is_campaign_world(w);
@@ -1342,7 +1357,8 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
     const auto& origin=w.migration_origin();
     const bool origin_matches=origin==legislative_origin(trial)||
         (trial==LegislativeTrial::campaign&&
-         (origin==legacy_campaign_origin||origin==campaign_procurement_origin));
+         (origin==legacy_campaign_origin||origin==campaign_procurement_origin||
+          origin==campaign_ore_inventory_origin));
     if(!origin_matches||w.engine().base().spatial().dataset_hash!=origin||
        !c.has_country_treasury("A")||!c.has_actor(law_employer)||
        c.p1_constitution("A").legislature!=phasec::P1LegislatureKind::unicameral||
@@ -1364,6 +1380,8 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
            !c.has_actor(campaign_program_a)||!c.has_actor(campaign_program_b)||
            !c.has_actor(trial_worker_wallet(c,law_slice(c,campaign_worker_b,campaign_region_b))))
             throw std::invalid_argument("checkpoint lacks the shared campaign institutions");
+        if(is_balanced_timber(w)&&(!has_campaign_timber(w)||!valid_worker(campaign_workshop_worker)))
+            throw std::invalid_argument("checkpoint lacks the balanced timber campaign's labor and facilities");
         if(is_supply_recovery(w)) {
             const auto& edges=w.engine().commerce().transport_edges;
             const auto road=edges.find(recovery_edge),rail=edges.find(campaign_edge);
@@ -1550,6 +1568,21 @@ void campaign_supply_status(std::ostringstream& out,const daily::World& world) {
            <<R"(,"mill_boards_produced":)"<<mill_batches
            <<R"(,"mill_wood_bought":)"<<phaseb::add_checked(mill_batches,c.stock(campaign_board_vendor,law_region,"wood"))
            <<R"(,"toolworks_wood_bought":)"<<phaseb::add_checked(tools_batches,c.stock("A",law_region,"wood"));
+        if(is_balanced_timber(world)) {
+            const auto logger=c.firm_finance(campaign_wood_seller);
+            const auto mill=c.firm_finance(campaign_board_vendor);
+            const auto workshop=c.firm_finance(campaign_tool_buyer);
+            const auto& forest=domain.state().resource_sites.at(campaign_forest);
+            out<<R"(,"wood_price":)"<<c.market(law_region,"wood").price
+               <<R"(,"forest_biomass":)"<<forest.standing_biomass
+               <<R"(,"mill_cash":)"<<mill.cash
+               <<R"(,"workshop_worker_cash":)"<<paid_wages(campaign_workshop_worker)
+               <<R"(,"logger_wage_arrears":)"<<logger.outstanding_wages
+               <<R"(,"mill_wage_arrears":)"<<mill.outstanding_wages
+               <<R"(,"workshop_wage_arrears":)"<<workshop.outstanding_wages
+               <<R"(,"timber_private_loans":)"<<phaseb::add_checked(logger.outstanding_bank_loan,
+                    phaseb::add_checked(mill.outstanding_bank_loan,workshop.outstanding_bank_loan));
+        }
     }
     out<<'}';
 }

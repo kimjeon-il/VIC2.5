@@ -665,6 +665,53 @@ def main():
                 and supply_again.read_bytes() == supply_complete.read_bytes(),
                 "supply-recovery save did not preserve the real delayed cargo exactly")
 
+        timber_close = d / "timber month opening.sav"
+        timber_final = d / "timber month close.sav"
+        timber_replay = d / "timber month replay.sav"
+        opening_months = ("new CAMPAIGN-A", "step 2", "public-build-budget WORKERS",
+                          "public-build", "step 27", "step 29", "step 31", "step 30")
+        late_timber = panel(*opening_months, *["step 1"] * 31, f"save {timber_close}",
+                            *["step 1"] * 30, f"save {timber_final}", "quit")
+        require(all(row["ok"] for row in late_timber), "the ordinary timber campaign must run without intervention")
+        may_close_index = len(opening_months)-1+31
+        june_close_index = may_close_index+1+30
+        may_open, june_open, july_open = (
+            late_timber[i]["status"] for i in (len(opening_months)-1, may_close_index, june_close_index))
+        require(all(row["status"]["supply_chain"][key] == 0
+                    for row in late_timber[len(opening_months)-1:june_close_index+1]
+                    for key in ("logger_wage_arrears", "mill_wage_arrears",
+                                "workshop_wage_arrears", "timber_private_loans")),
+                "the chain must not rely on new credit or a missed working-day payroll")
+        require([row["date"] for row in (may_open, june_open, july_open)] ==
+                ["2000-05-01", "2000-06-01", "2000-07-01"],
+                "timber continuation must cover two complete later months")
+        for earlier, later in ((may_open, june_open), (june_open, july_open)):
+            b, a = earlier["supply_chain"], later["supply_chain"]
+            def gain(field):
+                return a[field] - b[field]
+            require(gain("household_fittings_bought") >= 4,
+                    "after starter inventories are gone, each full late month must have paid fittings sales")
+            require(gain("logs_harvested") == 8 and gain("logger_receipts") == 32
+                    and gain("logger_worker_cash") == gain("mill_worker_cash") == 31
+                    and gain("wood_seller_cash") == 32 - 31,
+                    "renewal and actual wood sales must support genuinely paid wood-industry wages")
+            require(gain("mill_boards_produced") == gain("tools_batches") == 4
+                    and gain("mill_wood_bought") == gain("toolworks_wood_bought") == 4
+                    and gain("board_vendor_receipts") == 80
+                    and gain("tools_sold") == 4,
+                    "both real wood-production branches must replenish paid workshop inputs")
+            require(gain("household_fittings_bought") == 4 and gain("fittings_sales_receipts") == 360
+                    and gain("workshop_worker_cash") == 31
+                    and gain("mill_cash") == 80 - 4 * 4 - 31
+                    and gain("tool_buyer_cash") == 360 - 4 * 60 - 80 - 31,
+                    "real purchases, paid workers and no prime-stock drawdown must reconcile")
+        read_timber = panel(f"load CAMPAIGN-A {timber_close}", "step 30",
+                            f"save {timber_replay}", "quit")
+        require(all(row["ok"] for row in read_timber) and read_timber[0]["status"] == june_open
+                and read_timber[1]["status"] == july_open
+                and timber_replay.read_bytes() == timber_final.read_bytes(),
+                "later timber and household cash must replay at an actual calendar boundary")
+
         steel_out = d / "steel order.sav"
         steel_done = d / "steel commissioned.sav"
         steel_replay = d / "steel commissioned replay.sav"
@@ -953,7 +1000,7 @@ def main():
             require(chain["logs_harvested"] == chain["wood_seller_stock"] +
                     chain["mill_wood_bought"] + chain["toolworks_wood_bought"] and
                     chain["logger_receipts"] ==
-                    2 * (chain["mill_wood_bought"] + chain["toolworks_wood_bought"]) and
+                    chain["wood_price"] * (chain["mill_wood_bought"] + chain["toolworks_wood_bought"]) and
                     chain["mill_boards_produced"] + initial["board_vendor_stock"] +
                     initial["workshop_board_stock"] ==
                     chain["board_vendor_stock"] + chain["workshop_board_stock"] +
@@ -991,15 +1038,12 @@ def main():
                 "active trade/industry and the shortage did not resume identically after saving")
         # Once the mill reaches its finished-stock target, two full idle
         # months must not spend any more on this standing import.
-        days_to_march = (civil_date(2000, 3, 1) -
-                         civil_date.fromisoformat(days[-1]["date"])).days
-        quiet = panel(f"load CAMPAIGN-A {supply_completed}", f"step {days_to_march}",
-                      "step 31", "step 30", "quit")
+        quiet = panel("new CAMPAIGN-A", "step 60", "step 31", "step 30", "quit")
         march, april, may = (row["status"] for row in quiet[1:4])
         require(all(row["ok"] for row in quiet) and
                 [row["date"] for row in (march, april, may)] ==
                     ["2000-03-01", "2000-04-01", "2000-05-01"] and
-                march["supply_chain"]["iron_batches"] >= 44 and
+                march["supply_chain"]["iron_batches"] >= 32 and
                 all(row["supplier_cash"] == march["supplier_cash"] and
                     row["carrier_cash"] == march["carrier_cash"] and
                     row["supply_chain"]["iron_batches"] == march["supply_chain"]["iron_batches"] and
@@ -1009,24 +1053,27 @@ def main():
         mislabeled_campaign = d / "campaign-wrong-dataset.vic25"
         mislabeled_campaign.write_bytes(native_save_with_origin(
             supply_checkpoint.read_bytes(), b"panel:campaign-procurement-v2",
-            old_origin=b"panel:campaign-ore-inventory-v3"))
+            old_origin=b"panel:campaign-timber-v4"))
         mismatch = panel(f"load CAMPAIGN-A {mislabeled_campaign}", "quit")
         require(not mismatch[0]["ok"],
                 "a current snapshot with only its outer origin changed was resumed under old rules")
         purchased_checkpoint = d / "campaign-tool-purchased.vic25"
-        purchased = panel(f"load CAMPAIGN-A {supply_checkpoint}", "step 4",
+        until_tool_sale = tool_sale["commit"] - timeline[5]["status"]["commit"]
+        purchased = panel(f"load CAMPAIGN-A {supply_checkpoint}", f"step {until_tool_sale}",
                           f"save {purchased_checkpoint}", "quit")
         require(all(row["ok"] for row in purchased) and purchased[1]["status"] == tool_sale,
                 "tool purchase needs to remain in the shop before any downstream output")
         retail_checkpoint = d / "campaign-fitting-sold.vic25"
-        after_purchase = panel(f"load CAMPAIGN-A {purchased_checkpoint}", "step 1",
+        until_fitting = downstream["commit"] - tool_sale["commit"]
+        after_purchase = panel(f"load CAMPAIGN-A {purchased_checkpoint}", f"step {until_fitting}",
                                f"save {retail_checkpoint}", "quit")
         require(all(row["ok"] for row in after_purchase) and
                 after_purchase[0]["status"] == tool_sale and
                 after_purchase[1]["status"] == downstream,
                 "resuming a paid physical tool should consume it once without repeating payment")
         retail_replayed = d / "campaign-fitting-replayed.vic25"
-        resumed_retail = panel(f"load CAMPAIGN-A {retail_checkpoint}", "step 13",
+        until_end = days[-1]["commit"] - downstream["commit"]
+        resumed_retail = panel(f"load CAMPAIGN-A {retail_checkpoint}", f"step {until_end}",
                                f"save {retail_replayed}", "quit")
         require(all(row["ok"] for row in resumed_retail) and
                 resumed_retail[0]["status"] == downstream and
