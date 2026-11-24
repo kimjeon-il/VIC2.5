@@ -761,8 +761,137 @@ static void sale_funded_expansion_adds_a_real_taxpaying_worker() {
           "actual earnings must finance expansion, additional output and a new paid job");
 }
 
+static void inactive_producer_leaves_scarce_input_for_real_work(bool stocked_opening) {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","STATE");geo.seed_unit(1,"STATE","DISTRICT");
+    geo.seed_assignment(1,1);
+    auto& industry=geo.seed_core();
+    auto& c=industry.seed_core();
+    c.seed_actor("STATE",0);c.seed_actor("STOCKED",stocked_opening?100:0);
+    c.seed_actor("ACTIVE",100);
+    c.seed_actor("SUPPLIER",50);c.seed_actor("BUYER-EMPLOYER",200);
+    c.seed_government("STATE","HEAD","PM",5,3);
+    c.seed_market("R","ore",4,4,4,1);
+    c.seed_market("R","food",20,20,20);
+    c.seed_market("R","tools",30,30,30,1);
+    if(stocked_opening)c.seed_stock("STOCKED","R","food",1);
+    else {
+        // Stage 1 cannot reserve the opening contract wage. A separate
+        // sale during Stage 3 leaves enough cash to buy ore, but that does
+        // not re-enable today's Stage 4 production.
+        c.seed_market("R","fabric",6,6,6);
+        c.seed_stock("STOCKED","R","fabric",1);
+    }
+    c.seed_stock("SUPPLIER","R","ore",2);
+    const auto add_worker=[&](const std::string& firm,phasec::Money wage) {
+        auto& pop=c.seed_population();
+        const auto h=pop.household_profile({"R",firm,"shared",1});
+        const auto e=pop.economic_profile({"R","worker","wage","employee",pop.default_education()});
+        const auto d=pop.demographic_profile({"R",23700,phaseb::Sex::female,
+            "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+        const auto resident=pop.seed_population(d,e,h,1,
+            static_cast<phaseb::Id>(pop.slices().size()+1));
+        const auto wallet="HH:"+std::to_string(h);
+        c.seed_actor(wallet,0);
+        pop.hire(resident,1,firm,"worker",wage*31,{});
+        return std::pair{resident,wallet};
+    };
+    const auto stocked=add_worker("STOCKED",1),active=add_worker("ACTIVE",1),
+               supplier=add_worker("SUPPLIER",1),customer=add_worker("BUYER-EMPLOYER",25);
+    check(stocked.second!=active.second&&active.second!=supplier.second,
+          "the procurement control must use independent payroll accounts");
+    for(const auto* site:{"STOCKED","ACTIVE","SUPPLIER"})
+        c.seed_production_facility(site,site,"R",31);
+    const auto seed_recipe=[&](const char* id,const char* site,const char* good,Quantity raw) {
+        phased::IndustryRecipe recipe;
+        recipe.id=id;recipe.site=site;recipe.inputs={{"ore",raw}};
+        if(!stocked_opening&&recipe.site=="ACTIVE")recipe.inputs.push_back({"fabric",1});
+        recipe.outputs={{good,1}};recipe.workers_per_batch=recipe.capacity_per_batch=1;
+        industry.seed_recipe(recipe);
+    };
+    // The active line first buys both units in Stage 3. Legacy then lets
+    // the idle line buy one back before either recipe can run in Stage 4.
+    seed_recipe("1-ACTIVE","ACTIVE","tools",2);
+    seed_recipe("2-STOCKED","STOCKED","food",1);
+    phased::ResourceSite source;
+    source.id="RAW";source.site=source.owner="SUPPLIER";
+    source.region="R";source.good="ore";source.monthly_capacity=31;
+    industry.seed_resource_site(source);
+
+    p0::Policies old_policy;
+    old_policy.daily_food_units_per_person=old_policy.monthly_clothing_units_per_person=0;
+    old_policy.allow_endogenous_input_procurement=false;
+    old_policy.allow_endogenous_staffing=false;
+    old_policy.allow_endogenous_factory_expansion=false;
+    old_policy.buyers.push_back({customer.first,customer.second,"STOCKED","R","food",1});
+    auto new_policy=old_policy;
+    new_policy.gate_local_input_procurement_by_production=true;
+    auto opening=daily::World::adopt(std::move(gh),68);
+    p0::DailyGame live(opening,new_policy),legacy(std::move(opening),old_policy);
+    const auto core=[](const p0::DailyGame& game)->const phasec::IntegratedWorld& {
+        return game.world().engine().base().core().core();
+    };
+    const auto observe=[](const p0::DailyGame& game) {
+        const auto& state=game.world().engine().base().core().state();
+        std::array<Quantity,2> runs{};
+        for(const auto& run:state.actual_production_runs) {
+            if(run.recipe=="2-STOCKED")runs[0]+=run.batches;
+            if(run.recipe=="1-ACTIVE")runs[1]+=run.batches;
+        }
+        return runs;
+    };
+    const auto require_conservation=[&](const p0::DailyGame& game) {
+        const auto& c=core(game);
+        const auto made=observe(game);
+        const auto& state=game.world().engine().base().core().state();
+        const auto cash=c.cash("STATE")+c.cash("STOCKED")+c.cash("ACTIVE")+
+            c.cash("SUPPLIER")+c.cash("BUYER-EMPLOYER")+c.cash(stocked.second)+
+            c.cash(active.second)+c.cash(supplier.second)+c.cash(customer.second);
+        const auto raw=c.stock("STOCKED","R","ore")+c.stock("ACTIVE","R","ore")+
+                       c.stock("SUPPLIER","R","ore");
+        check(cash==(stocked_opening?450:350)&&c.financial().balanced()&&
+              raw+made[0]+2*made[1]==2+state.resource_sites.at(source.id).cumulative_output,
+              "procurement must preserve the real wages, cash and material ledger");
+    };
+    live.advance_day();
+    legacy.advance_day();
+    check(core(legacy).stock("STOCKED","R","ore")==1&&
+          core(legacy).stock("ACTIVE","R","ore")==1&&observe(legacy)[1]==0,
+          "legacy control must reproduce the unnecessary purchase and blocked rival");
+    check(observe(live)==std::array<Quantity,2>{0,1}&&
+          core(live).stock("STOCKED","R","ore")==0&&core(live).stock("ACTIVE","R","tools")==1,
+          "an idle manufacturer must leave the scarce raw material for real production");
+    require_conservation(live);
+    require_conservation(legacy);
+    if(!stocked_opening) {
+        check(core(live).firm_finance("STOCKED").receipts==6&&
+              core(live).cash("STOCKED")>=4&&core(legacy).stock("ACTIVE","R","fabric")==1&&
+              core(live).stock("ACTIVE","R","fabric")==0,
+              "a documented wage shortfall, not insufficient shopping cash, must protect the active line");
+        return;
+    }
+    check(core(live).firm_finance("STOCKED").receipts==20&&
+          core(live).firm_finance("SUPPLIER").receipts==8&&core(live).cash(customer.second)==3&&
+          core(live).stock("STOCKED","R","food")==0,
+          "real paid finished sale must empty the opening stock only after Stage 3");
+
+    const auto settled=daily::SnapshotCodec::encode(live.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(settled),new_policy);
+    live.advance_day();replay.advance_day();
+    check(observe(live)==std::array<Quantity,2>{1,1}&&
+          core(live).firm_finance("STOCKED").receipts==40&&
+          core(live).firm_finance("SUPPLIER").receipts==12&&core(live).cash(customer.second)==6,
+          "after the first real output sale the originally stocked line must buy and make again");
+    require_conservation(live);
+    check(daily::SnapshotCodec::encode(live.world())==daily::SnapshotCodec::encode(replay.world()),
+          "the post-sale procurement replay must be byte exact");
+}
+
 int main() {
     try {
+        inactive_producer_leaves_scarce_input_for_real_work(true);
+        inactive_producer_leaves_scarce_input_for_real_work(false);
         quote_requires_real_supply_and_verified_route();
         collateralized_autonomous_new_factory(false);
         collateralized_autonomous_new_factory(true);

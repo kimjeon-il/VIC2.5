@@ -960,6 +960,8 @@ def main():
                     chain["tools_sold"] == chain["tool_buyer_tools_stock"] + chain["tool_buyer_batches"] and
                     chain["tools_batches"] == chain["tools_stock"] + chain["tools_sold"],
                     "funded transfers and production did not conserve timber, boards and tools")
+        require(later["mill_boards_produced"] >= 4 and later["household_fittings_bought"] >= 6,
+                "preventing the excess purchase must free real boards and additional paid fittings")
         require(later["logger_worker_cash"] > 0 and later["mill_worker_cash"] > 0 and
                 later["mill_wood_bought"] >= later["mill_boards_produced"] > 0 and
                 later["toolworks_wood_bought"] >= later["tools_batches"] >= 3 and
@@ -978,6 +980,13 @@ def main():
                 restarted[3]["status"] == days[-1] and
                 supply_replay.read_bytes() == supply_completed.read_bytes(),
                 "active trade/industry and the shortage did not resume identically after saving")
+        mislabeled_campaign = d / "campaign-wrong-dataset.vic25"
+        mislabeled_campaign.write_bytes(native_save_with_origin(
+            supply_checkpoint.read_bytes(), b"panel:campaign-v1",
+            old_origin=b"panel:campaign-procurement-v2"))
+        mismatch = panel(f"load CAMPAIGN-A {mislabeled_campaign}", "quit")
+        require(not mismatch[0]["ok"],
+                "a current snapshot with only its outer origin changed was resumed under old rules")
         purchased_checkpoint = d / "campaign-tool-purchased.vic25"
         purchased = panel(f"load CAMPAIGN-A {supply_checkpoint}", "step 4",
                           f"save {purchased_checkpoint}", "quit")

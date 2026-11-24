@@ -369,6 +369,8 @@ struct Policies {
     bool allow_autonomous_naval_air_ai{true};
     std::vector<PublicConstructionOffer> public_construction_offers;
     std::vector<OldAgePensionProgram> old_age_pensions;
+    // New ordinary campaigns opt in without changing older saved policies.
+    bool gate_local_input_procurement_by_production{false};
     void validate() const {
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
@@ -1178,6 +1180,7 @@ public:
         // recipes on one commissioned site. No free facility retooling or
         // automatic technology adoption; explicit player policies win.
         std::set<std::string> autonomous_operating_recipes;
+        std::map<std::string_view,Quantity> same_day_procurement_targets;
         std::set<std::string> explicitly_managed_sites;
         for(const auto& p:decisions.manufacturers)
             explicitly_managed_sites.insert(industry.recipes.at(p.recipe).site);
@@ -1216,11 +1219,12 @@ public:
             if(chosen.empty())continue;
             const auto& product=industry.recipes.at(chosen).outputs.front();
             const auto& market=game_c.market(facility.region,product.good);
-            decisions.manufacturers.push_back(Manufacturer{
-                chosen,std::max<Quantity>(product.per_unit,phaseb::add_checked(
-                    market.target_stock,
-                    regional_need[{facility.region,product.good}]))});
-            autonomous_operating_recipes.insert(chosen);
+            const auto target=std::max<Quantity>(product.per_unit,phaseb::add_checked(
+                market.target_stock,regional_need[{facility.region,product.good}]));
+            decisions.manufacturers.push_back(Manufacturer{chosen,target});
+            const auto recipe=autonomous_operating_recipes.insert(chosen).first;
+            if(decisions.gate_local_input_procurement_by_production)
+                same_day_procurement_targets.emplace(*recipe,target);
         }
         // Production selection (including explicit overrides) also owns
         // hiring and replenishment. An installed alternative is not a plan.
@@ -2192,13 +2196,23 @@ public:
                     (void)enterprise_ai::draw_documented_credit(
                          gh,f.owner,target-free);
             });
-            plan[3].push_back([recipe_id,date,dim](phasegh::Stage& gh) {
+            const Quantity production_target=decisions.gate_local_input_procurement_by_production?
+                same_day_procurement_targets.at(recipe_id):0;
+            plan[3].push_back([recipe_id,date,dim,production_target,salary_shortfall]
+                              (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 const auto& domain=gh.phase_d().state();
                 const auto& r=domain.recipes.at(recipe_id);
                 if(!c.facilities().contains(r.site))return;
                 const auto& f=c.facility(r.site);
                 if(c.firm_bankrupt(f.owner) || f.capacity<=f.damaged)return;
+                // Stage 4 would have no work if the same selected
+                // manufacturer's output target or wage reservation blocks it.
+                // A sale after production can still reopen tomorrow's order.
+                if(production_target>0&&
+                   (salary_shortfall->contains(f.owner)||
+                    c.stock(f.owner,f.region,r.outputs.front().good)>=production_target))
+                    return;
                 const Quantity available=daily_budget::cumulative(
                     f.capacity-f.damaged,date.day,dim);
                 const Quantity used=used_site_capacity(domain,r.site,c.month());
