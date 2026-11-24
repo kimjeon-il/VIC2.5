@@ -1696,81 +1696,85 @@ static void explicit_and_automatic_dues_keep_live_payment_priority() {
 }
 
 
-static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
-    const auto build=[](bool expires,bool replacement=false) {
-        phasegh::World gh(24000);
-        auto& geo=gh.seed_geography();
-        geo.seed_province(1,"SOURCE","A");
-        geo.seed_province(2,"PORT","B");
-        geo.seed_unit(1,"A","A-ADMIN");geo.seed_assignment(1,1);
-        geo.seed_unit(2,"B","B-ADMIN");geo.seed_assignment(2,2);
-        geo.seed_border(1,2);
-        auto& d=geo.seed_core();
-        auto& c=d.seed_core();
-        for(const auto* actor:{"A","B","MINE","RAIL"})c.seed_actor(actor,0);
-        c.seed_actor("FACTORY",4000);
-        if(replacement)c.seed_actor("NEW-RAIL",0);
-        c.seed_government("A","HEAD-A","PM-A",5,3);
-        c.seed_government("B","HEAD-B","PM-B",5,3);
-        c.seed_market("SOURCE","ore",10,10,10);
-        c.seed_market("PORT","ore",30,30,30);
-        c.seed_market("PORT","fuel",4,4,4);
-        c.seed_market("PORT","tools",40,1,100);
-        c.seed_stock("MINE","SOURCE","ore",200);
-        c.seed_stock("FACTORY","PORT","fuel",200);
-        c.seed_production_facility("WORKS","FACTORY","PORT",31);
-        phased::IndustryRecipe recipe;
-        recipe.id="TOOLS";recipe.site="WORKS";
-        recipe.inputs={{"ore",2},{"fuel",2}};recipe.outputs={{"tools",2}};
-        recipe.workers_per_batch=recipe.capacity_per_batch=1;
-        d.seed_recipe(recipe);
-        const auto worker=people(gh,"PORT",1,"worker");
-        const auto customer=people(gh,"PORT",2,"consumer");
-        auto& pop=c.seed_population();
-        pop.hire(worker,1,"FACTORY","worker",31,{});
-        const auto wallet=[&](auto id) {
-            return "HH:"+std::to_string(c.people().slice(id).key.household);
-        };
-        const auto buyer=wallet(customer);
-        c.seed_actor(wallet(worker),0);
-        c.seed_actor(buyer,10000);
+static auto paid_freight_fixture(bool expires,bool replacement=false,bool bounded=false) {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"SOURCE","A");
+    geo.seed_province(2,"PORT","B");
+    geo.seed_unit(1,"A","A-ADMIN");geo.seed_assignment(1,1);
+    geo.seed_unit(2,"B","B-ADMIN");geo.seed_assignment(2,2);
+    geo.seed_border(1,2);
+    auto& d=geo.seed_core();
+    auto& c=d.seed_core();
+    for(const auto* actor:{"A","B","MINE","RAIL"})c.seed_actor(actor,0);
+    c.seed_actor("FACTORY",4000);
+    if(replacement)c.seed_actor("NEW-RAIL",0);
+    c.seed_government("A","HEAD-A","PM-A",5,3);
+    c.seed_government("B","HEAD-B","PM-B",5,3);
+    c.seed_market("SOURCE","ore",10,10,10);
+    c.seed_market("PORT","ore",30,30,30);
+    c.seed_market("PORT","fuel",4,4,4);
+    c.seed_market("PORT","tools",40,1,100);
+    c.seed_stock("MINE","SOURCE","ore",200);
+    c.seed_stock("FACTORY","PORT","fuel",200);
+    c.seed_production_facility("WORKS","FACTORY","PORT",31);
+    phased::IndustryRecipe recipe;
+    recipe.id="TOOLS";recipe.site="WORKS";
+    recipe.inputs={{"ore",2},{"fuel",2}};recipe.outputs={{"tools",2}};
+    recipe.workers_per_batch=recipe.capacity_per_batch=1;
+    d.seed_recipe(recipe);
+    const auto worker=people(gh,"PORT",1,"worker");
+    const auto customer=people(gh,"PORT",2,"consumer");
+    auto& pop=c.seed_population();
+    pop.hire(worker,1,"FACTORY","worker",31,{});
+    const auto wallet=[&](auto id) {
+        return "HH:"+std::to_string(c.people().slice(id).key.household);
+    };
+    const auto buyer=wallet(customer);
+    c.seed_actor(wallet(worker),0);
+    c.seed_actor(buyer,10000);
 
-        gh.seed_verified_geographic_link("rail-source",1,2,"rail");
-        phasegh::TransportEdge rail;
-        rail.id="sole-service";rail.carrier="RAIL";rail.from=1;rail.to=2;
-        rail.monthly_capacity=62;rail.freight_per_unit=1;rail.transit_days=2;
-        rail.mode="rail";rail.evidence_id="fixture:dated-rail-service";
-        rail.valid_from_month=24000;rail.valid_through_month=expires?24000:24002;
+    gh.seed_verified_geographic_link("rail-source",1,2,"rail");
+    phasegh::TransportEdge rail;
+    rail.id="sole-service";rail.carrier="RAIL";rail.from=1;rail.to=2;
+    rail.monthly_capacity=62;rail.freight_per_unit=1;rail.transit_days=2;
+    rail.mode="rail";rail.evidence_id="fixture:dated-rail-service";
+    rail.valid_from_month=24000;rail.valid_through_month=expires?24000:24002;
+    gh.seed_transport_edge(rail);
+    if(replacement) {
+        rail.id="replacement-service";rail.carrier="NEW-RAIL";
+        rail.freight_per_unit=3;rail.evidence_id="fixture:replacement-dated-rail-service";
+        rail.valid_from_month=rail.valid_through_month=24002;
         gh.seed_transport_edge(rail);
-        if(replacement) {
-            rail.id="replacement-service";rail.carrier="NEW-RAIL";
-            rail.freight_per_unit=3;rail.evidence_id="fixture:replacement-dated-rail-service";
-            rail.valid_from_month=rail.valid_through_month=24002;
-            gh.seed_transport_edge(rail);
-        }
-        gh.seed_route({"ORE","MINE","FACTORY","ore",1,2,62,1});
+    }
+    gh.seed_route({"ORE","MINE","FACTORY","ore",1,2,62,1});
 
-        p0::Policies rules;
-        rules.auto_national_budgets_from_actual_services=false;
-        rules.daily_food_units_per_person=rules.monthly_clothing_units_per_person=0;
-        // No fictional substitute input. Both choices use the same real
-        // recurring order and buyer, isolated from independent discovery.
-        rules.allow_endogenous_input_procurement=false;
-        rules.buyers.push_back({customer,buyer,"FACTORY","PORT","tools",1});
-        return std::pair{p0::DailyGame(daily::World::adopt(std::move(gh),85),rules),buyer};
-    };
-    auto [open,buyer]=build(false);
-    auto [cut,cut_buyer]=build(true);
-    auto [recover,recover_buyer]=build(true,true);
-    const auto tools_batches=[](const p0::DailyGame& g) {
-        Quantity n=0;
-        for(const auto& run:g.world().engine().base().core().state().actual_production_runs)
-            if(run.recipe=="TOOLS")n+=run.batches;
-        return n;
-    };
-    const auto& freight=[](const p0::DailyGame& g) -> const phasegh::TradeState& {
-        return g.world().engine().commerce();
-    };
+    p0::Policies rules;
+    rules.auto_national_budgets_from_actual_services=false;
+    rules.daily_food_units_per_person=rules.monthly_clothing_units_per_person=0;
+    // No fictional substitute input. Both choices use the same real
+    // recurring order and buyer, isolated from independent discovery.
+    rules.allow_endogenous_input_procurement=false;
+    rules.buyers.push_back({customer,buyer,"FACTORY","PORT","tools",1});
+    if(bounded)rules.standing_route_stock_targets.emplace("ORE",2);
+    return std::pair{p0::DailyGame(daily::World::adopt(std::move(gh),85),rules),buyer};
+}
+
+static Quantity tools_batches(const p0::DailyGame& game) {
+    Quantity n=0;
+    for(const auto& run:game.world().engine().base().core().state().actual_production_runs)
+        if(run.recipe=="TOOLS")n+=run.batches;
+    return n;
+}
+
+static const phasegh::TradeState& freight(const p0::DailyGame& game) {
+    return game.world().engine().commerce();
+}
+
+static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
+    auto [open,buyer]=paid_freight_fixture(false);
+    auto [cut,cut_buyer]=paid_freight_fixture(true);
+    auto [recover,recover_buyer]=paid_freight_fixture(true,true);
     for(int i=0;i<31;++i){open.advance_day();cut.advance_day();recover.advance_day();}
     const auto old_batches=tools_batches(cut);
     const auto old_fills=freight(cut).fills.size();
@@ -1889,6 +1893,100 @@ static void loss_of_paid_freight_constrains_output_and_solvent_customers() {
                  tools_batches(cut)==drought_batches && c(cut).cash(buyer)==drought_cash &&
                  c(cut).previous_daily_solvent_unmet("PORT","tools",cut.world().day_index())==2,
                  "only genuine arrival may restore actual production, consumer deliveries and factory receipts");
+}
+
+static void bounded_paid_freight_recovers_only_after_physical_arrival() {
+    auto [recover,buyer]=paid_freight_fixture(true,true,true);
+    auto [uncapped,uncapped_buyer]=paid_freight_fixture(true,true);
+    const auto inbound=[](const p0::DailyGame& g) {
+        Quantity ore=0;
+        for(const auto& [id,cargo]:freight(g).daily_shipments) {
+            (void)id;
+            if(cargo.buyer=="FACTORY"&&cargo.destination=="PORT"&&cargo.good=="ore")
+                ore+=c(g).stock("TRANSIT:DAY:"+cargo.current_leg_id,"in_transit","ore");
+        }
+        return ore;
+    };
+    const auto check_position=[&](const p0::DailyGame& g) {
+        require_test(c(g).stock("FACTORY","PORT","ore")+inbound(g)<=2 &&
+                     c(g).financial().balanced(),
+                     "the bounded factory cannot exceed its target with physical or paid inbound ore");
+    };
+    recover.advance_day();uncapped.advance_day();
+    require_test(inbound(recover)==2 && c(recover).cash("MINE")==20 &&
+                 c(recover).cash("RAIL")==2 && tools_batches(recover)==0,
+                 "day one must settle real supplier and freight payments without producing tools");
+    recover.advance_day();uncapped.advance_day();
+    require_test(buyer==uncapped_buyer && inbound(recover)==2 && inbound(uncapped)==4 &&
+                 c(recover).stock("FACTORY","PORT","ore")==0 &&
+                 c(recover).cash("MINE")==20 && c(recover).cash("RAIL")==2 &&
+                 c(uncapped).cash("MINE")==40 && c(uncapped).cash("RAIL")==4,
+                 "already-paid ore in transit must suppress the second order only under the cap");
+    check_position(recover);
+
+    while(recover.world().date()<daily::Date{2000,2,1}) {
+        recover.advance_day();
+        check_position(recover);
+    }
+    const auto mine_cash=c(recover).cash("MINE");
+    const auto rail_cash=c(recover).cash("RAIL");
+    const auto fills=freight(recover).fills.size();
+    // January commitments may finish in February; later drought must be real.
+    recover.advance_day();recover.advance_day();
+    const auto stalled=tools_batches(recover);
+    const auto household_cash=c(recover).cash(buyer);
+    const auto verify_closed=[&] {
+        require_test(stalled>0 && tools_batches(recover)==stalled && inbound(recover)==0 &&
+                     c(recover).stock("FACTORY","PORT","ore")==0 &&
+                     freight(recover).fills.size()==fills && c(recover).cash("MINE")==mine_cash &&
+                     c(recover).cash("RAIL")==rail_cash && c(recover).cash("NEW-RAIL")==0 &&
+                     c(recover).cash(buyer)==household_cash,
+                     "no new payment, ore, or tools sale is possible during the rail outage");
+    };
+    verify_closed();
+    while(recover.world().date()<daily::Date{2000,3,1}) {
+        recover.advance_day();
+        verify_closed();
+    }
+
+    recover.advance_day();
+    const auto& fill=freight(recover).fills.back();
+    require_test(freight(recover).fills.size()==fills+1 &&
+                 fill.physical_path==std::vector<std::string>{"replacement-service"} &&
+                 fill.goods_value==20 && fill.freight_paid==6 &&
+                 c(recover).cash("MINE")==mine_cash+20 && c(recover).cash("RAIL")==rail_cash &&
+                 c(recover).cash("NEW-RAIL")==6 && inbound(recover)==2 &&
+                 c(recover).stock("FACTORY","PORT","ore")==0 && tools_batches(recover)==stalled,
+                 "restored rail must book exactly one useful capped shipment without early output");
+    const auto due=freight(recover).daily_shipments.at(fill.execution_id).arrival_day;
+    auto replay=p0::DailyGame(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(recover.world())),recover.policies());
+    const auto step=[&](const phasegh::World::Plan& audit={}) {
+        recover.advance_day(audit);replay.advance_day(audit);
+        check_position(recover);
+        require_test(daily::SnapshotCodec::encode(recover.world())==
+                     daily::SnapshotCodec::encode(replay.world()) &&
+                     freight(recover).fills.size()==fills+1 &&
+                     c(recover).cash("MINE")==mine_cash+20 && c(recover).cash("NEW-RAIL")==6,
+                     "restored paid freight must replay exactly without duplicate payments");
+    };
+    while(recover.world().day_index()<due) {
+        step();
+        require_test(inbound(recover)==2 && tools_batches(recover)==stalled &&
+                     c(recover).stock("FACTORY","PORT","ore")==0 &&
+                     c(recover).cash(buyer)==household_cash,
+                     "paid replacement cargo cannot produce or sell tools before arrival");
+    }
+    const auto price=c(recover).market("PORT","tools").price;
+    phasegh::World::Plan audit;
+    audit[1].push_back([](phasegh::Stage& stage) {
+        require_test(stage.phase_c().stock("FACTORY","PORT","ore")==2,
+                     "physical ore must reach the capped factory before production");
+    });
+    step(audit);
+    require_test(inbound(recover)==0 && c(recover).stock("FACTORY","PORT","ore")==0 &&
+                 tools_batches(recover)==stalled+1 && c(recover).cash(buyer)==household_cash-2*price,
+                 "only the physically received ore can restore production and paid customer purchases");
 }
 
 static void producer_import_counts_real_on_site_and_inbound_stock_once() {
@@ -3861,6 +3959,7 @@ int main(){
         native_autonomous_h_crisis_and_organization_funding();
         explicit_and_automatic_dues_keep_live_payment_priority();
         loss_of_paid_freight_constrains_output_and_solvent_customers();
+        bounded_paid_freight_recovers_only_after_physical_arrival();
         producer_import_counts_real_on_site_and_inbound_stock_once();
         expired_trade_leg_uses_alternate_that_can_carry_full_lot();
         autonomous_f_two_hop_freight_and_save_replay();
