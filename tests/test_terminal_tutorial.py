@@ -35,6 +35,100 @@ def native_save_with_origin(raw, origin, old_origin=b"tutorial:market-v1"):
     return payload + struct.pack("<Q", checksum)
 
 
+def check_shared_campaign_year(panel, directory):
+    """One playable policy year, not a proof of autonomous national solvency."""
+    awaiting = directory / "policy year awaiting B.sav"
+    midyear = directory / "policy year July.sav"
+    final = directory / "policy year January.sav"
+    mid_replay = directory / "policy year July resumed.sav"
+    final_replay = directory / "policy year January resumed.sav"
+
+    setup = ("new CAMPAIGN-A", "tariff 20", "step 1", "public-build-budget WORKERS",
+             "public-build", "ore-pact")
+    after_proposal = ("step 1", "spending-cap 1 WORKERS", "income-tax 13 WORKERS")
+    spring = ("step 83", "inspect B", "inspect A")
+    summer = ("step 91", "inspect B", "inspect A")
+    autumn = ("step 92", "inspect B", "inspect A")
+    winter = ("step 92", "inspect B", "inspect A")
+    first_half = (*after_proposal, *spring, *summer)
+    second_half = (*autumn, *winter)
+
+    def play(*commands):
+        replies = panel(*commands, "quit")
+        failed = [(command, reply.get("error")) for command, reply in zip(commands, replies)
+                  if not reply["ok"]]
+        require(not failed and replies[-1]["ok"], f"yearly shared campaign failed: {failed}")
+        return [reply["status"] for reply in replies[:-1]]
+
+    # Saving does not tick the clock. Use one uninterrupted player session
+    # as the reference, then actually reconstruct a process at each seam.
+    trace = play(*setup, f"save {awaiting}", *first_half, f"save {midyear}",
+                 *second_half, f"save {final}")
+    first = len(setup) + 1
+    middle = first + len(first_half)
+    proposed = trace[first - 1]
+    require(proposed["date"] == "2000-01-06" and
+            proposed["ore_trade_pact"]["state"] == "proposed" and
+            not proposed["ore_trade_pact"]["b_ratified"] and
+            trace[first]["ore_trade_pact"]["b_ratified"] and
+            trace[first]["ore_trade_pact"]["effective_date"] == "2000-02-01",
+            "the first checkpoint must be before B's actual response")
+    first_replay = play(f"load CAMPAIGN-A {awaiting}", *first_half, f"save {mid_replay}")
+    require(first_replay == trace[first - 1:middle + 1] and
+            mid_replay.read_bytes() == midyear.read_bytes(),
+            "resuming while awaiting B altered interim results or the July checkpoint")
+    second_replay = play(f"load CAMPAIGN-A {mid_replay}", *second_half,
+                         f"save {final_replay}")
+    require(second_replay == trace[middle:] and final_replay.read_bytes() == final.read_bytes(),
+            "resuming in July altered the remaining quarters or final checkpoint bytes")
+
+    quarters = (first + len(after_proposal), first + len(after_proposal) + len(spring),
+                middle + 1, middle + 1 + len(autumn))
+    dates = ("2000-04-01", "2000-07-01", "2000-10-01", "2001-01-01")
+    prior_a, prior_b = {}, {}
+    prior_chain = {}
+    for i, (idx, day) in enumerate(zip(quarters, dates)):
+        a, b, returned = trace[idx:idx + 3]
+        chain = a["supply_chain"]
+        require(a == returned and a["date"] == b["date"] == day
+                and a["country"] == "A" and b["country"] == "B"
+                and a["can_act"] and not b["can_act"] and a["commit"] == b["commit"],
+                f"{day}: inspection must read the same shared world without advancing it")
+        require(a["ore_trade_pact"] == b["ore_trade_pact"] and
+                a["ore_trade_pact"]["state"] == "active" and a["tariff_ppm"] == 200_000
+                and a["paid_duty"] == 62 and a["income_tax_ppm"] == 130_000
+                and a["civilian_spending_cap"] == 1 and a["public_program_paid"] ==
+                    62 + (civil_date.fromisoformat(day) - civil_date(2000, 2, 1)).days,
+                f"{day}: enacted policies must govern real recurring payments and settled customs")
+        # The public invoice is a capitalized payment outside ordinary expenditure.
+        invoice = a["public_construction"]["invoice_paid"]
+        require(a["treasury"] == 100 + a["revenue"] - a["expenditure"] - invoice > 0
+                and a["debt"] == 0
+                and b["treasury"] == 100 + b["revenue"] - b["expenditure"] == 0 and b["debt"] == 100
+                and b["income_tax_ppm"] == 110_000 + i * 30_000
+                and a["peer_revenue"] == b["revenue"] and b["peer_treasury"] == a["treasury"]
+                and a["peer_public_program_paid"] == b["public_program_paid"]
+                and b["public_program_paid"] > prior_b.get("public_program_paid", 0),
+                f"{day}: B must pay from actual revenue but its opening debt is not repaid")
+        require(a["supplier_cash"] == b["supplier_cash"] > prior_a.get("supplier_cash", 0)
+                and a["carrier_cash"] == b["carrier_cash"] > prior_a.get("carrier_cash", 0)
+                and a["supplier_cash"] == 5 * a["carrier_cash"]
+                and a["supplier_cash"] == 10 * (
+                    chain["iron_batches"] + chain["ore_stock"] + a["in_transit_ore"])
+                and chain["iron_batches"] == (
+                    chain["iron_stock"] + chain["factory_iron_stock"] + chain["tools_batches"])
+                and chain["tools_batches"] == chain["tools_stock"] + chain["tools_sold"]
+                and invoice == 20 and a["public_construction"]["commissioned_capacity"] == 31
+                and chain["fittings_sales_receipts"] == 90 * chain["household_fittings_bought"]
+                and all(chain[key] > prior_chain.get(key, 0) for key in
+                        ("iron_batches", "mill_boards_produced", "tools_batches",
+                         "logger_worker_cash", "mill_worker_cash", "household_fittings_bought")),
+                f"{day}: paid rail deliveries, real public commissioning and private output must persist")
+        prior_a, prior_b, prior_chain = a, b, chain
+    require(trace[quarters[-1]]["commit"] == 366,
+            "the shared campaign must reach the next January in exactly one leap year")
+
+
 def main():
     binary = Path(sys.argv[1]).resolve()
     require(binary.is_file(), f"native terminal entrypoint does not exist: {binary}")
@@ -861,6 +955,8 @@ def main():
                 and "ore_trade_pact" not in only_a[5]["status"]
                 and only_a[6]["status"] == only_a[5]["status"],
                 "the fixed ordinary pact must not leak to B, other goods or optional modes")
+
+        check_shared_campaign_year(panel, d)
 
         steel_out = d / "steel order.sav"
         steel_done = d / "steel commissioned.sav"
