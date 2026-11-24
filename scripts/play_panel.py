@@ -141,6 +141,8 @@ class PlayPanel:
         actions.grid(row=5, sticky="ew")
         self.step_button = ttk.Button(actions, text="하루 진행", command=self.step)
         self.step_button.grid(row=0, column=0, padx=(0, 12))
+        self.ore_pact_button = ttk.Button(actions, text="광석 면제 협정 제안", command=self.propose_ore_pact)
+        self.ore_pact_button.grid(row=3, column=0, sticky="w", padx=(0, 8), pady=(4, 0))
         self.tariff_label = ttk.Label(actions, text="수입 관세율(%):")
         self.tariff_label.grid(row=0, column=1)
         self.tariff_entry = ttk.Entry(actions, textvariable=self.tariff, width=9)
@@ -194,6 +196,12 @@ class PlayPanel:
         direct_actions = not (factory or legislature or campaign or self._expansion(self.current)
                               or self._staples(self.current))
         can_campaign_act = self._campaign_can_act(self.current)
+        pact = self.current.get("ore_trade_pact") if can_campaign_act else None
+        self.ore_pact_button.state(["!disabled"] if ready and pact and pact["can_propose"] else ["disabled"])
+        if pact:
+            self.ore_pact_button.grid()
+        else:
+            self.ore_pact_button.grid_remove()
         bill = self.current.get("law_bill") if legislature or can_campaign_act else None
         campaign_tax = bool(can_campaign_act and self.current["campaign_tax_allowed"])
         elected_spending = self._campaign_spending_scope(self.current)
@@ -323,6 +331,8 @@ class PlayPanel:
                         self.notice.set("건설 예산이 승인됐습니다. 공사는 아직 신청하지 않았습니다.")
                     elif command == "public-build":
                         self.notice.set("건설 신청을 접수했습니다.")
+                    elif command == "ore-pact":
+                        self.notice.set("광석 관세 면제 협정을 제안했습니다.")
                     else:
                         self.notice.set("저장했습니다." if command.startswith("save ") else "준비됐습니다.")
                 except (KeyError, TypeError, ValueError):
@@ -602,16 +612,24 @@ class PlayPanel:
                 fittings_receipts = chain.get("fittings_sales_receipts")
                 if fittings_bought is not None and fittings_receipts is not None:
                     market += f"\n가계 부품 구매 {fittings_bought} · 목공소 판매대금 {fittings_receipts}"
+            pact = status.get("ore_trade_pact")
             if self._campaign_tariff_scope(status):
                 tariff = self._percent(status["tariff_ppm"])
                 limit = self._percent(status["max_tariff_ppm"])
                 self.tariff.set(tariff)
-                market = (f"광석 수입 관세: {tariff}% (상한 {limit}%)"
+                effective = " · 협정 적용 관세: 0%" if pact and pact["state"] == "active" else ""
+                market = (f"광석 수입 관세: {tariff}% (상한 {limit}%){effective}"
                           f" · 누적 관세 징수: {status['paid_duty']}\n" + market)
             role = "플레이어" if status["peer_is_player"] else "조회 전용"
             diplomacy = (f"{status['peer_country']} · {role}\n"
                          f"국고: {status['peer_treasury']}\n"
                          f"소득세율: {self._percent(status['peer_income_tax_ppm'])}%")
+            if pact:
+                phase = {"available": "미제안", "proposed": "B 비준 대기",
+                         "ratified": "양국 비준 완료", "active": "발효"}[pact["state"]]
+                diplomacy += f"\n양국 광석 관세 면제: {phase}"
+                if pact["effective_date"]:
+                    diplomacy += f" ({pact['effective_date']})"
             peer_pending = status["peer_pending_income_tax_ppm"]
             if peer_pending is not None:
                 diplomacy += (f"\n소득세 예약: {self._percent(peer_pending)}% "
@@ -669,6 +687,11 @@ class PlayPanel:
     def step(self):
         if self.current:
             self._send("step 1")
+
+    def propose_ore_pact(self):
+        pact = self.current.get("ore_trade_pact") if self._campaign_can_act(self.current) else None
+        if pact and pact["can_propose"]:
+            self._send("ore-pact")
 
     def set_tariff(self):
         if (not self.current or self._industry(self.current) or self._legislature(self.current)

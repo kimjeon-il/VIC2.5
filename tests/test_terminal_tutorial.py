@@ -777,6 +777,91 @@ def main():
                 and at_max["in_transit_ore"] == 2,
                 "the lawful maximum tariff must retain the authored B financing on the opening day")
 
+        pact_baseline = d / "ore pact before proposal.sav"
+        pact_proposed = d / "ore pact awaiting B.sav"
+        pact_rejected = d / "ore pact rejected duplicate.sav"
+        pact_active = d / "ore pact active.sav"
+        pact_again = d / "ore pact replay.sav"
+        pact_run = panel("new CAMPAIGN-A", "tariff 20", "step 28", f"save {pact_baseline}",
+                         "ore-pact", f"save {pact_proposed}", "ore-pact", "inspect B",
+                         "ore-pact", f"save {pact_rejected}", "inspect A", "step 1",
+                         "step 1", f"save {pact_active}", "quit")
+        require(pact_run[4]["ok"], f"the ordinary campaign could not offer the fixed ore treaty: {pact_run[4]}")
+        require(all(row["ok"] == (i not in {6, 8}) for i, row in enumerate(pact_run)),
+                "canonical ore agreement or its rejected controls did not run")
+        before, proposed, inspection, ratified, active = (
+            pact_run[i]["status"] for i in (2, 4, 7, 11, 12))
+        def pact_status(row):
+            return row["ore_trade_pact"]
+        require(pact_status(before) == {
+                    "state": "available", "can_propose": True,
+                    "a_ratified": False, "b_ratified": False, "effective_date": None}
+                and [row["date"] for row in (before, proposed, ratified, active)] ==
+                    ["2000-01-30", "2000-01-31", "2000-02-01", "2000-02-02"],
+                "the campaign must initially offer the agreement and cross the real calendar boundary")
+        require(pact_status(proposed) == {
+                    "state": "proposed", "can_propose": False,
+                    "a_ratified": True, "b_ratified": False, "effective_date": None}
+                and pact_status(inspection) == pact_status(proposed)
+                and inspection["country"] == "B" and not inspection["can_act"]
+                and pact_run[6]["status"] == pact_run[10]["status"] == proposed
+                and pact_run[8]["status"] == inspection
+                and pact_proposed.read_bytes() == pact_rejected.read_bytes(),
+                "B must not be autostamped in A's proposal or mutable through read-only/duplicate commands")
+        require(pact_status(ratified) == {
+                    "state": "ratified", "can_propose": False,
+                    "a_ratified": True, "b_ratified": True, "effective_date": "2000-02-01"}
+                and pact_status(active) == dict(pact_status(ratified), state="active"),
+                "B's own mandate must ratify before the first processed day of the effective month")
+        no_pact = panel(f"load CAMPAIGN-A {pact_baseline}", "step 1", "step 1", "step 1", "quit")
+        control_proposed, control_ratified, control_active = (no_pact[i]["status"] for i in (1, 2, 3))
+        require(all(row["ok"] for row in no_pact)
+                and pact_status(no_pact[0]["status"])["state"] == "available"
+                and before["paid_duty"] == 58
+                and proposed["paid_duty"] == control_proposed["paid_duty"] == 60
+                and ratified["paid_duty"] == control_ratified["paid_duty"] == 62
+                and ratified["in_transit_ore"] == 1 and ratified["supply_chain"]["ore_stock"] == 0,
+                "a proposal, unprocessed first day of month or old rail cargo must not receive the exemption")
+        require(active["tariff_ppm"] == control_active["tariff_ppm"] == 200_000
+                and active["paid_duty"] == ratified["paid_duty"] == 62
+                and control_active["paid_duty"] == 64
+                and control_active["treasury"] - active["treasury"] == 2
+                and control_active["revenue"] - active["revenue"] == 2
+                and active["supply_chain"]["smelter_cash"] - control_active["supply_chain"]["smelter_cash"] == 2
+                and active["supplier_cash"] == control_active["supplier_cash"] == ratified["supplier_cash"] + 10
+                and active["carrier_cash"] == control_active["carrier_cash"] == ratified["carrier_cash"] + 2
+                and active["in_transit_ore"] == control_active["in_transit_ore"] == 1
+                and active["supply_chain"]["iron_batches"] ==
+                    control_active["supply_chain"]["iron_batches"] == ratified["supply_chain"]["iron_batches"] + 1,
+                "the active pact must exempt only a new paid B ore dispatch, with no rewrite of the domestic rate")
+        replay_pact = panel(f"load CAMPAIGN-A {pact_proposed}", "step 1", "step 1",
+                            f"save {pact_again}", "quit")
+        require(all(row["ok"] for row in replay_pact)
+                and [replay_pact[i]["status"] for i in range(3)] == [proposed, ratified, active]
+                and pact_again.read_bytes() == pact_active.read_bytes(),
+                "a snapshot between A's proposal and B's response must replay the same legal and cash outcomes")
+
+        late_agreement = panel(f"load CAMPAIGN-A {pact_baseline}", "step 1", "ore-pact", "step 1", "quit")
+        late_proposal, late_consent = (late_agreement[i]["status"] for i in (2, 3))
+        require(all(row["ok"] for row in late_agreement)
+                and late_proposal["date"] == "2000-02-01"
+                and pact_status(late_proposal)["state"] == "proposed"
+                and late_consent["date"] == "2000-02-02"
+                and pact_status(late_consent)["state"] == "ratified"
+                and pact_status(late_consent)["effective_date"] == "2000-03-01"
+                and late_consent["paid_duty"] == 64,
+                "a Jan31 proposal signed by B in February must not backdate February trade relief")
+        only_a = panel("new CAMPAIGN-A", "inspect B", "ore-pact", "inspect A",
+                       "ore-pact IRON", "new SUPPLY-A", "ore-pact", "quit")
+        require(all(row["ok"] == (i not in {2, 4, 6}) for i, row in enumerate(only_a))
+                and pact_status(only_a[1]["status"]) ==
+                    dict(pact_status(only_a[0]["status"]), can_propose=False)
+                and only_a[2]["status"] == only_a[1]["status"]
+                and only_a[4]["status"] == only_a[0]["status"]
+                and "ore_trade_pact" not in only_a[5]["status"]
+                and only_a[6]["status"] == only_a[5]["status"],
+                "the fixed ordinary pact must not leak to B, other goods or optional modes")
+
         steel_out = d / "steel order.sav"
         steel_done = d / "steel commissioned.sav"
         steel_replay = d / "steel commissioned replay.sav"
@@ -1181,7 +1266,7 @@ def main():
         mislabeled_campaign = d / "campaign-wrong-dataset.vic25"
         mislabeled_campaign.write_bytes(native_save_with_origin(
             supply_checkpoint.read_bytes(), b"panel:campaign-procurement-v2",
-            old_origin=b"panel:campaign-ore-tariff-v6"))
+            old_origin=b"panel:campaign-ore-pact-v7"))
         mismatch = panel(f"load CAMPAIGN-A {mislabeled_campaign}", "quit")
         require(not mismatch[0]["ok"],
                 "a current snapshot with only its outer origin changed was resumed under old rules")

@@ -120,6 +120,7 @@ def run(exe):
             run_shared_construction(root, panel, Path(directory) / "공동 건설 예산 승인.vic25")
             run_shared_spending(root, panel, Path(directory) / "공동 공공사업 한도.vic25")
             run_shared_tariff(root, panel, Path(directory) / "공동 광석 관세.vic25")
+            run_shared_ore_pact(root, panel, Path(directory) / "광석 협정 비준 대기.vic25")
             run_private_expansion(root, panel, Path(directory) / "민간 증설.vic25")
             run_supply_recovery(root, panel, Path(directory) / "공급망 복구.vic25")
             run_household_staples(root, panel, Path(directory) / "가계 소비.vic25")
@@ -345,6 +346,54 @@ def run_shared_campaign(root, panel, save):
     panel.step_button.invoke()
     wait(root, panel)
     assert panel.current == next_day
+
+
+def run_shared_ore_pact(root, panel, save):
+    panel.country.set("A 공동 캠페인")
+    panel.new_button.invoke()
+    wait(root, panel)
+    assert panel.ore_pact_button.winfo_ismapped() and panel.ore_pact_button.instate(["!disabled"])
+    panel.tariff.set("20")
+    panel.tariff_button.invoke()
+    wait(root, panel)
+    panel.ore_pact_button.invoke()
+    wait(root, panel)
+    proposed = panel.current
+    pact = proposed["ore_trade_pact"]
+    assert pact["a_ratified"] and not pact["b_ratified"] and pact["state"] == "proposed"
+    assert pact["effective_date"] is None and "B 비준 대기" in panel.diplomacy.get()
+    assert panel.ore_pact_button.instate(["disabled"])
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+        assert save.is_file()
+    panel.step_button.invoke()
+    wait(root, panel)
+    ratified = panel.current
+    pact = ratified["ore_trade_pact"]
+    assert pact["b_ratified"] and pact["state"] == "ratified"
+    assert pact["effective_date"] == "2000-02-01" and pact["effective_date"] in panel.diplomacy.get()
+    panel._send("inspect B")
+    wait(root, panel)
+    assert panel.current["ore_trade_pact"]["b_ratified"] and not panel.ore_pact_button.winfo_ismapped()
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.load_button.invoke()
+        wait(root, panel)
+        assert panel.current == proposed
+    panel.step_button.invoke()
+    wait(root, panel)
+    assert panel.current == ratified
+    due = date.fromisoformat(pact["effective_date"])
+    today = date.fromisoformat(ratified["date"])
+    panel._send(f"step {(due - today).days}")
+    wait(root, panel)
+    assert panel.current["ore_trade_pact"]["state"] == "ratified"
+    tariff_paid = panel.current["paid_duty"]
+    panel.step_button.invoke()
+    wait(root, panel)
+    assert panel.current["ore_trade_pact"]["state"] == "active"
+    assert panel.current["tariff_ppm"] == 200_000 and panel.current["paid_duty"] == tariff_paid
+    assert "협정 적용 관세: 0%" in panel.market.get()
 
 
 def run_shared_tariff(root, panel, save):

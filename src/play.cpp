@@ -500,8 +500,24 @@ constexpr auto campaign_ore_inventory_origin="panel:campaign-ore-inventory-v3";
 constexpr auto campaign_timber_balance_origin="panel:campaign-timber-v4";
 constexpr auto campaign_elected_budget_origin="panel:campaign-elected-budget-v5";
 constexpr auto campaign_ore_tariff_origin="panel:campaign-ore-tariff-v6";
+constexpr auto campaign_ore_pact_origin="panel:campaign-ore-pact-v7";
+constexpr auto campaign_ore_pact="CAMPAIGN-ORE-EXEMPTION";
+constexpr auto campaign_ore_pact_clause="CAMPAIGN-B-ORE-DUTY-EXEMPTION";
+bool is_ore_pact_campaign(const daily::World& world) {
+    return world.migration_origin()==campaign_ore_pact_origin;
+}
 bool is_ore_tariff_campaign(const daily::World& world) {
-    return world.migration_origin()==campaign_ore_tariff_origin;
+    return world.migration_origin()==campaign_ore_tariff_origin||is_ore_pact_campaign(world);
+}
+bool campaign_can_decree_foreign_policy(const phasegh::World& engine,
+                                       const std::string& country) {
+    const auto& core=engine.base().core().core();
+    const auto& protection=engine.diplomacy().protectorates;
+    return !core.government(country).prime_minister.empty()&&
+        std::none_of(protection.begin(),protection.end(),[&](const auto& entry) {
+            const auto& link=entry.second;
+            return link.active&&link.dependent==country&&link.exclusive_foreign_policy;
+        });
 }
 constexpr phasec::Money campaign_public_program_limit=2;
 bool is_elected_budget_campaign(const daily::World& world) {
@@ -612,7 +628,7 @@ const char* legislative_origin(LegislativeTrial trial) {
         case LegislativeTrial::wage:return law_origin;
         case LegislativeTrial::education:return education_origin;
         case LegislativeTrial::education_remote:return education_remote_origin;
-        case LegislativeTrial::campaign:return campaign_ore_tariff_origin;
+        case LegislativeTrial::campaign:return campaign_ore_pact_origin;
         case LegislativeTrial::supply_recovery:return supply_recovery_origin;
         case LegislativeTrial::steel_chain:return steel_chain_origin;
     }
@@ -1048,6 +1064,13 @@ p0::Policies law_policies(const daily::World& world,LegislativeTrial trial) {
         p.public_budget.push_back({"B",campaign_program_b,100,0});
         p.allow_endogenous_debt_repayment=false;
         p.autonomous_tax_step_ppm=10'000;
+        // v7 offers only this fixed commercial package. Reuse the existing
+        // conservative autonomous response, anchored to B's actual office
+        // on opening or restore; H checks it live at ratification as well.
+        if(is_ore_pact_campaign(world)&&campaign_can_decree_foreign_policy(world.engine(),"B")) {
+            const auto& b=world.engine().base().core().core().government("B");
+            p.treaty_ratifications.push_back({"B",b.prime_minister,0,false,false,false});
+        }
         p.allow_endogenous_staffing=has_campaign_supply(world);
         const bool buffered_ore=world.migration_origin()==campaign_ore_inventory_origin||
                                 is_balanced_timber(world);
@@ -1376,7 +1399,7 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
         (trial==LegislativeTrial::campaign&&
          (origin==legacy_campaign_origin||origin==campaign_procurement_origin||
           origin==campaign_ore_inventory_origin||origin==campaign_timber_balance_origin||
-          origin==campaign_elected_budget_origin));
+          origin==campaign_elected_budget_origin||origin==campaign_ore_tariff_origin));
     if(!origin_matches||w.engine().base().spatial().dataset_hash!=origin||
        !c.has_country_treasury("A")||!c.has_actor(law_employer)||
        c.p1_constitution("A").legislature!=phasec::P1LegislatureKind::unicameral||
@@ -1402,6 +1425,20 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
            (!c.has_elected_civilian_spending_cap_authority("A")||
              c.has_elected_civilian_spending_cap_authority("B")))
             throw std::invalid_argument("checkpoint lacks the player-only elected spending authority");
+        if(is_ore_pact_campaign(w)) {
+            const auto& treaties=w.engine().diplomacy().treaties;
+            const auto pact=treaties.find(campaign_ore_pact);
+            if(pact!=treaties.end()) {
+                const auto& existing=pact->second;
+                if(existing.parties!=std::set<std::string>{"A","B"}||existing.clauses.size()!=1)
+                    throw std::invalid_argument("checkpoint has an unexpected ore treaty package");
+                const auto& term=existing.clauses.front();
+                if(term.id!=campaign_ore_pact_clause||term.kind!=phasegh::ClauseKind::tariff_exemption||
+                   term.obligor!="A"||term.beneficiary!="B"||term.good!=trial_good||
+                   term.amount!=0||term.expires!=-1)
+                    throw std::invalid_argument("checkpoint has an unexpected ore exemption term");
+            }
+        }
         if(is_balanced_timber(w)&&(!has_campaign_timber(w)||!valid_worker(campaign_workshop_worker)))
             throw std::invalid_argument("checkpoint lacks the balanced timber campaign's labor and facilities");
         if(is_supply_recovery(w)) {
@@ -1714,6 +1751,19 @@ void advance_panel_day(p0::DailyGame& game,phasegh::World::Plan plan={}) {
     game.advance_day(plan);
 }
 
+void propose_campaign_ore_pact(p0::DailyGame& game) {
+    phasegh::World::Plan plan;
+    plan[9].push_back([](phasegh::Stage& stage) {
+        phasegh::TreatyClause exemption;
+        exemption.id=campaign_ore_pact_clause;
+        exemption.kind=phasegh::ClauseKind::tariff_exemption;
+        exemption.obligor="A";exemption.beneficiary="B";exemption.good=trial_good;
+        stage.propose_treaty_package(campaign_ore_pact,{"A","B"},{exemption},
+                                    "A",stage.phase_c().government("A").prime_minister);
+    });
+    advance_panel_day(game,std::move(plan));
+}
+
 void law_action(p0::DailyGame& game,std::string_view command,std::string_view arg) {
     if(!is_law_world(game.world()))
         throw std::invalid_argument("this command requires the elected law trial");
@@ -1810,6 +1860,23 @@ void public_build_status(std::ostringstream& out,const p0::DailyGame& game,
     }
 }
 
+void campaign_ore_pact_status(std::ostringstream& out,const phasegh::World& engine,
+                              const std::string& tag) {
+    const auto& treaties=engine.diplomacy().treaties;
+    const auto found=treaties.find(campaign_ore_pact);
+    const auto* pact=found==treaties.end()?nullptr:&found->second;
+    const bool a=pact&&pact->ratifications.contains("A");
+    const bool b=pact&&pact->ratifications.contains("B");
+    const bool can_propose=!pact&&tag=="A"&&campaign_can_decree_foreign_policy(engine,tag);
+    out<<R"(,"ore_trade_pact":{"state":)"
+       <<json_string(!pact?"available":pact->active?"active":a&&b?"ratified":"proposed")
+       <<R"(,"can_propose":)"<<(can_propose?"true":"false")
+       <<R"(,"a_ratified":)"<<(a?"true":"false")
+       <<R"(,"b_ratified":)"<<(b?"true":"false")
+       <<R"(,"effective_date":)"<<(a&&b?json_string(month_opening(pact->effective_month)):"null")
+       <<'}';
+}
+
 std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
     const auto& world=game.world();
     const auto& engine=world.engine();
@@ -1881,6 +1948,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
            <<",\"carrier_cash\":"<<core.cash(campaign_carrier);
         if(is_supply_recovery(world))supply_recovery_status(out,world);
         if(is_steel_campaign(world))steel_chain_status(out,world);
+        if(is_ore_pact_campaign(world))campaign_ore_pact_status(out,engine,tag);
         if(tag=="A") {
             if(is_ore_tariff_campaign(world)) {
                 const auto& diplomacy=engine.diplomacy();
@@ -1891,14 +1959,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
                 for(const auto& receipt:engine.commerce().customs)
                     if(receipt.importer==tag&&receipt.good==trial_good)
                         duty=phaseb::add_checked(duty,receipt.paid);
-                // Show the same effective foreign-policy authority the H
-                // command will validate at the start of the processing day.
-                const bool can_decree=!core.government(tag).prime_minister.empty()&&
-                    std::none_of(diplomacy.protectorates.begin(),diplomacy.protectorates.end(),
-                        [&](const auto& entry) {
-                            const auto& link=entry.second;
-                            return link.active&&link.dependent==tag&&link.exclusive_foreign_policy;
-                        });
+                const bool can_decree=campaign_can_decree_foreign_policy(engine,tag);
                 out<<",\"campaign_ore_tariff_allowed\":"<<(can_decree?"true":"false")
                    <<",\"tariff_ppm\":"<<(rate==diplomacy.tariffs.end()?0:rate->second.ppm)
                    <<",\"max_tariff_ppm\":"<<cap<<",\"paid_duty\":"<<duty;
@@ -2053,6 +2114,12 @@ void run_panel() {
                     p0::DailyGame(std::move(next),std::move(policy))});
                 last_status=panel_status(replacement->game,replacement->tag);
                 session=std::move(replacement);
+            } else if(command=="ore-pact"&&arg.empty()) {
+                if(!session||!is_ore_pact_campaign(session->game.world()))
+                    throw std::invalid_argument("the ore pact is available only in the current shared campaign");
+                if(session->tag!="A")throw std::invalid_argument("the inspected peer is read-only");
+                propose_campaign_ore_pact(session->game);
+                last_status=panel_status(session->game,session->tag);
             } else if(command=="bill-introduce"||command=="bill-approve"||
                       command=="bill-promulgate"||command=="law-hire") {
                 if(!session)throw std::invalid_argument("start or load a trial first");
