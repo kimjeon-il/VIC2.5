@@ -630,6 +630,11 @@ class PlayPanel:
                 diplomacy += f"\n양국 광석 관세 면제: {phase}"
                 if pact["effective_date"]:
                     diplomacy += f" ({pact['effective_date']})"
+            wars = status.get("wars")
+            if wars is not None:
+                labels = {"active": "전쟁 중", "armistice": "휴전 중"}
+                current = " · ".join(f"{war['opponent']} ({labels[war['state']]})" for war in wars)
+                diplomacy += f"\n현재 분쟁: {current or '없음'}"
             peer_pending = status["peer_pending_income_tax_ppm"]
             if peer_pending is not None:
                 diplomacy += (f"\n소득세 예약: {self._percent(peer_pending)}% "

@@ -1,5 +1,6 @@
 #include "vic25/daily_snapshot.hpp"
 #include "vic25/p0_daily.hpp"
+#include "vic25/play_conflict_status.hpp"
 #include <array>
 #include <charconv>
 #include <filesystem>
@@ -1877,6 +1878,19 @@ void campaign_ore_pact_status(std::ostringstream& out,const phasegh::World& engi
        <<'}';
 }
 
+void current_conflict_status(std::ostringstream& out,const phasegh::DiplomacyState& diplomacy,
+                             const std::string& tag) {
+    out<<",\"wars\":[";
+    bool first=true;
+    for(const auto& [opponent,state]:play_status::current_conflicts(diplomacy,tag)) {
+        if(!first)out<<',';
+        first=false;
+        out<<"{\"opponent\":"<<json_string(opponent)
+           <<",\"state\":"<<json_string(state)<<'}';
+    }
+    out<<']';
+}
+
 std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
     const auto& world=game.world();
     const auto& engine=world.engine();
@@ -1948,7 +1962,10 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
            <<",\"carrier_cash\":"<<core.cash(campaign_carrier);
         if(is_supply_recovery(world))supply_recovery_status(out,world);
         if(is_steel_campaign(world))steel_chain_status(out,world);
-        if(is_ore_pact_campaign(world))campaign_ore_pact_status(out,engine,tag);
+        if(is_ore_pact_campaign(world)) {
+            campaign_ore_pact_status(out,engine,tag);
+            current_conflict_status(out,engine.diplomacy(),tag);
+        }
         if(tag=="A") {
             if(is_ore_tariff_campaign(world)) {
                 const auto& diplomacy=engine.diplomacy();
@@ -2041,16 +2058,9 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
        <<",\"ore_price\":"<<core.market(region,trial_good).price
        <<",\"paid_duty\":"<<duty
        <<",\"delivered_ore\":"<<core.stock(trial_buyer,region,trial_good)
-       <<",\"in_transit_ore\":"<<transit<<",\"wars\":[";
-    bool first=true;
-    for(const auto& [id,war]:engine.diplomacy().wars) {
-        if((!war.active&&!war.armistice)||(war.attacker!=tag&&war.defender!=tag))continue;
-        if(!first)out<<',';
-        first=false;
-        out<<"{\"opponent\":"<<json_string(war.attacker==tag?war.defender:war.attacker)
-           <<",\"state\":"<<json_string(war.armistice?"armistice":"active")<<'}';
-    }
-    out<<"]}";
+       <<",\"in_transit_ore\":"<<transit;
+    current_conflict_status(out,engine.diplomacy(),tag);
+    out<<'}';
     return out.str();
 }
 

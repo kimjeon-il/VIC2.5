@@ -871,6 +871,22 @@ def main():
                 and at_max["in_transit_ore"] == 2,
                 "the lawful maximum tariff must retain the authored B financing on the opening day")
 
+        peace_a = d / "campaign peace A.sav"
+        peace_b = d / "campaign peace B.sav"
+        peace = panel("new CAMPAIGN-A", f"save {peace_a}", "inspect B", "status",
+                      f"save {peace_b}", "inspect A", f"load CAMPAIGN-A {peace_b}", "quit")
+        require(all(row["ok"] for row in peace) and all(
+                    peace[i]["status"].get("wars") == [] for i in range(7)),
+                "ordinary A and B must both publish an empty current conflict list in peacetime")
+        require(peace[2]["status"]["country"] == "B"
+                and not peace[2]["status"]["can_act"]
+                and peace[2]["status"] == peace[3]["status"]
+                and peace[0]["status"] == peace[5]["status"] == peace[6]["status"]
+                and peace_a.read_bytes() == peace_b.read_bytes(),
+                "viewing the peer's conflict summary must not change authority or saved world state")
+        require("wars" not in optional[0]["status"],
+                "the additive ordinary campaign view must not change optional campaign status")
+
         pact_baseline = d / "ore pact before proposal.sav"
         pact_proposed = d / "ore pact awaiting B.sav"
         pact_rejected = d / "ore pact rejected duplicate.sav"

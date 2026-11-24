@@ -1,6 +1,7 @@
 #include "vic25/phase_gh.hpp"
 #include "vic25/daily_snapshot.hpp"
 #include "vic25/p0_daily.hpp"
+#include "vic25/play_conflict_status.hpp"
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -198,6 +199,18 @@ static void signed_and_dated_war_terms_bind_only_the_named_conflict() {
     const auto selected=[&]() -> const WarState& {
         return world.engine().diplomacy().wars.at(war_id);
     };
+    const auto current_conflicts=[&](std::initializer_list<std::string_view> states) {
+        const auto& diplomacy=world.engine().diplomacy();
+        for(const auto& [country,opponent]:{std::pair{"A","B"},std::pair{"B","A"}}) {
+            std::vector<play_status::CurrentConflict> expected;
+            for(const auto state:states)expected.push_back({opponent,state});
+            verify(play_status::current_conflicts(diplomacy,country)==expected,
+                   "current conflicts must show live state from each belligerent's perspective");
+        }
+        verify(play_status::current_conflicts(diplomacy,"C").empty(),
+               "an uninvolved nation's current conflict list must omit other wars");
+    };
+    current_conflicts({"active","active"});
     const auto unaffected=[&] {
         verify(other().active&&!other().armistice&&other().ended_day<0,
                "treaty changed another conflict with the same states");
@@ -239,6 +252,7 @@ static void signed_and_dated_war_terms_bind_only_the_named_conflict() {
     until({2000,4,1});world.advance_day();
     verify(!world.engine().diplomacy().treaties.at(truce_id).active&&selected().active,
            "a single signatory activated a ceasefire");
+    current_conflicts({"active","active"});
     assert_rejected([&](Stage& h){h.ratify_package_member(truce_id,"B","PM_A");});
     World::Plan consent;consent[9].push_back([&](Stage& h) {
         h.ratify_package_member(truce_id,"B","PM_B");
@@ -247,11 +261,13 @@ static void signed_and_dated_war_terms_bind_only_the_named_conflict() {
     until({2000,5,1});
     verify(selected().active&&!selected().armistice,
            "lawful ratification applied prior to its effective month");
+    current_conflicts({"active","active"});
     auto replay=daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(world));
     world.advance_day();replay.advance_day();
     verify(daily::SnapshotCodec::encode(world)==daily::SnapshotCodec::encode(replay)&&
            !selected().active&&selected().armistice&&selected().ended_day<0,
            "current conflict ceasefire failed on its effective date or replay");
+    current_conflicts({"armistice","active"});
     unaffected();
     until({2000,6,1});
     verify(selected().armistice,"ceasefire expired too early");
@@ -264,6 +280,7 @@ static void signed_and_dated_war_terms_bind_only_the_named_conflict() {
     world.advance_day(peace);
     verify(selected().active&&!selected().armistice&&selected().ended_day<0,
            "expiry did not resume the underlying war");
+    current_conflicts({"active","active"});
     World::Plan consent_a;consent_a[9].push_back([&](Stage& h) {
         h.ratify_package_member(peace_id,"A","PM_A");
     });
@@ -276,6 +293,7 @@ static void signed_and_dated_war_terms_bind_only_the_named_conflict() {
            !selected().active&&!selected().armistice&&selected().ended_day==effect&&
            world.engine().base().sovereign(2)=="B",
            "scoped ratified peace failed on due date, or transferred sovereignty");
+    current_conflicts({"active"});
     unaffected();
     assert_rejected([&](Stage& h) {
         auto c=clause("ended-war",ClauseKind::ceasefire,"A","B");

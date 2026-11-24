@@ -348,6 +348,24 @@ def run_shared_campaign(root, panel, save):
     assert panel.current == next_day
 
 
+def check_current_conflict_display(panel, status, opponent):
+    same_card = panel.diplomacy.get()
+    assert status["wars"] == [] and "현재 분쟁: 없음" in same_card
+    legacy_status = dict(status)
+    legacy_status.pop("wars")
+    try:
+        panel._show(legacy_status)
+        assert "현재 분쟁:" not in panel.diplomacy.get()
+        for state, label in (("active", "전쟁 중"), ("armistice", "휴전 중")):
+            panel._show(dict(status, wars=[{"opponent": opponent, "state": state}]))
+            expected = f"현재 분쟁: {opponent} ({label})"
+            shown = panel.diplomacy.get()
+            assert expected in shown
+            assert shown.replace(expected, "현재 분쟁: 없음") == same_card
+    finally:
+        panel._show(status)
+
+
 def run_shared_ore_pact(root, panel, save):
     panel.country.set("A 공동 캠페인")
     panel.new_button.invoke()
@@ -362,6 +380,7 @@ def run_shared_ore_pact(root, panel, save):
     pact = proposed["ore_trade_pact"]
     assert pact["a_ratified"] and not pact["b_ratified"] and pact["state"] == "proposed"
     assert pact["effective_date"] is None and "B 비준 대기" in panel.diplomacy.get()
+    check_current_conflict_display(panel, proposed, "B")
     assert panel.ore_pact_button.instate(["disabled"])
     with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
         panel.save_button.invoke()
@@ -376,6 +395,7 @@ def run_shared_ore_pact(root, panel, save):
     panel._send("inspect B")
     wait(root, panel)
     assert panel.current["ore_trade_pact"]["b_ratified"] and not panel.ore_pact_button.winfo_ismapped()
+    check_current_conflict_display(panel, panel.current, "A")
     with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
         panel.load_button.invoke()
         wait(root, panel)
