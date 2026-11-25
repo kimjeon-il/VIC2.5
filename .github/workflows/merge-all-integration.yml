@@ -47,6 +47,9 @@ jobs:
       - name: Draw archived Oresund tile with OpenGL (Linux)
         if: runner.os == 'Linux'
         run: ctest --test-dir build -C Release -V -R "^vic25_oresund_review_gpu$" --no-tests=error
+      - name: Draw synthetic RGB-kind review tile with OpenGL (Linux)
+        if: runner.os == 'Linux'
+        run: ctest --test-dir build -C Release -V -R "^vic25_province_review_rgbi_gpu$" --no-tests=error
       - name: Full CTest (includes EV-T10 compact 10k to 30k and 238 explicit G/H IDs)
         run: ctest --test-dir build -C Release --parallel 2 --output-on-failure
       - name: G/H 238 status report (Linux)

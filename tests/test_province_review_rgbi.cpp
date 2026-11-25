@@ -41,6 +41,12 @@ int main() {
                 {1,v,-u},{-1,v,u},{u,1,-v},{u,-1,v},{u,v,1},{-u,v,-1},
             }};
             const auto texel=tile.at(x,y);
+            const auto camera=review::face_camera(static_cast<std::uint8_t>(face),directions[face]);
+            check(camera.x==u&&camera.y==v&&camera.z==1);
+            const auto i4=4u*(y*3+x);
+            check(review::packed_word(texel)==(static_cast<unsigned>(bytes[i4])|
+                  static_cast<unsigned>(bytes[i4+1])<<8|static_cast<unsigned>(bytes[i4+2])<<16|
+                  static_cast<unsigned>(bytes[i4+3])<<24));
             check(texel==tile.sample(directions[face]));
             const auto i=4u*(y*3+x);
             check(texel.rgba()==std::array<std::uint8_t,4>{bytes[i],bytes[i+1],bytes[i+2],

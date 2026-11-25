@@ -108,3 +108,22 @@ python scripts/review_province_cube.py MAP.png PALETTE.csv \
 검사는 `ctest --test-dir BUILD -R '^vic25_province_review_rgbi_tests$'`에서
 실행한다. 이 경로는 CPU 진단용이다. 외레순드 전용 OpenGL 경로, 국가·프로빈스
 ID, 인접 그래프와 실제 캠페인 데이터는 변경하지 않는다.
+
+### 화면에서 검토 타일 열기
+
+기존 CMake·OpenGL 3.3·GLFW·GLEW 환경에서 명시적으로 열 수 있다.
+
+```sh
+cmake -S . -B build -DVIC25_ENABLE_GL=ON
+cmake --build build --target vic25_province_review_gl
+./build/vic25_province_review_gl PRIVATE.rgbi WIDTH HEIGHT FACE UMIN VMIN UMAX VMAX
+```
+
+출력 당시 타일의 가로·세로, 큐브 면 번호(0–5), UV 범위를 그대로 사용한다.
+창에서 **1**은 육지(초록), 해양(파랑), 호수(청록), 자료 없음(회색)을 구분하고,
+**2**는 원본 RGB 식별색을 혼합하지 않고 표시한다. 검정 육지도 별도로 표시한다.
+**Esc**로 닫는다. 타일 한 장을 해당 큐브 면 정면에서 검토하는 개발 도구이며,
+캠페인 지도나 역사적 소유권·이동·인접 관계에 연결하지 않는다. 입력 파일은 읽기만 한다.
+
+OpenGL CTest의 `vic25_province_review_rgbi_gpu`는 이 실행 파일의 합성 검토 모드에서
+6면의 비대칭 사각 타일을 실제로 그린 뒤 프레임버퍼의 분류색과 식별색을 확인한다.

@@ -29,6 +29,25 @@ struct Texel {
     }
 };
 
+// The numeric word, not a host-endian byte reinterpretation, crosses the GL API.
+inline std::uint32_t packed_word(Texel texel) {
+    return std::uint32_t(texel.rgb[0])|(std::uint32_t(texel.rgb[1])<<8)|
+        (std::uint32_t(texel.rgb[2])<<16)|(std::uint32_t(texel.kind)<<24);
+}
+
+// Inverse of each cube-face orientation, preserving normalized globe depth.
+inline raster::Vector3 face_camera(std::uint8_t face,raster::Vector3 d) {
+    switch(face) {
+      case 0:return {-d.z,d.y,d.x};
+      case 1:return {d.z,d.y,-d.x};
+      case 2:return {d.x,-d.z,d.y};
+      case 3:return {d.x,d.z,-d.y};
+      case 4:return d;
+      case 5:return {-d.x,d.y,-d.z};
+      default:throw std::invalid_argument("invalid RGB-kind review face");
+    }
+}
+
 class Tile {
     Window window_;
     std::vector<std::uint8_t> bytes_;
