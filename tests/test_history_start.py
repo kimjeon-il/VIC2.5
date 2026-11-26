@@ -257,6 +257,61 @@ def executive_tax(work):
         rejected(run("--history", start), message)
 
 
+def grain_freight(work):
+    start = work / "grain-freight.txt"
+    header, *rows = FIXTURE.splitlines()
+    header = header.replace("HISTORY-1", "HISTORY-2")
+    supply = "grain-supply 12 4 3"
+    road = "grain-road 12 7 31 2 3 FIXTURE-ROAD"
+    economy = ["food-start 7 2 240 F SAMPLE-CULTURE SAMPLE-FAITH 100 8 0 200",
+               "food-mill 7 1 372 31 1 3", supply]
+    pending, final, replay = (work / f"grain-{name}.sav" for name in ("pending", "final", "replay"))
+
+    def write(records, geography=rows):
+        start.write_text("\n".join([header, *geography, *records]) + "\n", encoding="ascii")
+
+    def panel(*commands):
+        result = run("--panel-stdio", script="\n".join((*commands, "quit", "")))
+        success(result)
+        replies = [json.loads(line) for line in result.stdout.splitlines()][:-1]
+        assert all(reply["ok"] for reply in replies), replies
+        return [reply["status"] for reply in replies]
+
+    def local(status):
+        return status["history"]["economy"]
+
+    prefix = (f"history-open {start}", "choose-country AAA")
+    write(economy)
+    *_, without = panel(*prefix, *("step 1",) * 6)
+    assert local(without)["food_stock"] == 0 and local(without).get("grain_in_transit", 0) == 0
+    write([*economy, road])
+    _, _, first, depleted, dispatched, _, hold_a, hold_b, resumed, _ = panel(
+        *prefix, "step 1", "step 1", "step 1", f"save {pending}", "step 1",
+        "step 1", "step 1", f"save {final}")
+    assert (local(first)["grain_stock"], local(first)["food_stock"]) == (0, 1)
+    assert local(depleted)["food_stock"] == 0
+    for held in (dispatched, hold_a, hold_b):
+        assert local(held)["food_stock"] == 0 and local(held)["grain_stock"] == 0
+        assert local(held)["grain_in_transit"] == 1
+    assert local(resumed)["food_stock"] == 1
+    assert local(resumed).get("grain_in_transit", 0) == 0
+    assert local(resumed)["seller_cash"] - local(without)["seller_cash"] == 2 * 8 - 3 - 2
+    assert local(without)["household_cash"] - local(resumed)["household_cash"] == 2 * 8
+    start.unlink()
+    loaded, same, _ = panel(f"history-load {pending}", "step 3", f"save {replay}")
+    assert loaded == dispatched and same == resumed
+    assert replay.read_bytes() == final.read_bytes()
+
+    for records, geography, error in (
+        ([*economy, road], [row for row in rows if not row.startswith("contact 7 12 ")], "grain-road requires adjacent land"),
+        ([*economy, road, road], rows, "duplicate grain-road"),
+        ([*economy[:-1], road], rows, "grain-road requires a grain supplier and food mill"),
+        ([*economy, road.replace("2 3 FIXTURE", "2 0 FIXTURE")], rows, "invalid grain-road transit days"),
+    ):
+        write(records, geography)
+        rejected(run("--history", start), error)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -310,6 +365,7 @@ def main():
         local_food_market(work)
         local_food_mill(work)
         executive_tax(work)
+        grain_freight(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (

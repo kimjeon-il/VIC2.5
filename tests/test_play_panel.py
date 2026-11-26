@@ -115,6 +115,7 @@ def run(exe):
             run_industry(root, panel, save)
             run_history(root, panel, Path(directory))
             run_history_tax(root, panel, Path(directory))
+            run_history_freight(root, panel, Path(directory))
             run_elected_bill(root, panel, Path(directory) / "선출 의회 공포 대기.vic25")
             run_elected_bill(root, panel, Path(directory) / "교육 법안 공포 대기.vic25",
                              choice="A 교육 시범판")
@@ -952,6 +953,31 @@ def run_history_tax(root, panel, directory):
     assert panel.current["date"] == "1836-02-02" and panel.tax_button.instate(["!disabled"])
     assert "소득세율: 50%" in panel.policy.get()
     assert "누적 세입:" in panel.budget.get() and panel.current["treasury"] > 50
+
+
+def run_history_freight(root, panel, directory):
+    start = directory / "곡물 운송 시작.txt"
+    start.write_text("VIC25-HISTORY-2 ROAD_WINDOW 1836 1\n"
+                     "land 7 WEST AAA\nland 12 WEST AAA\ncontact 7 12 1\n"
+                     "food-start 7 2 240 F SAMPLE-CULTURE SAMPLE-FAITH 100 8 0 200\n"
+                     "food-mill 7 1 372 31 1 3\n"
+                     "grain-supply 12 4 3\ngrain-road 12 7 31 2 3 FIXTURE-ROAD\n",
+                     encoding="ascii")
+    panel.country.set(panel.HISTORY)
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(start)):
+        panel.new_button.invoke()
+        wait(root, panel)
+    panel.history_choice.current(0)
+    panel.history_choice.event_generate("<<ComboboxSelected>>")
+    wait(root, panel)
+    panel._send("step 3")
+    wait(root, panel)
+    assert "원료 곡물: 0 · 운송 중: 1" in panel.market.get()
+    assert "식량 재고: 0" in panel.market.get()
+    panel._send("step 3")
+    wait(root, panel)
+    assert "운송 중:" not in panel.market.get()
+    assert "식량 재고: 1" in panel.market.get()
 
 
 def run_industry(root, panel, tariff_save):

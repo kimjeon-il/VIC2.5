@@ -506,6 +506,8 @@ class PlayPanel:
                       f"가계 잔액: {economy['household_cash']} · 판매자 잔액: {economy['seller_cash']}")
             if economy.get("mills"):
                 market += f"\n식량 작업장: {economy['mills']}곳 · 원료 곡물: {economy['grain_stock']}"
+                if economy.get("grain_in_transit"):
+                    market += f" · 운송 중: {economy['grain_in_transit']}"
         self.market.set(market)
         scope = ("입력된 시험용 정부에서만 소득세를 바꿀 수 있습니다. "
                  "새 세율은 다음 달 첫날 처리부터 임금 원천징수에 적용됩니다."

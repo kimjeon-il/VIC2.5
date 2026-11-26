@@ -139,6 +139,71 @@ inline void seed_executives(phasec::IntegratedWorld& core,const std::map<std::st
     }
 }
 
+struct GrainSupply {
+    Quantity stock{};
+    phasec::Money price{};
+};
+
+inline GrainSupply parse_grain_supply(std::istringstream& row) {
+    std::string stock,price,extra;
+    if(!(row>>stock>>price)||row>>extra)
+        throw std::invalid_argument("malformed grain-supply record");
+    return {start_value(stock,1,1'000'000'000,"invalid grain-supply stock"),
+            start_value(price,1,1'000'000'000,"invalid grain-supply price")};
+}
+
+struct GrainRoad {
+    Quantity monthly_capacity{};
+    phasec::Money freight_per_unit{};
+    int days{};
+    std::string evidence;
+};
+
+inline GrainRoad parse_grain_road(std::istringstream& row) {
+    std::string capacity,freight,days,evidence,extra;
+    if(!(row>>capacity>>freight>>days>>evidence)||row>>extra||!identifier(evidence))
+        throw std::invalid_argument("malformed grain-road record");
+    return {start_value(capacity,1,1'000'000'000,"invalid grain-road capacity"),
+            start_value(freight,0,1'000'000'000,"invalid grain-road freight"),
+            static_cast<int>(start_value(days,1,366,"invalid grain-road transit days")),
+            std::move(evidence)};
+}
+
+inline void seed_grain_freight(phasegh::World& engine,
+        const std::map<phasee::Id,GrainSupply>& supplies,
+        const std::map<std::pair<phasee::Id,phasee::Id>,GrainRoad>& roads,
+        std::int64_t month) {
+    const auto& geo=engine.base();
+    auto& core=engine.seed_geography().seed_core().seed_core();
+    for(const auto& [id,supply]:supplies) {
+        const auto& region=geo.province(id).region;
+        const auto seller="history-grain-supply-"+std::to_string(id);
+        core.seed_actor(seller,0);
+        core.seed_market(region,grain_good,supply.price,supply.price,supply.price);
+        core.seed_stock(seller,region,grain_good,supply.stock);
+    }
+    for(const auto& [pair,road]:roads) {
+        const auto [source,dest]=pair;
+        const auto id="history-grain-road-"+std::to_string(source)+"-"+std::to_string(dest);
+        const auto carrier=id+"-carrier";
+        core.seed_actor(carrier,0);
+        engine.seed_verified_geographic_link(id,source,dest,"road");
+        phasegh::TransportEdge edge;
+        edge.id=id;
+        edge.from=source;
+        edge.to=dest;
+        edge.carrier=carrier;
+        edge.mode="road";
+        edge.monthly_capacity=road.monthly_capacity;
+        edge.freight_per_unit=road.freight_per_unit;
+        edge.transit_days=road.days;
+        edge.evidence_id=road.evidence;
+        edge.valid_from_month=month;
+        edge.valid_through_month=daily::legacy_month({9999,12,1});
+        engine.seed_transport_edge(std::move(edge));
+    }
+}
+
 inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,FoodStart>& starts,
         const std::map<phasee::Id,MillStart>& mills,bool government_mode,std::int64_t month) {
     auto& industry=world.seed_core();
@@ -229,6 +294,8 @@ inline daily::World open(const std::filesystem::path& path) {
     std::map<Id,FoodStart> food_starts;
     std::map<Id,MillStart> mills;
     std::map<std::string,ExecutiveStart> executives;
+    std::map<Id,GrainSupply> supplies;
+    std::map<std::pair<Id,Id>,GrainRoad> roads;
     while(std::getline(input,line)) {
         std::istringstream row(std::move(line));
         row.imbue(std::locale::classic());
@@ -243,6 +310,20 @@ inline daily::World open(const std::filesystem::path& path) {
             continue;
         }
         const Id id=positive(id_text,"invalid province ID");
+        if(type=="grain-supply") {
+            if(!economy_allowed)throw std::invalid_argument("grain-supply requires VIC25-HISTORY-2");
+            if(!supplies.emplace(id,parse_grain_supply(row)).second)
+                throw std::invalid_argument("duplicate grain-supply province");
+            continue;
+        }
+        if(type=="grain-road") {
+            if(!economy_allowed)throw std::invalid_argument("grain-road requires VIC25-HISTORY-2");
+            if(!(row>>a))throw std::invalid_argument("malformed grain-road record");
+            const Id dest=positive(a,"invalid grain-road destination");
+            if(!roads.emplace(std::pair{id,dest},parse_grain_road(row)).second)
+                throw std::invalid_argument("duplicate grain-road");
+            continue;
+        }
         if(type=="food-start") {
             if(!economy_allowed)throw std::invalid_argument("food-start requires VIC25-HISTORY-2");
             auto start=parse_food_start(row);
@@ -314,6 +395,20 @@ inline daily::World open(const std::filesystem::path& path) {
                 throw std::invalid_argument("food-mill requires a modeled government when an executive-start is used");
         }
     }
+    for(const auto& [id,supply]:supplies) {
+        (void)supply;
+        const auto node=nodes.find(id);
+        if(node==nodes.end()||node->second.kind!=geo::Kind::land||mills.contains(id))
+            throw std::invalid_argument("grain-supply requires an existing land province without a food mill");
+    }
+    for(const auto& [pair,road]:roads) {
+        (void)road;
+        const auto [source,dest]=pair;
+        if(!supplies.contains(source)||!mills.contains(dest))
+            throw std::invalid_argument("grain-road requires a grain supplier and food mill");
+        if(nodes.at(source).country!=nodes.at(dest).country)
+            throw std::invalid_argument("grain-road currently supports domestic service only");
+    }
     std::vector<geo::Contact> contacts;
     contacts.reserve(rows.size());
     for(const auto& [a,b,sides]:rows) {
@@ -351,6 +446,13 @@ inline daily::World open(const std::filesystem::path& path) {
     if(!executives.empty())seed_executives(world.seed_core().seed_core(),executives);
     if(!food_starts.empty())
         seed_food_starts(world,food_starts,mills,!executives.empty(),daily::legacy_month(date));
+    for(const auto& [pair,road]:roads) {
+        (void)road;
+        if(!world.province(pair.first).neighbors.contains(pair.second))
+            throw std::invalid_argument("grain-road requires adjacent land provinces");
+    }
+    if(!supplies.empty())
+        seed_grain_freight(engine,supplies,roads,daily::legacy_month(date));
     return daily::World::adopt(std::move(engine),0,std::string(origin_prefix)+dataset);
 }
 
