@@ -30,7 +30,7 @@ struct FoodOverview {
     std::size_t covered_provinces{},mills{};
     phaseb::People people{};
     phasec::Money household_cash{},seller_cash{};
-    vic25::Quantity food_stock{},grain_stock{};
+    vic25::Quantity food_stock{},grain_stock{},grain_in_transit{};
 };
 
 // Not a national estimate: only explicitly opened provincial food markets.
@@ -39,6 +39,7 @@ inline FoodOverview food_overview(const daily::World& world,const std::string& c
     const auto& core=geo.core().core();
     const auto& facilities=geo.core().state().site_archetypes;
     std::set<std::string> regions;
+    std::map<std::string,std::string> mill_owners;
     FoodOverview result;
     for(const auto& id:geo.sovereign_provinces(country)) {
         const auto& region=geo.province(id).region;
@@ -48,6 +49,7 @@ inline FoodOverview food_overview(const daily::World& world,const std::string& c
         if(!core.has_actor(seller)||!core.has_market(region,good))continue;
         if(mill) {
             ++result.mills;
+            mill_owners.emplace(region,seller);
             result.grain_stock=phaseb::add_checked(result.grain_stock,
                                                   core.stock(seller,region,history_start::grain_good));
         }
@@ -57,6 +59,13 @@ inline FoodOverview food_overview(const daily::World& world,const std::string& c
         result.seller_cash=phaseb::add_checked(result.seller_cash,core.cash(seller));
     }
     if(regions.empty())return result;
+    if(!mill_owners.empty())
+        for(const auto& [id,cargo]:world.engine().commerce().daily_shipments) {
+            (void)id;
+            const auto mill=mill_owners.find(cargo.destination);
+            if(cargo.good==history_start::grain_good&&mill!=mill_owners.end()&&mill->second==cargo.buyer)
+                result.grain_in_transit=phaseb::add_checked(result.grain_in_transit,cargo.quantity);
+        }
     const auto& people=core.people();
     std::set<phaseb::Id> households;
     for(const auto& [id,slice]:people.slices()) {

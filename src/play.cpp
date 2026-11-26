@@ -2147,6 +2147,7 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
            <<",\"people\":"<<food.people<<",\"household_cash\":"<<food.household_cash
            <<",\"food_stock\":"<<food.food_stock<<",\"seller_cash\":"<<food.seller_cash;
         if(food.mills>0)out<<",\"mills\":"<<food.mills<<",\"grain_stock\":"<<food.grain_stock;
+        if(food.grain_in_transit>0)out<<",\"grain_in_transit\":"<<food.grain_in_transit;
         out<<'}';
     }
     out<<'}';
