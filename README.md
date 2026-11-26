@@ -47,6 +47,14 @@ ctest --test-dir build --output-on-failure
 
 CMake 3.20+, C++20 컴파일러가 필요합니다. Linux/GCC 14 환경에서 빌드·CTest 1개가 통과했습니다. 다른 운영체제의 빌드/성능 검증은 별도입니다.
 
+### 외부 역사 시작 데이터 시험
+
+`vic25_play --history <시작 파일>`로 소규모 지리 시험을 열어 국가 소속과
+인접 관계를 확인하고 날짜를 진행할 수 있습니다. 저장은
+`vic25_play --resume-history <저장 파일>`로 이어서 엽니다.
+[입력 형식과 사용법](docs/geography/HISTORICAL_START.md).
+이 경로에는 역사 캠페인 경제나 실제 지도 자료가 포함되지 않습니다.
+
 ### 지도 없이 국가 운영 화면 실행
 
 먼저 `cmake --build build --target vic25_play --config Release`로 엔진을

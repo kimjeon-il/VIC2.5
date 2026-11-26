@@ -35,6 +35,11 @@ if (BUILD_TESTING)
                          ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_terminal_tutorial.py
                          $<TARGET_FILE:vic25_play>)
         set_tests_properties(vic25_terminal_tutorial PROPERTIES TIMEOUT 90)
+        add_test(NAME vic25_history_start
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_history_start.py
+                         $<TARGET_FILE:vic25_play>)
+        set_tests_properties(vic25_history_start PROPERTIES TIMEOUT 90)
 
         # Native gameplay stays independent of Tk. The visual acceptance
         # actually starts a Tk window and drives the built C++ executable.
