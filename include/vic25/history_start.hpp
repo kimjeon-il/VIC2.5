@@ -108,8 +108,39 @@ inline MillStart parse_mill_start(std::istringstream& row) {
             start_value(grain,0,limit,"invalid food-mill grain stock")};
 }
 
+struct ExecutiveStart {
+    std::string head, minister;
+    phasec::Money treasury{};
+    int income_tax_ppm{};
+};
+
+inline ExecutiveStart parse_executive_start(std::istringstream& row) {
+    std::string head,minister,treasury,percent,extra;
+    if(!(row>>head>>minister>>treasury>>percent)||row>>extra||
+       !identifier(head)||!identifier(minister))
+        throw std::invalid_argument("malformed executive-start record");
+    return {std::move(head),std::move(minister),
+            start_value(treasury,0,1'000'000'000,"invalid executive-start treasury"),
+            static_cast<int>(start_value(percent,0,100,"invalid executive-start income tax"))*10'000};
+}
+
+inline void seed_executives(phasec::IntegratedWorld& core,const std::map<std::string,ExecutiveStart>& starts) {
+    using namespace phasec;
+    for(const auto& [country,seed]:starts) {
+        const auto treasury="history-treasury:"+country;
+        core.seed_actor(treasury,seed.treasury);
+        // No elected chamber. The native government record still requires
+        // positive seat and quorum placeholders; neither is a fictional vote.
+        core.seed_government(country,seed.head,seed.minister,1,1);
+        core.seed_p1_constitution(country,{P1GovernancePrinciple::monarchy,
+            P1PowerDistribution::autocracy,P1LegislatureKind::none,"history:executive-start"});
+        core.seed_country_treasury(country,treasury);
+        core.seed_country_income_tax(country,seed.income_tax_ppm);
+    }
+}
+
 inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,FoodStart>& starts,
-        const std::map<phasee::Id,MillStart>& mills,std::int64_t month) {
+        const std::map<phasee::Id,MillStart>& mills,bool government_mode,std::int64_t month) {
     auto& industry=world.seed_core();
     auto& core=industry.seed_core();
     auto& pop=core.seed_population();
@@ -117,7 +148,7 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
         industry.seed_standard_industries();
         // Without a modeled public authority, this pilot charges no
         // withholding. Do not implicitly reuse the legacy 10% tax default.
-        core.seed_legacy_income_tax(0);
+        if(!government_mode)core.seed_legacy_income_tax(0);
     }
     for(const auto& [id,seed]:starts) {
         const auto& region=world.province(id).region;
@@ -143,7 +174,7 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
         // Normal no-government payroll requires a distinct country actor.
         // It has zero initial funds, and is not registered as a treasury.
         const auto& country=core.sovereignty(region);
-        if(!core.has_actor(country))core.seed_actor(country,0);
+        if(!government_mode&&!core.has_actor(country))core.seed_actor(country,0);
         const auto site=food_mill(id);
         industry.seed_building_facility(site,seller,region,work.monthly_capacity,
                                        "vic3_115.urban.food_industries");
@@ -197,12 +228,20 @@ inline daily::World open(const std::filesystem::path& path) {
     std::vector<ContactRow> rows;
     std::map<Id,FoodStart> food_starts;
     std::map<Id,MillStart> mills;
+    std::map<std::string,ExecutiveStart> executives;
     while(std::getline(input,line)) {
         std::istringstream row(std::move(line));
         row.imbue(std::locale::classic());
         std::string type,id_text,a,b;
         if(!(row>>type>>id_text))
             throw std::invalid_argument("malformed record in historical start");
+        if(type=="executive-start") {
+            if(!economy_allowed)throw std::invalid_argument("executive-start requires VIC25-HISTORY-2");
+            if(!identifier(id_text))throw std::invalid_argument("invalid executive-start country");
+            if(!executives.emplace(id_text,parse_executive_start(row)).second)
+                throw std::invalid_argument("duplicate executive-start country");
+            continue;
+        }
         const Id id=positive(id_text,"invalid province ID");
         if(type=="food-start") {
             if(!economy_allowed)throw std::invalid_argument("food-start requires VIC25-HISTORY-2");
@@ -258,6 +297,23 @@ inline daily::World open(const std::filesystem::path& path) {
         if(!nodes.contains(id)||nodes.at(id).kind!=geo::Kind::land)
             throw std::invalid_argument("food-start requires an existing land province");
     }
+    if(!executives.empty()) {
+        std::set<std::string> countries;
+        for(const auto& [admin,country]:owners) {
+            (void)admin;
+            countries.insert(country);
+        }
+        for(const auto& [country,seed]:executives) {
+            (void)seed;
+            if(!countries.contains(country))
+                throw std::invalid_argument("executive-start requires a country with land");
+        }
+        for(const auto& [id,mill]:mills) {
+            (void)mill;
+            if(!executives.contains(nodes.at(id).country))
+                throw std::invalid_argument("food-mill requires a modeled government when an executive-start is used");
+        }
+    }
     std::vector<geo::Contact> contacts;
     contacts.reserve(rows.size());
     for(const auto& [a,b,sides]:rows) {
@@ -292,7 +348,9 @@ inline daily::World open(const std::filesystem::path& path) {
     for(const auto& contact:contacts)
         if(contact.a.kind==geo::Kind::ocean&&contact.b.kind==geo::Kind::ocean)
             world.seed_ocean_border(contact.a.id,contact.b.id);
-    if(!food_starts.empty())seed_food_starts(world,food_starts,mills,daily::legacy_month(date));
+    if(!executives.empty())seed_executives(world.seed_core().seed_core(),executives);
+    if(!food_starts.empty())
+        seed_food_starts(world,food_starts,mills,!executives.empty(),daily::legacy_month(date));
     return daily::World::adopt(std::move(engine),0,std::string(origin_prefix)+dataset);
 }
 

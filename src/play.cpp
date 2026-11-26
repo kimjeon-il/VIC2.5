@@ -445,12 +445,12 @@ void set_trial_tariff(p0::DailyGame& game,const std::string& tag,int percent) {
     game.advance_day(ore_tariff_order(game,tag,percent,"TRIAL-TARIFF:"));
 }
 
-void propose_trial_income_tax(p0::DailyGame& game,const std::string& tag,int percent) {
+void propose_direct_income_tax(p0::DailyGame& game,const std::string& tag,int percent) {
     const auto ppm=percent*10'000;
     phasegh::World::Plan order;
     order[9].push_back([tag,ppm](phasegh::Stage& stage){
         auto& c=stage.phase_c();
-        // This trial is a direct executive government. Never invent a
+        // This command is for a direct executive government. Never invent a
         // parliamentary vote; the same native authority and limits apply.
         c.propose_tax_law(tag,c.government(tag).prime_minister,{},ppm);
     });
@@ -2110,6 +2110,11 @@ p0::Policies history_policies() {
     return result;
 }
 
+bool history_direct_tax(const phasec::IntegratedWorld& core,const std::string& country) {
+    return !country.empty()&&core.has_country_treasury(country)&&
+           core.country_tax_uses_direct_executive(country);
+}
+
 std::string history_panel_status(const p0::DailyGame& game,const std::string& selected,
                                  const history_play::Countries& countries) {
     const auto& world=game.world();
@@ -2144,7 +2149,18 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
         if(food.mills>0)out<<",\"mills\":"<<food.mills<<",\"grain_stock\":"<<food.grain_stock;
         out<<'}';
     }
-    return out.str()+"}}";
+    out<<'}';
+    const auto& core=world.engine().base().core().core();
+    if(history_direct_tax(core,selected)) {
+        const auto fiscal=core.country_fiscal(selected);
+        const auto pending=core.pending_country_tax(selected);
+        out<<",\"treasury\":"<<fiscal.cash
+           <<",\"revenue\":"<<fiscal.realized_revenue
+           <<",\"income_tax_ppm\":"<<fiscal.income_tax_ppm
+           <<",\"pending_income_tax_ppm\":"<<(pending?std::to_string(pending->second):"null")
+           <<",\"pending_income_tax_date\":"<<(pending?json_string(month_opening(pending->first)):"null");
+    }
+    return out.str()+"}";
 }
 
 void run_panel() {
@@ -2196,6 +2212,12 @@ void run_panel() {
                         last_status=history_panel_status(session->game,session->tag,session->history);
                         throw;
                     }
+                    last_status=history_panel_status(session->game,session->tag,session->history);
+                } else if(command=="income-tax") {
+                    const auto& core=session->game.world().engine().base().core().core();
+                    if(!history_direct_tax(core,session->tag))
+                        throw std::invalid_argument("no modeled fiscal government for the selected country");
+                    propose_direct_income_tax(session->game,session->tag,command_number(arg,0,100));
                     last_status=history_panel_status(session->game,session->tag,session->history);
                 } else if(command=="save") {
                     if(session->tag.empty())throw std::invalid_argument("choose a historical country first");
@@ -2283,7 +2305,7 @@ void run_panel() {
                         throw std::invalid_argument("the elected law trial has no direct income-tax order");
                     if(session->tag==country)
                         throw std::invalid_argument("the industry trial has no income-tax order");
-                    propose_trial_income_tax(session->game,session->tag,command_number(arg,0,100));
+                    propose_direct_income_tax(session->game,session->tag,command_number(arg,0,100));
                 } else if(command=="spending-cap"&&is_elected_budget_campaign(session->game.world())) {
                     if(session->tag!="A")
                         throw std::invalid_argument("the inspected peer is read-only");
@@ -2432,7 +2454,7 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool h
                 std::cout<<"Tariff set within the current legal ceiling. Duty is collected only on actual trade.\n";
                 show_status();
             } else if(selected&&command=="income-tax"&&!arg.empty()) {
-                propose_trial_income_tax(game,*selected,command_number(arg,0,100));
+                propose_direct_income_tax(game,*selected,command_number(arg,0,100));
                 std::cout<<"Income-tax change scheduled for the opening of the next month.\n";
                 show_status();
             } else if(selected&&command=="spending-cap"&&!arg.empty()) {

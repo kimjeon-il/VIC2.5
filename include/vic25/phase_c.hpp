@@ -3949,6 +3949,12 @@ public:
                ppm>=0&&ppm<=1'000'000,"invalid legacy income tax seed");
         income_tax_ppm_=ppm;
     }
+    void seed_country_income_tax(const std::string& country,int ppm) {
+        ensure(stage_==-1&&commit_id_==0&&has_country_treasury(country)&&
+               !country_income_tax_.contains(country)&&ppm>=0&&ppm<=1'000'000,
+               "invalid country income tax seed");
+        country_income_tax_.emplace(country,ppm);
+    }
     [[nodiscard]] int income_tax_ppm() const { return income_tax_ppm_; } // legacy only
     [[nodiscard]] int income_tax_ppm(const std::string& country)const {
         ensure(governments_.contains(country),"unknown tax jurisdiction");
