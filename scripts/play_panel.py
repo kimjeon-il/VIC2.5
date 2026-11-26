@@ -485,9 +485,15 @@ class PlayPanel:
                          f"해안 프로빈스: {territory['coastal']}")
                         if territory is not None else "목록에서 미리 볼 국가를 선택하세요.")
         self.policy.set(f"자료 ID: {history['dataset']}")
-        self.market.set("인구·시장·국고의 역사 초기값은 아직 불러오지 않습니다.")
-        self.diplomacy.set("날짜 진행과 저장은 가능합니다. 정책·외교·운송은 이 미리보기에서 조작할 수 없습니다.")
-        for card, title in zip(self.cards, ("선택 국가의 영토", "시작 자료", "경제·인구", "미리보기 범위")):
+        economy = history["economy"]
+        self.market.set((f"자료가 있는 프로빈스: {economy['covered_provinces']}/{territory['land']}\n"
+                         f"입력 지역의 인구: {economy['people']}명\n"
+                         f"식량 재고: {economy['food_stock']}\n"
+                         f"가계 잔액: {economy['household_cash']} · 판매자 잔액: {economy['seller_cash']}")
+                        if economy is not None else "경제 자료 없음. 시작 파일에 입력된 지역에만 표시됩니다.")
+        self.diplomacy.set("국고·정치·외교·운송은 아직 연결하지 않았습니다. "
+                           "식량 구매는 자료가 있는 지역에서 날짜를 진행하면 자동으로 처리됩니다.")
+        for card, title in zip(self.cards, ("선택 국가의 영토", "시작 자료", "지역 식량 시장", "미리보기 범위")):
             card.configure(text=title)
         self.current = status
 

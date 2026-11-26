@@ -88,6 +88,61 @@ def history_panel(start, work, tutorial, legacy):
     assert not json.loads(corrupted.stdout.splitlines()[0])["ok"]
 
 
+def local_food_market(work):
+    start = work / "local market.txt"
+    legacy_header, *rows = FIXTURE.splitlines()
+    header = legacy_header.replace("HISTORY-1", "HISTORY-2")
+    food = "food-start 7 2 240 F SAMPLE-CULTURE SAMPLE-FAITH 50 5 9 3"
+    # Economy records may precede geography. Only the named land province has data.
+    start.write_text("\n".join([header, food, *rows]) + "\n", encoding="ascii")
+    saved, direct, replay = [work / (name + ".sav") for name in ("market-saved", "market-direct", "market-replay")]
+    first = run("--panel-stdio", script="\n".join((
+        f"history-open {start}", "choose-country BBB", "choose-country AAA",
+        "step 1", f"save {saved}", "step 1", f"save {direct}", "step 3", "step 1", "quit", "",
+    )))
+    success(first)
+    opened, peer, before, after, saved_reply, day_two, persisted, exhausted, no_refill, _ = map(
+        json.loads, first.stdout.splitlines())
+    assert opened["ok"], opened
+    assert peer["ok"] and peer["status"]["history"]["economy"] is None
+    def state(reply, cash, stock, seller):
+        assert reply["ok"], reply
+        economy = reply["status"]["history"]["economy"]
+        assert economy == {"covered_provinces": 1, "people": 2, "household_cash": cash,
+                           "food_stock": stock, "seller_cash": seller}, reply
+        assert cash + seller == 53
+        assert "treasury" not in reply["status"]
+    state(before, 50, 9, 3)
+    state(after, 40, 7, 13)
+    state(day_two, 30, 5, 23)
+    state(exhausted, 5, 0, 48)
+    state(no_refill, 5, 0, 48)
+    assert after == saved_reply and day_two == persisted
+    start.unlink()
+    restored = run("--panel-stdio", script=f"history-load {saved}\nstep 1\nsave {replay}\nquit\n")
+    success(restored)
+    assert list(map(json.loads, restored.stdout.splitlines()))[:2] == [after, day_two]
+    assert direct.read_bytes() == replay.read_bytes()
+    reversed_save = work / "market-reversed.sav"
+    start.write_text("\n".join([header, *reversed(rows), food]) + "\n", encoding="ascii")
+    reordered = run("--panel-stdio", script=f"history-open {start}\nchoose-country AAA\nstep 2\nsave {reversed_save}\nquit\n")
+    success(reordered)
+    assert reversed_save.read_bytes() == direct.read_bytes()
+    for bad_header, bad_rows, message in (
+        (header, rows + [food, food], "duplicate food-start"),
+        (header, rows + [food.replace("food-start 7 ", "food-start 31 ")], "land province"),
+        (header, rows + [food.replace("food-start 7 ", "food-start 79 ")], "land province"),
+        (header, rows + [food.replace(" 240 ", " 1441 ")], "age"),
+        (header, rows + [food.replace(" 50 ", " -1 ")], "cash"),
+        (header, rows + [food.replace(" 5 ", " 0 ")], "price"),
+        (header, rows + [food.replace(" 5 ", " 1000000001 ")], "price"),
+        (header, rows + [food.replace(" F ", " X ")], "sex"),
+        (legacy_header, rows + [food], "requires VIC25-HISTORY-2"),
+    ):
+        start.write_text("\n".join([bad_header, *bad_rows]) + "\n", encoding="ascii")
+        rejected(run("--history", start), message)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -138,6 +193,7 @@ def main():
         success(run("--tutorial", "market-v1", script=f"save {tutorial}\nquit\n"))
         rejected(run("--resume-history", tutorial), "does not belong")
         history_panel(start, work, tutorial, saved)
+        local_food_market(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (

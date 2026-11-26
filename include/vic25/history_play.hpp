@@ -26,6 +26,46 @@ inline Countries country_catalog(const daily::World& world) {
     return result;
 }
 
+struct FoodOverview {
+    std::size_t covered_provinces{};
+    phaseb::People people{};
+    phasec::Money household_cash{},seller_cash{};
+    vic25::Quantity food_stock{};
+};
+
+// Not a national estimate: only explicitly opened provincial food markets.
+inline FoodOverview food_overview(const daily::World& world,const std::string& country) {
+    const auto& geo=world.engine().base();
+    const auto& core=geo.core().core();
+    const std::string good(history_start::food_good);
+    std::set<std::string> regions;
+    FoodOverview result;
+    for(const auto& id:geo.sovereign_provinces(country)) {
+        const auto& region=geo.province(id).region;
+        const auto seller=history_start::food_seller(id);
+        if(!core.has_actor(seller)||!core.has_market(region,good))continue;
+        regions.insert(region);
+        ++result.covered_provinces;
+        result.food_stock=phaseb::add_checked(result.food_stock,core.stock(seller,region,good));
+        result.seller_cash=phaseb::add_checked(result.seller_cash,core.cash(seller));
+    }
+    if(regions.empty())return result;
+    const auto& people=core.people();
+    std::set<phaseb::Id> households;
+    for(const auto& [id,slice]:people.slices()) {
+        (void)id;
+        if(!regions.contains(people.demographic(slice.key.demographic).region))continue;
+        result.people=phaseb::add_checked(result.people,slice.count);
+        households.insert(slice.key.household);
+    }
+    for(const auto home:households) {
+        const auto wallet="HH:"+std::to_string(home);
+        if(core.has_actor(wallet))
+            result.household_cash=phaseb::add_checked(result.household_cash,core.cash(wallet));
+    }
+    return result;
+}
+
 struct Opened {
     daily::World world;
     std::string selected;

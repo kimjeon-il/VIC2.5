@@ -2102,6 +2102,14 @@ fs::path checkpoint_path_utf8(std::string_view value) {
     return fs::path(std::u8string(value.begin(),value.end()));
 }
 
+p0::Policies history_policies() {
+    p0::Policies result;
+    // The first local-history economy supplies food only. Do not report unmet
+    // demand for clothing or automatically create inventory to cover it.
+    result.monthly_clothing_units_per_person=0;
+    return result;
+}
+
 std::string history_panel_status(const p0::DailyGame& game,const std::string& selected,
                                  const history_play::Countries& countries) {
     const auto& world=game.world();
@@ -2125,6 +2133,13 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
         out<<"{\"land\":"<<entry.land<<",\"administrations\":"<<entry.administrations
            <<",\"coastal\":"<<entry.coastal<<'}';
     }
+    out<<",\"economy\":";
+    const auto food=selected.empty()?history_play::FoodOverview{}:
+        history_play::food_overview(world,selected);
+    if(food.covered_provinces==0)out<<"null";
+    else out<<"{\"covered_provinces\":"<<food.covered_provinces
+            <<",\"people\":"<<food.people<<",\"household_cash\":"<<food.household_cash
+            <<",\"food_stock\":"<<food.food_stock<<",\"seller_cash\":"<<food.seller_cash<<'}';
     return out.str()+"}}";
 }
 
@@ -2159,7 +2174,7 @@ void run_panel() {
                     history_play::load(path);
                 auto countries=history_play::country_catalog(opened.world);
                 auto replacement=std::make_unique<Session>(Session{std::move(opened.selected),
-                    p0::DailyGame(std::move(opened.world),{}),std::move(countries)});
+                    p0::DailyGame(std::move(opened.world),history_policies()),std::move(countries)});
                 last_status=history_panel_status(replacement->game,replacement->tag,replacement->history);
                 session=std::move(replacement);
             } else if(session&&!session->history.empty()&&command!="new"&&command!="load") {
@@ -2379,7 +2394,7 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool h
         else status(game);
     };
     if(history)
-        std::cout<<"VIC2.5 historical geography preview (no campaign economy or transport)\n";
+        std::cout<<"VIC2.5 historical preview (only explicitly supplied local markets; no campaign transport)\n";
     else if(selected)
         std::cout<<"VIC2.5 "<<(budget_world(game.world())?budget_scenario:trial)
                  <<": synthetic two-country trial (not a historical campaign)\n";
@@ -2476,7 +2491,7 @@ int main(int argc,char** argv) {
                 throw std::invalid_argument("historical start, resume, tutorial and trial modes are mutually exclusive");
             auto opened=history_file?history_play::Opened{history_start::open(*history_file),{}}:
                 history_play::load(*history_save);
-            run(p0::DailyGame(std::move(opened.world),{}),{},true,opened.selected);
+            run(p0::DailyGame(std::move(opened.world),history_policies()),{},true,opened.selected);
             return 0;
         }
         if(explicit_trial!=selected.has_value()||(explicit_trial&&explicit_tutorial))
