@@ -338,6 +338,67 @@ def bundled_trial(work):
     assert list(map(json.loads, restored.stdout.splitlines()))[:2] == [replies[5], replies[7]]
 
 
+def staple_price_shock(work):
+    start = work / "prices.txt"
+    source = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-grain-and-tax.txt"
+    text = source.read_text(encoding="ascii")
+    text = text.replace("100 8 0 800", "10000 100 0 800 100 104")
+    save = work / "price-shock.sav"
+
+    def panel(*commands):
+        result = run("--panel-stdio", script="\n".join((*commands, "quit", "")))
+        success(result)
+        replies = list(map(json.loads, result.stdout.splitlines()))[:-1]
+        assert all(reply["ok"] for reply in replies), replies
+        return [reply["status"] for reply in replies]
+
+    prefix = (f"history-open {start}", "choose-country MILL-LAND")
+    start.write_text(text.replace("2 3 SAMPLE-ROAD", "2 1 SAMPLE-ROAD"), encoding="ascii")
+    _, _, regular = panel(*prefix, "step 4")
+    start.write_text(text, encoding="ascii")
+    _, _, dispatch, delayed, _, cap, recovered = panel(
+        *prefix, "step 3", "step 1", f"save {save}", "step 1", "step 1")
+    def economy(status):
+        return status["history"]["economy"]
+    def price(status):
+        return economy(status)["local_food_prices"]
+    assert regular["date"] == delayed["date"] == "1840-01-05"
+    assert price(dispatch) == {"minimum": 102, "maximum": 102, "purchase_gap": 2}
+    assert price(regular) == {"minimum": 101, "maximum": 101, "purchase_gap": 0}
+    assert price(delayed) == {"minimum": 103, "maximum": 103, "purchase_gap": 2}
+    assert economy(regular)["food_stock"] == 1
+    assert economy(delayed)["food_stock"] == 0 and economy(delayed)["grain_in_transit"] == 1
+    assert price(cap)["maximum"] == 104
+    assert recovered["date"] == "1840-01-07"
+    assert price(recovered) == {"minimum": 103, "maximum": 103, "purchase_gap": 0}
+    assert economy(recovered)["food_stock"] == 1
+    start.unlink()
+    assert panel(f"history-load {save}", "step 2") == [delayed, recovered]
+
+    unavailable = "\n".join(line for line in text.splitlines()
+                            if not line.startswith("grain-road ")) + "\n"
+    start.write_text(unavailable, encoding="ascii")
+    _, _, limited = panel(*prefix, "step 20")
+    assert price(limited) == {"minimum": 104, "maximum": 104, "purchase_gap": 2}
+    assert economy(limited)["food_stock"] == 0
+
+    # Physical need is not price pressure when no customer can pay.
+    no_wallet = "\n".join(line for line in text.splitlines()
+                          if line.startswith(("VIC25-", "land ", "food-start")))
+    no_wallet = no_wallet.replace("10000 100", "0 100")
+    start.write_text(no_wallet + "\n", encoding="ascii")
+    _, _, poor = panel(*prefix, "step 3")
+    assert price(poor) == {"minimum": 100, "maximum": 100, "purchase_gap": 0}
+    assert economy(poor)["food_stock"] == economy(poor)["household_cash"] == 0
+
+    for tail, message in (("100", "malformed food-start price band"),
+                          ("101 104", "food-start price outside band"),
+                          ("100 99", "food-start price outside band"),
+                          ("0 104", "invalid food-start price floor")):
+        start.write_text(text.replace("800 100 104", "800 " + tail), encoding="ascii")
+        rejected(run("--history", start), message)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -393,6 +454,7 @@ def main():
         executive_tax(work)
         grain_freight(work)
         bundled_trial(work)
+        staple_price_shock(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (

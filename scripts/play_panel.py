@@ -508,6 +508,11 @@ class PlayPanel:
                 market += f"\n식량 작업장: {economy['mills']}곳 · 원료 곡물: {economy['grain_stock']}"
                 if economy.get("grain_in_transit"):
                     market += f" · 운송 중: {economy['grain_in_transit']}"
+            if prices := economy.get("local_food_prices"):
+                low, high = prices["minimum"], prices["maximum"]
+                price = str(low) if low == high else f"{low}~{high}"
+                market += (f"\n변동가 지역의 식품 단가: {price} "
+                           f"· 전날 살 돈은 있었지만 못 산 양: {prices['purchase_gap']}")
         self.market.set(market)
         scope = ("입력된 시험용 정부에서만 소득세를 바꿀 수 있습니다. "
                  "새 세율은 다음 달 첫날 처리부터 임금 원천징수에 적용됩니다."

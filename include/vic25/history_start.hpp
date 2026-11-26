@@ -55,7 +55,7 @@ struct FoodStart {
     std::int64_t age_months{};
     phaseb::Sex sex{phaseb::Sex::unknown};
     std::string culture,faith;
-    phasec::Money household_cash{},price{},seller_cash{};
+    phasec::Money household_cash{},price{},seller_cash{},price_floor{},price_ceiling{};
     vic25::Quantity stock{};
 };
 
@@ -72,7 +72,7 @@ inline std::int64_t start_value(std::string_view token,std::int64_t min,
 
 inline FoodStart parse_food_start(std::istringstream& row) {
     std::string people, age, sex, culture, faith, wallet, price, stock, seller, extra;
-    if(!(row>>people>>age>>sex>>culture>>faith>>wallet>>price>>stock>>seller)||row>>extra)
+    if(!(row>>people>>age>>sex>>culture>>faith>>wallet>>price>>stock>>seller))
         throw std::invalid_argument("malformed food-start record");
     if(!identifier(culture)||!identifier(faith))
         throw std::invalid_argument("invalid food-start culture or religion");
@@ -81,13 +81,23 @@ inline FoodStart parse_food_start(std::istringstream& row) {
     if(recorded_sex==phaseb::Sex::unknown&&sex!="U")
         throw std::invalid_argument("invalid food-start sex");
     constexpr std::int64_t limit=1'000'000'000;
+    const auto initial=start_value(price,1,limit,"invalid food-start price");
+    auto floor=initial,ceiling=initial;
+    std::string floor_text,ceiling_text;
+    if(row>>floor_text) {
+        if(!(row>>ceiling_text)||row>>extra)
+            throw std::invalid_argument("malformed food-start price band");
+        floor=start_value(floor_text,1,limit,"invalid food-start price floor");
+        ceiling=start_value(ceiling_text,1,limit,"invalid food-start price ceiling");
+        if(floor>initial||initial>ceiling)
+            throw std::invalid_argument("food-start price outside band");
+    }
     return {start_value(people,1,limit,"invalid food-start population"),
             start_value(age,0,1440,"invalid food-start age"),recorded_sex,
             std::move(culture),std::move(faith),
             start_value(wallet,0,limit,"invalid food-start household cash"),
-            start_value(price,1,limit,"invalid food-start price"),
-            start_value(seller,0,limit,"invalid food-start seller cash"),
-            start_value(stock,0,limit,"invalid food-start stock")};
+            initial,start_value(seller,0,limit,"invalid food-start seller cash"),
+            floor,ceiling,start_value(stock,0,limit,"invalid food-start stock")};
 }
 
 struct MillStart {
@@ -231,7 +241,7 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
         const auto mill=mills.find(id);
         const std::string good=mill==mills.end()?food_good:processed_food_good;
         core.seed_actor(seller,seed.seller_cash);
-        core.seed_market(region,good,seed.price,seed.price,seed.price);
+        core.seed_market(region,good,seed.price,seed.price_floor,seed.price_ceiling);
         if(seed.stock>0)core.seed_stock(seller,region,good,seed.stock);
         if(mill==mills.end())continue;
 
