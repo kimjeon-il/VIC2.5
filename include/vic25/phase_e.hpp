@@ -87,6 +87,11 @@ struct ElectoralBoundary {
     std::map<std::string,Id> named_districts;
     std::set<Id> split_without_geometry; // POP partition only, no invented shapes
 };
+enum class WaterKind:std::uint8_t { ocean, lake };
+struct WaterZone {
+    WaterKind kind{};
+    std::set<Id> ocean_neighbors; // Direct contact only, not navigable reachability.
+};
 struct SpatialState {
     std::string dataset_hash{"synthetic-provinces/1"};
     std::map<Id,Province> provinces;
@@ -102,6 +107,7 @@ struct SpatialState {
     std::set<std::string> commands;
     std::vector<ChangeLog> journal;
     std::uint64_t revision{1};
+    std::map<Id,WaterZone> water_zones;
 };
 
 inline bool descendant_or_self(const SpatialState& s,Id node,Id ancestor) {
@@ -141,8 +147,25 @@ inline void validate_spatial(const SpatialState& s,const phasec::IntegratedWorld
                     s.provinces.at(n).neighbors.contains(id),
                     "ED0_ERR_INVALID_PROVINCE");
         }
-        for(Id sea:p.coastal_seas)
+        for(Id sea:p.coastal_seas) {
             require(sea!=0,"ED0_ERR_INVALID_PROVINCE");
+            if(!s.water_zones.empty()) {
+                const auto zone=s.water_zones.find(sea);
+                require(zone!=s.water_zones.end()&&zone->second.kind==WaterKind::ocean,
+                        "ED0_ERR_INVALID_WATER_TOPOLOGY");
+            }
+        }
+    }
+    for(const auto& [id,zone]:s.water_zones) {
+        require(id!=0&&!s.provinces.contains(id)&&
+                (zone.kind==WaterKind::ocean||zone.kind==WaterKind::lake),
+                "ED0_ERR_INVALID_WATER_TOPOLOGY");
+        for(const auto neighbor:zone.ocean_neighbors) {
+            const auto peer=s.water_zones.find(neighbor);
+            require(zone.kind==WaterKind::ocean&&neighbor!=id&&peer!=s.water_zones.end()&&
+                    peer->second.kind==WaterKind::ocean&&peer->second.ocean_neighbors.contains(id),
+                    "ED0_ERR_INVALID_WATER_TOPOLOGY");
+        }
     }
     require(s.regions.size()==s.provinces.size()&&s.membership.size()==s.provinces.size(),
             "ED0_ERR_ADMIN_ASSIGNMENT");
@@ -540,6 +563,23 @@ public:
         require(core_.commit_id()==0&&sea>0&&spatial_.provinces.contains(p),
                 "ED0_ERR_INVALID_PROVINCE");
         spatial_.provinces.at(p).coastal_seas.insert(sea);
+    }
+
+    void seed_water_zone(Id id,WaterKind kind) {
+        require(core_.commit_id()==0&&id!=0&&!spatial_.provinces.contains(id)&&
+                (kind==WaterKind::ocean||kind==WaterKind::lake)&&
+                spatial_.water_zones.emplace(id,WaterZone{kind,{}}).second,
+                "ED0_ERR_INVALID_WATER_TOPOLOGY");
+    }
+    void seed_ocean_border(Id a,Id b) {
+        auto left=spatial_.water_zones.find(a),right=spatial_.water_zones.find(b);
+        require(core_.commit_id()==0&&a!=b&&left!=spatial_.water_zones.end()&&
+                right!=spatial_.water_zones.end()&&left->second.kind==WaterKind::ocean&&
+                right->second.kind==WaterKind::ocean&&
+                !left->second.ocean_neighbors.contains(b)&&!right->second.ocean_neighbors.contains(a),
+                "ED0_ERR_INVALID_WATER_TOPOLOGY");
+        left->second.ocean_neighbors.insert(b);
+        right->second.ocean_neighbors.insert(a);
     }
 
     // P1 site eligibility uses the real Phase E province/coast/link registry,

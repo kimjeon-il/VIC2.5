@@ -2255,6 +2255,23 @@ void history_status(const daily::World& world) {
              <<std::setfill(' ')<<" | land provinces "<<spatial.provinces.size()<<'\n';
 }
 
+void history_ids(const std::set<phasee::Id>& ids) {
+    if(ids.empty())std::cout<<" -";
+    else for(const auto id:ids)std::cout<<' '<<id;
+}
+
+void history_water(const daily::World& world,std::string_view argument) {
+    const auto id=history_start::positive(argument,"enter a positive water zone ID");
+    const auto& zones=world.engine().base().spatial().water_zones;
+    const auto found=zones.find(id);
+    if(found==zones.end())throw std::invalid_argument("unknown water zone (legacy saves may lack a registry)");
+    const auto& zone=found->second;
+    std::cout<<"Water "<<id<<" | "<<(zone.kind==phasee::WaterKind::ocean?"ocean":"lake")
+             <<" | ocean neighbors";
+    history_ids(zone.ocean_neighbors);
+    std::cout<<'\n';
+}
+
 void history_province(const daily::World& world,std::string_view argument) {
     const auto id=history_start::positive(argument,"enter a positive province ID");
     const auto& geo=world.engine().base();
@@ -2264,18 +2281,14 @@ void history_province(const daily::World& world,std::string_view argument) {
     const auto& administration=geo.spatial().units.at(geo.leaf(id));
     std::cout<<"Province "<<id<<" | country "<<geo.sovereign(id)
              <<" | administration "<<administration.name;
-    const auto print_ids=[](const auto& ids) {
-        if(ids.empty())std::cout<<" -";
-        else for(const auto item:ids)std::cout<<' '<<item;
-    };
-    std::cout<<" | neighbors";print_ids(province.neighbors);
-    std::cout<<" | coasts";print_ids(province.coastal_seas);
+    std::cout<<" | neighbors";history_ids(province.neighbors);
+    std::cout<<" | coasts";history_ids(province.coastal_seas);
     std::cout<<'\n';
 }
 
 void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool history=false) {
     const auto show_help=[&] {
-        if(history)std::cout<<"Commands: status | province <ID> | step [days] | save <new path> | help | quit\n";
+        if(history)std::cout<<"Commands: status | province <ID> | water <ID> | step [days] | save <new path> | help | quit\n";
         else if(selected)trial_help(budget_world(game.world()));
         else help();
     };
@@ -2309,6 +2322,8 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool h
                 show_status();
             } else if(history&&command=="province"&&!arg.empty()) {
                 history_province(game.world(),arg);
+            } else if(history&&command=="water"&&!arg.empty()) {
+                history_water(game.world(),arg);
             } else if(!history&&!selected&&command=="buy"&&!arg.empty()) {
                 buy(game,command_number(arg,1,1'000'000));
                 show_status();

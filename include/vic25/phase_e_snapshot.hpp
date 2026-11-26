@@ -93,21 +93,28 @@ template<class A>void state(A& ar,SpatialState& s) {
     }
     ar(s.revision);
 }
+template<class A>void water_zone(A& ar,WaterZone& zone) {
+    ar(zone.kind);ar(zone.ocean_neighbors);
+}
 } // namespace persisted
 
 struct SnapshotCodec {
     static constexpr const char* magic="VIC25_PHASEE_SNAPSHOT_1";
-    static constexpr const char* version="phase-e-cpp/0.4";
+    static constexpr const char* legacy_version="phase-e-cpp/0.4";
+    static constexpr const char* version="phase-e-cpp/0.5";
     static std::string encode(const World& w) {
         w.validate();
         std::ostringstream out(std::ios::binary|std::ios::out);
         persisted::Writer ar{out};
         ar(std::string(magic));
-        ar(std::string(version));
+        // Retain the exact old bytes when the world has no typed registry.
+        ar(std::string(w.spatial_.water_zones.empty()?legacy_version:version));
         ar(std::string(contract_version));
         ar(phased::SnapshotCodec::encode(w.core_));
         auto state=w.spatial_;
         persisted::state(ar,state);
+        if(!state.water_zones.empty())
+            persisted::checked_map(ar,state.water_zones,persisted::water_zone<persisted::Writer>);
         const auto payload=out.str();
         std::ostringstream checkstream(std::ios::binary|std::ios::out);
         persisted::Writer checksum_writer{checkstream};
@@ -121,12 +128,18 @@ struct SnapshotCodec {
         persisted::Reader ar{in};
         std::string m,v,design,core;
         ar(m);ar(v);ar(design);
-        if(m!=magic||v!=version||design!=contract_version)
+        if(m!=magic||(v!=legacy_version&&v!=version)||design!=contract_version)
             throw std::runtime_error("Phase E contract mismatch");
         ar(core);
         World candidate;
         candidate.core_=phased::SnapshotCodec::decode(core);
         persisted::state(ar,candidate.spatial_);
+        if(v==version) {
+            persisted::checked_map(ar,candidate.spatial_.water_zones,
+                                   persisted::water_zone<persisted::Reader>);
+            if(candidate.spatial_.water_zones.empty())
+                throw std::runtime_error("Phase E empty water registry in version 0.5");
+        }
         std::uint64_t digest{};
         ar(digest);
         if(in.peek()!=std::char_traits<char>::eof()||

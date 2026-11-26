@@ -119,13 +119,20 @@ inline daily::World open(const std::filesystem::path& path) {
         units.emplace(group,unit);
     }
     for(const auto& [id,node]:nodes) {
-        if(node.kind!=geo::Kind::land)continue;
+        if(node.kind!=geo::Kind::land) {
+            world.seed_water_zone(id,node.kind==geo::Kind::ocean?
+                                    phasee::WaterKind::ocean:phasee::WaterKind::lake);
+            continue;
+        }
         // Phase E requires a unique economic-region key per province. Land
         // provinces may still share a single administrative unit.
         world.seed_province(id,"history-province-"+std::to_string(id),node.country);
         world.seed_assignment(id,units.at(node.admin));
     }
     geo::seed_contacts(world,dataset,contacts);
+    for(const auto& contact:contacts)
+        if(contact.a.kind==geo::Kind::ocean&&contact.b.kind==geo::Kind::ocean)
+            world.seed_ocean_border(contact.a.id,contact.b.id);
     return daily::World::adopt(std::move(engine),0,std::string(origin_prefix)+dataset);
 }
 
