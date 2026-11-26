@@ -2148,6 +2148,10 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
            <<",\"food_stock\":"<<food.food_stock<<",\"seller_cash\":"<<food.seller_cash;
         if(food.mills>0)out<<",\"mills\":"<<food.mills<<",\"grain_stock\":"<<food.grain_stock;
         if(food.grain_in_transit>0)out<<",\"grain_in_transit\":"<<food.grain_in_transit;
+        if(food.prices)
+            out<<",\"local_food_prices\":{\"minimum\":"<<food.prices->minimum
+               <<",\"maximum\":"<<food.prices->maximum
+               <<",\"purchase_gap\":"<<food.prices->purchase_gap<<'}';
         out<<'}';
     }
     out<<'}';

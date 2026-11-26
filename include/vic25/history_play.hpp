@@ -26,11 +26,17 @@ inline Countries country_catalog(const daily::World& world) {
     return result;
 }
 
+struct FoodPriceOverview {
+    phasec::Money minimum{},maximum{};
+    Quantity purchase_gap{};
+};
+
 struct FoodOverview {
     std::size_t covered_provinces{},mills{};
     phaseb::People people{};
     phasec::Money household_cash{},seller_cash{};
     vic25::Quantity food_stock{},grain_stock{},grain_in_transit{};
+    std::optional<FoodPriceOverview> prices;
 };
 
 // Not a national estimate: only explicitly opened provincial food markets.
@@ -52,6 +58,16 @@ inline FoodOverview food_overview(const daily::World& world,const std::string& c
             mill_owners.emplace(region,seller);
             result.grain_stock=phaseb::add_checked(result.grain_stock,
                                                   core.stock(seller,region,history_start::grain_good));
+        }
+        const auto& quote=core.market(region,good);
+        if(quote.floor<quote.ceiling) {
+            if(!result.prices)
+                result.prices=FoodPriceOverview{quote.price,quote.price,0};
+            auto& prices=*result.prices;
+            prices.minimum=std::min(prices.minimum,quote.price);
+            prices.maximum=std::max(prices.maximum,quote.price);
+            prices.purchase_gap=phaseb::add_checked(prices.purchase_gap,
+                core.previous_daily_solvent_unmet(region,good,world.day_index()));
         }
         regions.insert(region);
         ++result.covered_provinces;
