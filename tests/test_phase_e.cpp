@@ -64,6 +64,44 @@ static void test_02(){auto w=fixture();check(w.province(1).neighbors.contains(2)
                        !w.province(1).neighbors.contains(6),"edge topology");}
 static void test_03(){auto w=fixture();w.seed_coast(1,77);check(w.province(1).coastal_seas.contains(77)&&
                         !w.province(1).neighbors.contains(77),"coast != land");}
+static void test_water_snapshot() {
+    auto legacy=fixture();
+    legacy.seed_coast(1,77);
+    const auto old=SnapshotCodec::encode(legacy);
+    auto old_restore=SnapshotCodec::decode(old);
+    check(old.find("phase-e-cpp/0.4")!=std::string::npos&&
+          old_restore.spatial().water_zones.empty()&&
+          old_restore.province(1).coastal_seas.contains(77)&&
+          SnapshotCodec::encode(old_restore)==old,"legacy coast and encoding unchanged");
+
+    auto w=fixture();
+    w.seed_water_zone(77,WaterKind::ocean);
+    w.seed_water_zone(78,WaterKind::ocean);
+    w.seed_water_zone(79,WaterKind::lake);
+    w.seed_water_zone(80,WaterKind::ocean);
+    w.seed_coast(1,77);
+    check(fails([&]{w.seed_water_zone(1,WaterKind::ocean);}),"reject land ID as water");
+    check(fails([&]{w.seed_water_zone(77,WaterKind::lake);}),"reject duplicate water ID");
+    check(fails([&]{w.seed_ocean_border(77,79);}),"reject lake in ocean border");
+    check(fails([&]{w.seed_ocean_border(77,999);}),"reject unknown neighboring ocean");
+    w.seed_ocean_border(77,78);
+    check(fails([&]{w.seed_ocean_border(78,77);}),"reject duplicate reciprocal border");
+
+    auto wrong_coast=w;
+    check(fails([&]{wrong_coast.seed_coast(2,79);(void)SnapshotCodec::encode(wrong_coast);}),
+          "lake cannot be persisted as an ocean coast");
+    const auto saved=SnapshotCodec::encode(w);
+    auto loaded=SnapshotCodec::decode(saved);
+    const auto& state=loaded.spatial();
+    check(saved.find("phase-e-cpp/0.5")!=std::string::npos&&
+          state.water_zones.size()==4&&
+          state.water_zones.at(77).ocean_neighbors==std::set<Id>{78}&&
+          state.water_zones.at(78).ocean_neighbors==std::set<Id>{77}&&
+          state.water_zones.at(79).kind==WaterKind::lake&&
+          state.water_zones.at(80).ocean_neighbors.empty()&&
+          state.geographic_links.empty()&&SnapshotCodec::encode(loaded)==saved,
+          "typed water snapshot, not a transport graph");
+}
 static void test_07(){auto a=fixture(),b=fixture();check(SnapshotCodec::encode(a)==SnapshotCodec::encode(b),
                           "deterministic dataset serialization");}
 static void test_08(){auto w=fixture();check(w.province(1).id==1&&w.province(1).area_m2==100,
@@ -533,6 +571,11 @@ static void test_50(){
 }
 
 int main(){
+    try {test_water_snapshot();}
+    catch(const std::exception& e) {
+        std::cerr<<"Water topology snapshot FAIL: "<<e.what()<<'\n';
+        return 1;
+    }
     const std::map<int,std::function<void()>> implemented={
       {1,test_01},{2,test_02},{3,test_03},{4,test_04},{5,test_05},{6,test_06},{7,test_07},{8,test_08},
       {9,test_09},{11,test_11},{12,test_12},{13,test_13},{14,test_14},

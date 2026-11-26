@@ -12,10 +12,14 @@ land 12 WEST AAA
 land 19 EAST BBB
 ocean 30 - -
 lake 31 - -
+ocean 32 - -
+ocean 33 - -
 contact 7 12 1
 contact 12 30 1
 contact 19 30 1
 contact 7 31 1
+contact 30 32 1
+contact 32 31 1
 """
 
 
@@ -41,10 +45,16 @@ def main():
             work / f"{name}.sav" for name in ("start saved", "continued", "replayed", "tutorial")
         ]
         result = run("--history", start, script=(
-            f"province 7\nprovince 12\nprovince 19\nstep 30\nsave {saved}\n"
+            f"province 7\nprovince 12\nprovince 19\nwater 30\nwater 31\nwater 32\nwater 33\nstep 30\nsave {saved}\n"
             f"step 2\nsave {continued}\nquit\n"))
         success(result)
-        for expected in (
+        water_lines = (
+            "Water 30 | ocean | ocean neighbors 32",
+            "Water 31 | lake | ocean neighbors -",
+            "Water 32 | ocean | ocean neighbors 30",
+            "Water 33 | ocean | ocean neighbors -",
+        )
+        for expected in (*water_lines,
             "History FICTIONAL_TEST | 1836-01-01 | land provinces 3",
             "History FICTIONAL_TEST | 1836-01-31 | land provinces 3",
             "History FICTIONAL_TEST | 1836-02-02 | land provinces 3",
@@ -55,9 +65,10 @@ def main():
             assert expected in result.stdout, result
         rejected(run("--history", start, "--resume", saved), "mutually exclusive")
         start.unlink()  # Native history checkpoints do not depend on the source file.
-        restored = run("--resume-history", saved, script=f"step 2\nprovince 12\nsave {replayed}\nquit\n")
+        restored = run("--resume-history", saved, script=f"step 2\nprovince 12\nwater 30\nwater 31\nwater 32\nwater 33\nsave {replayed}\nquit\n")
         success(restored)
         assert "1836-02-02" in restored.stdout and "administration WEST" in restored.stdout
+        assert all(line in restored.stdout.splitlines() for line in water_lines), restored
         assert replayed.read_bytes() == continued.read_bytes()
         # Resuming may not replace an existing checkpoint or treat a lake as land.
         unchanged = saved.read_bytes()
