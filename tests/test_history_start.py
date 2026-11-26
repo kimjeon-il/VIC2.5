@@ -312,6 +312,32 @@ def grain_freight(work):
         rejected(run("--history", start), error)
 
 
+def bundled_trial(work):
+    start = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-grain-and-tax.txt"
+    save = work / "bundled-trial.sav"
+    result = run("--panel-stdio", script="\n".join((
+        f"history-open {start}", "choose-country MILL-LAND", "step 3", "step 3",
+        "step 23", "income-tax 50", f"save {save}", "step 2", "quit", "",
+    )))
+    success(result)
+    replies = list(map(json.loads, result.stdout.splitlines()))
+    assert all(reply["ok"] for reply in replies), replies
+    opening, chosen, moving, arrived, _, pending, _, applied, _ = (r["status"] for r in replies)
+    assert opening["history"]["dataset"] == "FICTIONAL_GRAIN_AND_TAX"
+    assert chosen["treasury"] == 50 and chosen["income_tax_ppm"] == 100_000
+    assert moving["date"] == "1840-01-04"
+    assert moving["history"]["economy"]["grain_in_transit"] == 1
+    assert arrived["date"] == "1840-01-07" and arrived["history"]["economy"]["food_stock"] == 1
+    assert "grain_in_transit" not in arrived["history"]["economy"]
+    assert pending["pending_income_tax_date"] == "1840-02-01"
+    assert applied["date"] == "1840-02-02" and applied["income_tax_ppm"] == 500_000
+    assert applied["treasury"] == 87 and applied["revenue"] == 37
+    assert save.is_file()
+    restored = run("--panel-stdio", script=f"history-load {save}\nstep 2\nquit\n")
+    success(restored)
+    assert list(map(json.loads, restored.stdout.splitlines()))[:2] == [replies[5], replies[7]]
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -366,6 +392,7 @@ def main():
         local_food_mill(work)
         executive_tax(work)
         grain_freight(work)
+        bundled_trial(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (
