@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the native historical-start path with independent fictional geography."""
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -25,7 +26,7 @@ contact 32 31 1
 
 def run(*args, script=""):
     return subprocess.run([sys.argv[1], *map(str, args)], input=script,
-                          text=True, capture_output=True, timeout=30)
+                          encoding="utf-8", capture_output=True, timeout=30)
 
 
 def success(result):
@@ -34,6 +35,57 @@ def success(result):
 
 def rejected(result, message):
     assert result.returncode != 0 and message in result.stderr, result
+
+
+def history_panel(start, work, tutorial, legacy):
+    start.write_text(FIXTURE.replace("1836 1", "1835 12")
+                     .replace("land 19 EAST BBB", "land 19 EAST BBB\nland 23 INLAND CCC"),
+                     encoding="ascii")
+    save = work / "역사 저장.sav"
+    bad = work / "bad.sav"
+    bad.write_bytes(b"not a checkpoint")
+    result = run("--panel-stdio", script="\n".join((
+        "status", f"history-open {start}", "choose-country CCC", "choose-country AAA",
+        "choose-country ZZZ", "tariff 10", "step 31", f"save {save}", f"save {save}",
+        "new A", f"history-load {bad}", f"history-load {tutorial}", f"history-load {save}",
+        f"history-load {legacy}", "quit", "",
+    )))
+    success(result)
+    (initial, opened, inland, selected, unknown, policy, advanced, saved, exists,
+     trial, broken, other, resumed, old, quit_reply) = map(json.loads, result.stdout.splitlines())
+    assert initial == {"ok": True, "status": None}
+    assert opened["ok"], opened
+    assert opened["status"]["history"]["countries"] == ["AAA", "BBB", "CCC"]
+    assert opened["status"]["country"] is None
+    assert inland["status"]["history"]["territory"] == {"land": 1, "administrations": 1, "coastal": 0}
+    assert selected["status"]["history"]["territory"] == {"land": 2, "administrations": 1, "coastal": 1}
+    for reply in (unknown, policy):
+        assert not reply["ok"] and reply["status"] == selected["status"], reply
+    assert advanced["ok"] and advanced["status"]["date"] == "1836-01-01"
+    assert saved["ok"] and not exists["ok"] and "overwrite" in exists["error"]
+    assert trial["ok"] and "history" not in trial["status"]
+    for reply in (broken, other):
+        assert not reply["ok"] and reply["status"] == trial["status"], reply
+    assert resumed == advanced and resumed["status"]["country"] == "AAA"
+    assert old["ok"] and old["status"]["country"] is None and quit_reply == old
+    # A fresh process restores the same state without reading the start file.
+    start.unlink()
+    fresh = run("--panel-stdio", script=f"history-load {save}\nquit\n")
+    success(fresh)
+    assert json.loads(fresh.stdout.splitlines()[0]) == resumed
+    # CLI shares the new checkpoint reader; a re-save must retain the selection.
+    cli_input = work / "CLI input.sav"
+    cli_input.write_bytes(save.read_bytes())
+    replay = work / "CLI replay.sav"
+    success(run("--resume-history", cli_input, script=f"save {replay}\nquit\n"))
+    assert replay.read_bytes() == save.read_bytes()
+    damaged = bytearray(save.read_bytes())
+    position = damaged.index(b"AAA")
+    damaged[position:position + 3] = b"BBB"
+    bad.write_bytes(damaged)
+    corrupted = run("--panel-stdio", script=f"history-load {bad}\nquit\n")
+    success(corrupted)
+    assert not json.loads(corrupted.stdout.splitlines()[0])["ok"]
 
 
 def main():
@@ -85,6 +137,7 @@ def main():
         rejected(run("--tutorial", "market-v1", "--resume", saved), "does not belong")
         success(run("--tutorial", "market-v1", script=f"save {tutorial}\nquit\n"))
         rejected(run("--resume-history", tutorial), "does not belong")
+        history_panel(start, work, tutorial, saved)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (

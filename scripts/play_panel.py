@@ -1,4 +1,4 @@
-"""Map-free native VIC2.5 trial panel; requires an existing Python/Tk installation."""
+"""Native VIC2.5 trial and historical preview panel; requires Python/Tk."""
 from datetime import date
 import json
 from pathlib import Path
@@ -56,6 +56,7 @@ class PlayPanel:
     SUPPLY = "A 공급망 복구 시범판"
     STAPLES = "A 가계 소비 시범판"
     STEEL = "A 철강·건설 시범판"
+    HISTORY = "역사 지리 미리보기"
 
     @classmethod
     def _protocol_tag(cls, choice):
@@ -103,12 +104,12 @@ class PlayPanel:
         frame.columnconfigure(0, weight=1)
         ttk.Label(frame, text="VIC2.5 시범판",
                   font=("TkDefaultFont", 16, "bold")).grid(row=0, sticky="w")
-        ttk.Label(frame, text="가상 시나리오 · 실제 역사 지도 없음").grid(row=1, sticky="w")
+        ttk.Label(frame, text="시범판 또는 역사 지리 미리보기 · 지도 화면 없음").grid(row=1, sticky="w")
         setup = ttk.Frame(frame, padding=(0, 10))
         setup.grid(row=2, sticky="ew")
         ttk.Label(setup, text="시작·불러올 국가/시나리오:").grid(row=0, column=0, padx=(0, 6))
         choices = ("A", "B", self.FACTORY, *self.BUDGETS, self.LEGISLATURE,
-                   self.EDUCATION, self.CAMPAIGN, self.EXPANSION, self.SUPPLY, self.STAPLES, self.STEEL)
+                   self.EDUCATION, self.CAMPAIGN, self.EXPANSION, self.SUPPLY, self.STAPLES, self.STEEL, self.HISTORY)
         self.selector = ttk.Combobox(setup, textvariable=self.country, values=choices,
                                      width=16, state="readonly")
         self.selector.grid(row=0, column=1, padx=(0, 8))
@@ -117,6 +118,12 @@ class PlayPanel:
         self.save_button = ttk.Button(setup, text="다른 이름으로 저장…", command=self.save)
         for column, button in enumerate((self.new_button, self.load_button, self.save_button), 2):
             button.grid(row=0, column=column, padx=(0, 5))
+        self.history_label = ttk.Label(setup, text="미리 볼 국가:")
+        self.history_label.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.history_choice = ttk.Combobox(setup, width=16, state="readonly")
+        self.history_choice.grid(row=1, column=1, sticky="w", pady=(6, 0))
+        self.history_choice.bind("<<ComboboxSelected>>", lambda event:
+                                 self._send("choose-country " + self.history_choice.get()))
         ttk.Label(frame, textvariable=self.heading, font=("TkDefaultFont", 11, "bold")
                   ).grid(row=3, sticky="w")
         details = ttk.Frame(frame)
@@ -188,12 +195,21 @@ class PlayPanel:
         ready = not (self.busy or self.closing or self.disconnected)
         for widget in (self.new_button, self.load_button):
             widget.state(["!disabled"] if ready else ["disabled"])
+        history = self._history(self.current)
+        can_advance = self.current and (not history or self.current["country"] is not None)
         for widget in (self.save_button, self.step_button):
-            widget.state(["!disabled"] if ready and self.current else ["disabled"])
+            widget.state(["!disabled"] if ready and can_advance else ["disabled"])
+        if history:
+            self.history_label.grid()
+            self.history_choice.grid()
+            self.history_choice.configure(state="readonly" if ready else "disabled")
+        else:
+            self.history_label.grid_remove()
+            self.history_choice.grid_remove()
         factory = self._industry(self.current)
         legislature = self._legislature(self.current)
         campaign = self._campaign(self.current)
-        direct_actions = not (factory or legislature or campaign or self._expansion(self.current)
+        direct_actions = not (history or factory or legislature or campaign or self._expansion(self.current)
                               or self._staples(self.current))
         can_campaign_act = self._campaign_can_act(self.current)
         pact = self.current.get("ore_trade_pact") if can_campaign_act else None
@@ -299,13 +315,15 @@ class PlayPanel:
                 self.notice.set("오류: " + str(reply.get("error", "게임 엔진이 요청을 거절했습니다.")))
             elif reply.get("status") is not None:
                 try:
-                    opening = command.startswith(("new ", "load "))
+                    opening = command.startswith(("new ", "load ", "history-open ", "history-load "))
                     if opening:
                         self.law_party.set("")
                     self._show(reply["status"])
                     if opening:
                         choice = self.current["country"]
-                        if self._industry(self.current):
+                        if self._history(self.current):
+                            choice = self.HISTORY
+                        elif self._industry(self.current):
                             choice = self.FACTORY
                         elif self._budget(self.current):
                             choice += " 예산 시범판"
@@ -333,6 +351,8 @@ class PlayPanel:
                         self.notice.set("건설 신청을 접수했습니다.")
                     elif command == "ore-pact":
                         self.notice.set("광석 관세 면제 협정을 제안했습니다.")
+                    elif self._history(self.current) and self.current["country"] is None:
+                        self.notice.set("미리 볼 국가를 선택하세요.")
                     else:
                         self.notice.set("저장했습니다." if command.startswith("save ") else "준비됐습니다.")
                 except (KeyError, TypeError, ValueError):
@@ -347,6 +367,10 @@ class PlayPanel:
     def _percent(ppm):
         whole, fraction = divmod(ppm, 10_000)
         return f"{whole}.{fraction:04d}".rstrip("0") if fraction else str(whole)
+
+    @staticmethod
+    def _history(status):
+        return bool(status and "history" in status)
 
     @staticmethod
     def _industry(status):
@@ -449,7 +473,28 @@ class PlayPanel:
         self.law_party_choice.configure(values=tuple(self._seat_label(s) for s in bill["seats"]))
         return policy
 
+    def _show_history(self, status):
+        history, tag = status["history"], status["country"]
+        self.history_choice.configure(values=history["countries"])
+        self.history_choice.set(tag or "")
+        perspective = f"국가 {tag}" if tag else "국가 선택"
+        self.heading.set(f"역사 지리 미리보기  |  {perspective}  |  {status['date']}")
+        territory = history["territory"]
+        self.budget.set((f"육지 프로빈스: {territory['land']}\n"
+                         f"행정구역: {territory['administrations']}\n"
+                         f"해안 프로빈스: {territory['coastal']}")
+                        if territory is not None else "목록에서 미리 볼 국가를 선택하세요.")
+        self.policy.set(f"자료 ID: {history['dataset']}")
+        self.market.set("인구·시장·국고의 역사 초기값은 아직 불러오지 않습니다.")
+        self.diplomacy.set("날짜 진행과 저장은 가능합니다. 정책·외교·운송은 이 미리보기에서 조작할 수 없습니다.")
+        for card, title in zip(self.cards, ("선택 국가의 영토", "시작 자료", "경제·인구", "미리보기 범위")):
+            card.configure(text=title)
+        self.current = status
+
     def _show(self, status):
+        if self._history(status):
+            self._show_history(status)
+            return
         factory = self._industry(status)
         expansion = self._expansion(status)
         staples = self._staples(status)
@@ -687,7 +732,12 @@ class PlayPanel:
         self.current = status
 
     def new(self):
-        self._send("new " + self._protocol_tag(self.country.get()))
+        if self.country.get() == self.HISTORY:
+            self._file("history-open", filedialog.askopenfilename(
+                parent=self.root, title="역사 시작 자료 열기",
+            ))
+        else:
+            self._send("new " + self._protocol_tag(self.country.get()))
 
     def step(self):
         if self.current:
@@ -796,7 +846,8 @@ class PlayPanel:
         self._send(verb + " " + path)
 
     def save(self):
-        if not self.current or self.busy or self.closing or self.disconnected:
+        if (not self.current or self.busy or self.closing or self.disconnected
+                or (self._history(self.current) and self.current["country"] is None)):
             return
         self._file("save", filedialog.asksaveasfilename(
             parent=self.root, title="시나리오 저장", defaultextension=".vic25",
@@ -805,9 +856,9 @@ class PlayPanel:
     def load(self):
         if self.busy or self.closing or self.disconnected:
             return
-        self._file("load " + self._protocol_tag(self.country.get()), filedialog.askopenfilename(
-            parent=self.root, title="시나리오 불러오기",
-        ))
+        choice = self.country.get()
+        verb = "history-load" if choice == self.HISTORY else "load " + self._protocol_tag(choice)
+        self._file(verb, filedialog.askopenfilename(parent=self.root, title="시나리오 불러오기"))
 
     def close(self):
         if self.closing:

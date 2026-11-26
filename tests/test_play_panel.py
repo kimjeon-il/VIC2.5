@@ -113,6 +113,7 @@ def run(exe):
             assert panel.current["public_construction"]["commissioned_capacity"] == 31
             assert "준공" in panel.budget.get()
             run_industry(root, panel, save)
+            run_history(root, panel, Path(directory))
             run_elected_bill(root, panel, Path(directory) / "선출 의회 공포 대기.vic25")
             run_elected_bill(root, panel, Path(directory) / "교육 법안 공포 대기.vic25",
                              choice="A 교육 시범판")
@@ -857,6 +858,47 @@ def run_steel_construction(root, panel, save):
     panel._send(f"step {steps}")
     wait(root, panel)
     assert panel.current == result
+
+
+def run_history(root, panel, directory):
+    start = directory / "역사 시작.txt"
+    start.write_text("VIC25-HISTORY-1 PANEL_TEST 1836 1\n"
+                     "land 9 EAST BBB\nland 8 WEST AAA\nland 7 WEST AAA\n"
+                     "ocean 20 - -\ncontact 7 20 1\n", encoding="ascii")
+    save = directory / "선택한 국가.vic25"
+    panel.country.set(panel.HISTORY)
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(start)):
+        panel.new_button.invoke()
+        wait(root, panel)
+    assert panel.current["country"] is None
+    assert panel.history_choice.winfo_ismapped()
+    assert tuple(panel.history_choice["values"]) == ("AAA", "BBB")
+    assert panel.step_button.instate(["disabled"]) and panel.save_button.instate(["disabled"])
+    panel.history_choice.current(0)
+    panel.history_choice.event_generate("<<ComboboxSelected>>")
+    wait(root, panel)
+    assert panel.current["country"] == "AAA"
+    assert "육지 프로빈스: 2" in panel.budget.get() and "해안 프로빈스: 1" in panel.budget.get()
+    assert not panel.tariff_button.winfo_ismapped() and not panel.tax_button.winfo_ismapped()
+    panel.step_button.invoke()
+    wait(root, panel)
+    saved = panel.current
+    assert saved["date"] == "1836-01-02"
+    with patch.object(play_panel.filedialog, "asksaveasfilename", return_value=str(save)):
+        panel.save_button.invoke()
+        wait(root, panel)
+    start.unlink()
+    assert save.is_file()
+    panel.country.set("B")
+    panel.new_button.invoke()
+    wait(root, panel)
+    assert not panel.history_choice.winfo_ismapped()
+    assert panel.current["country"] == "B" and panel.tariff_button.winfo_ismapped()
+    panel.country.set(panel.HISTORY)
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.load_button.invoke()
+        wait(root, panel)
+    assert panel.current == saved and panel.history_choice.get() == "AAA"
 
 
 def run_industry(root, panel, tariff_save):

@@ -1,5 +1,5 @@
 #include "vic25/daily_snapshot.hpp"
-#include "vic25/history_start.hpp"
+#include "vic25/history_play.hpp"
 #include "vic25/p0_daily.hpp"
 #include "vic25/play_conflict_status.hpp"
 #include <array>
@@ -376,7 +376,8 @@ std::string_view trim(std::string_view value) {
 // A hard link publishes the complete checkpoint in one no-replace operation.
 // On a filesystem without hard-link support, fail safely instead of replacing
 // a path or leaving a partial destination. The native codec owns the bytes.
-void save_new(const daily::World& world,const fs::path& destination) {
+template<class WriteVerified>
+void publish_new_checkpoint(const fs::path& destination,WriteVerified write_verified) {
     if(destination.empty()||fs::exists(fs::symlink_status(destination)))
         throw std::invalid_argument("refusing to overwrite an existing save (or empty path)");
     auto stage=destination;
@@ -392,16 +393,40 @@ void save_new(const daily::World& world,const fs::path& destination) {
         fs::remove(stage,ignored);
     };
     try {
-        daily::SnapshotCodec::save(world,pending);
-        if(daily::SnapshotCodec::encode(daily::SnapshotCodec::load(pending))!=
-           daily::SnapshotCodec::encode(world))
-            throw std::runtime_error("save verification failed before publication");
+        write_verified(pending);
         fs::create_hard_link(pending,destination);
     }catch(...) {
         cleanup();
         throw;
     }
     cleanup();
+}
+
+void save_new(const daily::World& world,const fs::path& destination) {
+    publish_new_checkpoint(destination,[&](const fs::path& pending) {
+        daily::SnapshotCodec::save(world,pending);
+        if(daily::SnapshotCodec::encode(daily::SnapshotCodec::load(pending))!=
+           daily::SnapshotCodec::encode(world))
+            throw std::runtime_error("save verification failed before publication");
+    });
+}
+
+void save_history(const daily::World& world,std::string_view selected,const fs::path& destination) {
+    if(selected.empty()) {
+        save_new(world,destination);
+        return;
+    }
+    publish_new_checkpoint(destination,[&](const fs::path& pending) {
+        const auto bytes=history_play::encode(world,selected);
+        std::ofstream out(pending,std::ios::binary|std::ios::trunc);
+        out.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));
+        out.close();
+        if(!out)throw std::runtime_error("historical checkpoint write failed");
+        const auto check=history_play::load(pending);
+        if(check.selected!=selected||
+           daily::SnapshotCodec::encode(check.world)!=daily::SnapshotCodec::encode(world))
+            throw std::runtime_error("historical checkpoint verification failed before publication");
+    });
 }
 
 phasegh::World::Plan ore_tariff_order(const p0::DailyGame& game,const std::string& tag,
@@ -2077,10 +2102,37 @@ fs::path checkpoint_path_utf8(std::string_view value) {
     return fs::path(std::u8string(value.begin(),value.end()));
 }
 
+std::string history_panel_status(const p0::DailyGame& game,const std::string& selected,
+                                 const history_play::Countries& countries) {
+    const auto& world=game.world();
+    const auto date=world.date();
+    std::ostringstream out;
+    out<<"{\"country\":"<<(selected.empty()?"null":json_string(selected))
+       <<",\"date\":\""<<std::setfill('0')<<std::setw(4)<<date.year<<'-'<<std::setw(2)<<date.month
+       <<'-'<<std::setw(2)<<date.day<<"\",\"history\":{\"dataset\":"
+       <<json_string(world.engine().base().spatial().dataset_hash)<<",\"countries\":[";
+    bool comma=false;
+    for(const auto& [tag,territory]:countries) {
+        (void)territory;
+        if(comma)out<<',';
+        out<<json_string(tag);
+        comma=true;
+    }
+    out<<"],\"territory\":";
+    if(selected.empty())out<<"null";
+    else {
+        const auto& entry=countries.at(selected);
+        out<<"{\"land\":"<<entry.land<<",\"administrations\":"<<entry.administrations
+           <<",\"coastal\":"<<entry.coastal<<'}';
+    }
+    return out.str()+"}}";
+}
+
 void run_panel() {
     struct Session {
         std::string tag;
         p0::DailyGame game;
+        history_play::Countries history{};
     };
     std::unique_ptr<Session> session;
     std::string last_status="null";
@@ -2101,7 +2153,36 @@ void run_panel() {
             const auto [command,arg]=panel_token(trim(input));
             if(command=="quit"&&arg.empty())quit=true;
             else if(command=="status"&&arg.empty()) {}
-            else if(command=="inspect"&&(arg=="A"||arg=="B")) {
+            else if(command=="history-open"||command=="history-load") {
+                const auto path=checkpoint_path_utf8(arg);
+                auto opened=command=="history-open"?history_play::Opened{history_start::open(path),{}}:
+                    history_play::load(path);
+                auto countries=history_play::country_catalog(opened.world);
+                auto replacement=std::make_unique<Session>(Session{std::move(opened.selected),
+                    p0::DailyGame(std::move(opened.world),{}),std::move(countries)});
+                last_status=history_panel_status(replacement->game,replacement->tag,replacement->history);
+                session=std::move(replacement);
+            } else if(session&&!session->history.empty()&&command!="new"&&command!="load") {
+                if(command=="choose-country") {
+                    const std::string tag(arg);
+                    if(!session->history.contains(tag))throw std::invalid_argument("unknown historical country");
+                    last_status=history_panel_status(session->game,tag,session->history);
+                    session->tag=tag;
+                } else if(command=="step") {
+                    if(session->tag.empty())throw std::invalid_argument("choose a historical country first");
+                    const auto days=command_number(arg,1,366);
+                    try {
+                        for(int i=0;i<days;++i)session->game.advance_day();
+                    } catch(...) {
+                        last_status=history_panel_status(session->game,session->tag,session->history);
+                        throw;
+                    }
+                    last_status=history_panel_status(session->game,session->tag,session->history);
+                } else if(command=="save") {
+                    if(session->tag.empty())throw std::invalid_argument("choose a historical country first");
+                    save_history(session->game.world(),session->tag,checkpoint_path_utf8(arg));
+                } else throw std::invalid_argument("historical preview supports country selection, step and save only");
+            } else if(command=="inspect"&&(arg=="A"||arg=="B")) {
                 if(!session||!is_campaign_world(session->game.world()))
                     throw std::invalid_argument("inspection is available only in the shared campaign");
                 last_status=panel_status(session->game,std::string(arg));
@@ -2217,7 +2298,7 @@ void run_panel() {
                     order_trial_public_build(session->game,session->tag);
                 } else save_new(session->game.world(),checkpoint_path_utf8(arg));
             } else throw std::invalid_argument("unknown or malformed panel command");
-            if(session&&(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="public-build"||command=="public-build-budget"))
+            if(session&&session->history.empty()&&(command=="step"||command=="tariff"||command=="income-tax"||command=="spending-cap"||command=="public-build"||command=="public-build-budget"))
                 last_status=panel_status(session->game,session->tag);
             const auto reply="{\"ok\":true,\"status\":"+last_status+'}';
             std::cout<<reply<<std::endl;
@@ -2286,7 +2367,7 @@ void history_province(const daily::World& world,std::string_view argument) {
     std::cout<<'\n';
 }
 
-void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool history=false) {
+void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool history=false,std::string_view history_country={}) {
     const auto show_help=[&] {
         if(history)std::cout<<"Commands: status | province <ID> | water <ID> | step [days] | save <new path> | help | quit\n";
         else if(selected)trial_help(budget_world(game.world()));
@@ -2342,7 +2423,8 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool h
                 order_trial_public_build(game,*selected);
                 show_status();
             } else if(command=="save"&&!arg.empty()) {
-                save_new(game.world(),checkpoint_path_utf8(arg));
+                if(history)save_history(game.world(),history_country,checkpoint_path_utf8(arg));
+                else save_new(game.world(),checkpoint_path_utf8(arg));
                 std::cout<<"saved\n";
             } else throw std::invalid_argument("unknown or malformed command; type help");
         }catch(const std::exception& e) {
@@ -2392,10 +2474,9 @@ int main(int argc,char** argv) {
         if(history_file||history_save) {
             if((history_file&&history_save)||explicit_tutorial||explicit_trial||selected||resume)
                 throw std::invalid_argument("historical start, resume, tutorial and trial modes are mutually exclusive");
-            auto world=history_file?history_start::open(*history_file):load_panel_checkpoint(*history_save);
-            if(!history_start::matches_checkpoint(world))
-                throw std::invalid_argument("checkpoint does not belong to historical start");
-            run(p0::DailyGame(std::move(world),{}),{},true);
+            auto opened=history_file?history_play::Opened{history_start::open(*history_file),{}}:
+                history_play::load(*history_save);
+            run(p0::DailyGame(std::move(opened.world),{}),{},true,opened.selected);
             return 0;
         }
         if(explicit_trial!=selected.has_value()||(explicit_trial&&explicit_tutorial))
