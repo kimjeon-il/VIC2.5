@@ -3942,6 +3942,13 @@ public:
         return shipments_.at(id);
     }
     [[nodiscard]] bool conscription_enabled() const { return conscription_enabled_; }
+    // Setup for scenarios that intentionally have no modeled government.
+    // Their private wages still use the ordinary fallback settlement path.
+    void seed_legacy_income_tax(int ppm) {
+        ensure(stage_==-1&&commit_id_==0&&governments_.empty()&&
+               ppm>=0&&ppm<=1'000'000,"invalid legacy income tax seed");
+        income_tax_ppm_=ppm;
+    }
     [[nodiscard]] int income_tax_ppm() const { return income_tax_ppm_; } // legacy only
     [[nodiscard]] int income_tax_ppm(const std::string& country)const {
         ensure(governments_.contains(country),"unknown tax jurisdiction");

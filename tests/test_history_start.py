@@ -143,6 +143,53 @@ def local_food_market(work):
         rejected(run("--history", start), message)
 
 
+def local_food_mill(work):
+    start = work / "mill.txt"
+    header, *rows = FIXTURE.splitlines()
+    header = header.replace("HISTORY-1", "HISTORY-2")
+    food = "food-start 7 2 240 F SAMPLE-CULTURE SAMPLE-FAITH 0 5 0 100"
+    mill = "food-mill 7 1 372 31 2 1"
+    start.write_text("\n".join([header, mill, *rows, food]) + "\n", encoding="ascii")
+    save, direct, replay = [work / (name + ".sav") for name in ("mill-saved", "mill-direct", "mill-replay")]
+    batch = run("--panel-stdio", script="\n".join((
+        f"history-open {start}", "choose-country AAA", "step 1", f"save {save}",
+        "step 1", f"save {direct}", "step 1", "quit", "",
+    )))
+    success(batch)
+    opened, before, first, _, second, _, exhausted, _ = map(json.loads, batch.stdout.splitlines())
+    assert opened["ok"], opened
+    def stock(reply, grain, food_stock, household, seller):
+        assert reply["ok"], reply
+        status = reply["status"]
+        eco = status["history"]["economy"]
+        assert (eco["grain_stock"], eco["food_stock"], eco["household_cash"], eco["seller_cash"]) == (
+            grain, food_stock, household, seller), reply
+        assert eco["mills"] == 1 and eco["people"] == 2 and eco["covered_provinces"] == 1
+        assert household + seller == 100
+        assert "treasury" not in status
+    stock(before, 2, 0, 0, 100)
+    stock(first, 1, 1, 2, 98)
+    stock(second, 0, 2, 4, 96)
+    # Existing contracts still pay wages even on a day without production.
+    stock(exhausted, 0, 0, 6, 94)
+    start.unlink()
+    resumed = run("--panel-stdio", script=f"history-load {save}\nstep 1\nsave {replay}\nquit\n")
+    success(resumed)
+    assert list(map(json.loads, resumed.stdout.splitlines()))[:2] == [first, second]
+    assert replay.read_bytes() == direct.read_bytes()
+    cli = work / "mill-cli.sav"
+    success(run("--resume-history", save, script=f"step 1\nsave {cli}\nquit\n"))
+    assert cli.read_bytes() == direct.read_bytes()
+    for invalid, message in (
+        ([food, mill, mill], "duplicate food-mill"),
+        ([mill], "matching food-start"),
+        ([food, mill.replace("7 1", "7 3", 1)], "food-mill employment"),
+        ([food.replace(" 240 ", " 60 "), mill], "food-mill employment"),
+    ):
+        start.write_text("\n".join([header, *rows, *invalid]) + "\n", encoding="ascii")
+        rejected(run("--history", start), message)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -194,6 +241,7 @@ def main():
         rejected(run("--resume-history", tutorial), "does not belong")
         history_panel(start, work, tutorial, saved)
         local_food_market(work)
+        local_food_mill(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (

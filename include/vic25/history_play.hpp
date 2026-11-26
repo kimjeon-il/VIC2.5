@@ -27,23 +27,30 @@ inline Countries country_catalog(const daily::World& world) {
 }
 
 struct FoodOverview {
-    std::size_t covered_provinces{};
+    std::size_t covered_provinces{},mills{};
     phaseb::People people{};
     phasec::Money household_cash{},seller_cash{};
-    vic25::Quantity food_stock{};
+    vic25::Quantity food_stock{},grain_stock{};
 };
 
 // Not a national estimate: only explicitly opened provincial food markets.
 inline FoodOverview food_overview(const daily::World& world,const std::string& country) {
     const auto& geo=world.engine().base();
     const auto& core=geo.core().core();
-    const std::string good(history_start::food_good);
+    const auto& facilities=geo.core().state().site_archetypes;
     std::set<std::string> regions;
     FoodOverview result;
     for(const auto& id:geo.sovereign_provinces(country)) {
         const auto& region=geo.province(id).region;
         const auto seller=history_start::food_seller(id);
+        const bool mill=facilities.contains(history_start::food_mill(id));
+        const std::string good=mill?history_start::processed_food_good:history_start::food_good;
         if(!core.has_actor(seller)||!core.has_market(region,good))continue;
+        if(mill) {
+            ++result.mills;
+            result.grain_stock=phaseb::add_checked(result.grain_stock,
+                                                  core.stock(seller,region,history_start::grain_good));
+        }
         regions.insert(region);
         ++result.covered_provinces;
         result.food_stock=phaseb::add_checked(result.food_stock,core.stock(seller,region,good));

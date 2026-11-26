@@ -38,10 +38,16 @@ inline bool matches_checkpoint(const daily::World& world) {
            !world.engine().base().spatial().provinces.empty();
 }
 
-inline constexpr std::string_view food_good="food";
+inline constexpr const char* food_good="food";
+inline constexpr const char* processed_food_good="groceries";
+inline constexpr const char* grain_good="grain";
 
 inline std::string food_seller(phasee::Id province) {
     return "history-food-seller-"+std::to_string(province);
+}
+
+inline std::string food_mill(phasee::Id province) {
+    return "history-food-mill-"+std::to_string(province);
 }
 
 struct FoodStart {
@@ -84,10 +90,35 @@ inline FoodStart parse_food_start(std::istringstream& row) {
             start_value(stock,0,limit,"invalid food-start stock")};
 }
 
+struct MillStart {
+    phaseb::People workers{};
+    phasec::Money wage{},grain_price{};
+    Quantity monthly_capacity{},grain_stock{};
+};
+
+inline MillStart parse_mill_start(std::istringstream& row) {
+    std::string workers,wage,capacity,grain,quote,extra;
+    if(!(row>>workers>>wage>>capacity>>grain>>quote)||row>>extra)
+        throw std::invalid_argument("malformed food-mill record");
+    constexpr std::int64_t limit=1'000'000'000;
+    return {start_value(workers,1,limit,"invalid food-mill workers"),
+            start_value(wage,1,limit,"invalid food-mill wage"),
+            start_value(quote,1,limit,"invalid food-mill grain price"),
+            start_value(capacity,1,limit,"invalid food-mill monthly capacity"),
+            start_value(grain,0,limit,"invalid food-mill grain stock")};
+}
+
 inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,FoodStart>& starts,
-                             std::int64_t month) {
-    auto& core=world.seed_core().seed_core();
+        const std::map<phasee::Id,MillStart>& mills,std::int64_t month) {
+    auto& industry=world.seed_core();
+    auto& core=industry.seed_core();
     auto& pop=core.seed_population();
+    if(!mills.empty()) {
+        industry.seed_standard_industries();
+        // Without a modeled public authority, this pilot charges no
+        // withholding. Do not implicitly reuse the legacy 10% tax default.
+        core.seed_legacy_income_tax(0);
+    }
     for(const auto& [id,seed]:starts) {
         const auto& region=world.province(id).region;
         if(seed.age_months>month-12)
@@ -98,13 +129,35 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
         const auto economy=pop.economic_profile({region,"unassigned","unassigned","unassigned",
                                                   pop.default_education()});
         const auto home=pop.household_profile({region,"scenario-pool","shared",0});
-        pop.seed_population(demographic,economy,home,seed.people);
+        const auto slice=pop.seed_population(demographic,economy,home,seed.people);
         core.seed_actor("HH:"+std::to_string(home),seed.household_cash);
         const auto seller=food_seller(id);
-        const std::string good(food_good);
+        const auto mill=mills.find(id);
+        const std::string good=mill==mills.end()?food_good:processed_food_good;
         core.seed_actor(seller,seed.seller_cash);
         core.seed_market(region,good,seed.price,seed.price,seed.price);
         if(seed.stock>0)core.seed_stock(seller,region,good,seed.stock);
+        if(mill==mills.end())continue;
+
+        const auto& work=mill->second;
+        // Normal no-government payroll requires a distinct country actor.
+        // It has zero initial funds, and is not registered as a treasury.
+        const auto& country=core.sovereignty(region);
+        if(!core.has_actor(country))core.seed_actor(country,0);
+        const auto site=food_mill(id);
+        industry.seed_building_facility(site,seller,region,work.monthly_capacity,
+                                       "vic3_115.urban.food_industries");
+        core.seed_market(region,grain_good,work.grain_price,work.grain_price,work.grain_price);
+        if(work.grain_stock>0)core.seed_stock(seller,region,grain_good,work.grain_stock);
+        phased::IndustryRecipe recipe;
+        recipe.id=site;
+        recipe.site=site;
+        recipe.industry_class="MANU";
+        recipe.inputs={{grain_good,1}};
+        recipe.outputs={{processed_food_good,3}};
+        recipe.workers_per_batch=1;
+        industry.seed_building_recipe(std::move(recipe));
+        pop.hire(slice,work.workers,seller,"worker",work.wage,{});
     }
 }
 
@@ -143,6 +196,7 @@ inline daily::World open(const std::filesystem::path& path) {
     std::map<std::string,std::string> owners;
     std::vector<ContactRow> rows;
     std::map<Id,FoodStart> food_starts;
+    std::map<Id,MillStart> mills;
     while(std::getline(input,line)) {
         std::istringstream row(std::move(line));
         row.imbue(std::locale::classic());
@@ -155,6 +209,13 @@ inline daily::World open(const std::filesystem::path& path) {
             auto start=parse_food_start(row);
             if(!food_starts.emplace(id,std::move(start)).second)
                 throw std::invalid_argument("duplicate food-start province");
+            continue;
+        }
+        if(type=="food-mill") {
+            if(!economy_allowed)throw std::invalid_argument("food-mill requires VIC25-HISTORY-2");
+            const auto mill=parse_mill_start(row);
+            if(!mills.emplace(id,mill).second)
+                throw std::invalid_argument("duplicate food-mill province");
             continue;
         }
         if(!(row>>a>>b)||row>>extra)
@@ -180,6 +241,16 @@ inline daily::World open(const std::filesystem::path& path) {
             throw std::invalid_argument("duplicate province ID in historical start");
     }
     if(owners.empty())throw std::invalid_argument("historical start has no land provinces");
+    for(const auto& [id,mill]:mills) {
+        const auto start=food_starts.find(id);
+        if(start==food_starts.end())
+            throw std::invalid_argument("food-mill requires a matching food-start");
+        const phaseb::JobRequirements job;
+        const auto& seed=start->second;
+        if(mill.workers>seed.people||seed.age_months<job.minimum_age_months||
+           seed.age_months>job.maximum_age_months)
+            throw std::invalid_argument("invalid food-mill employment");
+    }
     if(economy_allowed&&food_starts.empty())
         throw std::invalid_argument("VIC25-HISTORY-2 requires a food-start record");
     for(const auto& [id,start]:food_starts) {
@@ -221,7 +292,7 @@ inline daily::World open(const std::filesystem::path& path) {
     for(const auto& contact:contacts)
         if(contact.a.kind==geo::Kind::ocean&&contact.b.kind==geo::Kind::ocean)
             world.seed_ocean_border(contact.a.id,contact.b.id);
-    if(!food_starts.empty())seed_food_starts(world,food_starts,daily::legacy_month(date));
+    if(!food_starts.empty())seed_food_starts(world,food_starts,mills,daily::legacy_month(date));
     return daily::World::adopt(std::move(engine),0,std::string(origin_prefix)+dataset);
 }
 

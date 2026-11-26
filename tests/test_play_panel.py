@@ -865,7 +865,8 @@ def run_history(root, panel, directory):
     start.write_text("VIC25-HISTORY-2 PANEL_TEST 1836 1\n"
                      "land 9 EAST BBB\nland 8 WEST AAA\nland 7 WEST AAA\n"
                      "ocean 20 - -\ncontact 7 20 1\n"
-                     "food-start 7 2 240 F SAMPLE-CULTURE SAMPLE-FAITH 50 5 9 3\n",
+                     "food-start 7 2 240 F SAMPLE-CULTURE SAMPLE-FAITH 0 5 0 100\n"
+                     "food-mill 7 1 372 31 2 1\n",
                      encoding="ascii")
     save = directory / "선택한 국가.vic25"
     panel.country.set(panel.HISTORY)
@@ -882,13 +883,15 @@ def run_history(root, panel, directory):
     assert panel.current["country"] == "AAA"
     assert "육지 프로빈스: 2" in panel.budget.get() and "해안 프로빈스: 1" in panel.budget.get()
     assert "자료가 있는 프로빈스: 1/2" in panel.market.get()
-    assert "식량 재고: 9" in panel.market.get() and "가계 잔액: 50" in panel.market.get()
+    assert "식량 재고: 0" in panel.market.get() and "가계 잔액: 0" in panel.market.get()
+    assert "식량 작업장: 1곳" in panel.market.get() and "원료 곡물: 2" in panel.market.get()
     assert not panel.tariff_button.winfo_ismapped() and not panel.tax_button.winfo_ismapped()
     panel.step_button.invoke()
     wait(root, panel)
     saved = panel.current
     assert saved["date"] == "1836-01-02"
-    assert "식량 재고: 7" in panel.market.get() and "가계 잔액: 40" in panel.market.get()
+    assert "식량 재고: 1" in panel.market.get() and "가계 잔액: 2" in panel.market.get()
+    assert "판매자 잔액: 98" in panel.market.get() and "원료 곡물: 1" in panel.market.get()
     panel.history_choice.current(1)
     panel.history_choice.event_generate("<<ComboboxSelected>>")
     wait(root, panel)
