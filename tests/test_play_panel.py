@@ -118,6 +118,7 @@ def run(exe):
             run_bundled_trial(root, panel, Path(directory))
             run_variable_food_prices(root, panel, Path(directory))
             run_staffed_grain_farm(root, panel, Path(directory))
+            run_grain_tariff(root, panel, Path(directory))
             run_elected_bill(root, panel, Path(directory) / "선출 의회 공포 대기.vic25")
             run_elected_bill(root, panel, Path(directory) / "교육 법안 공포 대기.vic25",
                              choice="A 교육 시범판")
@@ -1050,6 +1051,40 @@ def run_staffed_grain_farm(root, panel, directory):
     panel._send("step 3")
     wait(root, panel)
     assert "운송 중:" not in panel.market.get() and "식량 재고: 1" in panel.market.get()
+
+
+def run_grain_tariff(root, panel, directory):
+    bundled = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-grain-and-tax.txt"
+    start = directory / "국경 곡물.txt"
+    text = bundled.read_text(encoding="ascii").replace(
+        "land 22 FARM-DISTRICT MILL-LAND", "land 22 FARM-DISTRICT FIELD-LAND").replace(
+        "grain-supply 22 24 3", "grain-supply 22 24 6").replace(
+        "SAMPLE-MINISTER 50 10", "SAMPLE-MINISTER 50 0")
+    start.write_text(text + "executive-start FIELD-LAND FIELD-HEAD FIELD-MINISTER 20 0\n"
+                     "grain-tariff MILL-LAND 50\n", encoding="ascii")
+    panel.country.set(panel.HISTORY)
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(start)):
+        panel.new_button.invoke()
+        wait(root, panel)
+    assert tuple(panel.history_choice["values"]) == ("COAST-LAND", "FIELD-LAND", "MILL-LAND")
+    panel.history_choice.current(1)
+    panel.history_choice.event_generate("<<ComboboxSelected>>")
+    wait(root, panel)
+    assert not panel.tariff_button.winfo_ismapped() and "국고: 20" in panel.budget.get()
+    panel.history_choice.current(2)
+    panel.history_choice.event_generate("<<ComboboxSelected>>")
+    wait(root, panel)
+    assert panel.tariff_button.winfo_ismapped() and "곡물 수입 관세율: 50%" in panel.policy.get()
+    panel._send("step 3")
+    wait(root, panel)
+    assert "누적 관세 수입: 3" in panel.policy.get() and "국고: 53" in panel.budget.get()
+    panel.tariff.set("100")
+    panel.tariff_button.invoke()
+    wait(root, panel)
+    assert "곡물 수입 관세율: 100%" in panel.policy.get() and "운송 중: 1" in panel.market.get()
+    panel._send("step 2")
+    wait(root, panel)
+    assert "식량 재고: 1" in panel.market.get() and "누적 관세 수입: 3" in panel.policy.get()
 
 
 def run_industry(root, panel, tariff_save):
