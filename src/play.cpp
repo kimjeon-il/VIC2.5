@@ -2137,9 +2137,13 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
     const auto food=selected.empty()?history_play::FoodOverview{}:
         history_play::food_overview(world,selected);
     if(food.covered_provinces==0)out<<"null";
-    else out<<"{\"covered_provinces\":"<<food.covered_provinces
-            <<",\"people\":"<<food.people<<",\"household_cash\":"<<food.household_cash
-            <<",\"food_stock\":"<<food.food_stock<<",\"seller_cash\":"<<food.seller_cash<<'}';
+    else {
+        out<<"{\"covered_provinces\":"<<food.covered_provinces
+           <<",\"people\":"<<food.people<<",\"household_cash\":"<<food.household_cash
+           <<",\"food_stock\":"<<food.food_stock<<",\"seller_cash\":"<<food.seller_cash;
+        if(food.mills>0)out<<",\"mills\":"<<food.mills<<",\"grain_stock\":"<<food.grain_stock;
+        out<<'}';
+    }
     return out.str()+"}}";
 }
 

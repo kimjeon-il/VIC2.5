@@ -486,13 +486,18 @@ class PlayPanel:
                         if territory is not None else "목록에서 미리 볼 국가를 선택하세요.")
         self.policy.set(f"자료 ID: {history['dataset']}")
         economy = history["economy"]
-        self.market.set((f"자료가 있는 프로빈스: {economy['covered_provinces']}/{territory['land']}\n"
-                         f"입력 지역의 인구: {economy['people']}명\n"
-                         f"식량 재고: {economy['food_stock']}\n"
-                         f"가계 잔액: {economy['household_cash']} · 판매자 잔액: {economy['seller_cash']}")
-                        if economy is not None else "경제 자료 없음. 시작 파일에 입력된 지역에만 표시됩니다.")
+        if economy is None:
+            market = "경제 자료 없음. 시작 파일에 입력된 지역에만 표시됩니다."
+        else:
+            market = (f"자료가 있는 프로빈스: {economy['covered_provinces']}/{territory['land']}\n"
+                      f"입력 지역의 인구: {economy['people']}명\n"
+                      f"식량 재고: {economy['food_stock']}\n"
+                      f"가계 잔액: {economy['household_cash']} · 판매자 잔액: {economy['seller_cash']}")
+            if economy.get("mills"):
+                market += f"\n식량 작업장: {economy['mills']}곳 · 원료 곡물: {economy['grain_stock']}"
+        self.market.set(market)
         self.diplomacy.set("국고·정치·외교·운송은 아직 연결하지 않았습니다. "
-                           "식량 구매는 자료가 있는 지역에서 날짜를 진행하면 자동으로 처리됩니다.")
+                           "데이터가 있는 지역의 식량 생산·임금·구매는 날짜를 진행하면 자동으로 처리됩니다.")
         for card, title in zip(self.cards, ("선택 국가의 영토", "시작 자료", "지역 식량 시장", "미리보기 범위")):
             card.configure(text=title)
         self.current = status
