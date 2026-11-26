@@ -468,6 +468,77 @@ def staffed_grain_farm(work):
         rejected(run("--history", start), message)
 
 
+def cross_border_grain(work):
+    start = work / "trade.txt"
+    sample = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-grain-and-tax.txt"
+    base = sample.read_text(encoding="ascii")
+    base = base.replace("land 22 FARM-DISTRICT MILL-LAND", "land 22 FARM-DISTRICT FIELD-LAND")
+    base = base.replace("grain-supply 22 24 3", "grain-supply 22 24 6")
+    base = base.replace("SAMPLE-MINISTER 50 10", "SAMPLE-MINISTER 50 0")
+    base += "executive-start FIELD-LAND FIELD-HEAD FIELD-MINISTER 20 0\n"
+    assessed = base + "grain-tariff MILL-LAND 50\n"
+    save = work / "customs-paid.sav"
+
+    def panel(*commands):
+        result = run("--panel-stdio", script="\n".join((*commands, "quit", "")))
+        success(result)
+        return list(map(json.loads, result.stdout.splitlines()))[:-1]
+
+    def state(reply):
+        assert reply["ok"], reply
+        return reply["status"]
+
+    def food(status):
+        return status["history"]["economy"]
+
+    prefix = (f"history-open {start}", "choose-country MILL-LAND")
+    start.write_text(assessed, encoding="ascii")
+    opened, opening, departure, _, raised, arrived, stalled, exporter, forbidden = panel(
+        *prefix, "step 3", f"save {save}", "tariff 100", "step 2", "step 3",
+        "choose-country FIELD-LAND", "tariff 50")
+    state(opened)
+    opening, departure, raised, arrived, stalled, exporter = map(state, (
+        opening, departure, raised, arrived, stalled, exporter))
+    assert opening["grain_trade"] == {"tariff_ppm": 500_000, "duties_paid": 0}
+    assert departure["grain_trade"]["duties_paid"] == 3
+    assert departure["treasury"] == 53 and departure["revenue"] == 3
+    assert food(departure)["grain_in_transit"] == 1
+    assert raised["grain_trade"] == {"tariff_ppm": 1_000_000, "duties_paid": 3}
+    assert food(raised)["grain_in_transit"] == 1
+    assert food(arrived)["food_stock"] == 1 and arrived["grain_trade"]["duties_paid"] == 3
+    assert food(stalled)["food_stock"] == 0 and food(stalled).get("grain_in_transit", 0) == 0
+    assert stalled["grain_trade"]["duties_paid"] == 3
+    assert exporter["treasury"] == 20 and "grain_trade" not in exporter
+    assert not forbidden["ok"] and forbidden["status"] == exporter
+    start.unlink()
+    reloaded, same, same_arrival = map(state, panel(f"history-load {save}", "tariff 100", "step 2"))
+    assert (reloaded, same, same_arrival) == (departure, raised, arrived)
+
+    start.write_text(base + "grain-tariff MILL-LAND 100\n", encoding="ascii")
+    *_, blocked = panel(*prefix, "step 6")
+    blocked = state(blocked)
+    assert blocked["grain_trade"]["duties_paid"] == 0 and blocked["treasury"] == 50
+    assert food(blocked)["food_stock"] == 0 and food(blocked).get("grain_in_transit", 0) == 0
+    start.write_text(base, encoding="ascii")  # Open trade without an editable duty rule.
+    *_, no_duty, open_trade = panel(*prefix, "step 3", "step 3")
+    no_duty, open_trade = state(no_duty), state(open_trade)
+    assert food(no_duty)["seller_cash"] - food(departure)["seller_cash"] == 3
+    assert food(no_duty)["household_cash"] == food(departure)["household_cash"]
+    assert "grain_trade" not in open_trade and food(open_trade)["food_stock"] == 1
+    assert open_trade["treasury"] == 50
+
+    for text, error in (
+        (assessed.replace("executive-start FIELD-LAND FIELD-HEAD FIELD-MINISTER 20 0\n", ""),
+         "cross-border grain-road requires both governments"),
+        (assessed.replace("grain-tariff MILL-LAND 50", "grain-tariff FIELD-LAND 50"),
+         "grain-tariff requires a cross-border grain import"),
+        (assessed + "grain-tariff MILL-LAND 20\n", "duplicate grain-tariff"),
+        (assessed.replace("MILL-LAND 50\n", "MILL-LAND 101\n"), "invalid grain-tariff percent"),
+    ):
+        start.write_text(text, encoding="ascii")
+        rejected(run("--history", start), error)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -525,6 +596,7 @@ def main():
         bundled_trial(work)
         staple_price_shock(work)
         staffed_grain_farm(work)
+        cross_border_grain(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (

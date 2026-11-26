@@ -354,6 +354,7 @@ inline daily::World open(const std::filesystem::path& path) {
     std::map<Id,FoodStart> food_starts;
     std::map<Id,MillStart> mills;
     std::map<std::string,ExecutiveStart> executives;
+    std::map<std::string,int> grain_tariffs;
     std::map<Id,GrainSupply> supplies;
     std::map<Id,FarmStart> farms;
     std::map<std::pair<Id,Id>,GrainRoad> roads;
@@ -368,6 +369,15 @@ inline daily::World open(const std::filesystem::path& path) {
             if(!identifier(id_text))throw std::invalid_argument("invalid executive-start country");
             if(!executives.emplace(id_text,parse_executive_start(row)).second)
                 throw std::invalid_argument("duplicate executive-start country");
+            continue;
+        }
+        if(type=="grain-tariff") {
+            if(!economy_allowed)throw std::invalid_argument("grain-tariff requires VIC25-HISTORY-2");
+            if(!identifier(id_text)||!(row>>a)||row>>extra)
+                throw std::invalid_argument("malformed grain-tariff record");
+            const auto ppm=static_cast<int>(start_value(a,0,100,"invalid grain-tariff percent"))*10'000;
+            if(!grain_tariffs.emplace(id_text,ppm).second)
+                throw std::invalid_argument("duplicate grain-tariff country");
             continue;
         }
         const Id id=positive(id_text,"invalid province ID");
@@ -480,13 +490,24 @@ inline daily::World open(const std::filesystem::path& path) {
         if(node==nodes.end()||node->second.kind!=geo::Kind::land||mills.contains(id))
             throw std::invalid_argument("grain-supply requires an existing land province without a food mill");
     }
+    std::set<std::string> grain_importers;
     for(const auto& [pair,road]:roads) {
         (void)road;
         const auto [source,dest]=pair;
         if(!supplies.contains(source)||!mills.contains(dest))
             throw std::invalid_argument("grain-road requires a grain supplier and food mill");
-        if(nodes.at(source).country!=nodes.at(dest).country)
-            throw std::invalid_argument("grain-road currently supports domestic service only");
+        const auto& exporter=nodes.at(source).country;
+        const auto& importer=nodes.at(dest).country;
+        if(exporter!=importer) {
+            if(!executives.contains(exporter)||!executives.contains(importer))
+                throw std::invalid_argument("cross-border grain-road requires both governments");
+            grain_importers.insert(importer);
+        }
+    }
+    for(const auto& [country,ppm]:grain_tariffs) {
+        (void)ppm;
+        if(!grain_importers.contains(country))
+            throw std::invalid_argument("grain-tariff requires a cross-border grain import");
     }
     std::vector<geo::Contact> contacts;
     contacts.reserve(rows.size());
@@ -532,6 +553,8 @@ inline daily::World open(const std::filesystem::path& path) {
         seed_food_starts(world,food_starts,mills,farms,!executives.empty(),daily::legacy_month(date));
     if(!supplies.empty())
         seed_grain_freight(engine,supplies,farms,roads,daily::legacy_month(date));
+    for(const auto& [country,ppm]:grain_tariffs)
+        engine.seed_tariff(country,grain_good,ppm);
     return daily::World::adopt(std::move(engine),0,std::string(origin_prefix)+dataset);
 }
 

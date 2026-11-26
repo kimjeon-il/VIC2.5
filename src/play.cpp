@@ -429,20 +429,20 @@ void save_history(const daily::World& world,std::string_view selected,const fs::
     });
 }
 
-phasegh::World::Plan ore_tariff_order(const p0::DailyGame& game,const std::string& tag,
-        int percent,std::string_view command_prefix) {
+phasegh::World::Plan tariff_order(const p0::DailyGame& game,const std::string& tag,
+        std::string good,int percent,std::string_view command_prefix) {
     const auto ppm=percent*10'000;
     const auto key=std::string(command_prefix)+std::to_string(game.world().day_index());
     phasegh::World::Plan order;
-    order[0].push_back([tag,ppm,key](phasegh::Stage& stage){
-        stage.adopt_tariff_daily(key,tag,trial_good,ppm,
+    order[0].push_back([tag,good=std::move(good),ppm,key](phasegh::Stage& stage){
+        stage.adopt_tariff_daily(key,tag,good,ppm,
             stage.phase_c().government(tag).prime_minister);
     });
     return order;
 }
 
 void set_trial_tariff(p0::DailyGame& game,const std::string& tag,int percent) {
-    game.advance_day(ore_tariff_order(game,tag,percent,"TRIAL-TARIFF:"));
+    game.advance_day(tariff_order(game,tag,trial_good,percent,"TRIAL-TARIFF:"));
 }
 
 void propose_direct_income_tax(p0::DailyGame& game,const std::string& tag,int percent) {
@@ -2169,6 +2169,16 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
            <<",\"pending_income_tax_ppm\":"<<(pending?std::to_string(pending->second):"null")
            <<",\"pending_income_tax_date\":"<<(pending?json_string(month_opening(pending->first)):"null");
     }
+    const auto& tariffs=world.engine().diplomacy().tariffs;
+    const auto grain=tariffs.find({selected,history_start::grain_good});
+    if(history_direct_tax(core,selected)&&grain!=tariffs.end()) {
+        phasec::Money paid=0;
+        for(const auto& receipt:world.engine().commerce().customs)
+            if(receipt.importer==selected&&receipt.good==history_start::grain_good)
+                paid=phaseb::add_checked(paid,receipt.paid);
+        out<<",\"grain_trade\":{\"tariff_ppm\":"<<grain->second.ppm
+           <<",\"duties_paid\":"<<paid<<'}';
+    }
     return out.str()+"}";
 }
 
@@ -2221,6 +2231,15 @@ void run_panel() {
                         last_status=history_panel_status(session->game,session->tag,session->history);
                         throw;
                     }
+                    last_status=history_panel_status(session->game,session->tag,session->history);
+                } else if(command=="tariff") {
+                    const auto& engine=session->game.world().engine();
+                    const auto& core=engine.base().core().core();
+                    if(!history_direct_tax(core,session->tag)||
+                       !engine.diplomacy().tariffs.contains({session->tag,history_start::grain_good}))
+                        throw std::invalid_argument("no editable grain tariff for the selected country");
+                    session->game.advance_day(tariff_order(session->game,session->tag,
+                        history_start::grain_good,command_number(arg,0,100),"HISTORY-GRAIN-TARIFF:"));
                     last_status=history_panel_status(session->game,session->tag,session->history);
                 } else if(command=="income-tax") {
                     const auto& core=session->game.world().engine().base().core().core();
@@ -2288,7 +2307,7 @@ void run_panel() {
                 } else if(command=="tariff"&&is_ore_tariff_campaign(session->game.world())) {
                     if(session->tag!="A")
                         throw std::invalid_argument("the inspected peer is read-only");
-                    advance_panel_day(session->game,ore_tariff_order(session->game,session->tag,
+                    advance_panel_day(session->game,tariff_order(session->game,session->tag,trial_good,
                         command_number(arg,0,100),"CAMPAIGN-ORE-TARIFF:"));
                 } else if(command=="tariff") {
                     if(is_law_world(session->game.world()))

@@ -225,11 +225,13 @@ class PlayPanel:
         campaign_party = self._selected_bill_party(bill) if (campaign_tax or spending_vote) and bill else None
         campaign_tariff = self._campaign_tariff_scope(self.current)
         can_set_tariff = campaign_tariff and self.current["campaign_ore_tariff_allowed"]
-        self.tariff_label.configure(text="광석 수입 관세율(%):" if campaign_tariff else "수입 관세율(%):")
+        history_tariff = history and "grain_trade" in self.current
+        self.tariff_label.configure(text="곡물 수입 관세율(%):" if history_tariff else
+                                    "광석 수입 관세율(%):" if campaign_tariff else "수입 관세율(%):")
         for widget in (self.tariff_label, self.tariff_button, self.tariff_entry):
-            enabled = ready and self.current and (direct_actions or can_set_tariff)
+            enabled = ready and self.current and (direct_actions or can_set_tariff or history_tariff)
             widget.state(["!disabled"] if enabled else ["disabled"])
-            if direct_actions or campaign_tariff:
+            if direct_actions or campaign_tariff or history_tariff:
                 # Row 0 is the elected party picker in the shared campaign.
                 widget.grid(row=4 if campaign_tariff else 0, pady=(4, 0) if campaign_tariff else 0)
             else:
@@ -495,6 +497,10 @@ class PlayPanel:
                 policy += (f"\n소득세 예약: {self._percent(pending)}% "
                            f"({status['pending_income_tax_date']} 시행)")
             self.tax.set(self._percent(status["income_tax_ppm"] if pending is None else pending))
+        if grain_trade := status.get("grain_trade"):
+            tariff = self._percent(grain_trade["tariff_ppm"])
+            self.tariff.set(tariff)
+            policy += f"\n곡물 수입 관세율: {tariff}% · 누적 관세 수입: {grain_trade['duties_paid']}"
         self.policy.set(policy)
         economy = history["economy"]
         if economy is None:
@@ -787,6 +793,8 @@ class PlayPanel:
     def set_tariff(self):
         if (not self.current or self._industry(self.current) or self._legislature(self.current)
                 or self._expansion(self.current) or self._staples(self.current)):
+            return
+        if self._history(self.current) and "grain_trade" not in self.current:
             return
         shared = self._campaign(self.current)
         if shared and (not self._campaign_tariff_scope(self.current)
