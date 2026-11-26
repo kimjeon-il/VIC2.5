@@ -190,6 +190,73 @@ def local_food_mill(work):
         rejected(run("--history", start), message)
 
 
+def executive_tax(work):
+    start = work / "executive.txt"
+    header, *rows = FIXTURE.splitlines()
+    header = header.replace("HISTORY-1", "HISTORY-2")
+    economy = ["food-start 7 2 240 F SAMPLE-CULTURE SAMPLE-FAITH 0 5 0 10000",
+               "food-mill 7 1 1922 31 100 1"]
+    office = "executive-start AAA SAMPLE-HEAD SAMPLE-MINISTER 50 10"
+    rows.append("land 39 OTHER CCC")
+    other_office = "executive-start CCC OTHER-HEAD OTHER-MINISTER 25 0"
+
+    def write(*records):
+        start.write_text("\n".join([header, *rows, *records]) + "\n", encoding="ascii")
+    write(*economy, office, other_office)
+    pending = work / "tax-pending.sav"
+    direct = work / "tax-direct.sav"
+    replay = work / "tax-replay.sav"
+
+    def panel(*commands):
+        result = run("--panel-stdio", script="\n".join((*commands, "quit", "")))
+        success(result)
+        return list(map(json.loads, result.stdout.splitlines()))[:-1]
+
+    prefix = (f"history-open {start}", "choose-country BBB", "income-tax 50",
+              "choose-country AAA", "step 29")
+    opened, peer, unavailable, selected, january, proposed, _, boundary, changed, _ = panel(
+        *prefix, "income-tax 50", f"save {pending}", "step 1", "step 1", f"save {direct}")
+    assert opened["ok"], opened
+    assert peer["ok"] and "treasury" not in peer["status"]
+    assert not unavailable["ok"] and unavailable["status"] == peer["status"]
+    assert selected["status"]["treasury"] == 50 and selected["status"]["income_tax_ppm"] == 100_000
+    assert january["status"]["date"] == "1836-01-30"
+    assert proposed["status"]["date"] == "1836-01-31"
+    assert proposed["status"]["income_tax_ppm"] == 100_000
+    assert proposed["status"]["pending_income_tax_ppm"] == 500_000
+    assert proposed["status"]["pending_income_tax_date"] == "1836-02-01"
+    assert boundary["status"]["date"] == "1836-02-01"
+    assert boundary["status"]["income_tax_ppm"] == 100_000
+    assert changed["status"]["date"] == "1836-02-02"
+    assert changed["status"]["income_tax_ppm"] == 500_000
+    assert changed["status"]["pending_income_tax_ppm"] is None
+    separate = panel(*prefix, "income-tax 50", "step 2", "choose-country CCC")[-1]["status"]
+    assert separate["treasury"] == 25 and separate["revenue"] == 0
+    assert separate["income_tax_ppm"] == 0 and separate["pending_income_tax_ppm"] is None
+    control = panel(*prefix, "step 3")[-1]["status"]
+    actual = changed["status"]
+    assert control["date"] == actual["date"] and control["income_tax_ppm"] == 100_000
+    extra_tax = actual["treasury"] - control["treasury"]
+    assert extra_tax > 0 and actual["revenue"] - control["revenue"] == extra_tax
+    actual_food, control_food = actual["history"]["economy"], control["history"]["economy"]
+    assert control_food["household_cash"] - actual_food["household_cash"] == extra_tax
+    assert control_food["food_stock"] == actual_food["food_stock"]
+    assert actual["treasury"] + actual_food["household_cash"] + actual_food["seller_cash"] == 10050
+    start.unlink()
+    loaded, same, _ = panel(f"history-load {pending}", "step 2", f"save {replay}")
+    assert loaded == proposed and same == changed
+    assert replay.read_bytes() == direct.read_bytes()
+
+    for offices, message in (
+        ([office, office], "duplicate executive-start"),
+        ([office.replace("AAA", "ZZZ")], "executive-start requires a country with land"),
+        ([office.replace("AAA", "BBB")], "food-mill requires a modeled government"),
+        ([office.replace("50 10", "50 101")], "invalid executive-start income tax"),
+    ):
+        write(*economy, *offices)
+        rejected(run("--history", start), message)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -242,6 +309,7 @@ def main():
         history_panel(start, work, tutorial, saved)
         local_food_market(work)
         local_food_mill(work)
+        executive_tax(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (

@@ -234,7 +234,8 @@ class PlayPanel:
                 widget.grid(row=4 if campaign_tariff else 0, pady=(4, 0) if campaign_tariff else 0)
             else:
                 widget.grid_remove()
-        direct_tax = (ready and self.current and direct_actions
+        history_tax = history and "income_tax_ppm" in self.current
+        direct_tax = (ready and self.current and (direct_actions or history_tax)
                       and self.current["pending_income_tax_ppm"] is None)
         self.tax_button.configure(text="소득세 표결 후 하루 진행" if campaign
                                   else "소득세 제출 후 하루 진행")
@@ -242,7 +243,7 @@ class PlayPanel:
             can_edit = (campaign_tax and ready and (campaign_party or widget is not self.tax_button)
                         if campaign else direct_tax)
             widget.state(["!disabled"] if can_edit else ["disabled"])
-            if direct_actions or can_campaign_act:
+            if direct_actions or can_campaign_act or history_tax:
                 widget.grid()
             else:
                 widget.grid_remove()
@@ -484,7 +485,17 @@ class PlayPanel:
                          f"행정구역: {territory['administrations']}\n"
                          f"해안 프로빈스: {territory['coastal']}")
                         if territory is not None else "목록에서 미리 볼 국가를 선택하세요.")
-        self.policy.set(f"자료 ID: {history['dataset']}")
+        policy = f"자료 ID: {history['dataset']}"
+        has_fiscal = "income_tax_ppm" in status
+        if has_fiscal:
+            self.budget.set(self.budget.get() + f"\n국고: {status['treasury']} · 누적 세입: {status['revenue']}")
+            pending = status["pending_income_tax_ppm"]
+            policy += f"\n소득세율: {self._percent(status['income_tax_ppm'])}%"
+            if pending is not None:
+                policy += (f"\n소득세 예약: {self._percent(pending)}% "
+                           f"({status['pending_income_tax_date']} 시행)")
+            self.tax.set(self._percent(status["income_tax_ppm"] if pending is None else pending))
+        self.policy.set(policy)
         economy = history["economy"]
         if economy is None:
             market = "경제 자료 없음. 시작 파일에 입력된 지역에만 표시됩니다."
@@ -496,9 +507,13 @@ class PlayPanel:
             if economy.get("mills"):
                 market += f"\n식량 작업장: {economy['mills']}곳 · 원료 곡물: {economy['grain_stock']}"
         self.market.set(market)
-        self.diplomacy.set("국고·정치·외교·운송은 아직 연결하지 않았습니다. "
-                           "데이터가 있는 지역의 식량 생산·임금·구매는 날짜를 진행하면 자동으로 처리됩니다.")
-        for card, title in zip(self.cards, ("선택 국가의 영토", "시작 자료", "지역 식량 시장", "미리보기 범위")):
+        scope = ("입력된 시험용 정부에서만 소득세를 바꿀 수 있습니다. "
+                 "새 세율은 다음 달 첫날 처리부터 임금 원천징수에 적용됩니다."
+                 if has_fiscal else "이 국가에는 조작 가능한 재정·정부 자료가 없습니다.")
+        self.diplomacy.set(scope + " 식량 생산·임금·구매는 입력된 지역에서 자동으로 처리됩니다.")
+        titles = ("영토·국고" if has_fiscal else "선택 국가의 영토",
+                  "자료·소득세" if has_fiscal else "시작 자료", "지역 식량 시장", "미리보기 범위")
+        for card, title in zip(self.cards, titles):
             card.configure(text=title)
         self.current = status
 
@@ -777,6 +792,7 @@ class PlayPanel:
     def set_income_tax(self):
         if (not self.current or self._industry(self.current) or self._legislature(self.current)
                 or self._expansion(self.current) or self._staples(self.current)
+                or "pending_income_tax_ppm" not in self.current
                 or self.current["pending_income_tax_ppm"] is not None):
             return
         value = self.tax.get().strip()

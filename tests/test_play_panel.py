@@ -114,6 +114,7 @@ def run(exe):
             assert "준공" in panel.budget.get()
             run_industry(root, panel, save)
             run_history(root, panel, Path(directory))
+            run_history_tax(root, panel, Path(directory))
             run_elected_bill(root, panel, Path(directory) / "선출 의회 공포 대기.vic25")
             run_elected_bill(root, panel, Path(directory) / "교육 법안 공포 대기.vic25",
                              choice="A 교육 시범판")
@@ -915,6 +916,42 @@ def run_history(root, panel, directory):
         panel.load_button.invoke()
         wait(root, panel)
     assert panel.current == saved and panel.history_choice.get() == "AAA"
+
+
+def run_history_tax(root, panel, directory):
+    start = directory / "가상 정부 시작.txt"
+    start.write_text("VIC25-HISTORY-2 POLICY_WINDOW 1836 1\n"
+                     "land 7 WEST AAA\nland 9 EAST BBB\n"
+                     "food-start 7 2 240 F SAMPLE-CULTURE SAMPLE-FAITH 0 5 0 10000\n"
+                     "food-mill 7 1 1922 31 100 1\n"
+                     "executive-start AAA SAMPLE-HEAD SAMPLE-MINISTER 50 10\n",
+                     encoding="ascii")
+    panel.country.set(panel.HISTORY)
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(start)):
+        panel.new_button.invoke()
+        wait(root, panel)
+    assert not panel.tax_button.winfo_ismapped()
+    panel.history_choice.current(1)
+    panel.history_choice.event_generate("<<ComboboxSelected>>")
+    wait(root, panel)
+    assert panel.current["country"] == "BBB" and not panel.tax_button.winfo_ismapped()
+    panel.history_choice.current(0)
+    panel.history_choice.event_generate("<<ComboboxSelected>>")
+    wait(root, panel)
+    assert panel.current["country"] == "AAA"
+    assert "국고: 50" in panel.budget.get() and "소득세율: 10%" in panel.policy.get()
+    assert panel.tax_button.winfo_ismapped() and panel.tax_button.instate(["!disabled"])
+    assert not panel.tariff_button.winfo_ismapped() and not panel.spending_button.winfo_ismapped()
+    panel.tax.set("50")
+    panel.tax_button.invoke()
+    wait(root, panel)
+    assert panel.current["income_tax_ppm"] == 100_000 and panel.tax_button.instate(["disabled"])
+    assert "50% (1836-02-01 시행)" in panel.policy.get()
+    panel._send("step 31")
+    wait(root, panel)
+    assert panel.current["date"] == "1836-02-02" and panel.tax_button.instate(["!disabled"])
+    assert "소득세율: 50%" in panel.policy.get()
+    assert "누적 세입:" in panel.budget.get() and panel.current["treasury"] > 50
 
 
 def run_industry(root, panel, tariff_save):
