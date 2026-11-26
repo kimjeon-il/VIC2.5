@@ -441,6 +441,13 @@ if(BUILD_TESTING)
              COMMAND vic25_economy_transport_trade_credit_smoke)
 endif()
 
+# Imported geography stays independent of documented transport service.
+if(BUILD_TESTING)
+    add_executable(vic25_province_contacts_daily tests/test_province_contacts_daily.cpp)
+    target_link_libraries(vic25_province_contacts_daily PRIVATE vic25_core)
+    add_test(NAME vic25_province_contacts_daily COMMAND vic25_province_contacts_daily)
+endif()
+
 # P4 party-system and institution-specific election schedule regressions.
 if(BUILD_TESTING)
     add_executable(vic25_p4_governance_tests tests/test_p4_governance.cpp)
