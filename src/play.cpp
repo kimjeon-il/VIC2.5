@@ -1,4 +1,5 @@
 #include "vic25/daily_snapshot.hpp"
+#include "vic25/history_start.hpp"
 #include "vic25/p0_daily.hpp"
 #include "vic25/play_conflict_status.hpp"
 #include <array>
@@ -2245,10 +2246,47 @@ void buy(p0::DailyGame& game,int quantity) {
     game.advance_day(order);
 }
 
-void run(p0::DailyGame game,const std::optional<std::string>& selected={}) {
-    const auto show_help=[&] {if(selected)trial_help(budget_world(game.world()));else help();};
-    const auto show_status=[&] {if(selected)trial_status(game,*selected);else status(game);};
-    if(selected)
+void history_status(const daily::World& world) {
+    const auto date=world.date();
+    const auto& spatial=world.engine().base().spatial();
+    std::cout<<"History "<<spatial.dataset_hash<<" | "
+             <<std::setfill('0')<<std::setw(4)<<date.year<<'-'
+             <<std::setw(2)<<date.month<<'-'<<std::setw(2)<<date.day
+             <<std::setfill(' ')<<" | land provinces "<<spatial.provinces.size()<<'\n';
+}
+
+void history_province(const daily::World& world,std::string_view argument) {
+    const auto id=history_start::positive(argument,"enter a positive province ID");
+    const auto& geo=world.engine().base();
+    if(!geo.spatial().provinces.contains(id))
+        throw std::invalid_argument("unknown land province");
+    const auto& province=geo.province(id);
+    const auto& administration=geo.spatial().units.at(geo.leaf(id));
+    std::cout<<"Province "<<id<<" | country "<<geo.sovereign(id)
+             <<" | administration "<<administration.name;
+    const auto print_ids=[](const auto& ids) {
+        if(ids.empty())std::cout<<" -";
+        else for(const auto item:ids)std::cout<<' '<<item;
+    };
+    std::cout<<" | neighbors";print_ids(province.neighbors);
+    std::cout<<" | coasts";print_ids(province.coastal_seas);
+    std::cout<<'\n';
+}
+
+void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool history=false) {
+    const auto show_help=[&] {
+        if(history)std::cout<<"Commands: status | province <ID> | step [days] | save <new path> | help | quit\n";
+        else if(selected)trial_help(budget_world(game.world()));
+        else help();
+    };
+    const auto show_status=[&] {
+        if(history)history_status(game.world());
+        else if(selected)trial_status(game,*selected);
+        else status(game);
+    };
+    if(history)
+        std::cout<<"VIC2.5 historical geography preview (no campaign economy or transport)\n";
+    else if(selected)
         std::cout<<"VIC2.5 "<<(budget_world(game.world())?budget_scenario:trial)
                  <<": synthetic two-country trial (not a historical campaign)\n";
     else std::cout<<"VIC2.5 market-v1: synthetic market tutorial (not a historical campaign)\n";
@@ -2269,7 +2307,9 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={}) {
                 const int days=arg.empty()?1:command_number(arg,1,366);
                 for(int i=0;i<days;++i)game.advance_day();
                 show_status();
-            } else if(!selected&&command=="buy"&&!arg.empty()) {
+            } else if(history&&command=="province"&&!arg.empty()) {
+                history_province(game.world(),arg);
+            } else if(!history&&!selected&&command=="buy"&&!arg.empty()) {
                 buy(game,command_number(arg,1,1'000'000));
                 show_status();
             } else if(selected&&command=="tariff"&&!arg.empty()) {
@@ -2300,14 +2340,15 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={}) {
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string_view(argv[1])=="--panel-stdio") {run_panel(); return 0;}
-        std::optional<fs::path> resume;
+        std::optional<fs::path> resume,history_file,history_save;
         bool explicit_tutorial=false,explicit_trial=false,budget=false;
         std::optional<std::string> selected;
         for(int i=1;i<argc;++i) {
             const std::string_view flag(argv[i]);
             if(flag=="--help"&&argc==2) {
                 std::cout<<"Usage: vic25_play [--tutorial market-v1 [--resume <save>]]\n"
-                           "       vic25_play --trial tariff-v1|budget-v1 --country A|B [--resume <save>]\n";
+                           "       vic25_play --trial tariff-v1|budget-v1 --country A|B [--resume <save>]\n"
+                           "       vic25_play --history <start-file> | --resume-history <save>\n";
                 help();
                 return 0;
             }
@@ -2325,9 +2366,22 @@ int main(int argc,char** argv) {
                 selected=argv[++i];
                 if(*selected!="A"&&*selected!="B")
                     throw std::invalid_argument("choose trial country A or B");
+            } else if(flag=="--history"&&!history_file&&i+1<argc) {
+                history_file=argv[++i];
+            } else if(flag=="--resume-history"&&!history_save&&i+1<argc) {
+                history_save=argv[++i];
             } else if(flag=="--resume"&&!resume&&i+1<argc) {
                 resume=argv[++i];
             } else throw std::invalid_argument("invalid launch argument; use --help");
+        }
+        if(history_file||history_save) {
+            if((history_file&&history_save)||explicit_tutorial||explicit_trial||selected||resume)
+                throw std::invalid_argument("historical start, resume, tutorial and trial modes are mutually exclusive");
+            auto world=history_file?history_start::open(*history_file):load_panel_checkpoint(*history_save);
+            if(!history_start::matches_checkpoint(world))
+                throw std::invalid_argument("checkpoint does not belong to historical start");
+            run(p0::DailyGame(std::move(world),{}),{},true);
+            return 0;
         }
         if(explicit_trial!=selected.has_value()||(explicit_trial&&explicit_tutorial))
             throw std::invalid_argument("choose --trial tariff-v1 or budget-v1 with --country A|B separately from --tutorial");
