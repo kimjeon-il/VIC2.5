@@ -149,6 +149,33 @@ inline void seed_executives(phasec::IntegratedWorld& core,const std::map<std::st
     }
 }
 
+inline std::string grain_supplier(phasee::Id province) {
+    return "history-grain-supply-"+std::to_string(province);
+}
+
+inline std::string grain_farm(phasee::Id province) {
+    return "history-grain-farm-"+std::to_string(province);
+}
+
+struct FarmStart {
+    phaseb::People workers{};
+    phasec::Money wage{},cash{};
+    Quantity capacity{},standing{},renewal{};
+};
+
+inline FarmStart parse_farm_start(std::istringstream& row) {
+    std::string workers,wage,cash,capacity,standing,renewal,extra;
+    if(!(row>>workers>>wage>>cash>>capacity>>standing>>renewal)||row>>extra)
+        throw std::invalid_argument("malformed grain-farm record");
+    constexpr std::int64_t limit=1'000'000'000;
+    return {start_value(workers,1,limit,"invalid grain-farm workers"),
+            start_value(wage,1,limit,"invalid grain-farm wage"),
+            start_value(cash,0,limit,"invalid grain-farm cash"),
+            start_value(capacity,1,limit,"invalid grain-farm capacity"),
+            start_value(standing,1,limit,"invalid grain-farm standing crop"),
+            start_value(renewal,0,limit,"invalid grain-farm renewal")};
+}
+
 struct GrainSupply {
     Quantity stock{};
     phasec::Money price{};
@@ -158,7 +185,7 @@ inline GrainSupply parse_grain_supply(std::istringstream& row) {
     std::string stock,price,extra;
     if(!(row>>stock>>price)||row>>extra)
         throw std::invalid_argument("malformed grain-supply record");
-    return {start_value(stock,1,1'000'000'000,"invalid grain-supply stock"),
+    return {start_value(stock,0,1'000'000'000,"invalid grain-supply stock"),
             start_value(price,1,1'000'000'000,"invalid grain-supply price")};
 }
 
@@ -181,16 +208,17 @@ inline GrainRoad parse_grain_road(std::istringstream& row) {
 
 inline void seed_grain_freight(phasegh::World& engine,
         const std::map<phasee::Id,GrainSupply>& supplies,
+        const std::map<phasee::Id,FarmStart>& farms,
         const std::map<std::pair<phasee::Id,phasee::Id>,GrainRoad>& roads,
         std::int64_t month) {
     const auto& geo=engine.base();
     auto& core=engine.seed_geography().seed_core().seed_core();
     for(const auto& [id,supply]:supplies) {
         const auto& region=geo.province(id).region;
-        const auto seller="history-grain-supply-"+std::to_string(id);
-        core.seed_actor(seller,0);
+        const auto seller=grain_supplier(id);
+        if(!farms.contains(id))core.seed_actor(seller,0);
         core.seed_market(region,grain_good,supply.price,supply.price,supply.price);
-        core.seed_stock(seller,region,grain_good,supply.stock);
+        if(supply.stock>0)core.seed_stock(seller,region,grain_good,supply.stock);
     }
     for(const auto& [pair,road]:roads) {
         const auto [source,dest]=pair;
@@ -215,11 +243,12 @@ inline void seed_grain_freight(phasegh::World& engine,
 }
 
 inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,FoodStart>& starts,
-        const std::map<phasee::Id,MillStart>& mills,bool government_mode,std::int64_t month) {
+        const std::map<phasee::Id,MillStart>& mills,const std::map<phasee::Id,FarmStart>& farms,
+        bool government_mode,std::int64_t month) {
     auto& industry=world.seed_core();
     auto& core=industry.seed_core();
     auto& pop=core.seed_population();
-    if(!mills.empty()) {
+    if(!mills.empty()||!farms.empty()) {
         industry.seed_standard_industries();
         // Without a modeled public authority, this pilot charges no
         // withholding. Do not implicitly reuse the legacy 10% tax default.
@@ -239,17 +268,38 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
         core.seed_actor("HH:"+std::to_string(home),seed.household_cash);
         const auto seller=food_seller(id);
         const auto mill=mills.find(id);
+        const auto farm=farms.find(id);
         const std::string good=mill==mills.end()?food_good:processed_food_good;
         core.seed_actor(seller,seed.seller_cash);
         core.seed_market(region,good,seed.price,seed.price_floor,seed.price_ceiling);
         if(seed.stock>0)core.seed_stock(seller,region,good,seed.stock);
-        if(mill==mills.end())continue;
-
-        const auto& work=mill->second;
+        if(mill==mills.end()&&farm==farms.end())continue;
         // Normal no-government payroll requires a distinct country actor.
         // It has zero initial funds, and is not registered as a treasury.
         const auto& country=core.sovereignty(region);
         if(!government_mode&&!core.has_actor(country))core.seed_actor(country,0);
+        if(farm!=farms.end()) {
+            const auto& fields=farm->second;
+            const auto owner=grain_supplier(id);
+            const auto site=grain_farm(id);
+            core.seed_actor(owner,fields.cash);
+            // The farm record explicitly grants the scenario's operator
+            // the native land title; this asserts no historical ownership.
+            const auto title="land:"+region+":grain";
+            core.seed_shares(title,owner,1);
+            world.seed_building_in_province(site,owner,id,fields.capacity,
+                                            "vic3_115.rural.wheat_farms",title);
+            phased::ResourceSite crop;
+            crop.id=site;crop.site=site;crop.owner=owner;crop.region=region;crop.good=grain_good;
+            crop.monthly_capacity=fields.capacity;
+            crop.renewable=true;
+            crop.standing_biomass=crop.carrying_capacity=fields.standing;
+            crop.renewal_per_month=fields.renewal;
+            industry.seed_building_resource_site(std::move(crop));
+            pop.hire(slice,fields.workers,owner,"farm_worker",fields.wage,{});
+            continue;
+        }
+        const auto& work=mill->second;
         const auto site=food_mill(id);
         industry.seed_building_facility(site,seller,region,work.monthly_capacity,
                                        "vic3_115.urban.food_industries");
@@ -305,6 +355,7 @@ inline daily::World open(const std::filesystem::path& path) {
     std::map<Id,MillStart> mills;
     std::map<std::string,ExecutiveStart> executives;
     std::map<Id,GrainSupply> supplies;
+    std::map<Id,FarmStart> farms;
     std::map<std::pair<Id,Id>,GrainRoad> roads;
     while(std::getline(input,line)) {
         std::istringstream row(std::move(line));
@@ -324,6 +375,12 @@ inline daily::World open(const std::filesystem::path& path) {
             if(!economy_allowed)throw std::invalid_argument("grain-supply requires VIC25-HISTORY-2");
             if(!supplies.emplace(id,parse_grain_supply(row)).second)
                 throw std::invalid_argument("duplicate grain-supply province");
+            continue;
+        }
+        if(type=="grain-farm") {
+            if(!economy_allowed)throw std::invalid_argument("grain-farm requires VIC25-HISTORY-2");
+            if(!farms.emplace(id,parse_farm_start(row)).second)
+                throw std::invalid_argument("duplicate grain-farm province");
             continue;
         }
         if(type=="grain-road") {
@@ -405,8 +462,20 @@ inline daily::World open(const std::filesystem::path& path) {
                 throw std::invalid_argument("food-mill requires a modeled government when an executive-start is used");
         }
     }
+    for(const auto& [id,farm]:farms) {
+        if(!food_starts.contains(id)||!supplies.contains(id))
+            throw std::invalid_argument("grain-farm requires a local food-start and grain-supply");
+        const auto& start=food_starts.at(id);
+        const phaseb::JobRequirements job;
+        if(farm.workers>start.people||start.age_months<job.minimum_age_months||
+           start.age_months>job.maximum_age_months)
+            throw std::invalid_argument("invalid grain-farm employment");
+        if(!executives.empty()&&!executives.contains(nodes.at(id).country))
+            throw std::invalid_argument("grain-farm requires a modeled government when an executive-start is used");
+    }
     for(const auto& [id,supply]:supplies) {
-        (void)supply;
+        if(supply.stock==0&&!farms.contains(id))
+            throw std::invalid_argument("zero initial grain requires a grain-farm");
         const auto node=nodes.find(id);
         if(node==nodes.end()||node->second.kind!=geo::Kind::land||mills.contains(id))
             throw std::invalid_argument("grain-supply requires an existing land province without a food mill");
@@ -454,15 +523,15 @@ inline daily::World open(const std::filesystem::path& path) {
         if(contact.a.kind==geo::Kind::ocean&&contact.b.kind==geo::Kind::ocean)
             world.seed_ocean_border(contact.a.id,contact.b.id);
     if(!executives.empty())seed_executives(world.seed_core().seed_core(),executives);
-    if(!food_starts.empty())
-        seed_food_starts(world,food_starts,mills,!executives.empty(),daily::legacy_month(date));
     for(const auto& [pair,road]:roads) {
         (void)road;
         if(!world.province(pair.first).neighbors.contains(pair.second))
             throw std::invalid_argument("grain-road requires adjacent land provinces");
     }
+    if(!food_starts.empty())
+        seed_food_starts(world,food_starts,mills,farms,!executives.empty(),daily::legacy_month(date));
     if(!supplies.empty())
-        seed_grain_freight(engine,supplies,roads,daily::legacy_month(date));
+        seed_grain_freight(engine,supplies,farms,roads,daily::legacy_month(date));
     return daily::World::adopt(std::move(engine),0,std::string(origin_prefix)+dataset);
 }
 

@@ -399,6 +399,75 @@ def staple_price_shock(work):
         rejected(run("--history", start), message)
 
 
+def staffed_grain_farm(work):
+    start = work / "farm.txt"
+    sample = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-grain-and-tax.txt"
+    base = sample.read_text(encoding="ascii")
+    base = base.replace("grain-supply 22 24 3", "grain-supply 22 0 3")
+    base += "food-start 22 1 240 F FARM-CULTURE FARM-FAITH 0 1 0 0\n"
+    farm = "grain-farm 22 1 31 50 31 2 31"
+    save = work / "farm-continued.sav"
+
+    def write(text=base, record=farm):
+        start.write_text(text + record + "\n", encoding="ascii")
+
+    def panel(*commands):
+        result = run("--panel-stdio", script="\n".join((*commands, "quit", "")))
+        success(result)
+        replies = [json.loads(line) for line in result.stdout.splitlines()][:-1]
+        assert all(reply["ok"] for reply in replies), replies
+        return [reply["status"] for reply in replies]
+
+    def economy(status):
+        return status["history"]["economy"]
+
+    def actual_farm(status):
+        return economy(status)["grain_farm"]
+
+    prefix = (f"history-open {start}", "choose-country MILL-LAND")
+    write()
+    _, opening, first, in_transit, arrived, _, month_end, across_month = panel(
+        *prefix, "step 1", "step 2", "step 3", f"save {save}", "step 25", "step 4")
+    assert actual_farm(opening) == {"sites": 1, "harvested": 0, "saleable": 0, "cash": 50}
+    assert actual_farm(first) == {"sites": 1, "harvested": 1, "saleable": 1, "cash": 49}
+    assert economy(first)["household_cash"] == 96 and first["treasury"] == 51
+    assert economy(in_transit)["grain_in_transit"] == 1 and economy(in_transit)["food_stock"] == 0
+    assert actual_farm(in_transit)["cash"] == 50  # Three wages and one paid grain sale.
+    assert economy(arrived)["food_stock"] == 1
+    assert month_end["date"] == "1840-02-01" and actual_farm(month_end)["harvested"] > 2
+    assert across_month["date"] == "1840-02-05"
+    assert actual_farm(across_month)["harvested"] > actual_farm(month_end)["harvested"]
+    start.unlink()
+    assert panel(f"history-load {save}", "step 29") == [arrived, across_month]
+
+    no_road = "\n".join(line for line in base.splitlines()
+                        if not line.startswith("grain-road ")) + "\n"
+    write(no_road)
+    _, _, isolated = panel(*prefix, "step 6")
+    assert actual_farm(isolated)["harvested"] == 1 and actual_farm(isolated)["saleable"] == 1
+    assert actual_farm(isolated)["cash"] == 44 and economy(isolated)["food_stock"] == 0
+
+    for record, text in (
+        (farm.replace("31 50", "31 0"), base),  # No payroll funding.
+        (farm.replace("1 31 50", "1 93 50"), base),  # Wage equals price.
+    ):
+        write(text, record)
+        _, _, frozen = panel(*prefix, "step 6")
+        assert actual_farm(frozen)["harvested"] == 0 and economy(frozen)["food_stock"] == 0
+        assert economy(frozen).get("grain_in_transit", 0) == 0
+
+    for record, text, message in (
+        (farm, base.replace("food-start 22", "food-start 33"), "grain-farm requires a local food-start and grain-supply"),
+        (farm.replace("22 1 31", "22 2 31"), base, "invalid grain-farm employment"),
+        ("", base, "zero initial grain requires a grain-farm"),
+    ):
+        if record:
+            write(text, record)
+        else:
+            start.write_text(text, encoding="ascii")
+        rejected(run("--history", start), message)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -455,6 +524,7 @@ def main():
         grain_freight(work)
         bundled_trial(work)
         staple_price_shock(work)
+        staffed_grain_farm(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (

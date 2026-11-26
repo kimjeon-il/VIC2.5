@@ -117,6 +117,7 @@ def run(exe):
             run_history_tax(root, panel, Path(directory))
             run_bundled_trial(root, panel, Path(directory))
             run_variable_food_prices(root, panel, Path(directory))
+            run_staffed_grain_farm(root, panel, Path(directory))
             run_elected_bill(root, panel, Path(directory) / "선출 의회 공포 대기.vic25")
             run_elected_bill(root, panel, Path(directory) / "교육 법안 공포 대기.vic25",
                              choice="A 교육 시범판")
@@ -1024,6 +1025,31 @@ def run_variable_food_prices(root, panel, directory):
     assert "식품 단가: 103" in panel.market.get()
     assert "전날 살 돈은 있었지만 못 산 양: 0" in panel.market.get()
     assert "식량 재고: 1" in panel.market.get()
+
+
+def run_staffed_grain_farm(root, panel, directory):
+    bundled = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-grain-and-tax.txt"
+    start = directory / "일하는 곡물 농장.txt"
+    text = bundled.read_text(encoding="ascii").replace("grain-supply 22 24 3", "grain-supply 22 0 3")
+    start.write_text(text + "food-start 22 1 240 F FARM-CULTURE FARM-FAITH 0 1 0 0\n"
+                     "grain-farm 22 1 31 50 31 2 31\n", encoding="ascii")
+    panel.country.set(panel.HISTORY)
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(start)):
+        panel.new_button.invoke()
+        wait(root, panel)
+    panel.history_choice.current(1)
+    panel.history_choice.event_generate("<<ComboboxSelected>>")
+    wait(root, panel)
+    assert "곡물 농장: 1곳 · 누적 수확: 0 · 출하 가능: 0" in panel.market.get()
+    panel.step_button.invoke()
+    wait(root, panel)
+    assert "곡물 농장: 1곳 · 누적 수확: 1 · 출하 가능: 1" in panel.market.get()
+    panel._send("step 2")
+    wait(root, panel)
+    assert "운송 중: 1" in panel.market.get()
+    panel._send("step 3")
+    wait(root, panel)
+    assert "운송 중:" not in panel.market.get() and "식량 재고: 1" in panel.market.get()
 
 
 def run_industry(root, panel, tariff_save):

@@ -31,24 +31,41 @@ struct FoodPriceOverview {
     Quantity purchase_gap{};
 };
 
+struct GrainFarmOverview {
+    std::size_t sites{};
+    Quantity harvested{},saleable{};
+    phasec::Money cash{};
+};
+
 struct FoodOverview {
     std::size_t covered_provinces{},mills{};
     phaseb::People people{};
     phasec::Money household_cash{},seller_cash{};
     vic25::Quantity food_stock{},grain_stock{},grain_in_transit{};
     std::optional<FoodPriceOverview> prices;
+    GrainFarmOverview farms;
 };
 
 // Not a national estimate: only explicitly opened provincial food markets.
 inline FoodOverview food_overview(const daily::World& world,const std::string& country) {
     const auto& geo=world.engine().base();
     const auto& core=geo.core().core();
-    const auto& facilities=geo.core().state().site_archetypes;
+    const auto& industry=geo.core().state();
+    const auto& facilities=industry.site_archetypes;
+    const auto& resources=industry.resource_sites;
     std::set<std::string> regions;
     std::map<std::string,std::string> mill_owners;
     FoodOverview result;
     for(const auto& id:geo.sovereign_provinces(country)) {
         const auto& region=geo.province(id).region;
+        if(const auto farm=resources.find(history_start::grain_farm(id));farm!=resources.end()) {
+            const auto& site=farm->second;
+            ++result.farms.sites;
+            result.farms.harvested=phaseb::add_checked(result.farms.harvested,site.cumulative_output);
+            result.farms.saleable=phaseb::add_checked(result.farms.saleable,
+                core.stock(site.owner,region,history_start::grain_good));
+            result.farms.cash=phaseb::add_checked(result.farms.cash,core.cash(site.owner));
+        }
         const auto seller=history_start::food_seller(id);
         const bool mill=facilities.contains(history_start::food_mill(id));
         const std::string good=mill?history_start::processed_food_good:history_start::food_good;

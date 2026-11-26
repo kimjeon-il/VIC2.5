@@ -508,6 +508,9 @@ class PlayPanel:
                 market += f"\n식량 작업장: {economy['mills']}곳 · 원료 곡물: {economy['grain_stock']}"
                 if economy.get("grain_in_transit"):
                     market += f" · 운송 중: {economy['grain_in_transit']}"
+            if farms := economy.get("grain_farm"):
+                market += (f"\n곡물 농장: {farms['sites']}곳 · 누적 수확: {farms['harvested']} "
+                           f"· 출하 가능: {farms['saleable']}")
             if prices := economy.get("local_food_prices"):
                 low, high = prices["minimum"], prices["maximum"]
                 price = str(low) if low == high else f"{low}~{high}"
