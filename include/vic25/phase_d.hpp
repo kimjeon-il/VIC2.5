@@ -35,6 +35,10 @@ inline std::int64_t product(std::int64_t a,std::int64_t b) {
     require(a>=0 && b>=0,"phase D negative factor");
     return phaseb::mul_checked(a,b);
 }
+// Check the actual unreserved treasury against an invoice and the cash floor.
+inline bool construction_funding_covers(Money cash,Money reserve,Money invoice) {
+    return cash>=reserve && cash-reserve>=invoice;
+}
 enum class KnowledgeLevel : std::uint8_t { unknown, observed, understood, usable };
 struct Input { std::string good; Quantity per_unit{}; };
 
@@ -684,7 +688,7 @@ class Stage {
             return "public construction lacks a qualified operating contractor";
         const Money cost=product(project.work_required,project.cash_price_per_work);
         const Money free=c_.phase_d_cash_available(project.client);
-        if(free<cash_reserve||free-cash_reserve<cost)
+        if(!construction_funding_covers(free,cash_reserve,cost))
             return "public construction invoice and reserve are unfunded";
         if(recipe) {
             if(!c_.has_market(project.region,recipe->outputs.front().good))
