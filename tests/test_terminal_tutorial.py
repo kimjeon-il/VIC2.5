@@ -807,6 +807,16 @@ def main():
                 and supply(low_made)["smelter_receipts"] == supply(low_open)["smelter_receipts"] + 40
                 and supply(high_made)["iron_batches"] == supply(high_open)["iron_batches"],
                 "the duty choice did not affect real shipments and production")
+        # Lower the rate after deliberately missing the first road day,
+        # exactly as the Tk button test does. Unused quota carries over.
+        late = panel(f"load SUPPLY-A {recovery_cut}", "tariff 100", "step 29",
+                     "tariff 50", "quit")
+        require(all(row["ok"] for row in late), late)
+        blocked, cut_rate = (row["status"] for row in late[2:4])
+        require(supply(blocked)["road_in_transit_ore"] == 0 and blocked["paid_duty"] == 0
+                and supply(cut_rate)["road_in_transit_ore"] == 2 and cut_rate["paid_duty"] == 10
+                and supply(cut_rate)["iron_batches"] == supply(blocked)["iron_batches"],
+                "lowering the rate after the first road day must use carried-over capacity")
         reload = panel(f"load SUPPLY-A {recovery_transit}", "step 3",
                        f"save {recovery_replay}", "quit")
         require(all(row["ok"] for row in reload) and reload[0]["status"] == low_cargo

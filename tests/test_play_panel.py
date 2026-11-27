@@ -726,12 +726,17 @@ def run_supply_recovery(root, panel, save):
     assert panel.current["paid_duty"] == 0 and "광석 수입 관세: 100%" in panel.market.get()
     advance_to("2000-03-02")
     assert panel.current["supply_recovery"]["route"] == "road"
-    assert panel.current["supply_recovery"]["road_in_transit_ore"] == 0
+    blocked = panel.current
+    assert blocked["supply_recovery"]["road_in_transit_ore"] == 0
     panel.tariff.set("50")
     panel.tariff_button.invoke()
     wait(root, panel)
-    assert panel.current["supply_recovery"]["road_in_transit_ore"] == 1
-    assert panel.current["paid_duty"] == 5 and "누적 관세 징수: 5" in panel.market.get()
+    after_cut = panel.current
+    # March 1's unused quota is still available on March 2. Two units
+    # depart, each with duty 5, but neither is available to the mill.
+    assert after_cut["supply_recovery"]["road_in_transit_ore"] == 2
+    assert after_cut["paid_duty"] == 10 and "누적 관세 징수: 10" in panel.market.get()
+    assert after_cut["supply_recovery"]["iron_batches"] == blocked["supply_recovery"]["iron_batches"]
 
 
 def run_household_staples(root, panel, save):
