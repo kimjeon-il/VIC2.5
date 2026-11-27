@@ -137,24 +137,27 @@ inline FoodOverview food_overview(const daily::World& world,const std::string& c
     return result;
 }
 
-struct PublicWorks {
+struct ScenarioSettings {
     std::optional<history_start::FreightWorks> freight;
     phasec::Money daily_cap{};
-    bool operator==(const PublicWorks&) const = default;
+    history_start::FoodOwnerReserves food_owners;
+    bool operator==(const ScenarioSettings&) const = default;
 };
 struct Opened {
     daily::World world;
     std::string selected;
-    PublicWorks works;
+    ScenarioSettings works;
 };
 inline Opened open(const std::filesystem::path& path) {
-    PublicWorks works;
-    auto world=history_start::open(path,&works.freight);
+    ScenarioSettings works;
+    auto world=history_start::open(path,&works.freight,&works.food_owners);
     return {std::move(world),{},std::move(works)};
 }
 
 inline constexpr std::string_view magic="VIC25-HISTORY-PLAY-1\n";
 inline constexpr std::string_view works_magic="VIC25-HISTORY-PLAY-2\n";
+inline constexpr std::string_view scenario_magic="VIC25-HISTORY-PLAY-3\n";
+inline constexpr std::size_t max_owner_row_bytes=32;
 inline constexpr std::uint64_t max_snapshot=850'000'000;
 
 inline void validate(const Opened& state) {
@@ -164,6 +167,17 @@ inline void validate(const Opened& state) {
         if(!history_start::identifier(state.selected)||
            state.world.engine().base().sovereign_provinces(state.selected).empty())
             throw std::invalid_argument("unknown historical country in checkpoint");
+    }
+    const auto& geo=state.world.engine().base();
+    const auto& core=geo.core().core();
+    if(state.works.food_owners.size()>history_start::max_food_owners)
+        throw std::invalid_argument("too many historical food owners");
+    for(const auto& [id,reserve]:state.works.food_owners) {
+        const auto seller=history_start::food_seller(id);
+        if(!geo.spatial().provinces.contains(id)||!core.has_actor(seller)||
+           !core.p2_has_registered_company_equity(seller)||
+           reserve<0||reserve>history_start::max_food_owner_reserve)
+            throw std::invalid_argument("invalid historical food owner binding");
     }
     if(state.works.freight) {
         const auto& works=*state.works.freight;
@@ -181,19 +195,26 @@ inline void validate(const Opened& state) {
 // The checksum covers the selected country as well as the unaltered native
 // snapshot. Older history saves without any player selection keep native bytes.
 inline std::string encode(const daily::World& world,std::string_view selected,
-                          const PublicWorks& works={}) {
+                          const ScenarioSettings& works={}) {
     auto snapshot=daily::SnapshotCodec::encode(world);
     if(snapshot.size()>max_snapshot)throw std::invalid_argument("historical checkpoint exceeds save limit");
-    if(selected.empty()&&!works.freight)return snapshot;
-    std::string bytes(works.freight?works_magic:magic);
+    const bool with_owners=!works.food_owners.empty();
+    if(selected.empty()&&!works.freight&&!with_owners)return snapshot;
+    std::string bytes(with_owners?scenario_magic:works.freight?works_magic:magic);
     bytes+=selected;
     bytes+='\n';
+    if(with_owners)bytes+=works.freight?"1\n":"0\n";
     if(works.freight) {
         const auto& f=*works.freight;
         bytes+=std::to_string(f.source)+' '+std::to_string(f.destination)+' '+f.sponsor+' '+
                std::to_string(f.work)+' '+std::to_string(f.monthly_capacity)+' '+
                std::to_string(f.invoice)+' '+std::to_string(f.reserve)+'\n';
         bytes+=std::to_string(works.daily_cap)+'\n';
+    }
+    if(with_owners) {
+        bytes+=std::to_string(works.food_owners.size())+'\n';
+        for(const auto& [id,reserve]:works.food_owners)
+            bytes+=std::to_string(id)+' '+std::to_string(reserve)+'\n';
     }
     bytes+=snapshot;
     std::ostringstream trailer(std::ios::binary|std::ios::out);
@@ -208,7 +229,8 @@ inline Opened load(const std::filesystem::path& path) {
     if(!fs::is_regular_file(path))
         throw std::invalid_argument("historical checkpoint must use a regular file");
     const auto size=fs::file_size(path);
-    if(size>max_snapshot+works_magic.size()+64+1+257+17+8)
+    if(size>max_snapshot+scenario_magic.size()+64+1+2+257+17+5+8+
+            history_start::max_food_owners*(max_owner_row_bytes+1))
         throw std::invalid_argument("historical checkpoint exceeds save limit");
     std::ifstream file(path,std::ios::binary);
     if(!file)throw std::invalid_argument("cannot open historical checkpoint");
@@ -217,15 +239,18 @@ inline Opened load(const std::filesystem::path& path) {
        file.peek()!=std::char_traits<char>::eof()||file.bad())
         throw std::invalid_argument("historical checkpoint changed or could not be read");
     std::string selected;
-    PublicWorks works;
-    const bool with_works=bytes.starts_with(works_magic);
-    if(with_works||bytes.starts_with(magic)) {
-        const auto header_size=with_works?works_magic.size():magic.size();
+    ScenarioSettings works;
+    bool with_works=bytes.starts_with(works_magic);
+    const bool with_owners=bytes.starts_with(scenario_magic);
+    if(with_owners||with_works||bytes.starts_with(magic)) {
+        const auto header_size=with_owners?scenario_magic.size():
+                               with_works?works_magic.size():magic.size();
         const auto eol=bytes.find('\n',header_size);
         if(eol==bytes.npos||eol-header_size>64||bytes.size()-eol<=9)
             throw std::invalid_argument("invalid historical checkpoint header");
         selected=bytes.substr(header_size,eol-header_size);
-        if((!with_works||!selected.empty())&&!history_start::identifier(selected))
+        if(((!with_works&&!with_owners)||!selected.empty())&&
+           !history_start::identifier(selected))
             throw std::invalid_argument("invalid historical checkpoint country");
         std::istringstream trailer(bytes.substr(bytes.size()-8),std::ios::binary|std::ios::in);
         std::uint64_t expected{};
@@ -235,6 +260,13 @@ inline Opened load(const std::filesystem::path& path) {
         if(phasec::persistence_detail::checksum(bytes)!=expected)
             throw std::invalid_argument("historical checkpoint checksum mismatch");
         auto payload=eol+1;
+        if(with_owners) {
+            if(bytes.size()-payload<2||bytes[payload+1]!='\n'||
+               (bytes[payload]!='0'&&bytes[payload]!='1'))
+                throw std::invalid_argument("invalid historical settings flags");
+            with_works=bytes[payload]=='1';
+            payload+=2;
+        }
         if(with_works) {
             const auto end=bytes.find('\n',payload);
             if(end==bytes.npos||end-payload>256)
@@ -253,6 +285,32 @@ inline Opened load(const std::filesystem::path& path) {
                 0,1'000'000,"invalid historical public works ceiling");
             payload=cap_end+1;
         }
+        if(with_owners) {
+            const auto count_end=bytes.find('\n',payload);
+            if(count_end==bytes.npos||count_end-payload>4)
+                throw std::invalid_argument("invalid historical food owner count");
+            const auto count=history_start::start_value(bytes.substr(payload,count_end-payload),
+                1,history_start::max_food_owners,"invalid historical food owner count");
+            payload=count_end+1;
+            for(std::int64_t i=0;i<count;++i) {
+                const auto end=bytes.find('\n',payload);
+                if(end==bytes.npos||end-payload>max_owner_row_bytes)
+                    throw std::invalid_argument("invalid historical food owner row");
+                std::istringstream row(bytes.substr(payload,end-payload));
+                row.imbue(std::locale::classic());
+                std::string id_text,reserve_text,extra;
+                if(!(row>>id_text>>reserve_text)||row>>extra)
+                    throw std::invalid_argument("invalid historical food owner row");
+                const auto id=history_start::positive(id_text,"invalid historical food owner");
+                const auto reserve=history_start::start_value(reserve_text,0,
+                    history_start::max_food_owner_reserve,"invalid historical food owner reserve");
+                if(!works.food_owners.emplace(id,reserve).second)
+                    throw std::invalid_argument("duplicate historical food owner");
+                payload=end+1;
+            }
+        }
+        if(bytes.size()-payload>max_snapshot)
+            throw std::invalid_argument("historical checkpoint exceeds save limit");
         bytes.erase(0,payload);
     }
     Opened result{daily::SnapshotCodec::decode(bytes),std::move(selected),std::move(works)};

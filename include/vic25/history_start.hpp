@@ -42,6 +42,9 @@ inline bool matches_checkpoint(const daily::World& world) {
 inline constexpr const char* food_good="food";
 inline constexpr const char* processed_food_good="groceries";
 inline constexpr const char* grain_good="grain";
+using FoodOwnerReserves=std::map<phasee::Id,phasec::Money>;
+inline constexpr std::size_t max_food_owners=1024;
+inline constexpr phasec::Money max_food_owner_reserve=1'000'000'000;
 
 inline std::string food_seller(phasee::Id province) {
     return "history-food-seller-"+std::to_string(province);
@@ -293,6 +296,7 @@ inline void seed_grain_freight(phasegh::World& engine,
 inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,FoodStart>& starts,
         const std::map<phasee::Id,MillStart>& mills,const std::map<phasee::Id,FarmStart>& farms,
         const std::map<phasee::Id,FoodAlternate>& alternates,
+        const FoodOwnerReserves& food_owners,
         bool government_mode,std::int64_t month,const std::optional<FreightWorks>& works) {
     auto& industry=world.seed_core();
     auto& core=industry.seed_core();
@@ -322,6 +326,8 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
         const auto farm=farms.find(id);
         const std::string good=mill==mills.end()?food_good:processed_food_good;
         core.seed_actor(seller,seed.seller_cash);
+        if(food_owners.contains(id))
+            core.seed_shares("company:"+seller,"HH:"+std::to_string(home),1);
         core.seed_market(region,good,seed.price,seed.price_floor,seed.price_ceiling);
         if(seed.stock>0)core.seed_stock(seller,region,good,seed.stock);
         if(const auto extra=alternates.find(id);extra!=alternates.end()) {
@@ -386,7 +392,8 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
 // Read a bounded, explicit startup dataset. Geographic contacts never
 // bootstrap ports, markets or transport services, even across the same sea.
 inline daily::World open(const std::filesystem::path& path,
-                         std::optional<FreightWorks>* opened_works=nullptr) {
+                         std::optional<FreightWorks>* opened_works=nullptr,
+                         FoodOwnerReserves* opened_food_owners=nullptr) {
     namespace geo=phasee::geography_import;
     namespace fs=std::filesystem;
     using phasee::Id;
@@ -420,6 +427,7 @@ inline daily::World open(const std::filesystem::path& path,
     std::vector<ContactRow> rows;
     std::map<Id,FoodStart> food_starts;
     std::map<Id,FoodAlternate> alternates;
+    FoodOwnerReserves food_owners;
     std::map<Id,MillStart> mills;
     std::map<std::string,ExecutiveStart> executives;
     std::map<std::string,int> grain_tariffs;
@@ -482,6 +490,17 @@ inline daily::World open(const std::filesystem::path& path,
                 throw std::invalid_argument("duplicate food-start province");
             continue;
         }
+        if(type=="food-owner") {
+            if(!economy_allowed)throw std::invalid_argument("food-owner requires VIC25-HISTORY-2");
+            if(!(row>>a)||row>>extra)
+                throw std::invalid_argument("malformed food-owner record");
+            const auto reserve=start_value(a,0,max_food_owner_reserve,"invalid food-owner reserve");
+            if(!food_owners.emplace(id,reserve).second)
+                throw std::invalid_argument("duplicate food-owner province");
+            if(food_owners.size()>max_food_owners)
+                throw std::invalid_argument("too many food-owner records");
+            continue;
+        }
         if(type=="food-alternate") {
             if(!economy_allowed)throw std::invalid_argument("food-alternate requires VIC25-HISTORY-2");
             if(!alternates.emplace(id,parse_food_alternate(row)).second)
@@ -534,6 +553,11 @@ inline daily::World open(const std::filesystem::path& path,
         (void)start;
         if(!nodes.contains(id)||nodes.at(id).kind!=geo::Kind::land)
             throw std::invalid_argument("food-start requires an existing land province");
+    }
+    for(const auto& [id,reserve]:food_owners) {
+        (void)reserve;
+        if(!food_starts.contains(id))
+            throw std::invalid_argument("food-owner requires a matching food-start");
     }
     for(const auto& [id,alternate]:alternates) {
         (void)alternate;
@@ -646,12 +670,13 @@ inline daily::World open(const std::filesystem::path& path,
             throw std::invalid_argument("grain-road requires adjacent land provinces");
     }
     if(!food_starts.empty())
-        seed_food_starts(world,food_starts,mills,farms,alternates,!executives.empty(),daily::legacy_month(date),works);
+        seed_food_starts(world,food_starts,mills,farms,alternates,food_owners,!executives.empty(),daily::legacy_month(date),works);
     if(!supplies.empty())
         seed_grain_freight(engine,supplies,farms,roads,daily::legacy_month(date),works);
     for(const auto& [country,ppm]:grain_tariffs)
         engine.seed_tariff(country,grain_good,ppm);
     if(opened_works)*opened_works=works;
+    if(opened_food_owners)*opened_food_owners=std::move(food_owners);
     return daily::World::adopt(std::move(engine),0,std::string(origin_prefix)+dataset);
 }
 
