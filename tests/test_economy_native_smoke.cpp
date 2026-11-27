@@ -873,7 +873,108 @@ static void linked_staples_keep_running_across_payroll_rounding(StapleTrial tria
     }
 }
 
+enum class IndustrialBidTrial { recovery, cashless, competing_inputs, priced_stock_first };
+
+static void empty_stock_keeps_funded_industrial_bid(IndustrialBidTrial trial) {
+    const bool recovery=trial==IndustrialBidTrial::recovery;
+    const bool cashless=trial==IndustrialBidTrial::cashless;
+    const bool two_inputs=!recovery&&!cashless;
+    const bool offer_dye=trial==IndustrialBidTrial::priced_stock_first;
+    const phasec::Money opening_mill_cash=recovery?500:(cashless?0:8);
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");geo.seed_unit(1,"A","Textile region");
+    geo.seed_assignment(1,1);
+    auto& d=geo.seed_core();
+    auto& c=d.seed_core();
+    c.seed_actor("A",0);
+    c.seed_government("A","HEAD","PM",5,3);
+    c.seed_actor("COTTON",500);
+    c.seed_actor("MILL",opening_mill_cash);
+    c.seed_market("R","fabric",3,3,8,2);
+    c.seed_market("R","clothes",5,2,10,2);
+    if(two_inputs)c.seed_market("R","dye",3,3,8,0);
+    if(offer_dye)c.seed_stock("COTTON","R","dye",1);
+    d.seed_standard_industries();
+    c.seed_shares("land:R:fabric","COTTON",1);
+    geo.seed_building_in_province("COTTON","COTTON",1,31,
+                                  "vic3_115.rural.cotton_plantations","land:R:fabric");
+    phased::ResourceSite source;
+    source.id=source.site=source.owner="COTTON";
+    source.region="R";source.good="fabric";source.monthly_capacity=31;
+    source.renewable=true;source.standing_biomass=source.carrying_capacity=100;
+    source.renewal_per_month=31;
+    d.seed_building_resource_site(source);
+    geo.seed_building_in_province("MILL","MILL",1,31,"vic3_115.urban.textile_mills");
+    phased::IndustryRecipe recipe;
+    recipe.id=recipe.site="MILL";recipe.industry_class="MANU";
+    recipe.inputs={{"fabric",1}};recipe.outputs={{"clothes",2}};
+    if(two_inputs)recipe.inputs.push_back({"dye",1});
+    recipe.workers_per_batch=recipe.capacity_per_batch=1;
+    d.seed_building_recipe(recipe);
+    auto& pop=c.seed_population();
+    const auto cotton_worker=add_worker(gh);
+    const auto& key=pop.slice(cotton_worker).key;
+    const auto home=key.household;
+    const auto mill_worker=pop.seed_population(key.demographic,key.economic,home,1,2);
+    const auto wallet="HH:"+std::to_string(home);
+    c.seed_actor(wallet,120);
+    pop.hire(cotton_worker,1,"COTTON","worker",93,{});
+    pop.hire(mill_worker,1,"MILL","worker",93,{});
+    p0::Policies rules;
+    rules.daily_food_units_per_person=0;
+    rules.monthly_clothing_units_per_person=16;
+    rules.allow_endogenous_staffing=false;
+    rules.allow_endogenous_investment_credit=false;
+    rules.allow_endogenous_factory_expansion=false;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),17),rules);
+    std::optional<p0::DailyGame> replay;
+    for(int day=1;day<=(two_inputs?1:45);++day) {
+        phasegh::World::Plan observe{};
+        if(day==1)observe[7].push_back([=](phasegh::Stage& stage){
+            const auto& market=stage.phase_c();
+            const auto& fabric=market.market("R","fabric");
+            check(fabric.solvent_demand==(recovery?1:0)&&
+                  fabric.unmet==(recovery?1:0)&&fabric.delivered==0,
+                  "an empty material market must see exactly one affordable, unfilled bid");
+            if(two_inputs) {
+                const auto& dye=market.market("R","dye");
+                check(dye.solvent_demand==(offer_dye?0:1)&&
+                      dye.unmet==(offer_dye?0:1)&&dye.delivered==0&&
+                      market.stock("MILL","R","dye")==(offer_dye?1:0)&&
+                      market.cash("MILL")==(offer_dye?2:5)&&
+                      market.outstanding_worker_wages("MILL")==0,
+                      "the factory counted its input funds twice or bypassed an actual payment");
+            }
+        });
+        game.advance_day(observe);
+        if(replay) {
+            replay->advance_day();
+            check(daily::SnapshotCodec::encode(game.world())==
+                  daily::SnapshotCodec::encode(replay->world()),
+                  "native input shortage replay differed");
+        }
+        if(day==3&&recovery)replay.emplace(daily::SnapshotCodec::decode(
+                                daily::SnapshotCodec::encode(game.world())),rules);
+        const auto& ledger=game.world().engine().base().core().core();
+        check(ledger.cash(wallet)+ledger.cash("A")+ledger.cash("COTTON")+
+              ledger.cash("MILL")==620+opening_mill_cash&&ledger.financial().balanced(),
+              "industrial bids must not create, spend or lose unposted cash");
+        if(day==45) {
+            const auto fabric_sales=ledger.firm_finance("COTTON").receipts;
+            const auto clothes_sales=ledger.firm_finance("MILL").receipts;
+            check(recovery?(fabric_sales>0&&clothes_sales>0):
+                           (fabric_sales==0&&clothes_sales==0&&
+                            ledger.market("R","fabric").price==3),
+                  "only a funded textile order should restart the chain");
+        }
+    }
+}
+
 int main() {
+    for(const auto trial:{IndustrialBidTrial::recovery,IndustrialBidTrial::cashless,
+                          IndustrialBidTrial::competing_inputs,IndustrialBidTrial::priced_stock_first})
+        empty_stock_keeps_funded_industrial_bid(trial);
     for(const auto trial:{StapleTrial::viable,StapleTrial::break_even,StapleTrial::supply_interruption})
         linked_staples_keep_running_across_payroll_rounding(trial);
     plain_clothing_has_a_bounded_fabric_fallback();
