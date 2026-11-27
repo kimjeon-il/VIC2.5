@@ -765,9 +765,10 @@ static void monthly_clothing_cap_is_shared_across_household_slices() {
           "half of two monthly household clothing units must be replaceable after splitting the POP");
 }
 
-enum class StapleTrial { viable, break_even, supply_interruption };
-static void linked_staples_keep_running_across_payroll_rounding(StapleTrial trial) {
+enum class StapleTrial { viable, break_even, supply_interruption, open_prices };
+static void linked_staples_hold_across_months(StapleTrial trial) {
     constexpr phasec::Money grain_quote=4;
+    const bool open_prices=trial==StapleTrial::open_prices;
     const bool shock=trial==StapleTrial::supply_interruption;
     const bool break_even=trial==StapleTrial::break_even;
     phasegh::World gh(24000);
@@ -782,10 +783,10 @@ static void linked_staples_keep_running_across_payroll_rounding(StapleTrial tria
     c.seed_country_income_tax("A",0);
     const std::array actors={"WHEAT","COTTON","BAKERY","WEAVER"};
     for(const auto firm:actors)c.seed_actor(firm,500);
-    c.seed_market("R","grain",grain_quote,grain_quote,grain_quote,2);
-    c.seed_market("R","fabric",6,6,6,2);
-    c.seed_market("R","groceries",2,2,2,4);
-    c.seed_market("R","clothes",5,5,5,2);
+    c.seed_market("R","grain",grain_quote,open_prices?2:grain_quote,open_prices?8:grain_quote,2);
+    c.seed_market("R","fabric",6,open_prices?3:6,open_prices?12:6,2);
+    c.seed_market("R","groceries",2,open_prices?1:2,open_prices?4:2,4);
+    c.seed_market("R","clothes",5,open_prices?2:5,open_prices?10:5,2);
     c.seed_stock("BAKERY","R","grain",1);
     c.seed_stock("WEAVER","R","fabric",1);
     c.seed_stock("WHEAT","R","tools",31);
@@ -812,7 +813,7 @@ static void linked_staples_keep_running_across_payroll_rounding(StapleTrial tria
     crop("WHEAT","grain","vic3_115.rural.wheat_farms");
     crop("COTTON","fabric","vic3_115.rural.cotton_plantations");
     factory("BAKERY","grain","groceries",4,"vic3_115.urban.food_industries");
-    factory("WEAVER","fabric","clothes",2,"vic3_115.urban.textile_mills");
+    factory("WEAVER","fabric","clothes",open_prices?3:2,"vic3_115.urban.textile_mills");
     auto& pop=c.seed_population();
     const auto home=pop.household_profile({"R","workers","shared",4});
     const auto econ=pop.economic_profile({"R","worker","wage","employee",pop.default_education()});
@@ -822,17 +823,24 @@ static void linked_staples_keep_running_across_payroll_rounding(StapleTrial tria
     c.seed_actor(wallet,150);
     for(std::size_t i=0;i<actors.size();++i) {
         const auto worker=pop.seed_population(demo,econ,home,1,static_cast<phaseb::Id>(i+1));
-        pop.hire(worker,1,actors[i],"worker",std::string_view(actors[i])=="BAKERY"&&break_even?116:93,{});
+        const std::string_view role=actors[i];
+        const auto wage=role=="BAKERY"&&break_even?116:
+            open_prices&&(role=="COTTON"||role=="WEAVER")?58:93;
+        pop.hire(worker,1,actors[i],"worker",wage,{});
+        if(open_prices)c.seed_shares("company:"+std::string(role),wallet,1);
     }
     p0::Policies rules;
-    rules.monthly_clothing_units_per_person=8;
+    rules.monthly_clothing_units_per_person=open_prices?12:8;
+    if(open_prices)for(const auto firm:actors)rules.registered_dividend_reserves[firm]=120;
     rules.allow_endogenous_staffing=false;
     rules.allow_endogenous_investment_credit=false;
     rules.allow_endogenous_factory_expansion=false;
     p0::DailyGame game(daily::World::adopt(std::move(gh),17),rules);
     std::optional<p0::DailyGame> replay;
     phasec::Money prev_sales=0;
-    for(int day=1;day<=65;++day) {
+    Quantity food_sold=0,clothes_sold=0;
+    const int days=open_prices?730:65;
+    for(int day=1;day<=days;++day) {
         phasegh::World::Plan events{};
         if(shock&&day==35) events[10].push_back([](phasegh::Stage& gh){
             gh.phase_c().war_damage_facility("WHEAT",31);
@@ -840,20 +848,26 @@ static void linked_staples_keep_running_across_payroll_rounding(StapleTrial tria
         if(shock&&day==40) events[4].push_back([](phasegh::Stage& gh){
             gh.phase_c().phase_time_maintain_facility("WHEAT","tools",31,1,1);
         });
+        if(open_prices)events[7].push_back([&](phasegh::Stage& stage) {
+            const auto& market=stage.phase_c();
+            food_sold+=market.market("R","groceries").delivered;
+            clothes_sold+=market.market("R","clothes").delivered;
+        });
         game.advance_day(events);
         const auto& d=game.world().engine().base().core();
         const auto& c=d.core();
         if(replay) {
-            replay->advance_day(events);
+            if(open_prices)replay->advance_day();
+            else replay->advance_day(events);
             check(daily::SnapshotCodec::encode(game.world())==
                   daily::SnapshotCodec::encode(replay->world()),"replay changed");
         }
-        if(day==31) replay.emplace(daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(game.world())),rules);
+        if(day==(open_prices?days-5:31)) replay.emplace(daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(game.world())),rules);
         auto cash=c.cash(wallet)+c.cash("GOV");
         for(const auto firm:actors)cash+=c.cash(firm);
         check(cash==2150&&c.financial().balanced(),"cash changed");
         const auto sales=c.firm_finance("BAKERY").receipts;
-        if(day>=32&&day<=60) {
+        if(!open_prices&&day>=32&&day<=60) {
             // Damage enters at worker-day close. Existing grain feeds the
             // next batch; replacement grain arrives only after real repair.
             const bool no_sale=break_even||(shock&&day>=37&&day<=41);
@@ -866,9 +880,21 @@ static void linked_staples_keep_running_across_payroll_rounding(StapleTrial tria
             check(c.firm_finance("BAKERY").outstanding_wages==0,"bakery wages unpaid");
             check(c.firm_finance("WHEAT").outstanding_wages==0,"wheat wages unpaid");
         }
-        if(day==60)
+        if(!open_prices&&day==60)
             check(c.firm_finance("BAKERY").expenses>0&&c.firm_finance("WEAVER").receipts>100,
                   "linked market failed to pay wages or sell clothes after the opening fabric");
+        if(open_prices) {
+            for(const auto firm:actors)
+                check(c.firm_finance(firm).outstanding_wages==0,
+                      "viable staple baseline left wages unpaid");
+            if(day==days) {
+                check(food_sold==4*days&&clothes_sold>=1100&&
+                      c.market("R","fabric").price!=6&&c.market("R","clothes").price!=5,
+                      "staple chains failed to trade with moving quotes");
+                check(c.cash("WEAVER")>=120&&c.cash("COTTON")>=120,
+                      "baseline textiles consumed their entire working reserves");
+            }
+        }
         prev_sales=sales;
     }
 }
@@ -975,8 +1001,9 @@ int main() {
     for(const auto trial:{IndustrialBidTrial::recovery,IndustrialBidTrial::cashless,
                           IndustrialBidTrial::competing_inputs,IndustrialBidTrial::priced_stock_first})
         empty_stock_keeps_funded_industrial_bid(trial);
-    for(const auto trial:{StapleTrial::viable,StapleTrial::break_even,StapleTrial::supply_interruption})
-        linked_staples_keep_running_across_payroll_rounding(trial);
+    for(const auto trial:{StapleTrial::viable,StapleTrial::break_even,
+                          StapleTrial::supply_interruption,StapleTrial::open_prices})
+        linked_staples_hold_across_months(trial);
     plain_clothing_has_a_bounded_fabric_fallback();
     monthly_clothing_cap_is_shared_across_household_slices();
     copper_mine_supplies_paid_telephone_sales(false);
