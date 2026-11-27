@@ -1682,7 +1682,8 @@ static void known_future_month_birthday_does_not_end_opening_job_early(bool miss
     for(int day=1;day<=final_day;++day)game.advance_day();
     if(missing_day) {
         check(game.world().date()==daily::Date{1999,3,1}&&
-              core(game).cash(wallet)==282&&core(game).people().employed(worker)==1&&
+              core(game).cash(wallet)==279&&core(game).cash("A")==31&&
+              core(game).cash("FIRM")==690&&core(game).people().employed(worker)==1&&
               core(game).people().native_calendar_day()==28&&
               core(game).people().age_months_slice(worker)==899,
               "a genuine Feb 29 worker must still work through the last actual February day");
@@ -1691,7 +1692,7 @@ static void known_future_month_birthday_does_not_end_opening_job_early(bool miss
         game.advance_day();restored.advance_day();
         const auto& after=core(game);
         const auto& p=after.people();
-        check(after.cash(wallet)==282&&p.employed(worker)==0&&
+        check(after.cash(wallet)==279&&after.cash("A")==31&&p.employed(worker)==0&&
               p.exact_birth_day(worker)==29&&p.age_months_slice(worker)==900&&
               p.economic(p.slice(worker).key.economic).labor_class=="retired"&&
               daily::SnapshotCodec::encode(game.world())==
@@ -1702,7 +1703,7 @@ static void known_future_month_birthday_does_not_end_opening_job_early(bool miss
         for(const auto& e:core(game).people().events())
             if(e.kind==phaseb::EventKind::occupation&&e.from==worker&&e.to==worker)
                 ++transitions;
-        check(transitions==1&&core(game).cash(wallet)==282,
+        check(transitions==1&&core(game).cash(wallet)==279&&core(game).cash("A")==31,
               "a missing calendar date cannot duplicate retirement");
         return;
     }

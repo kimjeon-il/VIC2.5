@@ -421,8 +421,9 @@ static void sales_fund_expansion_on_an_ordinary_day() {
         const auto& day2=game.world().engine().base().core();
         check(day2.core().stock("OWNER","R","ore")==29,
               "the existing farm did not consume physical inputs on both days");
-        check(day2.core().cash(shopper)==(funded?10:6),
-              "empty household wallet did not receive payroll and pay for consumption");
+        check(day2.core().cash(shopper)==(funded?11:6)&&
+              day2.core().cash("STATE")== (funded?3:0),
+              "household payroll, consumption and withheld income tax must balance");
         check(day2.core().cash("OWNER")== (funded?34:14),
               "actual sales did not reach the enterprise cash balance");
         if(byproduct_case==1)
@@ -460,27 +461,29 @@ static void sales_fund_expansion_on_an_ordinary_day() {
     }
     check(!priority_failed,"automatic expansion and queued work must not spend earned wages");
     run(3,false,"","");
-    run(16,true,"","");
-    run(16,true,"","",0,-1,true,false,false,false,false,0,0,true);
-    run(16,true,"","OWNER"); // proposal saved by the old monthly scheduler
-    run(16,true,"OWNER","BUILDER"); // the due allowance stays with the proposer
-    run(16,true,"BUILDER","OWNER"); // buying a factory does not spend an allowance
-    run(16,true,"","",0,20); // unchanged baseline; an actual funded project
-    run(16,true,"","",1,20); // 31/51; two rival recipes, one physical facility
-    run(16,true,"","",1,31); // exactly 50%, not dominant
-    run(16,true,"","",1,40); // minority
-    run(16,true,"","",1,40,true,true); // other good cannot dilute dominance
-    run(16,true,"","",1,20,false); // uncategorized production remains unchanged
-    run(16,true,"","",2,20); // local lookalike
-    run(16,true,"","",3,20); // foreign law
-    run(16,true,"","",4,20); // custom national group lookalike
-    run(16,true,"","",0,31,true,false,true); // both outputs allowed without law
-    run(16,true,"","",1,31,true,false,true); // dominant in a real secondary output
-    run(16,true,"","",1,40,true,false,false,true); // different market region
-    run(16,true,"","",1,40,true,false,false,false,true); // unusable recipe
-    run(16,true,"","",0,31,true,false,false,false,false,1); // baseline marketed byproduct
-    run(16,true,"","",1,31,true,false,false,false,false,1); // incumbent leads marketed byproduct
-    run(16,true,"","",1,31,true,false,false,false,false,2); // rival byproduct ties food capacity
+    // Two gross payments of 17 leave 31 after tax: enough for the two
+    // observed purchases and an affordable third unit of unmet demand.
+    run(17,true,"","");
+    run(17,true,"","",0,-1,true,false,false,false,false,0,0,true);
+    run(17,true,"","OWNER"); // proposal saved by the old monthly scheduler
+    run(17,true,"OWNER","BUILDER"); // the due allowance stays with the proposer
+    run(17,true,"BUILDER","OWNER"); // buying a factory does not spend an allowance
+    run(17,true,"","",0,20); // unchanged baseline; an actual funded project
+    run(17,true,"","",1,20); // 31/51; two rival recipes, one physical facility
+    run(17,true,"","",1,31); // exactly 50%, not dominant
+    run(17,true,"","",1,40); // minority
+    run(17,true,"","",1,40,true,true); // other good cannot dilute dominance
+    run(17,true,"","",1,20,false); // uncategorized production remains unchanged
+    run(17,true,"","",2,20); // local lookalike
+    run(17,true,"","",3,20); // foreign law
+    run(17,true,"","",4,20); // custom national group lookalike
+    run(17,true,"","",0,31,true,false,true); // both outputs allowed without law
+    run(17,true,"","",1,31,true,false,true); // dominant in a real secondary output
+    run(17,true,"","",1,40,true,false,false,true); // different market region
+    run(17,true,"","",1,40,true,false,false,false,true); // unusable recipe
+    run(17,true,"","",0,31,true,false,false,false,false,1); // baseline marketed byproduct
+    run(17,true,"","",1,31,true,false,false,false,false,1); // incumbent leads marketed byproduct
+    run(17,true,"","",1,31,true,false,false,false,false,2); // rival byproduct ties food capacity
 }
 static void self_funded_expansion_commissions_and_sells_real_output() {
     for(bool solvent_demand:{true,false}) {
@@ -894,8 +897,12 @@ static void inactive_producer_leaves_scarce_input_for_real_work(bool stocked_ope
     live.advance_day();replay.advance_day();
     check(observe(live)==std::array<Quantity,2>{1,1}&&
           core(live).firm_finance("STOCKED").receipts==40&&
-          core(live).firm_finance("SUPPLIER").receipts==12&&core(live).cash(customer.second)==6,
+          core(live).firm_finance("SUPPLIER").receipts==12,
           "after the first real output sale the originally stocked line must buy and make again");
+    // Two gross payments of 25 produce five total withholding at 10%:
+    // 50 gross - 5 tax - 40 paid for food = 5 in the household wallet.
+    check(core(live).cash("STATE")==5&&core(live).cash(customer.second)==5,
+          "paid wages must carry the first day's fractional tax without charging food twice");
     require_conservation(live);
     check(daily::SnapshotCodec::encode(live.world())==daily::SnapshotCodec::encode(replay.world()),
           "the post-sale procurement replay must be byte exact");

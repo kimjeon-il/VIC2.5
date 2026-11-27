@@ -239,6 +239,36 @@ static void public_employment_pays_net_without_self_tax_revenue() {
                      daily::SnapshotCodec::encode(arrears_replay.world()),
                  "public same-wallet arrears must survive exact resume");
 }
+static void small_public_wages_reduce_expense_without_recording_tax_revenue() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");geo.seed_unit(1,"A","R");
+    geo.seed_assignment(1,1);
+    auto& core=geo.seed_core().seed_core();
+    core.seed_actor("A",500);
+    core.seed_government("A","HEAD","PM",5,3);
+    core.seed_country_income_tax("A",150'000);
+    const auto worker=people(gh,"R",1,"worker");
+    auto& pop=core.seed_population();
+    const auto wallet="HH:"+std::to_string(pop.slice(worker).key.household);
+    pop.hire(worker,1,"A","worker",93,{});
+    p0::Policies p;p.daily_food_units_per_person=0;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),9),p);
+    game.advance_day();
+    require_test(c(game).cash(wallet)==3&&c(game).cash("A")==497,
+                 "the public worker must receive the first small paid wage in full");
+    p0::DailyGame replay(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(game.world())),p);
+    for(int day=2;day<=31;++day){game.advance_day();replay.advance_day();}
+    const auto fiscal=c(game).country_fiscal("A");
+    require_test(c(game).cash(wallet)==80&&fiscal.cash==420&&
+                 fiscal.realized_revenue==0&&
+                 c(game).outstanding_worker_wages("A")==0&&
+                 c(game).financial().balance("A:expense")==80&&
+                 daily::SnapshotCodec::encode(game.world())==
+                     daily::SnapshotCodec::encode(replay.world()),
+                 "tax on small public wages must reduce net expense without cash income");
+}
 static void automatic_wage_withholding_rereads_office_funding() {
     using namespace phasec;
     auto gh=fixture();
@@ -1366,6 +1396,10 @@ static void paid_laboratory_research_speed(
     }
     const auto cash=c(game).cash("A"),firm=c(game).cash("FIRM"),
         inputs=c(game).stock("FIRM","R",research_material);
+    const auto opening_revenue=c(game).financial().balance("A:revenue");
+    const auto wage_tax=[&] {
+        return opening_revenue-c(game).financial().balance("A:revenue");
+    };
     const auto opening_payroll=c(game).has_actor(scientist_wallet)?
         c(game).cash(scientist_wallet):Money{0};
     Money new_payroll=0;
@@ -1394,9 +1428,9 @@ static void paid_laboratory_research_speed(
             require_test(progress().paid_work==paid_after_twenty_days&&
                          progress().verified_work==paid_after_twenty_days,
                          "fractional production research rate stalled or a second penalty accelerated it");
-        require_test(c(game).cash("A")==cash-5*progress().paid_work&&
+        require_test(c(game).cash("A")==cash+wage_tax()-5*progress().paid_work&&
                      c(game).cash("FIRM")==firm+5*progress().paid_work-new_payroll&&
-                     c(game).cash(scientist_wallet)==opening_payroll+new_payroll&&
+                     c(game).cash(scientist_wallet)==opening_payroll+new_payroll-wage_tax()&&
                      c(game).stock("FIRM","R",research_material)==inputs-progress().paid_work,
                      "daily paid evidence did not match actual lab money and material");
         if(!low_daily_limit&&!explicit_micro_order)
@@ -1405,8 +1439,8 @@ static void paid_laboratory_research_speed(
     phaseb::People evidence=0;
     for(const auto& e:game.world().engine().base().core().state().research_evidence)
         if(e.project=="RESEARCH")evidence+=e.units;
-    require_test(c(game).cash("A")==cash-5*required&&c(game).cash("FIRM")==firm+5*required-new_payroll&&
-                 c(game).cash(scientist_wallet)==opening_payroll+new_payroll&&
+    require_test(c(game).cash("A")==cash+wage_tax()-5*required&&c(game).cash("FIRM")==firm+5*required-new_payroll&&
+                 c(game).cash(scientist_wallet)==opening_payroll+new_payroll-wage_tax()&&
                  c(game).stock("FIRM","R",research_material)==inputs-required&&evidence==required&&
                  progress().paid_work==required&&progress().verified_work==required&&
                  progress().required_evidence==required&&progress().reviewed,
@@ -1416,7 +1450,7 @@ static void paid_laboratory_research_speed(
                  phased::KnowledgeLevel::usable,"research bypassed monthly knowledge date");
     game.advance_day();
     require_test(game.world().engine().base().core().knowledge("FIRM","SOURCED")==
-                 phased::KnowledgeLevel::usable&&c(game).cash("A")==cash-5*required&&
+                 phased::KnowledgeLevel::usable&&c(game).cash("A")==cash+wage_tax()-5*required&&
                  c(game).stock("FIRM","R",research_material)==inputs-required,
                  "funded research failed dated promotion or spent twice");
 }
@@ -1486,12 +1520,19 @@ static void native_autonomous_funded_research_and_day_lab_limit(bool competing_f
     rules.researches.push_back({"PROJECT-RESEARCH",1});
     p0::DailyGame game(daily::World::adopt(std::move(gh),23),rules);
     const auto sponsor_cash=::c(game).cash("A");
+    const auto sponsor_revenue=::c(game).financial().balance("A:revenue");
+    // Wage tax receipts do not reimburse or duplicate the project's spending.
+    const auto sponsor_spent=[&] {
+        const auto& treasury=::c(game);
+        return sponsor_cash-treasury.cash("A")+
+            sponsor_revenue-treasury.financial().balance("A:revenue");
+    };
     const auto materials=::c(game).stock("FIRM","R","ore");
     game.advance_day();
     const auto& progress=game.world().engine().base().core().state().researches.at(
                           "PROJECT-RESEARCH");
     require_test(progress.verified_work==1&&progress.paid_work==1&&
-                 !progress.reviewed&&::c(game).cash("A")==sponsor_cash-5&&
+                 !progress.reviewed&&sponsor_spent()==5&&
                  ::c(game).stock("FIRM","R","ore")==materials-1,
                  "research Day1 did not use actual paid labor, materials and lab");
     auto bytes=daily::SnapshotCodec::encode(game.world());
@@ -1504,14 +1545,14 @@ static void native_autonomous_funded_research_and_day_lab_limit(bool competing_f
         const auto& state=game.world().engine().base().core().state();
         const auto& actual=state.researches.at("PROJECT-RESEARCH");
         require_test(!actual.reviewed&&actual.verified_work==1&&actual.paid_work==1&&
-                     actual.planned_work==0&&::c(game).cash("A")==sponsor_cash-5&&
+                     actual.planned_work==0&&sponsor_spent()==5&&
                      ::c(game).stock("FIRM","R","ore")==materials-5,
                      "competing real output did not use four existing workers or cancel only unused lab funding");
         return;
     }
     require_test(game.world().engine().base().core().state().researches.at(
                      "PROJECT-RESEARCH").reviewed &&
-                 ::c(game).cash("A")==sponsor_cash-10 &&
+                 sponsor_spent()==10 &&
                  ::c(game).stock("FIRM","R","ore")==materials-2 &&
                  game.world().engine().base().core().knowledge(
                      "FIRM","TECH-DAILY")!=phased::KnowledgeLevel::usable,
@@ -1520,7 +1561,7 @@ static void native_autonomous_funded_research_and_day_lab_limit(bool competing_f
     game.advance_day(); // February 1: next-month researched technology is usable.
     require_test(game.world().engine().base().core().knowledge(
                      "FIRM","TECH-DAILY")==phased::KnowledgeLevel::usable &&
-                 ::c(game).cash("A")==sponsor_cash-10 &&
+                 sponsor_spent()==10 &&
                  ::c(game).stock("FIRM","R","ore")==materials-2,
                  "next-month knowledge must not duplicate financing or material");
 }
@@ -4078,6 +4119,7 @@ int main(){
         fitting_purchase_requires_wages_and_consumes_real_stock();
         independent_workshop_must_pay_for_its_real_inputs();
         public_employment_pays_net_without_self_tax_revenue();
+        small_public_wages_reduce_expense_without_recording_tax_revenue();
         automatic_wage_withholding_rereads_office_funding();
         country_tariff_ai_respects_each_sovereigns_current_law();
         tariff_ai_skips_stale_or_delegated_authority();

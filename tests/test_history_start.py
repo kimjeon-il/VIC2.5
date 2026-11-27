@@ -443,7 +443,7 @@ def bundled_trial(work):
     assert "grain_in_transit" not in arrived["history"]["economy"]
     assert pending["pending_income_tax_date"] == "1840-02-01"
     assert applied["date"] == "1840-02-02" and applied["income_tax_ppm"] == 500_000
-    assert applied["treasury"] == 87 and applied["revenue"] == 37
+    assert applied["treasury"] == 93 and applied["revenue"] == 43
     assert save.is_file()
     restored = run("--panel-stdio", script=f"history-load {save}\nstep 2\nquit\n")
     success(restored)
