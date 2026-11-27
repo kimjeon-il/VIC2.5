@@ -79,19 +79,25 @@ inline FoodOverview food_overview(const daily::World& world,const std::string& c
             result.grain_stock=phaseb::add_checked(result.grain_stock,
                                                   core.stock(seller,region,history_start::grain_good));
         }
-        const auto& quote=core.market(region,good);
-        if(quote.floor<quote.ceiling) {
+        const std::string alternate=history_start::alternate_food_good(good);
+        const bool has_alternate=core.has_market(region,alternate);
+        const auto record_food=[&](const std::string& product) {
+            result.food_stock=phaseb::add_checked(result.food_stock,
+                core.stock(seller,region,product));
+            const auto& quote=core.market(region,product);
+            if(quote.floor==quote.ceiling&&!has_alternate)return;
             if(!result.prices)
                 result.prices=FoodPriceOverview{quote.price,quote.price,0};
             auto& prices=*result.prices;
             prices.minimum=std::min(prices.minimum,quote.price);
             prices.maximum=std::max(prices.maximum,quote.price);
             prices.purchase_gap=phaseb::add_checked(prices.purchase_gap,
-                core.previous_daily_solvent_unmet(region,good,world.day_index()));
-        }
+                core.previous_daily_solvent_unmet(region,product,world.day_index()));
+        };
+        record_food(good);
+        if(has_alternate)record_food(alternate);
         regions.insert(region);
         ++result.covered_provinces;
-        result.food_stock=phaseb::add_checked(result.food_stock,core.stock(seller,region,good));
         result.seller_cash=phaseb::add_checked(result.seller_cash,core.cash(seller));
     }
     if(regions.empty())return result;

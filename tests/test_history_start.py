@@ -88,6 +88,47 @@ def history_panel(start, work, tutorial, legacy):
     assert not json.loads(corrupted.stdout.splitlines()[0])["ok"]
 
 
+def two_foods_share_one_need(work):
+    start = work / "two foods.txt"
+    scenario = (FIXTURE.replace("HISTORY-1", "HISTORY-2")
+                + "food-start 7 2 240 F SAMPLE-CULTURE SAMPLE-FAITH 30 9 4 0\n"
+                + "food-alternate 7 5 1\n")
+    start.write_text(scenario, encoding="ascii")
+    save = work / "two foods.sav"
+    result = run("--panel-stdio", script=(
+        f"history-open {start}\nchoose-country AAA\nstep 1\nsave {save}\nstep 1\nquit\n"))
+    success(result)
+    opened, before, after, saved, next_day, _ = map(json.loads, result.stdout.splitlines())
+    assert opened["ok"], opened
+    def state(reply, wallet, reserve, seller, gap=0):
+        assert reply["ok"], reply
+        eco = reply["status"]["history"]["economy"]
+        assert (eco["household_cash"], eco["food_stock"], eco["seller_cash"]) == (
+            wallet, reserve, seller), eco
+        assert eco["local_food_prices"] == {"minimum": 5, "maximum": 9, "purchase_gap": gap}
+    state(before, 30, 5, 0)
+    state(after, 16, 3, 14)
+    state(next_day, 7, 2, 23, gap=1)
+    bundled = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-two-food-market.txt"
+    shipped = run("--panel-stdio", script=(
+        f"history-open {bundled}\nchoose-country FOOD-LAND\nstep 1\nquit\n"))
+    success(shipped)
+    state(json.loads(shipped.stdout.splitlines()[2]), 16, 3, 14)
+    assert saved == after
+    start.unlink()
+    restored = run("--panel-stdio", script=f"history-load {save}\nstep 1\nquit\n")
+    success(restored)
+    assert list(map(json.loads, restored.stdout.splitlines()))[:2] == [after, next_day]
+
+    for extra, message in (
+        ("food-alternate 12 5 1", "requires a matching food-start"),
+        ("food-alternate 7 0 1", "invalid food-alternate price"),
+        ("food-alternate 7 5 2", "duplicate food-alternate"),
+    ):
+        start.write_text(scenario + extra + "\n", encoding="ascii")
+        rejected(run("--history", start), message)
+
+
 def local_food_market(work):
     start = work / "local market.txt"
     legacy_header, *rows = FIXTURE.splitlines()
@@ -696,6 +737,7 @@ def main():
         success(run("--tutorial", "market-v1", script=f"save {tutorial}\nquit\n"))
         rejected(run("--resume-history", tutorial), "does not belong")
         history_panel(start, work, tutorial, saved)
+        two_foods_share_one_need(work)
         local_food_market(work)
         local_food_mill(work)
         executive_tax(work)

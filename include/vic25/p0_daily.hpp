@@ -759,7 +759,33 @@ using HouseholdNeedKey=std::tuple<std::string,Id,std::string>;
 struct HouseholdNeedAmount {
     int priority{};
     Quantity quantity{};
+    Quantity flexible_food{};
 };
+inline const char* preferred_basic_food(const phasec::IntegratedWorld* markets,
+                                       const std::string& region) {
+    if(markets && markets->has_market(region,"food") &&
+                  markets->has_market(region,"groceries") &&
+                  markets->market(region,"groceries").price<
+                  markets->market(region,"food").price)return "groceries";
+    return default_staple(markets,region,"food","groceries");
+}
+inline const char* other_basic_food(std::string_view good) {
+    return good=="food"?"groceries":"food";
+}
+inline Quantity available_household_offer(
+    const phasec::IntegratedWorld& c,
+    const phasec::IntegratedWorld::MarketSellerIndex& sellers,
+    const std::string& region,const std::string& good,Quantity limit) {
+    const auto it=sellers.find({region,good});
+    if(it==sellers.end())return 0;
+    Quantity available=0;
+    for(const auto& seller:it->second) {
+        available+=std::min(limit-available,
+            c.phase_d_material_available(seller,region,good));
+        if(available==limit)break;
+    }
+    return available;
+}
 inline std::map<HouseholdNeedKey,HouseholdNeedAmount>
 household_daily_needs(
     const phaseb::World& people,int day,int days,
@@ -773,12 +799,13 @@ household_daily_needs(
         if(pop.count<=0)continue;
         const auto& demo=people.demographic(pop.key.demographic);
         const auto& econ=people.economic(pop.key.economic);
-        const auto add=[&](const std::string& good,Quantity units,int priority) {
+        const auto add=[&](const std::string& good,Quantity units,int priority,bool flexible=false) {
             if(units<=0||explicit_goods.contains({slice_id,good}))return;
             auto& need=needs[{demo.region,pop.key.household,good}];
             if(need.quantity==0)need.priority=priority;
             else need.priority=std::min(need.priority,priority);
             need.quantity=phaseb::add_checked(need.quantity,units);
+            if(flexible)need.flexible_food=phaseb::add_checked(need.flexible_food,units);
         };
         bool custom_food=explicit_goods.contains({slice_id,"food"})||
                          explicit_goods.contains({slice_id,"groceries"});
@@ -804,9 +831,9 @@ household_daily_needs(
         if(!custom_food||!custom_clothing) {
             const auto [it,added]=staple_choices.try_emplace(demo.region);
             if(added)it->second={
-                default_staple(markets,demo.region,"food","groceries"),
+                preferred_basic_food(markets,demo.region),
                 default_staple(markets,demo.region,"clothing","clothes")};
-            if(!custom_food)add(it->second.first,times(pop.count,food_per_day),0);
+            if(!custom_food)add(it->second.first,times(pop.count,food_per_day),0,true);
             if(!custom_clothing)add(it->second.second,daily_increment(
                 times(pop.count,clothing_per_month),day,days),1);
         }
@@ -1229,11 +1256,41 @@ public:
             decisions.monthly_clothing_units_per_person,
             decisions.household_basket,explicit_demand,&game_c);
         std::map<std::pair<std::string,std::string>,Quantity> regional_need;
+        const auto add_regional_need=[&](const auto& region,const auto& good,Quantity n) {
+            if(n<=0)return;
+            auto& total=regional_need[{region,good}];
+            total=phaseb::add_checked(total,n);
+        };
+        // Opening inventory can redirect a single need to an alternative
+        // rather than generating one production order per food. Uncovered
+        // needs stay with the preferred good; actual sales use live stock.
+        std::optional<phasec::IntegratedWorld::MarketSellerIndex> food_sellers;
+        std::map<std::pair<std::string,std::string>,Quantity> opening_food;
         for(const auto& [key,need]:household_forecast) {
             const auto& [region,household,good]=key;
             (void)household;
-            regional_need[{region,good}]=phaseb::add_checked(
-                regional_need[{region,good}],need.quantity);
+            const auto alt=other_basic_food(good);
+            Quantity redirected=0;
+            if(need.flexible_food>0&&game_c.has_market(region,good)&&
+                                    game_c.has_market(region,alt)) {
+                if(!food_sellers)food_sellers=game_c.market_seller_index();
+                const auto spare=[&](const std::string& product) -> Quantity& {
+                    const auto [it,added]=opening_food.try_emplace({region,product},0);
+                    if(added)it->second=available_household_offer(
+                        game_c,*food_sellers,region,product,
+                        std::numeric_limits<Quantity>::max());
+                    return it->second;
+                };
+                auto& primary=spare(good);
+                auto& secondary=spare(alt);
+                primary-=std::min(primary,need.quantity-need.flexible_food);
+                const auto supplied=std::min(primary,need.flexible_food);
+                primary-=supplied;
+                redirected=std::min(secondary,need.flexible_food-supplied);
+                secondary-=redirected;
+                add_regional_need(region,alt,redirected);
+            }
+            add_regional_need(region,good,need.quantity-redirected);
         }
         for(const auto& buyer:decisions.buyers)
             if(game_c.people().has_slice(buyer.population_slice)) {
@@ -2691,29 +2748,57 @@ public:
                 const auto sellers=c.market_seller_index();
                 for(const auto& [key,need]:ordered) {
                     const auto& [region,household,good]=key;
-                    const Quantity demand=need.quantity;
                     const std::string wallet="HH:"+std::to_string(household);
-                    Quantity still_due=demand;
-                    const Quantity in_kind=std::min(still_due,
-                        c.phase_d_material_available(wallet,region,good));
-                    if(in_kind>0) {
-                        c.consume(wallet,region,good,in_kind);
-                        still_due-=in_kind;
-                    }
-                    if(still_due>0 && c.has_actor(wallet) &&
-                       c.has_market(region,good)) {
-                        const auto market_sellers=sellers.find({region,good});
-                        const Quantity purchased=c.clear_household_market(
-                            wallet,region,good,still_due,
-                            market_sellers==sellers.end()?
-                                std::vector<std::string>{}:market_sellers->second);
-                        if(purchased>0) {
-                            c.consume(wallet,region,good,purchased);
-                            still_due-=purchased;
+                    const auto in_kind=[&](const std::string& product,Quantity due) {
+                        const auto n=std::min(due,
+                            c.phase_d_material_available(wallet,region,product));
+                        if(n>0)c.consume(wallet,region,product,n);
+                        return n;
+                    };
+                    const auto buy=[&](const std::string& product,Quantity due) {
+                        if(due<=0||!c.has_actor(wallet)||!c.has_market(region,product))
+                            return Quantity{0};
+                        const auto market_sellers=sellers.find({region,product});
+                        static const std::vector<std::string> nobody;
+                        const auto n=c.clear_household_market(wallet,region,product,due,
+                            market_sellers==sellers.end()?nobody:market_sellers->second);
+                        if(n>0)c.consume(wallet,region,product,n);
+                        return n;
+                    };
+                    const auto exact=need.quantity-need.flexible_food;
+                    auto missing=exact-in_kind(good,exact);
+                    missing-=buy(good,missing);
+                    auto remaining=need.flexible_food;
+                    if(remaining>0) {
+                        const std::string alt=other_basic_food(good);
+                        remaining-=in_kind(good,remaining);
+                        remaining-=in_kind(alt,remaining);
+                        if(c.has_actor(wallet)&&c.has_market(region,good)&&
+                                               c.has_market(region,alt)) {
+                            const auto preferred_order=std::array{good,alt};
+                            // First allocate actual offers, then record just
+                            // one residual signal, without counting attempted
+                            // units blocked by regional access limits twice.
+                            for(const auto& product:preferred_order) {
+                                if(remaining<=0)break;
+                                const auto affordable=std::min(remaining,
+                                    c.cash(wallet)/c.market(region,product).price);
+                                if(affordable<=0)continue;
+                                const Quantity order=available_household_offer(
+                                    c,sellers,region,product,affordable);
+                                const Quantity purchased=buy(product,order);
+                                missing+=order-purchased;
+                                remaining-=order;
+                            }
+                            if(remaining>0)c.record_household_market_shortage(
+                                wallet,region,good,remaining);
+                        } else {
+                            remaining-=buy(good,remaining);
                         }
+                        missing+=remaining;
                     }
-                    if(staple_food(good) && still_due>0)
-                        c.phase_time_record_food_need_gap(region,still_due);
+                    if(staple_food(good) && missing>0)
+                        c.phase_time_record_food_need_gap(region,missing);
                 }
             });
         // Goods purchased on this Stage7 stay in the buyer's C inventory,
