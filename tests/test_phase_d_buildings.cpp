@@ -16,13 +16,13 @@ template<class F> static bool rejects(F&& f) {
     try { f(); } catch(const std::exception&) { return true; }
     return false;
 }
-static Id seed_worker(World& w,People count) {
+static Id seed_worker(World& w,People count,Id partition=1) {
     auto& pop=w.seed_core().seed_population();
     const auto hh=pop.household_profile({"R","shared","shared",count});
     const auto eco=pop.economic_profile({"R","worker","wage","employee",pop.default_education()});
     const auto dem=pop.demographic_profile({"R",w.month()-300,Sex::female,
         "culture","faith","citizen","free",pop.default_health(),Service::civilian});
-    return pop.seed_population(dem,eco,hh,count);
+    return pop.seed_population(dem,eco,hh,count,partition);
 }
 static void test_native_catalog_and_actual_production() {
     check(vic25::building::archetypes.size()==99 &&
@@ -354,10 +354,101 @@ static void electrics_recipe_keeps_both_material_contracts() {
           "new telephone inputs invalidated existing recipes or replay");
 }
 
+static void food_industry_distillation_uses_actual_ingredients() {
+    World w{4200};
+    auto& core=w.seed_core();
+    core.seed_region("R","STATE");
+    w.seed_standard_industries();
+    for(const auto* id:{"BAKERY","POT","PATENT","PATENT_SHORT"}) {
+        core.seed_actor(id,50);
+        w.seed_building_facility(id,id,"R",3,"vic3_115.urban.food_industries");
+        core.seed_stock(id,"R","grain",8);
+    }
+    core.seed_stock("POT","R","sugar",5);
+    core.seed_stock("POT","R","glass",1);
+    core.seed_stock("PATENT","R","sugar",5);
+    core.seed_stock("PATENT","R","glass",1);
+    core.seed_stock("PATENT","R","copper",1);
+    core.seed_stock("PATENT_SHORT","R","sugar",5);
+    core.seed_stock("PATENT_SHORT","R","glass",1);
+    IndustryRecipe bakery;
+    bakery.id=bakery.site="BAKERY";bakery.industry_class="MANU";
+    bakery.inputs={{"grain",8}};bakery.outputs={{"groceries",9}};
+    bakery.workers_per_batch=1;
+    auto pot=bakery;
+    pot.id=pot.site="POT";
+    pot.inputs={{"grain",8},{"sugar",5},{"glass",1}};
+    pot.outputs={{"groceries",6},{"liquor",10}};
+    for(const auto* missing:{"sugar","glass"}) {
+        auto invalid=pot;
+        std::erase_if(invalid.inputs,[&](const auto& i){return i.good==missing;});
+        check(rejects([&]{w.seed_building_recipe(invalid);}),
+              "distillation accepted a recipe without sugar or glass");
+    }
+    auto missing_sugar_coproduct=bakery;
+    missing_sugar_coproduct.id=missing_sugar_coproduct.site="POT";
+    missing_sugar_coproduct.byproducts={{"liquor",10}};
+    check(rejects([&]{w.seed_building_recipe(missing_sugar_coproduct);}),
+          "a liquor coproduct must not bypass distillery material checks");
+    auto liquor_only=pot;
+    liquor_only.outputs={{"liquor",10}};
+    check(rejects([&]{w.seed_building_recipe(liquor_only);}),
+          "food-industry stills must retain their grocery output");
+    auto false_coproduct=pot;
+    false_coproduct.outputs.push_back({"telephones",1});
+    check(rejects([&]{w.seed_building_recipe(false_coproduct);}),
+          "distillation must not permit unrelated outputs");
+    auto patent=pot;
+    patent.id=patent.site="PATENT";
+    patent.inputs.push_back({"copper",1});
+    patent.outputs={{"groceries",5},{"liquor",15}};
+    w.seed_building_recipe(bakery);
+    w.seed_building_recipe(pot);
+    w.seed_building_recipe(patent);
+    auto short_patent=patent;
+    short_patent.id=short_patent.site="PATENT_SHORT";
+    w.seed_building_recipe(short_patent);
+    World::Plan hire;
+    Id partition=1;
+    for(const auto* id:{"BAKERY","POT","PATENT","PATENT_SHORT"}) {
+        const auto worker=seed_worker(w,1,partition++);
+        hire[2].push_back([id,worker](Stage& s){s.phase_c().hire(worker,1,id,1);});
+    }
+    w.advance(hire);
+    check(w.building_production_capacity("BAKERY").feasible_batches==1 &&
+          w.building_production_capacity("POT").feasible_batches==1 &&
+          w.building_production_capacity("PATENT").feasible_batches==1 &&
+          w.building_production_capacity("PATENT_SHORT").feasible_batches==0,
+          "missing copper must limit patent stills but not bakery or pot stills");
+    World::Plan production;
+    production[4].push_back([](Stage& s){
+        s.manufacture("BAKERY",1);
+        s.manufacture("POT",1);
+        s.manufacture("PATENT",1);
+    });
+    w.advance(production);
+    check(w.core().stock("BAKERY","R","groceries")==9 &&
+          w.core().stock("BAKERY","R","liquor")==0 &&
+          w.core().stock("POT","R","groceries")==6 &&
+          w.core().stock("POT","R","liquor")==10 &&
+          w.core().stock("POT","R","sugar")==0 &&
+          w.core().stock("POT","R","glass")==0 &&
+          w.core().stock("PATENT","R","groceries")==5 &&
+          w.core().stock("PATENT","R","liquor")==15 &&
+          w.core().stock("PATENT","R","copper")==0 &&
+          w.core().stock("PATENT_SHORT","R","grain")==8 &&
+          w.core().stock("PATENT_SHORT","R","liquor")==0,
+          "bakery and pot stills did not preserve their separate inventory contracts");
+    const auto checkpoint=SnapshotCodec::encode(w);
+    check(SnapshotCodec::encode(SnapshotCodec::decode(checkpoint))==checkpoint,
+          "distillery production and pending shortage did not survive reload");
+}
+
 int main() {
     try {
         test_native_catalog_and_actual_production();
         electrics_recipe_keeps_both_material_contracts();
+        food_industry_distillation_uses_actual_ingredients();
         national_art_amendment_changes_actual_academy_output();
         test_construction_and_recipe_before_commission();
         test_farm_with_real_material_and_renewable_crop();

@@ -35,7 +35,7 @@ inline constexpr std::array<OperatingProfile,52> operating_profiles{{
     {"vic3_115.urban.electrics_industries", Operation::recipe, Siting::urban, {"telephones", "radios", ""}, {"tools", "steel", ""}, "engineer", "steel"},
     {"vic3_115.urban.explosives_factory", Operation::recipe, Siting::urban, {"explosives", "", ""}, {"fertilizer", "sulfur", ""}, "chemical_worker", "steel"},
     {"vic3_115.urban.fertilizer_plants", Operation::recipe, Siting::urban, {"fertilizer", "", ""}, {"sulfur", "", ""}, "chemical_worker", "steel"},
-    {"vic3_115.urban.food_industries", Operation::recipe, Siting::urban, {"groceries", "", ""}, {"grain", "", ""}, "factory_worker", "wood"},
+    {"vic3_115.urban.food_industries", Operation::recipe, Siting::urban, {"groceries", "liquor", ""}, {"grain", "", ""}, "factory_worker", "wood"},
     {"vic3_115.urban.furniture_manufacturies", Operation::recipe, Siting::urban, {"furniture", "", ""}, {"wood", "", ""}, "craftsperson", "wood"},
     {"vic3_115.urban.glassworks", Operation::recipe, Siting::urban, {"glass", "", ""}, {"coal", "sand", ""}, "factory_worker", "stone"},
     {"vic3_115.urban.motor_industries", Operation::recipe, Siting::urban, {"engines", "", ""}, {"steel", "tools", ""}, "machinist", "steel"},

@@ -13,7 +13,7 @@
 | 전기기기공장 | 제조·실물생산 | 도시 시설 | telephones, radios | tools, steel | `engineer` | `steel` |
 | 폭약공장 | 제조·실물생산 | 도시 시설 | explosives | fertilizer, sulfur | `chemical_worker` | `steel` |
 | 비료공장 | 제조·실물생산 | 도시 시설 | fertilizer | sulfur | `chemical_worker` | `steel` |
-| 식품공장 | 제조·실물생산 | 도시 시설 | groceries | grain | `factory_worker` | `wood` |
+| 식품공장 | 제조·실물생산 | 도시 시설 | groceries, 선택형 liquor | grain, 증류 시 sugar·glass | `factory_worker` | `wood` |
 | 가구공장 | 제조·실물생산 | 도시 시설 | furniture | wood | `craftsperson` | `wood` |
 | 유리·도자기공장 | 제조·실물생산 | 도시 시설 | glass | coal, sand | `factory_worker` | `stone` |
 | 동력기관공장 | 제조·실물생산 | 도시 시설 | engines | steel, tools | `machinist` | `steel` |
@@ -70,6 +70,27 @@
 - `phasee::World::seed_building_in_province` / `seed_building_construction_in_province`: 기록된 실제 Province·해안·물리적 철도링크 및 기존 소유권 원장의 `land:`/`mining_right:` 자산 보유를 검사. 임의 생성된 역사적 지형/자원 증거로 간주하지 않음.
 - 기존 D-C: 사업주·시공자·자재·실제 노동·대금·WIP·준공을 통해 `ProductionFacility.capacity`을 부여. 자재/노동/지급 없는 건설, 무료 설비, 무근거 지하 총매장량을 생성하지 않음.
 - 스냅샷: `VIC25_PHASED_SNAPSHOT_8`/`phase-d-cpp/0.8`로 자원현장 실제 소모품 보존. v0.7 저장은 의도적으로 지원하지 않음.
+
+## 선택형 식품공장 증류 예제 (빅토리아 3 1.15.2)
+
+식품공장의 기본 식료품 생산은 그대로다. 증류를 시나리오에 지정할 때
+같은 공장의 식료품 생산량 일부가 주류 생산으로 바뀐다. 식료품을
+재고에서 구입하거나 소비하는 공정이 아니다.
+
+| 기본 제빵과 결합한 예제 | 투입 | 산출 |
+| --- | --- | --- |
+| 제빵만 | 곡물 8 | 식료품 9 |
+| 단식 증류기 | 곡물 8, 설탕 5, 유리 1 | 식료품 6, 주류 10 |
+| 특허 증류기 | 곡물 8, 설탕 5, 유리 1, 구리 1 | 식료품 5, 주류 15 |
+
+1.15.2의 기본 제빵 및 증류 수량을 1/5로 환산한 예시이며, 전 시설 공통의
+수치가 아니다. 기본 제빵에 구리를 요구하지 않으며 단식 증류기에도 구리를
+요구하지 않는다. 특허 증류기를 선택한 예제는 실제 구리 재고가 필요하다.
+두 증류 방식 모두 곡물·설탕·유리가 필요하고 일반 레시피와 동일하게
+노동과 시설 사용량을 계산한다. 기존 기술 채택 조건을 지정할 수 있지만,
+이 예제는 새 기술 트리, 기본 시나리오 변경, 증류기 선택 UI 또는 저장 형식을
+추가하지 않는다. 다른 기본 생산방식과의 조합 및 확장 투자 판단은 별도다.
+검증: `tests/test_phase_d_buildings.cpp`의 제빵·증류 실물 재고 및 저장 시험.
 
 ## 직접 연결하지 않는 기능
 
