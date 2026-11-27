@@ -558,7 +558,11 @@ constexpr phaseb::Id campaign_workshop_worker=210;
 bool is_balanced_timber(const daily::World& world) {
     return world.migration_origin()==campaign_timber_balance_origin||is_elected_budget_campaign(world);
 }
-constexpr auto supply_recovery_origin="panel:campaign-supply-v1";
+constexpr auto legacy_supply_recovery_origin="panel:campaign-supply-v1";
+constexpr auto supply_recovery_origin="panel:campaign-supply-tariff-v2";
+bool can_order_campaign_ore_tariff(const daily::World& world) {
+    return is_ore_tariff_campaign(world)||world.migration_origin()==supply_recovery_origin;
+}
 constexpr auto steel_chain_origin="panel:campaign-steel-v1";
 constexpr auto steel_coal_owner="CAMPAIGN-COAL-OWNER";
 constexpr auto steel_coal_site="CAMPAIGN-COAL-MINE";
@@ -649,7 +653,8 @@ bool is_steel_campaign(const daily::World& world) {
     return world.migration_origin()==steel_chain_origin;
 }
 bool is_supply_recovery(const daily::World& world) {
-    return world.migration_origin()==supply_recovery_origin;
+    return world.migration_origin()==supply_recovery_origin||
+           world.migration_origin()==legacy_supply_recovery_origin;
 }
 const char* legislative_origin(LegislativeTrial trial) {
     switch(trial) {
@@ -1225,7 +1230,11 @@ daily::World law_world(LegislativeTrial trial) {
 
         c.seed_actor(campaign_seller,0);c.seed_actor(campaign_carrier,0);
         c.seed_actor(campaign_buyer,40'000);
-        c.seed_market(law_region,"ore",30,30,30);
+        // The detour's 19 freight + 10 for ore leaves room for a
+        // reduced tariff, but full duty exceeds both the local ore bid
+        // and the smelter's iron receipts net of the worker's wage.
+        const phasec::Money ore_quote=recovery?36:30;
+        c.seed_market(law_region,"ore",ore_quote,ore_quote,ore_quote);
         c.seed_market(campaign_region_b,"ore",10,10,10);
         c.seed_stock(campaign_seller,campaign_region_b,"ore",4000);
         engine.seed_verified_geographic_link(campaign_edge,2,1,"rail");
@@ -1245,7 +1254,7 @@ daily::World law_world(LegislativeTrial trial) {
             engine.seed_verified_geographic_link(recovery_edge,2,1,"road");
             auto road=rail;
             road.id=recovery_edge;road.carrier=recovery_carrier;road.mode="road";
-            road.freight_per_unit=5;road.transit_days=3;
+            road.freight_per_unit=19;road.transit_days=3;
             road.evidence_id="campaign:supply-recovery-road";
             road.valid_from_month=24002;road.valid_through_month=24119;
             engine.seed_transport_edge(road);
@@ -1424,6 +1433,7 @@ daily::World open_law(const std::optional<fs::path>& resume,LegislativeTrial tri
     // checkpoint. Do not migrate its origin or reprovision its supply chain.
     const auto& origin=w.migration_origin();
     const bool origin_matches=origin==legislative_origin(trial)||
+        (trial==LegislativeTrial::supply_recovery&&origin==legacy_supply_recovery_origin)||
         (trial==LegislativeTrial::campaign&&
          (origin==legacy_campaign_origin||origin==campaign_procurement_origin||
           origin==campaign_ore_inventory_origin||origin==campaign_timber_balance_origin||
@@ -1994,7 +2004,7 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
             current_conflict_status(out,engine.diplomacy(),tag);
         }
         if(tag=="A") {
-            if(is_ore_tariff_campaign(world)) {
+            if(can_order_campaign_ore_tariff(world)) {
                 const auto& diplomacy=engine.diplomacy();
                 const auto rate=diplomacy.tariffs.find({tag,trial_good});
                 const auto cap=core.p2_rule(tag,tag,
@@ -2365,7 +2375,7 @@ void run_panel() {
                         last_status=panel_status(session->game,session->tag);
                         throw;
                     }
-                } else if(command=="tariff"&&is_ore_tariff_campaign(session->game.world())) {
+                } else if(command=="tariff"&&can_order_campaign_ore_tariff(session->game.world())) {
                     if(session->tag!="A")
                         throw std::invalid_argument("the inspected peer is read-only");
                     advance_panel_day(session->game,tariff_order(session->game,session->tag,trial_good,

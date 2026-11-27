@@ -745,7 +745,7 @@ def main():
                     and supply(row)["smelter_receipts"] == supply(stalled)["smelter_receipts"],
                     "paid road cargo was available to the smelter before the three-day trip ended")
         require(dispatched["supplier_cash"] - reopening["supplier_cash"] == 10
-                and supply(dispatched)["road_freight_paid"] == 5
+                and supply(dispatched)["road_freight_paid"] == 19
                 and supply(dispatched)["road_in_transit_ore"] == 1
                 and dispatched["carrier_cash"] == reopening["carrier_cash"],
                 "the new road's real cargo purchase and freight did not settle to the right wallets")
@@ -760,6 +760,69 @@ def main():
                 and supply_replay[2]["status"] == recovered and supply_replay[3]["ok"]
                 and supply_again.read_bytes() == supply_complete.read_bytes(),
                 "supply-recovery save did not preserve the real delayed cargo exactly")
+
+        # When rail has shut, tariff policy cannot change the old cargo or
+        # open a road stashed in the future. It can pay or prevent new trade
+        # once the detour raises the landed quote.
+        recovery_cut = d / "tariff recovery cut.sav"
+        recovery_transit = d / "tariff recovery transit.sav"
+        recovery_final = d / "tariff recovery full.sav"
+        recovery_replay = d / "tariff recovery replay.sav"
+        initial = panel("new SUPPLY-A", "step 31", f"save {recovery_cut}", "quit")
+        require(all(row["ok"] for row in initial), "could not save the recovery fork")
+        cut = initial[1]["status"]
+        require(cut.get("campaign_ore_tariff_allowed") and cut["in_transit_ore"] == 1,
+                "A must be able to set the ore tariff during the rail cut")
+        def recovery_policy(percent, transit_save, final_save):
+            commands = (f"load SUPPLY-A {recovery_cut}", "inspect B", f"tariff {percent}",
+                        "inspect A", f"tariff {percent}", "step 28", "step 1",
+                        f"save {transit_save}", "step 3", f"save {final_save}", "quit")
+            replies = panel(*commands)
+            require(not replies[2]["ok"] and replies[2]["status"] == replies[1]["status"],
+                    "B inspection incorrectly applied A's tariff")
+            require(all(r["ok"] for i,r in enumerate(replies) if i != 2), replies)
+            return [replies[i]["status"] for i in (4, 5, 6, 8)]
+        low_day, low_open, low_cargo, low_made = recovery_policy(
+            50, recovery_transit, recovery_final)
+        high_day, high_open, high_cargo, high_made = recovery_policy(
+            100, d / "high duty transit.sav", d / "high duty final.sav")
+        require(low_day["supplier_cash"] == high_day["supplier_cash"] == cut["supplier_cash"]
+                and low_day["paid_duty"] == high_day["paid_duty"] == 0
+                and supply(low_day)["iron_batches"] == supply(high_day)["iron_batches"]
+                == supply(cut)["iron_batches"] + 1,
+                "a new tariff changed already paid rail cargo")
+        require(low_open["date"] == high_open["date"] == "2000-03-01"
+                and low_open["in_transit_ore"] == high_open["in_transit_ore"] == 0
+                and low_open["supplier_cash"] == high_open["supplier_cash"] == cut["supplier_cash"],
+                "a tariff reopened trade while both physical routes were closed")
+        require(low_cargo["paid_duty"] == 5 and high_cargo["paid_duty"] == 0
+                and low_cargo["treasury"] - high_cargo["treasury"] == 5
+                and supply(low_cargo)["road_freight_paid"] == 19
+                and supply(high_cargo)["road_freight_paid"] == 0
+                and supply(low_cargo)["road_in_transit_ore"] == 1
+                and supply(low_cargo)["iron_batches"] == supply(high_cargo)["iron_batches"]
+                == supply(low_open)["iron_batches"],
+                "new cargo should face the landed-cost gate, but not produce until arrival")
+        require(supply(low_made)["iron_batches"] == supply(low_open)["iron_batches"] + 1
+                and supply(low_made)["smelter_receipts"] == supply(low_open)["smelter_receipts"] + 40
+                and supply(high_made)["iron_batches"] == supply(high_open)["iron_batches"],
+                "the duty choice did not affect real shipments and production")
+        # Lower the rate after deliberately missing the first road day,
+        # exactly as the Tk button test does. Unused quota carries over.
+        late = panel(f"load SUPPLY-A {recovery_cut}", "tariff 100", "step 29",
+                     "tariff 50", "quit")
+        require(all(row["ok"] for row in late), late)
+        blocked, cut_rate = (row["status"] for row in late[2:4])
+        require(supply(blocked)["road_in_transit_ore"] == 0 and blocked["paid_duty"] == 0
+                and supply(cut_rate)["road_in_transit_ore"] == 2 and cut_rate["paid_duty"] == 10
+                and supply(cut_rate)["iron_batches"] == supply(blocked)["iron_batches"],
+                "lowering the rate after the first road day must use carried-over capacity")
+        reload = panel(f"load SUPPLY-A {recovery_transit}", "step 3",
+                       f"save {recovery_replay}", "quit")
+        require(all(row["ok"] for row in reload) and reload[0]["status"] == low_cargo
+                and reload[1]["status"] == low_made
+                and recovery_replay.read_bytes() == recovery_final.read_bytes(),
+                "loading an in-flight taxed cargo changed the saved world")
 
         timber_close = d / "timber month opening.sav"
         timber_final = d / "timber month close.sav"
@@ -862,7 +925,7 @@ def main():
                 and restored_zero[1]["status"]["tariff_ppm"] == 0
                 and restored_zero[1]["status"]["paid_duty"] == 2,
                 "returning to zero must not erase the duty already paid before the old parcel arrives")
-        optional = panel("new SUPPLY-A", "tariff 20", "quit")
+        optional = panel("new STEEL-A", "tariff 20", "quit")
         require(optional[0]["ok"] and not optional[1]["ok"]
                 and "campaign_ore_tariff_allowed" not in optional[0]["status"]
                 and optional[1]["status"] == optional[0]["status"],
