@@ -765,7 +765,7 @@ using HouseholdNeedKey=std::tuple<std::string,Id,std::string>;
 struct HouseholdNeedAmount {
     int priority{};
     Quantity quantity{};
-    Quantity flexible_food{};
+    Quantity flexible_food{},fabric_allowance{};
 };
 inline const char* preferred_basic_food(const phasec::IntegratedWorld* markets,
                                        const std::string& region) {
@@ -800,6 +800,9 @@ household_daily_needs(
     const std::set<std::pair<Id,std::string>>& explicit_goods={},
     const phasec::IntegratedWorld* markets=nullptr) {
     std::map<HouseholdNeedKey,HouseholdNeedAmount> needs;
+    // Consolidate applicable slices of a household before daily integer
+    // division. Partitioning a population must not reduce its fabric cap.
+    std::map<HouseholdNeedKey,Quantity> flexible_clothing_monthly;
     std::map<std::string,std::pair<const char*,const char*>> staple_choices;
     for(const auto& [slice_id,pop]:people.slices()) {
         if(pop.count<=0)continue;
@@ -840,9 +843,30 @@ household_daily_needs(
                 preferred_basic_food(markets,demo.region),
                 default_staple(markets,demo.region,"clothing","clothes")};
             if(!custom_food)add(it->second.first,times(pop.count,food_per_day),0,true);
-            if(!custom_clothing)add(it->second.second,daily_increment(
-                times(pop.count,clothing_per_month),day,days),1);
+            if(!custom_clothing&&clothing_per_month>0) {
+                const auto monthly=times(pop.count,clothing_per_month);
+                if(markets&&markets->has_market(demo.region,"fabric")&&
+                            !markets->has_market(demo.region,"clothing")) {
+                    auto& total=flexible_clothing_monthly[
+                        {demo.region,pop.key.household,"clothes"}];
+                    total=phaseb::add_checked(total,monthly);
+                } else {
+                    add(it->second.second,daily_increment(monthly,day,days),1);
+                }
+            }
         }
+    }
+    for(const auto& [key,monthly]:flexible_clothing_monthly) {
+        const auto due=daily_increment(monthly,day,days);
+        if(due<=0)continue;
+        const auto before=proportional(monthly,day-1,days);
+        const auto through=phaseb::add_checked(before,due);
+        auto& need=needs[key];
+        need.priority=need.quantity==0?1:std::min(need.priority,1);
+        need.quantity=phaseb::add_checked(need.quantity,due);
+        // Every other ordinary clothing unit can be covered by fabric.
+        // Integer fractions have no separate stock, debt, or save fields.
+        need.fabric_allowance=through/2-before/2;
     }
     return needs;
 }
@@ -2785,7 +2809,27 @@ public:
                     };
                     const auto exact=need.quantity-need.flexible_food;
                     auto missing=exact-in_kind(good,exact);
-                    missing-=buy(good,missing);
+                    if(need.fabric_allowance>0&&missing>0&&c.has_actor(wallet)) {
+                        const auto affordable=c.has_market(region,good)?
+                            std::min(missing,c.cash(wallet)/c.market(region,good).price):0;
+                        const auto offered=available_household_offer(c,sellers,region,good,affordable);
+                        const auto delivered=buy(good,offered);
+                        // A blocked actual order already records its own gap;
+                        // don't send it a second time to the other market.
+                        auto unordered=missing-offered;
+                        const auto eligible=std::min(unordered,need.fabric_allowance);
+                        const auto fabric_in_kind=in_kind("fabric",eligible);
+                        const auto fabric_to_buy=available_household_offer(c,sellers,
+                            region,"fabric",std::min(eligible-fabric_in_kind,
+                                c.cash(wallet)/c.market(region,"fabric").price));
+                        const auto fabric_bought=buy("fabric",fabric_to_buy);
+                        unordered-=fabric_in_kind+fabric_to_buy;
+                        if(unordered>0&&c.has_market(region,good))
+                            c.record_household_market_shortage(wallet,region,good,unordered);
+                        missing=offered-delivered+fabric_to_buy-fabric_bought+unordered;
+                    } else {
+                        missing-=buy(good,missing);
+                    }
                     auto remaining=need.flexible_food;
                     if(remaining>0) {
                         const std::string alt=other_basic_food(good);

@@ -677,7 +677,96 @@ static void copper_mine_supplies_paid_telephone_sales(bool has_mine) {
     }
 }
 
+static void plain_clothing_has_a_bounded_fabric_fallback() {
+    struct Case {
+        Quantity clothes; phasec::Money funds; bool exact_basket;
+        Quantity bought_clothes,bought_fabric,unmet;
+    };
+    for(const auto trial:std::array{Case{1,40,false,1,2,1},Case{4,40,false,4,0,0},
+                                  Case{0,5,false,0,0,0},Case{1,40,true,1,0,3}}) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");geo.seed_unit(1,"A","Clothing fixture");
+        geo.seed_assignment(1,1);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",0);c.seed_government("A","HEAD","PM",5,3);
+        for(const auto seller:{"BAKER","MILL","FARM"})c.seed_actor(seller,0);
+        c.seed_market("R","groceries",5,5,5,0);
+        c.seed_market("R","clothes",8,8,8,0);
+        c.seed_market("R","fabric",3,3,3,0);
+        c.seed_stock("BAKER","R","groceries",1);
+        c.seed_stock("FARM","R","fabric",10);
+        if(trial.clothes>0)c.seed_stock("MILL","R","clothes",trial.clothes);
+        const auto pop=add_worker(gh);
+        const auto wallet="HH:"+std::to_string(c.people().slice(pop).key.household);
+        c.seed_actor(wallet,trial.funds);
+        p0::Policies p;
+        p.monthly_clothing_units_per_person=124; // four integer fixture units each January day
+        if(trial.exact_basket)p.household_basket={{"clothes","employee",124,1}};
+        p0::DailyGame game(daily::World::adopt(std::move(gh),29),p);
+        p0::DailyGame replay(daily::SnapshotCodec::decode(
+            daily::SnapshotCodec::encode(game.world())),p);
+        phasegh::World::Plan audit;
+        audit[7].push_back([&](phasegh::Stage& stage) {
+            const auto& live=stage.phase_c();
+            const auto& clothes=live.market("R","clothes");
+            const auto& fabric=live.market("R","fabric");
+            check(fabric.delivered==trial.bought_fabric&&fabric.unmet==0,
+                  "fabric did not fill just the allowed clothing shortage");
+            check(clothes.delivered==trial.bought_clothes&&clothes.unmet==trial.unmet,
+                  "substituted demand still counted as unmet clothes");
+        });
+        game.advance_day(audit);replay.advance_day();
+        const auto& live=game.world().engine().base().core().core();
+        check(live.cash("BAKER")==5&&live.cash("MILL")==8*trial.bought_clothes&&
+              live.cash("FARM")==3*trial.bought_fabric&&
+              live.cash(wallet)+live.cash("BAKER")+live.cash("MILL")+live.cash("FARM")==trial.funds&&
+              live.stock("FARM","R","fabric")==10-trial.bought_fabric&&
+              live.stock(wallet,"R","fabric")==0&&live.financial().balanced()&&
+              daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+              "food priority, paid cloth purchases or replay changed");
+    }
+}
+
+static void monthly_clothing_cap_is_shared_across_household_slices() {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(1,"A","Clothing rounding fixture");
+    geo.seed_assignment(1,1);
+    auto& c=geo.seed_core().seed_core();
+    c.seed_actor("A",0);
+    c.seed_actor("SUPPLIER",0);
+    c.seed_market("R","fabric",3,3,3,0);
+    c.seed_stock("SUPPLIER","R","fabric",10);
+    const auto slice=add_worker(gh);
+    auto& pop=c.seed_population();
+    const auto original=pop.slice(slice).key;
+    pop.seed_population(original.demographic,original.economic,original.household,1,2);
+    const auto wallet="HH:"+std::to_string(original.household);
+    c.seed_actor(wallet,20);
+    p0::Policies p;
+    p.daily_food_units_per_person=0;
+    p.monthly_clothing_units_per_person=1;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),29),p);
+    const auto ledger=[&]() -> const phasec::IntegratedWorld& {
+        return game.world().engine().base().core().core();
+    };
+    for(int day=1;day<=30;++day)game.advance_day();
+    check(ledger().cash(wallet)==20&&ledger().stock("SUPPLIER","R","fabric")==10,
+          "fabric purchased before the household's second monthly clothing unit was due");
+    const auto saved=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(saved),p);
+    game.advance_day();replay.advance_day();
+    check(ledger().cash(wallet)==17&&ledger().cash("SUPPLIER")==3&&
+          ledger().stock("SUPPLIER","R","fabric")==9&&
+          daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
+          "half of two monthly household clothing units must be replaceable after splitting the POP");
+}
+
 int main() {
+    plain_clothing_has_a_bounded_fabric_fallback();
+    monthly_clothing_cap_is_shared_across_household_slices();
     copper_mine_supplies_paid_telephone_sales(false);
     copper_mine_supplies_paid_telephone_sales(true);
     for(const auto trial:{DividendTrial::enabled,DividendTrial::disabled,
