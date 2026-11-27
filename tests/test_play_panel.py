@@ -1025,6 +1025,20 @@ def run_public_freight_works(root, panel):
     panel.step_button.invoke()
     wait(root, panel)
     assert panel.current["public_works"]["ordered"]
+    panel._send("step 2")
+    wait(root, panel)
+    paid_date = panel.current["date"]
+    assert panel.current["public_works"]["paid_work"] == 2
+    assert not panel.current["public_works"]["commissioned"]
+    panel.spending.set("0")
+    panel.spending_button.invoke()
+    wait(root, panel)
+    assert panel.current["date"] == paid_date
+    assert "준공 대기 · 공사 2/2" in panel.policy.get()
+    panel.step_button.invoke()
+    wait(root, panel)
+    assert panel.current["public_works"]["commissioned"]
+    assert "준공 · 공사 2/2" in panel.policy.get()
     panel.history_choice.current(1)
     panel.history_choice.event_generate("<<ComboboxSelected>>")
     wait(root, panel)

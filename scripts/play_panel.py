@@ -510,6 +510,8 @@ class PlayPanel:
             self.spending.set(str(cap))
             if works["commissioned"]:
                 phase = "준공"
+            elif works["ordered"] and works["paid_work"] == works["required_work"]:
+                phase = "준공 대기"
             elif cap < works["invoice_per_work"]:
                 phase = "일시정지" if works["ordered"] else "발주 대기"
             else:
