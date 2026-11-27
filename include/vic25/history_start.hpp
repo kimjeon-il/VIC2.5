@@ -293,12 +293,16 @@ inline void seed_grain_freight(phasegh::World& engine,
     }
 }
 
-// Initial conditions for a fictional 1.15-inspired market, not reference
-// game quantities. Other industrial starts do not acquire a copper input.
+// Fictional historical starts. Only the explicitly selected phone method
+// uses the Victoria 3 1.15.2 material proportions.
 inline constexpr const char* copper_trial_household_class="history-telephone-trial";
 struct CopperTelephoneStart {
     phasec::Money wage{},working_cash{};
     Quantity other_material_stock{},mine_capacity{},plant_capacity{};
+    bool vic3_1152{};
+    [[nodiscard]] phaseb::People mine_workers()const {
+        return mine_capacity>0?(vic3_1152?3:1):0;
+    }
 };
 
 inline std::string copper_trial_mine(phasee::Id id) {
@@ -313,13 +317,19 @@ inline CopperTelephoneStart parse_copper_telephone_start(std::istringstream& row
     std::string extra;
     for(auto& field:fields)
         if(!(row>>field))throw std::invalid_argument("malformed copper-telephones record");
-    if(row>>extra)throw std::invalid_argument("malformed copper-telephones record");
+    bool vic3_1152=false;
+    if(row>>extra) {
+        if(extra!="vic3-1152")throw std::invalid_argument("unknown copper-telephones method");
+        vic3_1152=true;
+        if(row>>extra)throw std::invalid_argument("malformed copper-telephones record");
+    }
     constexpr auto limit=1'000'000'000;
     return {start_value(fields[0],1,limit,"invalid copper-telephones wage"),
             start_value(fields[1],0,limit,"invalid copper-telephones cash"),
             start_value(fields[2],0,limit,"invalid copper-telephones stock"),
             start_value(fields[3],0,limit,"invalid copper-telephones mine capacity"),
-            start_value(fields[4],1,limit,"invalid copper-telephones plant capacity")};
+            start_value(fields[4],1,limit,"invalid copper-telephones plant capacity"),
+            vic3_1152};
 }
 
 inline void seed_copper_telephone_start(phasee::World& world,phasee::Id id,
@@ -331,16 +341,23 @@ inline void seed_copper_telephone_start(phasee::World& world,phasee::Id id,
     core.seed_actor(plant,spec.working_cash);
     core.seed_market(region,"copper",3,3,3,3);
     core.seed_market(region,"telephones",11,11,11,2);
-    for(const auto good:{"tools","steel"}) {
-        core.seed_market(region,good,2,2,2);
-        if(spec.other_material_stock>0)core.seed_stock(plant,region,good,spec.other_material_stock);
-    }
     world.seed_building_in_province(plant,plant,id,spec.plant_capacity,
                                     "vic3_115.urban.electrics_industries");
     phased::IndustryRecipe method;
     method.id=plant;method.site=plant;method.industry_class="MANU";
-    method.inputs={{"tools",1},{"steel",1},{"copper",1}};
-    method.outputs={{"telephones",1}};
+    if(spec.vic3_1152) {
+        method.inputs={{"iron",4},{"rubber",4},{"copper",3},{"tools",3}};
+        method.outputs={{"telephones",12}};
+    } else {
+        method.inputs={{"tools",1},{"steel",1},{"copper",1}};
+        method.outputs={{"telephones",1}};
+    }
+    for(const auto& input:method.inputs) {
+        if(input.good=="copper")continue;
+        core.seed_market(region,input.good,2,2,2);
+        if(spec.other_material_stock>0)
+            core.seed_stock(plant,region,input.good,spec.other_material_stock);
+    }
     method.workers_per_batch=method.capacity_per_batch=1;
     d.seed_building_recipe(std::move(method));
     auto& pop=core.seed_population();
@@ -355,8 +372,9 @@ inline void seed_copper_telephone_start(phasee::World& world,phasee::Id id,
         source.id=mine;source.site=mine;source.owner=mine;source.region=region;
         source.good="copper";source.monthly_capacity=spec.mine_capacity;
         d.seed_building_resource_site(std::move(source));
-        const auto miner=pop.split_partition(slice,1);
-        pop.hire(miner,1,mine,"miner",spec.wage,{});
+        const auto miners=spec.mine_workers();
+        const auto miner=pop.split_partition(slice,miners);
+        pop.hire(miner,miners,mine,"miner",spec.wage,{});
     }
     pop.hire(slice,1,plant,"worker",spec.wage,{});
 }
@@ -644,7 +662,7 @@ inline daily::World open(const std::filesystem::path& path,
             throw std::invalid_argument("copper-telephones requires its own local workforce");
         const auto& start=food_starts.at(id);
         const phaseb::JobRequirements job;
-        if(start.people<(trial.mine_capacity>0?2:1)||start.age_months<job.minimum_age_months||
+        if(start.people<1+trial.mine_workers()||start.age_months<job.minimum_age_months||
            start.age_months>job.maximum_age_months)
             throw std::invalid_argument("invalid copper-telephones employment");
         if(!executives.empty()&&!executives.contains(nodes.at(id).country))

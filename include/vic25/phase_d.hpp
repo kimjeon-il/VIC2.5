@@ -86,6 +86,23 @@ struct IndustryRecipe {
     bool needs_retrofit{}; // retrofit pipeline remains unsupported by this slice
     bool requires_same_stage_nonstorable_energy{}; // I2-DISPATCH not yet contracted
 };
+// Imported historical methods may use a complete, output-specific
+// intermediate mix instead of the generic electrics prototype. This also
+// preserves saved prototype and radio recipes that already require steel.
+inline bool building_recipe_has_inputs(const building::OperatingProfile& spec,
+                                       const IndustryRecipe& recipe) {
+    const auto has=[&](std::string_view good){
+        return std::any_of(recipe.inputs.begin(),recipe.inputs.end(),
+            [&](const Input& input){return input.good==good;});
+    };
+    const bool four_input_telephones=spec.id=="vic3_115.urban.electrics_industries"&&
+        recipe.outputs.size()==1&&recipe.outputs.front().good=="telephones"&&
+        has("iron")&&has("rubber")&&has("copper");
+    for(const auto good:spec.required_input_goods)
+        if(!good.empty()&&!(four_input_telephones&&good=="steel")&&!has(good))
+            return false;
+    return true;
+}
 // Quote each good once against the complete requirement for one batch or unit.
 // Keep first occurrence order for local buying when available cash is tight.
 inline std::vector<Input> input_totals(const std::vector<Input>& rows) {
@@ -411,12 +428,8 @@ struct DomainState {
             for(const auto& output:r.outputs)
                 output_valid|=spec->output_allowed(output.good);
             require(output_valid,"bound recipe produces incorrect goods");
-            for(const auto input:spec->required_input_goods) {
-                if(input.empty())continue;
-                require(std::any_of(r.inputs.begin(),r.inputs.end(),
-                    [&](const Input& v){return v.good==input;}),
+            require(building_recipe_has_inputs(*spec,r),
                     "bound recipe missing original mandatory material");
-            }
         }
         for(const auto& [id,resource]:resource_sites) {
             (void)id;
@@ -1762,12 +1775,8 @@ public:
         for(const auto& good:recipe.outputs)
             valid_output|=spec->output_allowed(good.good);
         require(valid_output,"recipe output incompatible with physical building");
-        for(const auto required:spec->required_input_goods) {
-            if(required.empty())continue;
-            require(std::any_of(recipe.inputs.begin(),recipe.inputs.end(),
-                    [&](const Input& item){return item.good==required;}),
-                    "recipe missing required intermediate good");
-        }
+        require(building_recipe_has_inputs(*spec,recipe),
+                "recipe missing required intermediate good");
         if(!recipe.tech_id.empty())
             require(domain_.technologies.contains(recipe.tech_id),
                     "recipe technology unknown in local research catalog");

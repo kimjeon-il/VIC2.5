@@ -320,9 +320,44 @@ static void national_art_amendment_changes_actual_academy_output() {
     check(run(Rule::ethnostate,10,false)==10,"unbound SERV site inherited academy effect");
 }
 
+static void electrics_recipe_keeps_both_material_contracts() {
+    World w{4200};
+    auto& core=w.seed_core();
+    core.seed_actor("FIRM",50);core.seed_region("R","STATE");
+    w.seed_standard_industries();
+    w.seed_building_facility("ELECTRICS","FIRM","R",2,
+                            "vic3_115.urban.electrics_industries");
+    IndustryRecipe recipe;
+    recipe.site="ELECTRICS";recipe.id="FOUR_INPUT";recipe.industry_class="MANU";
+    recipe.inputs={{"iron",4},{"rubber",4},{"copper",3},{"tools",3}};
+    recipe.outputs={{"telephones",12}};recipe.workers_per_batch=1;
+    for(const auto* missing:{"iron","rubber","copper","tools"}) {
+        auto incomplete=recipe;
+        std::erase_if(incomplete.inputs,[&](const auto& input){return input.good==missing;});
+        check(rejects([&]{w.seed_building_recipe(incomplete);}),
+              "a no-steel telephone method accepted a missing real input");
+    }
+    auto radio=recipe;
+    radio.outputs={{"radios",12}};
+    check(rejects([&]{w.seed_building_recipe(radio);}),
+          "telephone input alternative changed the existing radio rule");
+    w.seed_building_recipe(recipe);
+    auto prototype=recipe;
+    prototype.id="PROTOTYPE";
+    prototype.inputs={{"tools",1},{"steel",1},{"copper",1}};
+    prototype.outputs={{"telephones",1}};
+    w.seed_building_recipe(prototype);
+    radio.id="LEGACY_RADIO";radio.inputs={{"tools",1},{"steel",1}};
+    w.seed_building_recipe(radio);
+    const auto checkpoint=SnapshotCodec::encode(w);
+    check(SnapshotCodec::encode(SnapshotCodec::decode(checkpoint))==checkpoint,
+          "new telephone inputs invalidated existing recipes or replay");
+}
+
 int main() {
     try {
         test_native_catalog_and_actual_production();
+        electrics_recipe_keeps_both_material_contracts();
         national_art_amendment_changes_actual_academy_output();
         test_construction_and_recipe_before_commission();
         test_farm_with_real_material_and_renewable_crop();
