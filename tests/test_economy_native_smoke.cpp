@@ -1,6 +1,7 @@
 #include "vic25/p0_daily.hpp"
 #include "vic25/daily_snapshot.hpp"
 #include <stdexcept>
+#include <optional>
 #include <string>
 using namespace vic25;
 
@@ -764,7 +765,117 @@ static void monthly_clothing_cap_is_shared_across_household_slices() {
           "half of two monthly household clothing units must be replaceable after splitting the POP");
 }
 
+enum class StapleTrial { viable, break_even, supply_interruption };
+static void linked_staples_keep_running_across_payroll_rounding(StapleTrial trial) {
+    constexpr phasec::Money grain_quote=4;
+    const bool shock=trial==StapleTrial::supply_interruption;
+    const bool break_even=trial==StapleTrial::break_even;
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");geo.seed_unit(1,"A","Regional food and clothing");
+    geo.seed_assignment(1,1);
+    auto& d=geo.seed_core();
+    auto& c=d.seed_core();
+    c.seed_actor("GOV",0);
+    c.seed_government("A","HEAD","PM",5,3);
+    c.seed_country_treasury("A","GOV");
+    c.seed_country_income_tax("A",0);
+    const std::array actors={"WHEAT","COTTON","BAKERY","WEAVER"};
+    for(const auto firm:actors)c.seed_actor(firm,500);
+    c.seed_market("R","grain",grain_quote,grain_quote,grain_quote,2);
+    c.seed_market("R","fabric",6,6,6,2);
+    c.seed_market("R","groceries",2,2,2,4);
+    c.seed_market("R","clothes",5,5,5,2);
+    c.seed_stock("BAKERY","R","grain",1);
+    c.seed_stock("WEAVER","R","fabric",1);
+    c.seed_stock("WHEAT","R","tools",31);
+    d.seed_standard_industries();
+    auto crop=[&](std::string actor,std::string commodity,std::string archetype) {
+        auto title="land:R:"+commodity;
+        c.seed_shares(title,actor,1);
+        geo.seed_building_in_province(actor,actor,1,31,archetype,title);
+        phased::ResourceSite source;
+        source.id=source.site=source.owner=actor;
+        source.region="R";source.good=commodity;source.monthly_capacity=31;
+        source.renewable=true;source.standing_biomass=source.carrying_capacity=100;
+        source.renewal_per_month=31;
+        d.seed_building_resource_site(source);
+    };
+    auto factory=[&](std::string actor,std::string input,std::string output,Quantity count,std::string archetype) {
+        geo.seed_building_in_province(actor,actor,1,31,archetype);
+        phased::IndustryRecipe r;
+        r.id=r.site=actor;r.industry_class="MANU";
+        r.inputs={{input,1}};r.outputs={{output,count}};
+        r.workers_per_batch=r.capacity_per_batch=1;
+        d.seed_building_recipe(r);
+    };
+    crop("WHEAT","grain","vic3_115.rural.wheat_farms");
+    crop("COTTON","fabric","vic3_115.rural.cotton_plantations");
+    factory("BAKERY","grain","groceries",4,"vic3_115.urban.food_industries");
+    factory("WEAVER","fabric","clothes",2,"vic3_115.urban.textile_mills");
+    auto& pop=c.seed_population();
+    const auto home=pop.household_profile({"R","workers","shared",4});
+    const auto econ=pop.economic_profile({"R","worker","wage","employee",pop.default_education()});
+    const auto demo=pop.demographic_profile({"R",23640,phaseb::Sex::female,
+        "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+    const auto wallet="HH:"+std::to_string(home);
+    c.seed_actor(wallet,150);
+    for(std::size_t i=0;i<actors.size();++i) {
+        const auto worker=pop.seed_population(demo,econ,home,1,static_cast<phaseb::Id>(i+1));
+        pop.hire(worker,1,actors[i],"worker",std::string_view(actors[i])=="BAKERY"&&break_even?116:93,{});
+    }
+    p0::Policies rules;
+    rules.monthly_clothing_units_per_person=8;
+    rules.allow_endogenous_staffing=false;
+    rules.allow_endogenous_investment_credit=false;
+    rules.allow_endogenous_factory_expansion=false;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),17),rules);
+    std::optional<p0::DailyGame> replay;
+    phasec::Money prev_sales=0;
+    for(int day=1;day<=65;++day) {
+        phasegh::World::Plan events{};
+        if(shock&&day==35) events[10].push_back([](phasegh::Stage& gh){
+            gh.phase_c().war_damage_facility("WHEAT",31);
+        });
+        if(shock&&day==40) events[4].push_back([](phasegh::Stage& gh){
+            gh.phase_c().phase_time_maintain_facility("WHEAT","tools",31,1,1);
+        });
+        game.advance_day(events);
+        const auto& d=game.world().engine().base().core();
+        const auto& c=d.core();
+        if(replay) {
+            replay->advance_day(events);
+            check(daily::SnapshotCodec::encode(game.world())==
+                  daily::SnapshotCodec::encode(replay->world()),"replay changed");
+        }
+        if(day==31) replay.emplace(daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(game.world())),rules);
+        auto cash=c.cash(wallet)+c.cash("GOV");
+        for(const auto firm:actors)cash+=c.cash(firm);
+        check(cash==2150&&c.financial().balanced(),"cash changed");
+        const auto sales=c.firm_finance("BAKERY").receipts;
+        if(day>=32&&day<=60) {
+            // Damage enters at worker-day close. Existing grain feeds the
+            // next batch; replacement grain arrives only after real repair.
+            const bool no_sale=break_even||(shock&&day>=37&&day<=41);
+            check(sales-prev_sales==(no_sale?0:8),
+                  "linked food chain did not match its viable, break-even or interrupted market");
+            if(shock&&day>=35&&day<40)
+                check(c.facility("WHEAT").damaged==31&&c.stock("WHEAT","R","tools")==31,"damage did not persist");
+            if(shock&&day>=40)
+                check(c.facility("WHEAT").damaged==0&&c.stock("WHEAT","R","tools")==0,"restoration without inputs");
+            check(c.firm_finance("BAKERY").outstanding_wages==0,"bakery wages unpaid");
+            check(c.firm_finance("WHEAT").outstanding_wages==0,"wheat wages unpaid");
+        }
+        if(day==60)
+            check(c.firm_finance("BAKERY").expenses>0&&c.firm_finance("WEAVER").receipts>100,
+                  "linked market failed to pay wages or sell clothes after the opening fabric");
+        prev_sales=sales;
+    }
+}
+
 int main() {
+    for(const auto trial:{StapleTrial::viable,StapleTrial::break_even,StapleTrial::supply_interruption})
+        linked_staples_keep_running_across_payroll_rounding(trial);
     plain_clothing_has_a_bounded_fabric_fallback();
     monthly_clothing_cap_is_shared_across_household_slices();
     copper_mine_supplies_paid_telephone_sales(false);
