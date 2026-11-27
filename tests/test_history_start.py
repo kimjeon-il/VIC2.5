@@ -129,6 +129,77 @@ def two_foods_share_one_need(work):
         rejected(run("--history", start), message)
 
 
+def owner_dividend_restores_household_purchase(work):
+    start = work / "household ownership.txt"
+    control = work / "without ownership.txt"
+    data = ("VIC25-HISTORY-2 FICTIONAL_HOUSEHOLD_MARKET 1840 1\n"
+            "land 7 RIVER FOOD-LAND\n"
+            "food-start 7 1 240 F SAMPLE-CULTURE SAMPLE-FAITH 5 5 2 4\n")
+    control.write_text(data, encoding="ascii")
+    start.write_text(data + "food-owner 7 4\n", encoding="ascii")
+    checkpoint = work / "owner before payout.sav"
+    unselected = work / "owner before selection.sav"
+    direct = work / "owner after payout.sav"
+    reproduced = work / "owner replay.sav"
+    success(run("--history", start, script=f"save {unselected}\nquit\n"))
+    result = run("--panel-stdio", script=(
+        f"history-open {start}\nchoose-country FOOD-LAND\n"
+        f"step 31\nsave {checkpoint}\nstep 1\nsave {direct}\nquit\n"))
+    success(result)
+    opened, _, before, _, after, _, _ = map(json.loads, result.stdout.splitlines())
+    assert opened["ok"], opened
+    def state(reply, date, stock):
+        assert reply["ok"], reply
+        assert reply["status"]["date"] == date
+        eco = reply["status"]["history"]["economy"]
+        assert (eco["food_stock"], eco["household_cash"], eco["seller_cash"]) == (stock, 0, 9), eco
+    state(before, "1840-02-01", 1)
+    state(after, "1840-02-02", 0)
+    start.unlink()
+    result = run("--panel-stdio", script=(
+        f"history-load {checkpoint}\nstep 1\nsave {reproduced}\n"
+        f"history-load {unselected}\nchoose-country FOOD-LAND\nstep 31\nstep 1\n"
+        f"history-open {control}\nchoose-country FOOD-LAND\nstep 32\nquit\n"))
+    success(result)
+    replies = list(map(json.loads, result.stdout.splitlines()))
+    assert replies[:2] == [before, after]
+    assert replies[3] == opened and replies[6] == after
+    state(replies[9], "1840-02-02", 1)
+    assert direct.read_bytes() == reproduced.read_bytes()
+
+    samples = Path(__file__).resolve().parents[1] / "data/scenarios"
+    bundled = samples / "fictional-household-owned-food-market.txt"
+    shipped = run("--panel-stdio", script=(
+        f"history-open {bundled}\nchoose-country FOOD-LAND\nstep 32\nquit\n"))
+    success(shipped)
+    assert json.loads(shipped.stdout.splitlines()[2]) == after
+
+    # The generic settings checkpoint also keeps a public freight project
+    # when its scenario happens to include registered household ownership.
+    source = samples / "fictional-grain-freight-works.txt"
+    start.write_text(source.read_text(encoding="ascii") + "food-owner 11 10\n",
+                     encoding="ascii")
+    combined = work / "combined freight and ownership.sav"
+    projected = run("--panel-stdio", script=(
+        f"history-open {start}\nchoose-country FIELD-LAND\npublic-works 20\n"
+        f"step 1\nsave {combined}\nquit\n"))
+    success(projected)
+    states = list(map(json.loads, projected.stdout.splitlines()))
+    assert all(r["ok"] for r in states), states
+    start.unlink()
+    loaded = run("--panel-stdio", script=f"history-load {combined}\nquit\n")
+    success(loaded)
+    assert json.loads(loaded.stdout.splitlines()[0]) == states[-2]
+
+    for extra, message in (
+        ("food-owner 8 4", "requires a matching food-start"),
+        ("food-owner 7 -1", "invalid food-owner reserve"),
+        ("food-owner 7 4\nfood-owner 7 4", "duplicate food-owner"),
+    ):
+        start.write_text(data + extra + "\n", encoding="ascii")
+        rejected(run("--history", start), message)
+
+
 def local_food_market(work):
     start = work / "local market.txt"
     legacy_header, *rows = FIXTURE.splitlines()
@@ -738,6 +809,7 @@ def main():
         rejected(run("--resume-history", tutorial), "does not belong")
         history_panel(start, work, tutorial, saved)
         two_foods_share_one_need(work)
+        owner_dividend_restores_household_purchase(work)
         local_food_market(work)
         local_food_mill(work)
         executive_tax(work)

@@ -412,8 +412,8 @@ void save_new(const daily::World& world,const fs::path& destination) {
 }
 
 void save_history(const daily::World& world,std::string_view selected,const fs::path& destination,
-                  const history_play::PublicWorks& works={}) {
-    if(selected.empty()&&!works.freight) {
+                  const history_play::ScenarioSettings& works={}) {
+    if(selected.empty()&&!works.freight&&works.food_owners.empty()) {
         save_new(world,destination);
         return;
     }
@@ -2103,11 +2103,13 @@ fs::path checkpoint_path_utf8(std::string_view value) {
     return fs::path(std::u8string(value.begin(),value.end()));
 }
 
-p0::Policies history_policies(const daily::World& world,const history_play::PublicWorks& works) {
+p0::Policies history_policies(const daily::World& world,const history_play::ScenarioSettings& works) {
     p0::Policies result;
     // The first local-history economy supplies food only. Do not report unmet
     // demand for clothing or automatically create inventory to cover it.
     result.monthly_clothing_units_per_person=0;
+    for(const auto& [id,reserve]:works.food_owners)
+        result.registered_dividend_reserves.emplace(history_start::food_seller(id),reserve);
     if(works.freight) {
         const auto& f=*works.freight;
         const auto& geo=world.engine().base();
@@ -2135,7 +2137,7 @@ bool history_direct_tax(const phasec::IntegratedWorld& core,const std::string& c
 }
 
 std::string history_panel_status(const p0::DailyGame& game,const std::string& selected,
-                                 const history_play::Countries& countries,const history_play::PublicWorks& works) {
+                                 const history_play::Countries& countries,const history_play::ScenarioSettings& works) {
     const auto& world=game.world();
     const auto date=world.date();
     std::ostringstream out;
@@ -2218,7 +2220,7 @@ void run_panel() {
         std::string tag;
         p0::DailyGame game;
         history_play::Countries history{};
-        history_play::PublicWorks works{};
+        history_play::ScenarioSettings works{};
     };
     std::unique_ptr<Session> session;
     std::string last_status="null";
@@ -2480,7 +2482,7 @@ void history_province(const daily::World& world,std::string_view argument) {
 }
 
 void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool history=false,std::string_view history_country={},
-         const history_play::PublicWorks& works={}) {
+         const history_play::ScenarioSettings& works={}) {
     const auto show_help=[&] {
         if(history)std::cout<<"Commands: status | province <ID> | water <ID> | step [days] | save <new path> | help | quit\n";
         else if(selected)trial_help(budget_world(game.world()));
