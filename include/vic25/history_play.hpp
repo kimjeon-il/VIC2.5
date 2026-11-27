@@ -41,7 +41,7 @@ struct FoodOverview {
     std::size_t covered_provinces{},mills{};
     phaseb::People people{};
     phasec::Money household_cash{},seller_cash{};
-    vic25::Quantity food_stock{},grain_stock{},grain_in_transit{};
+    vic25::Quantity food_stock{},grain_stock{},grain_in_transit{},mill_output_this_month{};
     std::optional<FoodPriceOverview> prices;
     GrainFarmOverview farms;
 };
@@ -55,6 +55,7 @@ inline FoodOverview food_overview(const daily::World& world,const std::string& c
     const auto& resources=industry.resource_sites;
     std::set<std::string> regions;
     std::map<std::string,std::string> mill_owners;
+    std::set<std::string> mills;
     FoodOverview result;
     for(const auto& id:geo.sovereign_provinces(country)) {
         const auto& region=geo.province(id).region;
@@ -67,11 +68,13 @@ inline FoodOverview food_overview(const daily::World& world,const std::string& c
             result.farms.cash=phaseb::add_checked(result.farms.cash,core.cash(site.owner));
         }
         const auto seller=history_start::food_seller(id);
-        const bool mill=facilities.contains(history_start::food_mill(id));
+        const auto mill_id=history_start::food_mill(id);
+        const bool mill=facilities.contains(mill_id);
         const std::string good=mill?history_start::processed_food_good:history_start::food_good;
         if(!core.has_actor(seller)||!core.has_market(region,good))continue;
         if(mill) {
             ++result.mills;
+            mills.insert(mill_id);
             mill_owners.emplace(region,seller);
             result.grain_stock=phaseb::add_checked(result.grain_stock,
                                                   core.stock(seller,region,history_start::grain_good));
@@ -92,6 +95,19 @@ inline FoodOverview food_overview(const daily::World& world,const std::string& c
         result.seller_cash=phaseb::add_checked(result.seller_cash,core.cash(seller));
     }
     if(regions.empty())return result;
+    if(!mills.empty()) {
+        // The native run log is appended in simulation order. The calendar
+        // can already show the first of the new month before its first run.
+        const auto month=world.engine().month();
+        const auto& runs=industry.actual_production_runs;
+        for(auto run=runs.rbegin();run!=runs.rend()&&run->month>=month;++run) {
+            if(run->month!=month||!mills.contains(run->recipe))continue;
+            for(const auto& output:industry.recipes.at(run->recipe).outputs)
+                if(output.good==history_start::processed_food_good)
+                    result.mill_output_this_month=phaseb::add_checked(result.mill_output_this_month,
+                        phaseb::mul_checked(output.per_unit,run->batches));
+        }
+    }
     if(!mill_owners.empty())
         for(const auto& [id,cargo]:world.engine().commerce().daily_shipments) {
             (void)id;

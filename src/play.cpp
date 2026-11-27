@@ -2146,7 +2146,8 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
         out<<"{\"covered_provinces\":"<<food.covered_provinces
            <<",\"people\":"<<food.people<<",\"household_cash\":"<<food.household_cash
            <<",\"food_stock\":"<<food.food_stock<<",\"seller_cash\":"<<food.seller_cash;
-        if(food.mills>0)out<<",\"mills\":"<<food.mills<<",\"grain_stock\":"<<food.grain_stock;
+        if(food.mills>0)out<<",\"mills\":"<<food.mills<<",\"grain_stock\":"<<food.grain_stock
+                          <<",\"mill_output_this_month\":"<<food.mill_output_this_month;
         if(food.grain_in_transit>0)out<<",\"grain_in_transit\":"<<food.grain_in_transit;
         if(food.farms.sites)
             out<<",\"grain_farm\":{\"sites\":"<<food.farms.sites
