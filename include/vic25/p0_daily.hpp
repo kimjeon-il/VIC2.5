@@ -912,6 +912,35 @@ inline Money actual_daily_worker_wage(const phasec::IntegratedWorld& c,
     return highest;
 }
 
+// Use the exact daily share of the nominal monthly contract when deciding
+// if ordinary local operations can cover their costs. No booked payroll
+// changes: the contract still settles in actual integer cash each day.
+inline Money highest_monthly_contract_wage(const phasec::IntegratedWorld& c,
+                                            const std::string& employer) {
+    Money highest=0;
+    for(const auto& [slice,job]:c.people().jobs()) {
+        (void)slice;
+        if(job.employer==employer&&job.count>0)
+            highest=std::max(highest,job.wage_per_month);
+    }
+    return highest;
+}
+inline bool positive_projected_operating_margin(Money revenue,Money inputs,
+        People workers,Money explicit_daily_wage,Money monthly_contract_wage,int days) {
+    if(revenue<=inputs)return false;
+    if(workers<=0)return true;
+    const Money budget=revenue-inputs-1; // Strictly positive, even at true break-even.
+    if(explicit_daily_wage>0)return explicit_daily_wage<=budget/workers;
+    const Money whole=monthly_contract_wage/days;
+    const Money remainder=monthly_contract_wage%days;
+    if(whole>budget/workers)return false;
+    // Floor the aggregate payroll share, never each worker's share. Divide
+    // before multiplying so extreme valid monthly totals cannot overflow.
+    const Money fraction=times(workers/days,remainder)+
+                         times(workers%days,remainder)/days;
+    return fraction<=budget-times(workers,whole);
+}
+
 inline void hire_available(phasec::IntegratedWorld& c,const Staffing& p) {
     if(c.firm_bankrupt(p.employer))return;
     // Count actual employment contracts in this region, NOT effective workers:
@@ -1003,14 +1032,12 @@ inline Quantity available_production(const phased::Stage& d,
         cost_per_batch=phaseb::add_checked(cost_per_batch,times(input.per_unit,iq.price));
     }
     const Money revenue=times(primary.per_unit,quote.price);
-    // Count explicitly scripted OR real contractual payroll, never both.
-    const Money per_worker=policy.wage_per_worker_per_day>0?
-        policy.wage_per_worker_per_day:
-        actual_daily_worker_wage(c,f.owner,day,days);
-    if(per_worker>0)
-        cost_per_batch=phaseb::add_checked(cost_per_batch,
-                 times(r.workers_per_batch,per_worker));
-    if(revenue<=cost_per_batch)return 0;
+    // An explicit scenario wage overrides the ordinary contract projection.
+    const Money scheduled=policy.wage_per_worker_per_day;
+    if(!positive_projected_operating_margin(revenue,cost_per_batch,
+            r.workers_per_batch,scheduled,
+            scheduled>0?0:highest_monthly_contract_wage(c,f.owner),days))
+        return 0;
     const Quantity stock_shortfall=policy.target_inventory-c.stock(f.owner,f.region,primary.good);
     Quantity batches=stock_shortfall/primary.per_unit+
         (stock_shortfall%primary.per_unit!=0?1:0);
@@ -2494,11 +2521,7 @@ public:
                 if(salary_shortfall->contains(src.owner))return;
                 const auto& facility=c.facility(src.site);
                 const auto& quote=c.market(src.region,src.good);
-                const Money wage_per_unit=policy.wage_per_unit>0?
-                    policy.wage_per_unit:
-                    times(actual_daily_worker_wage(c,src.owner,date.day,dim),
-                          src.workers_per_unit);
-                Money unit_cost=wage_per_unit;
+                Money unit_cost=0;
                 const auto inputs=phased::input_totals(src.operational_inputs_per_unit);
                 for(const auto& input:inputs) {
                     if(!c.has_market(src.region,input.good))return;
@@ -2506,8 +2529,12 @@ public:
                         times(input.per_unit,
                               c.market(src.region,input.good).price));
                 }
-                if(quote.price<=unit_cost ||
-                   c.stock(src.owner,src.region,src.good)>=policy.target_inventory)
+                const bool margin=policy.wage_per_unit>0?
+                    positive_projected_operating_margin(quote.price,unit_cost,1,
+                        policy.wage_per_unit,0,dim):
+                    positive_projected_operating_margin(quote.price,unit_cost,
+                        src.workers_per_unit,0,highest_monthly_contract_wage(c,src.owner),dim);
+                if(!margin||c.stock(src.owner,src.region,src.good)>=policy.target_inventory)
                     return;
                 if(src.monthly_capacity<src.produced_this_month||
                    facility.capacity<=facility.damaged) return;
@@ -2917,10 +2944,11 @@ public:
                             times(item.per_unit,
                                 c.market(facility.region,item.good).price));
                     }
-                    const Money wage=times(recipe.workers_per_batch,
-                        actual_daily_worker_wage(c,facility.owner,date.day,dim));
-                    if(!priced||times(primary.per_unit,quote.price)<=
-                        phaseb::add_checked(input_cost,wage))continue;
+                    if(!priced||!positive_projected_operating_margin(
+                            times(primary.per_unit,quote.price),input_cost,
+                            recipe.workers_per_batch,0,
+                            highest_monthly_contract_wage(c,facility.owner),dim))
+                        continue;
                     for(const auto& item:inputs) {
                         const auto key=std::make_tuple(
                             facility.owner,facility.region,item.good);
