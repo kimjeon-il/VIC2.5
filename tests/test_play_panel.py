@@ -714,6 +714,25 @@ def run_supply_recovery(root, panel, save):
     advance_to(resumed["date"])
     assert panel.current == resumed
 
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(save)):
+        panel.load_button.invoke()
+        wait(root, panel)
+    assert panel.current == closed
+    assert panel.tariff_button.winfo_ismapped() and panel.tariff_button.instate(["!disabled"])
+    panel.tariff.set("100")
+    panel.tariff_button.invoke()
+    wait(root, panel)
+    assert panel.current["tariff_ppm"] == 1_000_000
+    assert panel.current["paid_duty"] == 0 and "광석 수입 관세: 100%" in panel.market.get()
+    advance_to("2000-03-02")
+    assert panel.current["supply_recovery"]["route"] == "road"
+    assert panel.current["supply_recovery"]["road_in_transit_ore"] == 0
+    panel.tariff.set("50")
+    panel.tariff_button.invoke()
+    wait(root, panel)
+    assert panel.current["supply_recovery"]["road_in_transit_ore"] == 1
+    assert panel.current["paid_duty"] == 5 and "누적 관세 징수: 5" in panel.market.get()
+
 
 def run_household_staples(root, panel, save):
     choice = "A 가계 소비 시범판"
