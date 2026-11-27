@@ -10,14 +10,25 @@ inline Quantity Stage::effective_edge_capacity(
     const auto loc=geo.provinces.find(edge.from);
     if(loc==geo.provinces.end())return edge.monthly_capacity;
     const auto& core=spatial_.phase_c();
+    Quantity base=edge.monthly_capacity;
+    if(!edge.capacity_site.empty()) {
+        const auto site=core.facilities().find(edge.capacity_site);
+        const auto dest=geo.provinces.find(edge.to);
+        if(site!=core.facilities().end()&&
+           (site->second.region==loc->second.region||
+            (dest!=geo.provinces.end()&&site->second.region==dest->second.region))) {
+            const auto installed=site->second.capacity-site->second.damaged;
+            base=phaseb::add_checked(base,std::min(installed,
+                std::numeric_limits<Quantity>::max()-base));
+        }
+    }
     const auto& country=core.sovereignty(loc->second.region);
-    if(!core.has_government(country))return edge.monthly_capacity;
+    if(!core.has_government(country))return base;
     const auto delta=phaseb::add_checked(
         core.p2_modifier_ppm(country,"state_infrastructure_mult"),
         core.p3_trait_modifier_ppm(country,"state_infrastructure_mult"));
     const auto multiplier=std::clamp<std::int64_t>(
         1'000'000+delta,0,2'000'000);
-    const Quantity base=edge.monthly_capacity;
     // Fixed-point division first: no compiler-specific 128-bit integer and
     // saturation only when extra real throughput exceeds signed 64-bit.
     const Quantity div=base/1'000'000;

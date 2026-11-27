@@ -58,7 +58,8 @@ template<class A>void route(A& a,Route& x) {
     a(x.travel_months);a(x.arrival_loss);
 }
 template<class A>void edge(A& a,TransportEdge& x,bool day_fields=false,
-                            bool mode_fields=false,bool verified_fields=false) {
+                            bool mode_fields=false,bool verified_fields=false,
+                            bool capacity_sites=false) {
     a(x.id);a(x.carrier);a(x.from);a(x.to);
     a(x.monthly_capacity);a(x.freight_per_unit);
     a(x.transit_months);a(x.enabled);
@@ -68,6 +69,7 @@ template<class A>void edge(A& a,TransportEdge& x,bool day_fields=false,
         a(x.evidence_id);
         a(x.valid_from_month);a(x.valid_through_month);
     }
+    if(capacity_sites)a(x.capacity_site);
 }
 template<class A>void native_transit(A& a,DailyTradeTransit& x,
                                      bool extended=false) {
@@ -117,11 +119,11 @@ template<class A>void insurance(A& a,CargoInsurance& x) {
 template<class A>void g_state(A& a,TradeState& x,bool day_fields=false,
                               bool mode_fields=false,
                               bool extended_cargo=false,
-                              bool verified_fields=false) {
+                              bool verified_fields=false,bool capacity_sites=false) {
     checked_map(a,x.routes,route<A>);
     checked_map(a,x.transport_edges,
         [&](A& io,TransportEdge& value){
-            edge(io,value,day_fields,mode_fields,verified_fields);
+            edge(io,value,day_fields,mode_fields,verified_fields,capacity_sites);
         });
     a(x.transport_adjacency);a(x.edge_usage);
     checked_map(a,x.contracts,contract<A>);
@@ -281,6 +283,7 @@ inline void restore_legacy_automatic_war_terms(DiplomacyState& state) {
 
 struct SnapshotCodec {
     static constexpr const char* magic="VIC25_PHASE_GH_SNAPSHOT_1";
+    static constexpr const char* capacity_site_version="phase-gh-cpp/0.10";
     static constexpr const char* version="phase-gh-cpp/0.9";
     static constexpr const char* verified_transport_version="phase-gh-cpp/0.8";
     static constexpr const char* intermodal_version="phase-gh-cpp/0.7";
@@ -314,7 +317,11 @@ struct SnapshotCodec {
                 return std::any_of(row.second.clauses.begin(),row.second.clauses.end(),
                     [](const TreatyClause& term){return !term.war_id.empty();});
             });
-        const auto layout=scoped_terms?version:verified?verified_transport_version:
+        const bool capacity_sites=std::any_of(w.trade_.transport_edges.begin(),
+            w.trade_.transport_edges.end(),
+            [](const auto& row){return !row.second.capacity_site.empty();});
+        const auto layout=capacity_sites?capacity_site_version:scoped_terms?version:
+                          verified?verified_transport_version:
                           intermodal?intermodal_version:has_wars?war_version:
                           multimodal?multimodal_version:native_transport?daily_transport_version:
                           upgraded?daily_treaty_version:legacy_version;
@@ -325,14 +332,14 @@ struct SnapshotCodec {
         a(existing);
         auto g=w.trade_;
         auto h=w.diplomacy_;
-        const bool verified_layout=verified||scoped_terms;
+        const bool verified_layout=verified||scoped_terms||capacity_sites;
         persisted::g_state(a,g,
                            native_transport||multimodal||has_wars||intermodal||verified_layout,
                            multimodal||has_wars||intermodal||verified_layout,
-                           intermodal||verified_layout,verified_layout);
+                           intermodal||verified_layout,verified_layout,capacity_sites);
         persisted::h_state(a,h,
                            upgraded||native_transport||multimodal||has_wars||intermodal||verified_layout,
-                           has_wars||intermodal||verified_layout,scoped_terms);
+                           has_wars||intermodal||verified_layout,scoped_terms||capacity_sites);
         if(!h.infamy.empty()||!h.infamy_events.empty()) {
             a(std::string("VIC25_PHASE_GH_INFAMY_1"));
             persisted::checked_map(a,h.infamy,persisted::infamy_record<decltype(a)>);
@@ -351,7 +358,7 @@ struct SnapshotCodec {
         persisted::Reader a{in};
         std::string m,v,g,h,base;
         a(m);a(v);a(g);a(h);
-        if(m!=magic||(v!=version&&v!=verified_transport_version&&
+        if(m!=magic||(v!=capacity_site_version&&v!=version&&v!=verified_transport_version&&
              v!=intermodal_version&&v!=war_version&&
              v!=multimodal_version&&v!=daily_transport_version&&
              v!=daily_treaty_version&&
@@ -361,14 +368,23 @@ struct SnapshotCodec {
         a(base);
         World next;
         next.core_=phasee::SnapshotCodec::decode(base);
-        const bool scoped_terms=v==version;
+        const bool capacity_sites=v==capacity_site_version;
+        const bool scoped_terms=v==version||capacity_sites;
         const bool verified_layout=scoped_terms||v==verified_transport_version;
         persisted::g_state(a,next.trade_,
                            verified_layout||v==intermodal_version||v==war_version||
                            v==multimodal_version||v==daily_transport_version,
                            verified_layout||v==intermodal_version||v==war_version||
                            v==multimodal_version,
-                           verified_layout||v==intermodal_version,verified_layout);
+                           verified_layout||v==intermodal_version,verified_layout,capacity_sites);
+        if(capacity_sites) {
+            std::set<std::string> seen_sites;
+            for(const auto& [id,edge]:next.trade_.transport_edges)
+                if(!edge.capacity_site.empty()&&
+                   (edge.mode=="legacy"||edge.transit_days<=0||edge.evidence_id.empty()||
+                    !seen_sites.insert(edge.capacity_site).second))
+                    throw std::runtime_error("G_ERR_INVALID_FREIGHT_CAPACITY_SITE");
+        }
         persisted::h_state(a,next.diplomacy_,v!=legacy_version,
                            verified_layout||v==intermodal_version||v==war_version,scoped_terms);
         const auto digest_offset=static_cast<std::streamoff>(

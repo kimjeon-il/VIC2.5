@@ -74,6 +74,9 @@ struct TransportEdge {
     // Source-qualified and dated; absent means an unverified old scenario edge.
     std::string evidence_id;
     Month valid_from_month{-1}, valid_through_month{-1};
+    // Optional commissioned facility at an endpoint: undamaged installed
+    // capacity in additional monthly freight units for this directed edge.
+    std::string capacity_site;
 };
 struct CustomsRecord {
     std::string execution_id, importer, treasury, good, policy_source;
@@ -1791,6 +1794,10 @@ public:
                   edge.valid_from_month>=0&&
                   edge.valid_through_month>=edge.valid_from_month))&&
                 !edge.carrier.empty() &&
+                (edge.capacity_site.empty()||
+                 (edge.mode!="legacy"&&edge.transit_days>0&&
+                  std::none_of(trade_.transport_edges.begin(),trade_.transport_edges.end(),
+                    [&](const auto& row){return row.second.capacity_site==edge.capacity_site;}))) &&
                 core_.spatial().provinces.contains(edge.from) &&
                 core_.spatial().provinces.contains(edge.to) &&
                 !trade_.transport_edges.contains(edge.id),
