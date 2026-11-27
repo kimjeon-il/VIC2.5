@@ -811,6 +811,47 @@ def copper_telephone_trial(work):
         rejected(run("--history", start), error)
 
 
+def victoria3_telephone_input_mix(work):
+    sample = work / "four-input-telephone.txt"
+    bundled = (Path(__file__).resolve().parents[1] / "data/scenarios"
+               / "fictional-copper-telephone-vic3-1152.txt")
+    source = bundled.read_text(encoding="ascii")
+    checkpoint = work / "four-input-telephone.sav"
+    continued = work / "four-input-continued.sav"
+    replay = work / "four-input-replay.sav"
+    sample.write_text(source, encoding="ascii")
+    result = run("--panel-stdio", script=(
+        f"history-open {sample}\nchoose-country WIRE-LAND\nstep 1\nsave {checkpoint}\n"
+        f"step 2\nsave {continued}\nstep 1\nquit\n"))
+    success(result)
+    opened, chosen, mined, _, built, _, exhausted, _ = map(json.loads, result.stdout.splitlines())
+    assert opened["ok"] and chosen["ok"], (opened, chosen)
+    def chain(reply):
+        assert reply["ok"], reply
+        return reply["status"]["history"]["economy"]["copper_telephone"]
+    assert chain(mined) == {"copper_extracted": 3, "copper_sale_receipts": 9,
+                            "telephones_made": 0, "telephone_sale_receipts": 0}
+    assert chain(built) == {"copper_extracted": 9, "copper_sale_receipts": 18,
+                            "telephones_made": 24, "telephone_sale_receipts": 88}
+    # Out of iron and rubber after two batches, but the household can still
+    # buy previously made phones and the mine can still supply copper.
+    assert chain(exhausted) == {"copper_extracted": 12, "copper_sale_receipts": 27,
+                                "telephones_made": 24, "telephone_sale_receipts": 132}
+    sample.unlink()
+    loaded = run("--panel-stdio", script=(
+        f"history-load {checkpoint}\nstep 2\nsave {replay}\nquit\n"))
+    success(loaded)
+    assert replay.read_bytes() == continued.read_bytes()
+    sample.write_text(source.replace("8 93 31 vic3-1152","8 0 31 vic3-1152"), encoding="ascii")
+    control = run("--panel-stdio", script=f"history-open {sample}\nchoose-country WIRE-LAND\nstep 3\nquit\n")
+    success(control)
+    assert not any(chain(json.loads(control.stdout.splitlines()[2])).values())
+    sample.write_text(source.replace("vic3-1152", "invented"), encoding="ascii")
+    rejected(run("--history", sample), "unknown copper-telephones method")
+    sample.write_text(source.replace("food-start 7 4", "food-start 7 3"), encoding="ascii")
+    rejected(run("--history", sample), "invalid copper-telephones employment")
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -874,6 +915,7 @@ def main():
         bundled_border_trade()
         history_public_works(work)
         copper_telephone_trial(work)
+        victoria3_telephone_input_mix(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (
