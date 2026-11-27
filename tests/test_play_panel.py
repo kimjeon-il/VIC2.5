@@ -1063,6 +1063,24 @@ def run_public_freight_works(root, panel):
     panel.history_choice.event_generate("<<ComboboxSelected>>")
     wait(root, panel)
     assert panel.history_choice.get() == "MILL-LAND" and not panel.spending_button.winfo_ismapped()
+    with TemporaryDirectory() as tmp:
+        low_funds = Path(tmp) / "low-funds.txt"
+        low_funds.write_text(start.read_text(encoding="ascii").replace(
+            "FIELD-MINISTER 200 0", "FIELD-MINISTER 79 0"), encoding="ascii")
+        panel.country.set(panel.HISTORY)
+        with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(low_funds)):
+            panel.new_button.invoke()
+            wait(root, panel)
+        panel.history_choice.current(0)
+        panel.history_choice.event_generate("<<ComboboxSelected>>")
+        wait(root, panel)
+        panel.spending.set("20")
+        panel.spending_button.invoke()
+        wait(root, panel)
+        assert "국고 부족으로 발주 대기" in panel.policy.get()
+        panel.step_button.invoke()
+        wait(root, panel)
+        assert not panel.current["public_works"]["ordered"]
 
 
 def run_variable_food_prices(root, panel, directory):

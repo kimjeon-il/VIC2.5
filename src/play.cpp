@@ -2204,8 +2204,15 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
         const auto& spec=*works.freight;
         const auto& projects=world.engine().base().core().state().constructions;
         const auto p=projects.find(spec.project());
+        const bool ordered=p!=projects.end();
+        const bool settled=ordered&&p->second.paid_work>=p->second.work_required;
+        const auto invoice=phased::product(ordered?1:spec.work,spec.invoice);
+        const bool funding_ready=settled||phased::construction_funding_covers(
+            core.phase_d_cash_available(core.country_treasury(selected)),
+            spec.reserve,invoice);
         out<<",\"public_works\":{\"daily_cap\":"<<works.daily_cap
            <<",\"invoice_per_work\":"<<spec.invoice
+           <<",\"funding_ready\":"<<(funding_ready?"true":"false")
            <<",\"required_work\":"<<spec.work
            <<",\"ordered\":"<<(p!=projects.end()?"true":"false")
            <<",\"paid_work\":"<<(p!=projects.end()?p->second.paid_work:0)

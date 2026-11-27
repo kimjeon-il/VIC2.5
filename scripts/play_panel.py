@@ -514,6 +514,8 @@ class PlayPanel:
                 phase = "준공 대기"
             elif cap < works["invoice_per_work"]:
                 phase = "일시정지" if works["ordered"] else "발주 대기"
+            elif not works.get("funding_ready", True):
+                phase = "국고 부족으로 일시정지" if works["ordered"] else "국고 부족으로 발주 대기"
             else:
                 phase = "공사 중" if works["ordered"] else "자동 발주 대기"
             policy += (f"\n운송 기반시설: {phase} · 공사 {works['paid_work']}/{works['required_work']}"

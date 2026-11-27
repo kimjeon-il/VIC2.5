@@ -723,6 +723,18 @@ def history_public_works(work):
     assert finished["public_works"]["paid_work"] == 2
     assert finished["public_works"]["commissioned"]
 
+    for cash in (79, 80):
+        narrow = work / f"freight-funding-{cash}.txt"
+        narrow.write_text(sample.read_text(encoding="ascii").replace(
+            "FIELD-MINISTER 200 0", f"FIELD-MINISTER {cash} 0"), encoding="ascii")
+        _, chosen, funded_view, after_step = panels(
+            f"history-open {narrow}", "choose-country FIELD-LAND",
+            "public-works 20", "step 1")
+        assert chosen["treasury"] == cash
+        assert funded_view["public_works"]["funding_ready"] == (cash == 80)
+        assert after_step["public_works"]["ordered"] == (cash == 80)
+        assert funded_view["date"] == chosen["date"]  # a status report pays nothing
+
     fixed = (f"history-open {sample}", "choose-country FIELD-LAND")
     _, _, _, funded = panels(*fixed, "public-works 20", "step 4")
     _, _, delayed = panels(*fixed, "step 4")
