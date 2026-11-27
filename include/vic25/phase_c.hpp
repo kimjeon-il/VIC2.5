@@ -357,7 +357,8 @@ public:
     // accrual profit (unsold material has no arbitrary book valuation).
     [[nodiscard]] FirmFinanceView firm_finance(const std::string& firm)const {
         ensure(actors_.contains(firm),"unknown firm balance sheet");
-        const Money revenue=-money_.balance(account(firm,"revenue"));
+        const Money revenue=phaseb::add_checked(
+            -money_.balance(account(firm,"revenue")),private_goods_receipts(firm));
         const Money expenses=money_.balance(account(firm,"expense"));
         return {cash(firm),phase_d_cash_available(firm),revenue,expenses,
                 phaseb::add_checked(revenue,-expenses),outstanding_loan(firm),
@@ -1161,15 +1162,43 @@ public:
                     1'000'000-admin.dividend_waste_ppm)/1'000'000;
             break;
         }
-        if(paid>0)
-            money_.post({unique("dividend"),
-                "net shareholder dividend after administrative waste", {
-                {account(d.payer, "capital"), paid, 0},
-                {account(d.payer, "cash"), 0, paid},
-                {account(holder, "cash"), paid, 0},
-                {account(holder, "revenue"), 0, paid}}});
+        if(paid>0)post_paid_dividend(d.payer,holder,paid);
         dividends_.erase(id);
         events_.push_back("dividend-paid");
+    }
+    // The first automatic slice is a sole registered household owner,
+    // not a proxy for all public or mixed forms of building ownership.
+    void phase_time_share_private_goods_surplus(
+            const std::string& firm,Money reserve,
+            const std::set<std::string>& living_household_wallets) {
+        require_stage({5});
+        ensure(reserve>=0,"negative firm operating reserve");
+        const auto asset="company:"+firm;
+        if(!actors_.contains(firm)||!is_private_registered_company(firm)||
+           firm_bankrupt(firm)||
+           outstanding_worker_wages(firm)>0||outstanding_loan(firm)>0||
+           money_.balance(account(firm,"debt"))!=0||
+           money_.balance(account(firm,"reparations_payable"))!=0||
+           (money_.has_account(account(firm,"bond_coupon_payable"))&&
+            money_.balance(account(firm,"bond_coupon_payable"))!=0))return;
+        for(const auto& [id,claim]:dividends_) {
+            (void)id;
+            if(claim.payer==firm)return;
+        }
+        const auto holders=ownership_.holders(asset);
+        if(holders.size()!=1)return;
+        const auto& holder=holders.begin()->first;
+        if(holder==firm||!actors_.contains(holder)||
+           !living_household_wallets.contains(holder))return;
+        const auto free=phase_d_cash_available(firm);
+        const auto receipts=private_goods_receipts(firm);
+        const auto expenses=money_.balance(account(firm,"expense"));
+        const auto paid_key=account(firm,"paid_equity_distributions");
+        const auto paid=money_.has_account(paid_key)?money_.balance(paid_key):0;
+        if(free<=reserve||receipts<=expenses||receipts-expenses<=paid)return;
+        const Money distributable=std::min(free-reserve,receipts-expenses-paid);
+        post_paid_dividend(firm,holder,distributable);
+        events_.push_back("automatic-registered-household-dividend-paid");
     }
     void issue_bond(const std::string& bond_id, const std::string& government,
                     const std::string& buyer, Money face) {
@@ -3258,16 +3287,52 @@ private:
     }
 public:
     void pay(const std::string& from, const std::string& to, Money amount) {
+        post_cash_payment(from,to,amount,false);
+    }
+private:
+    [[nodiscard]] bool is_private_registered_company(const std::string& actor)const {
+        if(!tracked_assets_.contains("company:"+actor)||has_government(actor))
+            return false;
+        return std::none_of(country_treasuries_.begin(),country_treasuries_.end(),
+            [&](const auto& binding){return binding.second==actor;});
+    }
+    [[nodiscard]] Money private_goods_receipts(const std::string& actor)const {
+        const auto key=account(actor,"paid_goods_revenue");
+        return money_.has_account(key)?-money_.balance(key):0;
+    }
+    void post_cash_payment(const std::string& from,const std::string& to,
+                           Money amount,bool goods_sale) {
         require_stage({3, 5, 7, 8});
         if(phase_d_reservation_mode_)
             resources_.assert_cash_available(from,amount,cash(from));
         ensure(amount > 0 && cash(from) >= amount && actors_.contains(to) && from != to,
                "unfunded payment");
+        std::string revenue=account(to,"revenue");
+        if(goods_sale&&is_private_registered_company(to)) {
+            // A real paid goods sale has its own revenue account. Borrowing,
+            // transfers and noncash writeoffs do not count as sale proceeds.
+            revenue=account(to,"paid_goods_revenue");
+            if(!money_.has_account(revenue))
+                money_.add_account(revenue,to,AccountType::revenue);
+        }
         money_.post({unique("pay"), "confirmed transfer", {
             {account(from, "expense"), amount, 0}, {account(from, "cash"), 0, amount},
-            {account(to, "cash"), amount, 0}, {account(to, "revenue"), 0, amount}}});
+            {account(to, "cash"), amount, 0}, {revenue, 0, amount}}});
         events_.push_back("payment");
     }
+    void post_paid_dividend(const std::string& firm,const std::string& holder,Money amount) {
+        std::string retained=account(firm,"capital");
+        if(is_private_registered_company(firm)) {
+            retained=account(firm,"paid_equity_distributions");
+            if(!money_.has_account(retained))
+                money_.add_account(retained,firm,AccountType::equity);
+        }
+        money_.post({unique("dividend"),
+            "net shareholder dividend after administrative waste", {
+            {retained, amount, 0}, {account(firm, "cash"), 0, amount},
+            {account(holder, "cash"), amount, 0}, {account(holder, "revenue"), 0, amount}}});
+    }
+public:
     void wages(const std::string& payer, const std::string& worker,
                const std::string& treasury, Money gross, Money withheld) {
         require_stage({5});
@@ -3923,7 +3988,7 @@ public:
         }
         ensure(cash(buyer) >= cost, "buyer cannot pay");
         goods_.transfer({seller, region, good}, {buyer, region, good}, qty);
-        pay(buyer, seller, cost);
+        post_cash_payment(buyer,seller,cost,true);
         events_.push_back("trade");
     }
     void consume(const std::string& owner, const std::string& region,
