@@ -373,7 +373,13 @@ struct Policies {
     bool gate_local_input_procurement_by_production{false};
     // Optional native-day target for an existing standing trade route.
     std::map<std::string,Quantity> standing_route_stock_targets;
+    // Per-country ceiling for paid public construction work, separate from
+    // operating services. Omission preserves existing scenario behavior.
+    std::map<std::string,Money> public_construction_daily_caps;
     void validate() const {
+        for(const auto& [country,cap]:public_construction_daily_caps)
+            if(country.empty()||cap<0)
+                throw std::invalid_argument("P0_INVALID_PUBLIC_CONSTRUCTION_DAILY_CAP");
         if(autonomous_tax_step_ppm<0||autonomous_tax_step_ppm>1'000'000||
            autonomous_tax_ceiling_ppm<0||
            autonomous_tax_ceiling_ppm>1'000'000||
@@ -1441,7 +1447,11 @@ public:
         std::erase_if(decisions.investments,[&](const Investment& investment) {
             return game_c.command_processed(public_build_key(investment.construction_project));
         });
-        std::map<std::string,const PublicConstructionOffer*> active_public_builds;
+        struct PublicBuild {
+            const PublicConstructionOffer* offer;
+            Quantity invoice_work_limit;
+        };
+        std::map<std::string,PublicBuild> active_public_builds;
         for(const auto& offer:decisions.public_construction_offers) {
             const auto found=industry.constructions.find(offer.project.id);
             if(found==industry.constructions.end()||
@@ -1462,24 +1472,35 @@ public:
                p.material_per_work!=offer.project.material_per_work||
                p.cash_price_per_work!=offer.project.cash_price_per_work||
                p.target_capacity!=offer.project.target_capacity)continue;
-            active_public_builds.emplace(p.id,&offer);
-            decisions.investments.push_back({p.id,offer.recipe.outputs.front().good,
-                offer.treasury_cash_reserve,1,1});
+            const auto cap=decisions.public_construction_daily_caps.find(country);
+            const Quantity invoice_work_limit=cap==decisions.public_construction_daily_caps.end()
+                ?std::numeric_limits<Quantity>::max():cap->second/p.cash_price_per_work;
+            active_public_builds.emplace(p.id,PublicBuild{&offer,invoice_work_limit});
+            // No work order or preparatory local purchase while paused.
+            if(invoice_work_limit>0)
+                decisions.investments.push_back({p.id,offer.recipe.outputs.front().good,
+                    offer.treasury_cash_reserve,1,1});
         }
         // Provider payouts happen after the real invoice payment callback.
         // If that callback paid today's final work, protect just the floor;
         // while unpaid, keep one next invoice available for the queue.
-        std::map<std::string,std::pair<std::string,Money>> public_build_reserves;
-        for(const auto& [id,offer]:active_public_builds)
-            public_build_reserves.emplace(offer->project.client,
-                std::pair{id,offer->treasury_cash_reserve});
+        struct PublicBuildReserve {
+            std::string project;
+            Money cash_floor,next_invoice;
+        };
+        std::map<std::string,PublicBuildReserve> public_build_reserves;
+        for(const auto& [id,build]:active_public_builds)
+            public_build_reserves.emplace(build.offer->project.client,PublicBuildReserve{
+                id,build.offer->treasury_cash_reserve,
+                build.invoice_work_limit>0?build.offer->project.cash_price_per_work:0});
         const auto public_build_floor=[reserves=std::move(public_build_reserves)]
             (phasegh::Stage& gh,const std::string& treasury) {
                 const auto reserve=reserves.find(treasury);
                 if(reserve==reserves.end())return Money{0};
-                const auto& p=gh.phase_d().state().constructions.at(reserve->second.first);
-                return phaseb::add_checked(reserve->second.second,
-                    p.paid_work<p.work_required?p.cash_price_per_work:0);
+                const auto& [project,cash_floor,next_invoice]=reserve->second;
+                const auto& p=gh.phase_d().state().constructions.at(project);
+                return phaseb::add_checked(cash_floor,
+                    p.paid_work<p.work_required?next_invoice:0);
             };
         std::set<std::string> autonomous_projects;
         for(const auto& [id,project]:industry.constructions) {
@@ -2002,11 +2023,14 @@ public:
             const bool generated=autonomous_projects.contains(investment.construction_project);
             const auto& project=industry.constructions.at(investment.construction_project);
             const bool ordinary=ordinary_construction(project);
+            const auto public_build=active_public_builds.find(investment.construction_project);
+            const bool public_funded=public_build!=active_public_builds.end();
+            const Quantity invoice_work_limit=public_funded
+                ?public_build->second.invoice_work_limit:std::numeric_limits<Quantity>::max();
             plan[1].push_back([investment,work,generated,investment_rates,
                 construction_population,construction_staff,active_construction,ordinary,
-                today=world_.day_index(),
-                collateral_credit=decisions.allow_collateralized_enterprise_credit&&
-                    !active_public_builds.contains(investment.construction_project)]
+                invoice_work_limit,today=world_.day_index(),
+                collateral_credit=decisions.allow_collateralized_enterprise_credit&&!public_funded]
                 (phasegh::Stage& gh){
                 const auto& domain=gh.phase_d().state();
                 const auto& p=domain.constructions.at(investment.construction_project);
@@ -2137,6 +2161,9 @@ public:
                         static_cast<Quantity>(staff/p.workers_per_work),
                         affordable});
                 }
+                // Even a positive construction bonus cannot raise today's
+                // paid invoice above the ceiling. Each treasury has one offer.
+                n=std::min(n,invoice_work_limit);
                 if(n<=0)return;
                 gh.phase_d().plan_work(investment.construction_project,n,ordinary);
                 if(ordinary)(*construction_staff)[p.contractor]+=times(n,p.workers_per_work);
