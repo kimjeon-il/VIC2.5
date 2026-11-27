@@ -2957,15 +2957,39 @@ public:
                     }
                 }
                 const auto sellers=c.market_seller_index();
+                std::vector<std::pair<const GoodsKey*,Quantity>> without_sellers;
                 for(const auto& [key,target]:inputs_wanted) {
                     const auto& [buyer,region,good]=key;
                     if(!c.has_market(region,good))continue;
                     const Quantity gap=local_material_shortfall(c,buyer,region,good,target);
                     if(gap==0)continue;
                     auto it=sellers.find({region,good});
-                    if(it==sellers.end())continue;
+                    if(it==sellers.end()) {
+                        without_sellers.emplace_back(&key,gap);
+                        continue;
+                    }
                     (void)c.clear_household_market(
                         buyer,region,good,gap,it->second);
+                }
+                // Empty-stock markets must still see a viable factory's
+                // remaining bid. Record this after real purchases so the
+                // same operating cash cannot back several absent inputs.
+                std::string_view current_buyer;
+                Money unallocated_cash=0;
+                const std::vector<std::string> no_sellers;
+                for(const auto& [key,gap]:without_sellers) {
+                    const auto& [buyer,region,good]=*key;
+                    if(buyer!=current_buyer) {
+                        current_buyer=buyer;
+                        unallocated_cash=c.outstanding_worker_wages(buyer)>0?
+                            0:std::max<Money>(0,c.phase_d_cash_available(buyer));
+                    }
+                    const Money quote=c.market(region,good).price;
+                    const Quantity funded=std::min(gap,unallocated_cash/quote);
+                    if(funded<=0)continue;
+                    (void)c.clear_household_market(
+                        buyer,region,good,funded,no_sellers);
+                    unallocated_cash-=times(funded,quote);
                 }
             });
         for(const auto& p:decisions.political_reactions) {
