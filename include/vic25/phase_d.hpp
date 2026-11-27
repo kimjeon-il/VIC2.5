@@ -626,48 +626,49 @@ class Stage {
     // Only the campaign offer dispatcher may enroll this public project.
     // The ordinary private-entry eligibility and all work stages are unchanged.
     friend class vic25::p0::DailyGame;
-    void order_public_construction(const std::string& country,
-            const std::string& proposer,ConstructionProject project,
-            IndustryRecipe recipe,Money cash_reserve,bool elected) {
+    const char* public_construction_rejection(const std::string& country,
+            const std::string& proposer,const ConstructionProject& project,
+            const IndustryRecipe& recipe,Money cash_reserve,bool elected) const {
         must(9);
-        require(c_.has_country_treasury(country)&&
-                c_.country_treasury(country)==project.client&&
-                c_.government(country).prime_minister==proposer&&
-                (elected ? (!c_.country_tax_uses_direct_executive(country)&&
-                            c_.p1_constitution(country).legislature==phasec::P1LegislatureKind::unicameral)
-                         : (c_.country_tax_uses_direct_executive(country)&&
-                            c_.p1_constitution(country).legislature==phasec::P1LegislatureKind::none))&&
-                c_.sovereignty(project.region)==country,
-                "unauthorized public construction offer");
-        require(!d_.constructions.contains(project.id)&&
-                !d_.recipes.contains(recipe.id)&&!c_.facilities().contains(project.target_site)&&
-                std::none_of(d_.constructions.begin(),d_.constructions.end(),
-                    [&](const auto& entry){return entry.second.target_site==project.target_site;}),
-                "public construction offer already queued");
-        require(c_.has_actor(project.contractor)&&!c_.firm_bankrupt(project.contractor)&&
-                c_.phase_d_workforce(project.contractor)>=project.workers_per_work&&
-                c_.outstanding_worker_wages(project.contractor)==0&&
-                c_.outstanding_worker_wages(project.client)==0&&
-                !c_.firm_bankrupt(project.client)&&
-                (recipe.industry_class.empty()||d_.industry_classes.contains(recipe.industry_class)),
-                "public construction lacks a qualified operating contractor");
+        if(!c_.has_country_treasury(country)||
+           c_.country_treasury(country)!=project.client||
+           c_.government(country).prime_minister!=proposer||
+           !c_.is_sovereign_region(project.region,country))
+            return "unauthorized public construction offer";
+        const auto legislature=c_.p1_constitution(country).legislature;
+        if(elected ? (c_.country_tax_uses_direct_executive(country)||
+                      legislature!=phasec::P1LegislatureKind::unicameral)
+                   : (!c_.country_tax_uses_direct_executive(country)||
+                      legislature!=phasec::P1LegislatureKind::none))
+            return "unauthorized public construction offer";
+        if(d_.constructions.contains(project.id)||d_.recipes.contains(recipe.id)||
+           c_.facilities().contains(project.target_site)||
+           std::any_of(d_.constructions.begin(),d_.constructions.end(),
+               [&](const auto& entry){return entry.second.target_site==project.target_site;}))
+            return "public construction offer already queued";
+        if(!c_.has_actor(project.contractor)||c_.firm_bankrupt(project.contractor)||
+           c_.phase_d_workforce(project.contractor)<project.workers_per_work||
+           c_.outstanding_worker_wages(project.contractor)!=0||
+           c_.outstanding_worker_wages(project.client)!=0||c_.firm_bankrupt(project.client)||
+           (!recipe.industry_class.empty()&&!d_.industry_classes.contains(recipe.industry_class)))
+            return "public construction lacks a qualified operating contractor";
         const Money cost=product(project.work_required,project.cash_price_per_work);
         const Money free=c_.phase_d_cash_available(project.client);
-        require(free>=cash_reserve&&free-cash_reserve>=cost,
-                "public construction invoice and reserve are unfunded");
-        require(c_.has_market(project.region,recipe.outputs.front().good),
-                "public construction lacks a local output market");
+        if(free<cash_reserve||free-cash_reserve<cost)
+            return "public construction invoice and reserve are unfunded";
+        if(!c_.has_market(project.region,recipe.outputs.front().good))
+            return "public construction lacks a local output market";
         for(const auto& input:recipe.inputs)
-            require(c_.has_market(project.region,input.good),
-                    "public construction lacks a local recipe input market");
+            if(!c_.has_market(project.region,input.good))
+                return "public construction lacks a local recipe input market";
         auto shortage=std::max<Quantity>(0,project.material_per_work-
             c_.phase_d_material_available(project.contractor,project.region,project.material_good));
         if(shortage>0) {
-            require(c_.has_market(project.region,project.material_good),
-                    "public construction material lacks a local quote");
+            if(!c_.has_market(project.region,project.material_good))
+                return "public construction material lacks a local quote";
             const auto price=c_.market(project.region,project.material_good).price;
-            require(price>0&&shortage<=c_.phase_d_cash_available(project.contractor)/price,
-                    "public contractor cannot fund its first material purchase");
+            if(price<=0||shortage>c_.phase_d_cash_available(project.contractor)/price)
+                return "public contractor cannot fund its first material purchase";
             const auto sellers=c_.market_seller_index();
             const auto local=sellers.find({project.region,project.material_good});
             if(local!=sellers.end())
@@ -675,8 +676,16 @@ class Stage {
                     if(seller!=project.contractor)
                         shortage-=std::min(shortage,c_.phase_d_material_available(
                             seller,project.region,project.material_good));
-            require(shortage==0,"public construction lacks local saleable material");
+            if(shortage!=0)return "public construction lacks local saleable material";
         }
+        return nullptr;
+    }
+    void order_public_construction(const std::string& country,
+            const std::string& proposer,ConstructionProject project,
+            IndustryRecipe recipe,Money cash_reserve,bool elected) {
+        if(const auto* reason=public_construction_rejection(
+                country,proposer,project,recipe,cash_reserve,elected))
+            throw std::invalid_argument(reason);
         const auto id=project.id;
         const auto method=recipe.id;
         d_.constructions.emplace(id,std::move(project));
