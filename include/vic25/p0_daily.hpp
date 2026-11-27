@@ -1008,10 +1008,38 @@ inline Quantity local_material_shortfall(const phasec::IntegratedWorld& c,
     return target>available?target-available:0;
 }
 
+// A price is not a completed sale. Attribute extra output to the marked
+// market only up to its inventory gap or recorded solvent unmet orders,
+// less this firm's existing stock. The primary stock policy is unchanged.
+inline Money projected_operating_revenue(const phasec::IntegratedWorld& c,
+        const phasec::ProductionFacility& f,const phased::IndustryRecipe& r,
+        std::int64_t today) {
+    const auto& primary=r.outputs.front();
+    Money revenue=times(primary.per_unit,c.market(f.region,primary.good).price);
+    if(r.outputs.size()==1)return revenue;
+    std::map<std::string_view,Quantity> remaining;
+    for(std::size_t i=1;i<r.outputs.size();++i) {
+        const auto& extra=r.outputs[i];
+        if(extra.good==primary.good||!c.has_market(f.region,extra.good))continue;
+        const auto& quote=c.market(f.region,extra.good);
+        auto it=remaining.find(extra.good);
+        if(it==remaining.end()) {
+            const auto wanted=std::max({quote.target_stock,quote.unmet,
+                c.previous_daily_solvent_unmet(f.region,extra.good,today)});
+            const auto held=c.stock(f.owner,f.region,extra.good);
+            it=remaining.emplace(extra.good,wanted>held?wanted-held:0).first;
+        }
+        const auto units=std::min(it->second,extra.per_unit);
+        revenue=phaseb::add_checked(revenue,times(units,quote.price));
+        it->second-=units;
+    }
+    return revenue;
+}
+
 inline Quantity available_production(const phased::Stage& d,
                                       const phasec::IntegratedWorld& c,
                                       const Manufacturer& policy,
-                                      int day,int days) {
+                                      int day,int days,std::int64_t today) {
     const auto& state=d.state();
     const auto& r=state.recipes.at(policy.recipe);
     const auto& f=c.facility(r.site);
@@ -1024,14 +1052,13 @@ inline Quantity available_production(const phased::Stage& d,
     }
     const auto& primary=r.outputs.front();
     if(c.stock(f.owner,f.region,primary.good)>=policy.target_inventory)return 0;
-    const auto& quote=c.market(f.region,primary.good);
     const auto inputs=phased::recipe_input_totals(r);
     Money cost_per_batch=0;
     for(const auto& input:inputs) {
         const auto& iq=c.market(f.region,input.good);
         cost_per_batch=phaseb::add_checked(cost_per_batch,times(input.per_unit,iq.price));
     }
-    const Money revenue=times(primary.per_unit,quote.price);
+    const Money revenue=projected_operating_revenue(c,f,r,today);
     // An explicit scenario wage overrides the ordinary contract projection.
     const Money scheduled=policy.wage_per_worker_per_day;
     if(!positive_projected_operating_margin(revenue,cost_per_batch,
@@ -1488,7 +1515,7 @@ public:
                               game_c.market(facility.region,input.good).price));
                 }
                 const Money wage_day=daily_increment(wage,date.day,dim);
-                if(!priced||times(output.per_unit,quote.price)<=
+                if(!priced||projected_operating_revenue(game_c,facility,recipe,world_.day_index())<=
                     phaseb::add_checked(input_cost,
                         times(recipe.workers_per_batch,wage_day)))continue;
                 const Quantity capacity=facility.capacity-facility.damaged;
@@ -2484,13 +2511,13 @@ public:
             std::optional<phasec::IntegratedWorld::P1PopulationTotals>>();
         for(const auto& firm:decisions.manufacturers) {
             auto workers=std::make_shared<People>(0);
-            plan[4].push_back([firm,date,dim,workers,
+            plan[4].push_back([firm,date,dim,workers,today=world_.day_index(),
                                salary_shortfall](phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 const auto& recipe=gh.phase_d().state().recipes.at(firm.recipe);
                 if(salary_shortfall->contains(c.facility(recipe.site).owner))
                     return;
-                const Quantity batches=available_production(gh.phase_d(),c,firm,date.day,dim);
+                const Quantity batches=available_production(gh.phase_d(),c,firm,date.day,dim,today);
                 if(batches<=0)return;
                 const auto& r=gh.phase_d().state().recipes.at(firm.recipe);
                 gh.phase_d().manufacture_daily(firm.recipe,batches,date.day,dim);
@@ -2896,7 +2923,8 @@ public:
         // Household essential orders have already been processed first.
         if(decisions.allow_endogenous_input_procurement)
             plan[7].push_back(
-                [regional_need,date,dim,recipes=std::move(planned_operating_recipes)]
+                [regional_need,date,dim,today=world_.day_index(),
+                 recipes=std::move(planned_operating_recipes)]
                 (phasegh::Stage& gh) {
                 auto& c=gh.phase_c();
                 const auto& domain=gh.phase_d().state();
@@ -2945,7 +2973,7 @@ public:
                                 c.market(facility.region,item.good).price));
                     }
                     if(!priced||!positive_projected_operating_margin(
-                            times(primary.per_unit,quote.price),input_cost,
+                            projected_operating_revenue(c,facility,recipe,today),input_cost,
                             recipe.workers_per_batch,0,
                             highest_monthly_contract_wage(c,facility.owner),dim))
                         continue;
@@ -4280,7 +4308,7 @@ public:
                     const Money payroll=times(std::max(max_wage,
                         actual_daily_worker_wage(c,f.owner,date.day,dim)),
                         r.workers_per_batch);
-                    Money remaining=times(product.per_unit,output.price)-payroll;
+                    Money remaining=projected_operating_revenue(c,f,r,today)-payroll;
                     if(remaining<=0)continue;
                     auto input_units=phased::recipe_input_totals(r);
                     // Import admission previously evaluated goods by ID.

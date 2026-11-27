@@ -997,7 +997,60 @@ static void empty_stock_keeps_funded_industrial_bid(IndustrialBidTrial trial) {
     }
 }
 
+static void daily_distillery_recognizes_a_marketable_coproduct(int liquor_case) {
+    phasegh::World gh(24000);
+    auto& spatial=gh.seed_geography();
+    spatial.seed_province(1,"R","A");
+    spatial.seed_unit(11,"A","ROOT");
+    spatial.seed_assignment(1,11);
+    auto& industry=spatial.seed_core();
+    auto& c=industry.seed_core();
+    c.seed_actor("A",1);
+    c.seed_actor("DISTILLER",200);
+    for(const auto* good:{"food","groceries","grain","sugar","glass"})
+        c.seed_market("R",good,1,1,1,good==std::string_view("groceries")?6:0);
+    if(liquor_case)
+        c.seed_market("R","liquor",5,5,5,liquor_case==2||liquor_case==3?8:0);
+    if(liquor_case==3)c.seed_stock("DISTILLER","R","liquor",8);
+    c.seed_stock("DISTILLER","R","grain",8);
+    c.seed_stock("DISTILLER","R","sugar",5);
+    c.seed_stock("DISTILLER","R","glass",1);
+    c.seed_government("A","HEAD","PRIME",5,3);
+    const auto slice=add_worker(gh);
+    const auto household=c.seed_population().slice(slice).key.household;
+    c.seed_actor("HH:"+std::to_string(household),0);
+    industry.seed_standard_industries();
+    industry.seed_building_facility("FOOD_SITE","DISTILLER","R",31,
+                                    "vic3_115.urban.food_industries");
+    phased::IndustryRecipe recipe;
+    recipe.id="POT";recipe.site="FOOD_SITE";recipe.industry_class="MANU";
+    recipe.inputs={{"grain",8},{"sugar",5},{"glass",1}};
+    recipe.outputs={{"groceries",6},{"liquor",10}};
+    recipe.workers_per_batch=recipe.capacity_per_batch=1;
+    industry.seed_building_recipe(recipe);
+    p0::Policies policy;
+    policy.monthly_clothing_units_per_person=0;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),8),policy);
+    game.advance_day();
+    const auto& d=game.world().engine().base().core();
+    const auto& core=d.core();
+    const bool viable=liquor_case==2;
+    check(core.people().employed(slice)==(viable?1:0),
+          "marketable secondary output must affect funded daily hiring");
+    check(core.stock("DISTILLER","R","grain")==(viable?0:8) &&
+          core.stock("DISTILLER","R","sugar")==(viable?0:5) &&
+          core.stock("DISTILLER","R","glass")==(viable?0:1) &&
+          core.stock("DISTILLER","R","liquor")==
+            (viable?10:(liquor_case==3?8:0)),
+          "daily forecast must not fabricate output or bypass actual input debits");
+    check(d.state().actual_production_runs.size()==(viable?1U:0U) &&
+          core.firm_finance("DISTILLER").receipts<=6,
+          "unbought secondary production must not be booked as a sale");
+}
+
 int main() {
+    for(int liquor_case=0;liquor_case<4;++liquor_case)
+        daily_distillery_recognizes_a_marketable_coproduct(liquor_case);
     for(const auto trial:{IndustrialBidTrial::recovery,IndustrialBidTrial::cashless,
                           IndustrialBidTrial::competing_inputs,IndustrialBidTrial::priced_stock_first})
         empty_stock_keeps_funded_industrial_bid(trial);
