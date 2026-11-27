@@ -627,6 +627,18 @@ def history_public_works(work):
     assert funded_delivery["history"]["economy"]["mill_output_this_month"] == 6
     assert delayed_delivery["history"]["economy"]["mill_output_this_month"] == 3
 
+    # At the fixed quote, February's conservative daily payroll raises
+    # the break-even input burden. The freight terminal alone is not a
+    # subsidy; a lower tariff lets the same mill place profitable orders.
+    february = (*fixed, "public-works 20", "choose-country MILL-LAND", "step 30")
+    unchanged = panels(*february, "tariff 50", "step 28")[-1]
+    lowered = panels(*february, "tariff 25", "step 28")[-1]
+    assert unchanged["date"] == lowered["date"] == "1840-02-29"
+    assert unchanged["history"]["economy"]["mill_output_this_month"] == 3
+    assert lowered["history"]["economy"]["mill_output_this_month"] == 18
+    assert unchanged["grain_trade"]["duties_paid"] == 18
+    assert lowered["grain_trade"]["duties_paid"] == 24
+
     denied = run("--panel-stdio", script="\n".join((
         f"history-open {sample}", "choose-country MILL-LAND", "public-works 20", "quit", "")))
     success(denied)
