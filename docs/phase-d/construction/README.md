@@ -58,6 +58,7 @@
 Victoria 3의 국가 건설대기열/건설 부문·재료/고용·생산방식 및 민간투자 개념을 **문제 설정 참고**에만 사용한다.
 - [Paradox Victoria 3 Dev Diary #36 — Construction](https://store.steampowered.com/news/posts/?enddate=1646328679&feed=steam_community_announcements)
 - [Paradox Victoria 3 Dev Diary #71 — Autonomous Investment](https://www.paradoxinteractive.com/games/victoria-3/news/dev-diary-71-autonomous-investment-in-1-2)
+- [Victoria 3 1.15.2 공식 변경사항](https://steamcommunity.com/app/529340/announcements/): 항구·무역센터의 자동 확장을 켤 수 있다. 개별 건물에 둘 수 있는 자동 확장과 달리, VIC2.5 기본 공공사업은 국가가 정한 한도와 우선순위로 개별 발주 조작을 줄이는 방향이다. 이 버전의 패치 노트가 국가 건설 지출 한도를 설명하는 것은 아니다.
 - [Victoria 3 Wiki — Buildings](https://vic3.paradoxwikis.com/Buildings) / [Production methods](https://vic3.paradoxwikis.com/Production_methods) (접근제한/버전별 내용변경 가능)
 
 VIC2.5는 실제 기업·노동·소유/채무·재고/운송·기성고/WIP를 기준으로 독자 규칙을 확정한다. 원작의 게임 파일/수치/코드·텍스트를 복제하지 않는다.
@@ -67,4 +68,5 @@ Victoria 3의 1.2 자율투자 설계처럼 정부 발주와 민간 자동 투�
 ## 구현 및 검증 상태
 
 - **실행 경로 확인:** 일간 건설은 기존 자재·고용·현금 원장과 실제 지급 및 WIP를 사용한다. 상세 WorkPackage와 검수는 명시 시나리오에서 기본 건설과 별개로 처리한다.
+- **공공건설 지출 한도:** 국가별로 일간 공공 공사비 한도를 선택 설정할 수 있는 엔진 경로가 있다. 기존 권한을 받은 시나리오 일반 공사만 대상으로, 해당 날짜에 실제 작업 단위별로 지급하는 공사비를 제한한다. 한도가 작업 한 단위에 못 미치면 날짜는 계속 진행되며 신규 자재 매입과 작업 지급만 쉰다. 이미 지급한 작업은 유지한다. 미설정은 기존 결과를 보존한다. 민간 투자, 공공서비스 운영비, 전체 사업비의 발주 승인과는 별개다. 이 설정은 현재 시나리오 정책 입력이며, 역사 플레이의 설정·저장과 후보 간 자동 우선순위 선택은 아직 미구현이다.
 - **검증 구분:** 25개 불변조건(`DC-INV-01..25`)·45개 인수 항목(`DC-T01..45`)·35개 ADR(`DC-ADR-001..035`) 및 두 합성 예시는 설계 범위다. 현재 문서 갱신이 45개 전체 자동화 인수·장기 성능·실제 역사 사례를 검증했다는 뜻은 아니다.

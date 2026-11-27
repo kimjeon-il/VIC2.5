@@ -2911,7 +2911,8 @@ static void autonomous_tax_requires_current_parliamentary_authority(bool direct_
 }
 
 static void public_construction_purchases_uses_and_pays_real_inputs() {
-    const auto trial=[](int steel,phasec::Money builder_cash,phasec::Money treasury,bool elected=false){
+    const auto trial=[](int steel,phasec::Money builder_cash,phasec::Money treasury,bool elected=false,
+                        phased::Quantity work_required=1){
         phasegh::World gh{24000};
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"RA","A");geo.seed_unit(1,"A","RA");geo.seed_assignment(1,1);
@@ -2939,7 +2940,7 @@ static void public_construction_purchases_uses_and_pays_real_inputs() {
         c.seed_population().hire(worker,1,"BUILDER","worker",0,{});
         phased::ConstructionProject p;
         p.id="PUBLIC-TOOLS-A";p.client="A";p.contractor="BUILDER";p.region="RA";
-        p.material_good="steel";p.target_site="SITE";p.work_required=1;
+        p.material_good="steel";p.target_site="SITE";p.work_required=work_required;
         p.material_per_work=2;p.workers_per_work=1;p.cash_price_per_work=20;p.target_capacity=31;
         phased::IndustryRecipe r;
         r.id="METHOD";r.site="SITE";r.inputs={{"wood",1}};r.outputs={{"tools",1}};
@@ -3066,6 +3067,47 @@ static void public_construction_purchases_uses_and_pays_real_inputs() {
                  domain(game).construction("PUBLIC-TOOLS-A").commissioned&&c(game).financial().balanced()&&
                  daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(replay.world()),
                  "committed construction failed native cash conservation, commissioning, or save replay");
+
+    // Isolate construction from the unrelated civilian service envelope.
+    auto funded=trial(4,12,200,false,2);
+    auto capped=funded.policies();
+    capped.public_budget.clear();
+    capped.public_construction_daily_caps["A"]=19;
+    p0::DailyGame limited(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(funded.world())),capped);
+    limited.order_public_construction("A","PM","PUBLIC-TOOLS-A");
+    const auto queued=daily::SnapshotCodec::encode(limited.world());
+    limited.advance_day();limited.advance_day();
+    require_test(limited.world().day_index()==daily::SnapshotCodec::decode(queued).day_index()+2&&
+                 c(limited).cash("A")==200&&c(limited).cash("SELLER")==0&&
+                 domain(limited).construction("PUBLIC-TOOLS-A").paid_work==0,
+                 "an invoice above today's cap must not stop the date, debit cash or procure inputs");
+    capped.public_construction_daily_caps["A"]=20;
+    p0::DailyGame running(daily::SnapshotCodec::decode(
+        daily::SnapshotCodec::encode(limited.world())),capped);
+    running.advance_day();running.advance_day();
+    require_test(c(running).cash("A")==180&&
+                 domain(running).construction("PUBLIC-TOOLS-A").paid_work==1&&
+                 !c(running).facilities().contains("SITE"),
+                 "matching cap should cover the first real invoice, not the full project");
+    const auto mid=daily::SnapshotCodec::encode(running.world());
+    auto zero=capped;
+    zero.public_construction_daily_caps["A"]=0;
+    p0::DailyGame paused(daily::SnapshotCodec::decode(mid),zero);
+    paused.advance_day();
+    require_test(c(paused).cash("A")==180&&
+                 domain(paused).construction("PUBLIC-TOOLS-A").paid_work==1,
+                 "zero cap must pause an active public order without losing paid progress");
+    p0::DailyGame capped_replay(daily::SnapshotCodec::decode(mid),capped);
+    running.advance_day();capped_replay.advance_day();
+    require_test(c(running).cash("A")==160&&
+                 domain(running).construction("PUBLIC-TOOLS-A").paid_work==2,
+                 "daily cap must reset on each new day");
+    running.advance_day();capped_replay.advance_day();
+    require_test(c(running).facilities().contains("SITE")&&c(running).financial().balanced()&&
+                 daily::SnapshotCodec::encode(running.world())==
+                     daily::SnapshotCodec::encode(capped_replay.world()),
+                 "capped construction must conserve cash, commission, and replay from mid-project");
 }
 
 static void selected_players_own_tax_without_disabling_rival_ai() {
