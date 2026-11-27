@@ -366,12 +366,12 @@ static void real_food_and_textile_sales(bool legacy_quotes,bool custom_goods=fal
         check(live.regional_food_grievances().empty(),
               "fulfilled groceries falsely left a second legacy food gap");
     } else {
-        check(live.stock("FOOD_CO","R","groceries")==3&&
-              live.stock("TEXTILE_CO","R","clothes")==3&&live.cash(wallet)==36&&
+        check(live.stock("FOOD_CO","R","groceries")==1&&
+              live.stock("TEXTILE_CO","R","clothes")==3&&live.cash(wallet)==18&&
               live.cash("A")==4,
-              "both legacy and catalog needs were purchased for one family");
-        check(live.regional_food_grievances().at("R")==1,
-              "legacy food shortage must remain a real unmet need");
+              "basic food should substitute without opening a second clothing need");
+        check(live.regional_food_grievances().empty(),
+              "fulfilled groceries should not leave a separate legacy food gap");
     }
     check(daily::SnapshotCodec::encode(game.world())==
           daily::SnapshotCodec::encode(replay.world()),
@@ -408,7 +408,118 @@ static void grocery_shortage_cannot_cancel_a_different_goods_tariff() {
               "mixed-market relief must follow observed need for the tariffed good");
     }
 }
+static void staple_food_substitutes_share_one_need() {
+    struct Case { Quantity available_food; phasec::Money funds; Quantity expected; };
+    for(const Case trial:std::array{Case{4,30,2},Case{1,30,1},Case{4,14,1}}) {
+        phasegh::World gh(24000);
+        auto& geo=gh.seed_geography();
+        geo.seed_province(1,"R","A");
+        geo.seed_unit(11,"A","ROOT");
+        geo.seed_assignment(1,11);
+        auto& c=geo.seed_core().seed_core();
+        c.seed_actor("A",0);
+        c.seed_government("A","HEAD","PRIME",5,3);
+        c.seed_actor("FARM",0);
+        c.seed_actor("MILL",0);
+        c.seed_market("R","food",9,1,100,0);
+        c.seed_market("R","groceries",5,1,100,0);
+        c.seed_stock("FARM","R","food",trial.available_food);
+        c.seed_stock("MILL","R","groceries",1);
+        const auto slice=add_worker(gh);
+        const auto wallet="HH:"+std::to_string(c.people().slice(slice).key.household);
+        c.seed_actor(wallet,trial.funds);
+        p0::Policies p;
+        p.daily_food_units_per_person=3;
+        p.monthly_clothing_units_per_person=0;
+        p0::DailyGame game(daily::World::adopt(std::move(gh),29),p);
+        p0::DailyGame replay(daily::SnapshotCodec::decode(
+            daily::SnapshotCodec::encode(game.world())),p);
+        bool checked_before_close=false;
+        phasegh::World::Plan observe{};
+        observe[7].push_back([&](phasegh::Stage& stage) {
+            const auto& fresh=stage.phase_c();
+            const auto& staple=fresh.market("R","food");
+            const auto& cheap=fresh.market("R","groceries");
+            const Quantity shortfall=trial.available_food==1?1:0;
+            check(staple.delivered==trial.expected&&staple.solvent_demand==trial.expected&&
+                  staple.unmet==0,"alternative recorded unmet or duplicated demand");
+            check(cheap.delivered==1&&cheap.solvent_demand==1+shortfall&&
+                  cheap.unmet==shortfall,"cheap food recorded wrong live demand");
+            checked_before_close=true;
+        });
+        game.advance_day(observe);replay.advance_day();
+        check(checked_before_close,"the observation must run before market close");
+        const auto& live=game.world().engine().base().core().core();
+        const auto bought_food=trial.expected;
+        check(live.cash("MILL")==5&&live.cash("FARM")==9*bought_food&&
+              live.cash(wallet)==trial.funds-5-9*bought_food,
+              "one food need should split between the cheaper and fallback sellers");
+        check(live.stock("MILL","R","groceries")==0&&
+              live.stock("FARM","R","food")==trial.available_food-bought_food,
+              "the two purchases must use distinct real inventories without extra demand");
+        check(live.regional_food_grievances().contains("R")==(bought_food<2),
+              "only combined food shortage may become a regional grievance");
+        check(live.previous_daily_solvent_unmet("R","groceries",game.world().day_index())==
+                  (trial.available_food==1?1:0)&&
+              live.previous_daily_solvent_unmet("R","food",game.world().day_index())==0,
+              "only one market should receive the single unmet unit");
+        check(daily::SnapshotCodec::encode(game.world())==
+              daily::SnapshotCodec::encode(replay.world()),
+              "food substitution changed after save and restore");
+    }
+}
+static void substitute_food_sales_redirect_next_day_production() {
+    phasegh::World gh(24000);
+    auto& spatial=gh.seed_geography();
+    spatial.seed_province(1,"R","A");
+    spatial.seed_unit(11,"A","ROOT");
+    spatial.seed_assignment(1,11);
+    auto& c=spatial.seed_core().seed_core();
+    c.seed_actor("A",0);
+    c.seed_actor("MILL",0);
+    c.seed_actor("GROWER",100);
+    c.seed_market("R","groceries",5,5,5,0);
+    c.seed_market("R","food",9,9,9,2);
+    c.seed_market("R","grain",1,1,1,0);
+    c.seed_stock("MILL","R","groceries",3);
+    c.seed_stock("GROWER","R","food",2);
+    c.seed_stock("GROWER","R","grain",10);
+    c.seed_production_facility("FARM","GROWER","R",31);
+    c.seed_government("A","HEAD","PRIME",5,3);
+    const auto slice=add_worker(gh);
+    auto& pop=c.seed_population();
+    const auto home=pop.slice(slice).key.household;
+    c.seed_actor("HH:"+std::to_string(home),100);
+    pop.hire(slice,1,"GROWER","worker",31,{});
+    phased::IndustryRecipe recipe;
+    recipe.id="MORE-FOOD";recipe.site="FARM";
+    recipe.inputs={{"grain",1}};recipe.outputs={{"food",2}};
+    recipe.workers_per_batch=1;recipe.capacity_per_batch=1;
+    spatial.seed_core().seed_recipe(recipe);
+    p0::Policies p;
+    p.monthly_clothing_units_per_person=0;
+    p.daily_food_units_per_person=3;
+    p0::DailyGame game(daily::World::adopt(std::move(gh),8),p);
+    phasegh::World::Plan observe{};
+    std::int64_t cheap=0,alt=0,unmet=0;
+    observe[7].push_back([&](phasegh::Stage& stage){
+        const auto& market=stage.phase_c();
+        cheap=market.market("R","groceries").delivered;
+        alt=market.market("R","food").delivered;
+        unmet=market.market("R","groceries").unmet+market.market("R","food").unmet;
+    });
+    game.advance_day(observe);
+    auto get=[&]()->const phasec::IntegratedWorld&{return game.world().engine().base().core().core();};
+    check(cheap==3&&alt==0&&unmet==0&&get().stock("GROWER","R","grain")==10,
+         "producer funded and staffed but shouldn't run on cheap-only day");
+    game.advance_day(observe);
+    check(cheap==0&&alt==3&&unmet==0&&get().stock("GROWER","R","grain")==9&&
+         get().stock("GROWER","R","food")==1,
+         "depleted cheap food should redirect forecast to real alternative production and sales");
+}
 int main() {
+    staple_food_substitutes_share_one_need();
+    substitute_food_sales_redirect_next_day_production();
     grocery_shortage_cannot_cancel_a_different_goods_tariff();
     real_food_and_textile_sales(false);
     real_food_and_textile_sales(true);

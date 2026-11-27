@@ -2359,6 +2359,18 @@ public:
         events_.push_back("solvent-demand-market-clearance");
         return fulfilled;
     }
+    // An essential basket may exhaust all of its substitutes. Attribute
+    // only the remaining solvent units to its preferred price signal.
+    void record_household_market_shortage(const std::string& buyer,
+                                          const std::string& region,
+                                          const std::string& good,Quantity due) {
+        require_stage({7});
+        ensure(due>0&&actors_.contains(buyer),"invalid household market shortage");
+        auto& quote=markets_.at({region,good});
+        const auto solvent=std::min(due,cash(buyer)/quote.price);
+        quote.solvent_demand=phaseb::add_checked(quote.solvent_demand,solvent);
+        quote.unmet=phaseb::add_checked(quote.unmet,solvent);
+    }
     // P0 consumes the goods through the real inventory ledger and records
     // the difference between essential demand and fulfilled goods. Unlike the
     // market-price rule this includes unmet needs caused by insolvency.

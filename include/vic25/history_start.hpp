@@ -60,6 +60,15 @@ struct FoodStart {
     vic25::Quantity stock{};
 };
 
+struct FoodAlternate {
+    phasec::Money price{};
+    Quantity stock{};
+};
+
+inline const char* alternate_food_good(std::string_view good) {
+    return good==food_good?processed_food_good:food_good;
+}
+
 inline std::int64_t start_value(std::string_view token,std::int64_t min,
                                 std::int64_t max,const char* error) {
     std::int64_t value{};
@@ -69,6 +78,15 @@ inline std::int64_t start_value(std::string_view token,std::int64_t min,
     if(result.ec!=std::errc{}||result.ptr!=end||value<min||value>max)
         throw std::invalid_argument(error);
     return value;
+}
+
+inline FoodAlternate parse_food_alternate(std::istringstream& row) {
+    std::string price,stock,extra;
+    if(!(row>>price>>stock)||row>>extra)
+        throw std::invalid_argument("malformed food-alternate record");
+    constexpr std::int64_t limit=1'000'000'000;
+    return {start_value(price,1,limit,"invalid food-alternate price"),
+            start_value(stock,0,limit,"invalid food-alternate stock")};
 }
 
 inline FoodStart parse_food_start(std::istringstream& row) {
@@ -274,6 +292,7 @@ inline void seed_grain_freight(phasegh::World& engine,
 
 inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,FoodStart>& starts,
         const std::map<phasee::Id,MillStart>& mills,const std::map<phasee::Id,FarmStart>& farms,
+        const std::map<phasee::Id,FoodAlternate>& alternates,
         bool government_mode,std::int64_t month,const std::optional<FreightWorks>& works) {
     auto& industry=world.seed_core();
     auto& core=industry.seed_core();
@@ -305,6 +324,12 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
         core.seed_actor(seller,seed.seller_cash);
         core.seed_market(region,good,seed.price,seed.price_floor,seed.price_ceiling);
         if(seed.stock>0)core.seed_stock(seller,region,good,seed.stock);
+        if(const auto extra=alternates.find(id);extra!=alternates.end()) {
+            const std::string alternate=alternate_food_good(good);
+            const auto& quote=extra->second;
+            core.seed_market(region,alternate,quote.price,quote.price,quote.price);
+            if(quote.stock>0)core.seed_stock(seller,region,alternate,quote.stock);
+        }
         if(construction_crew) {
             const auto builder=works->builder();
             const std::string material(freight_material);
@@ -394,6 +419,7 @@ inline daily::World open(const std::filesystem::path& path,
     std::map<std::string,std::string> owners;
     std::vector<ContactRow> rows;
     std::map<Id,FoodStart> food_starts;
+    std::map<Id,FoodAlternate> alternates;
     std::map<Id,MillStart> mills;
     std::map<std::string,ExecutiveStart> executives;
     std::map<std::string,int> grain_tariffs;
@@ -456,6 +482,12 @@ inline daily::World open(const std::filesystem::path& path,
                 throw std::invalid_argument("duplicate food-start province");
             continue;
         }
+        if(type=="food-alternate") {
+            if(!economy_allowed)throw std::invalid_argument("food-alternate requires VIC25-HISTORY-2");
+            if(!alternates.emplace(id,parse_food_alternate(row)).second)
+                throw std::invalid_argument("duplicate food-alternate province");
+            continue;
+        }
         if(type=="food-mill") {
             if(!economy_allowed)throw std::invalid_argument("food-mill requires VIC25-HISTORY-2");
             const auto mill=parse_mill_start(row);
@@ -502,6 +534,11 @@ inline daily::World open(const std::filesystem::path& path,
         (void)start;
         if(!nodes.contains(id)||nodes.at(id).kind!=geo::Kind::land)
             throw std::invalid_argument("food-start requires an existing land province");
+    }
+    for(const auto& [id,alternate]:alternates) {
+        (void)alternate;
+        if(!food_starts.contains(id))
+            throw std::invalid_argument("food-alternate requires a matching food-start");
     }
     if(!executives.empty()) {
         std::set<std::string> countries;
@@ -609,7 +646,7 @@ inline daily::World open(const std::filesystem::path& path,
             throw std::invalid_argument("grain-road requires adjacent land provinces");
     }
     if(!food_starts.empty())
-        seed_food_starts(world,food_starts,mills,farms,!executives.empty(),daily::legacy_month(date),works);
+        seed_food_starts(world,food_starts,mills,farms,alternates,!executives.empty(),daily::legacy_month(date),works);
     if(!supplies.empty())
         seed_grain_freight(engine,supplies,farms,roads,daily::legacy_month(date),works);
     for(const auto& [country,ppm]:grain_tariffs)
