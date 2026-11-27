@@ -1078,6 +1078,7 @@ def run_grain_tariff(root, panel, directory):
     panel._send("step 3")
     wait(root, panel)
     assert "누적 관세 수입: 3" in panel.policy.get() and "국고: 53" in panel.budget.get()
+    assert "이번 달 가공식품 생산: 3" in panel.market.get()
     panel.tariff.set("100")
     panel.tariff_button.invoke()
     wait(root, panel)
@@ -1085,6 +1086,7 @@ def run_grain_tariff(root, panel, directory):
     panel._send("step 2")
     wait(root, panel)
     assert "식량 재고: 1" in panel.market.get() and "누적 관세 수입: 3" in panel.policy.get()
+    assert "이번 달 가공식품 생산: 6" in panel.market.get()
 
 
 def run_industry(root, panel, tariff_save):

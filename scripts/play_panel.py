@@ -514,6 +514,7 @@ class PlayPanel:
                 market += f"\n식량 작업장: {economy['mills']}곳 · 원료 곡물: {economy['grain_stock']}"
                 if economy.get("grain_in_transit"):
                     market += f" · 운송 중: {economy['grain_in_transit']}"
+                market += f"\n이번 달 가공식품 생산: {economy['mill_output_this_month']}"
             if farms := economy.get("grain_farm"):
                 market += (f"\n곡물 농장: {farms['sites']}곳 · 누적 수확: {farms['harvested']} "
                            f"· 출하 가능: {farms['saleable']}")

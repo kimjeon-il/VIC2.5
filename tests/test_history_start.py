@@ -557,11 +557,18 @@ def bundled_border_trade():
     departure, arrived, exporter = panel("step 3", "step 3", "choose-country FIELD-LAND")
     assert departure["date"] == "1840-01-04" and departure["treasury"] == 53
     assert food(departure)["grain_in_transit"] == 1
+    assert food(departure)["mill_output_this_month"] == 3
     assert arrived["date"] == "1840-01-07" and food(arrived)["food_stock"] == 1
+    assert food(arrived)["mill_output_this_month"] == 6
     assert arrived["grain_trade"]["duties_paid"] == 3
+    assert "mill_output_this_month" not in food(exporter)
     assert exporter["treasury"] == 20 and food(exporter)["grain_farm"]["harvested"] == 2
     _, blocked = panel("tariff 100", "step 6")
     assert blocked["grain_trade"]["duties_paid"] == 0 and food(blocked)["food_stock"] == 0
+    assert food(blocked)["mill_output_this_month"] == 3
+    month_open, = panel("step 31")
+    assert month_open["date"] == "1840-02-01"
+    assert food(month_open)["mill_output_this_month"] == 0
     _, raised, still_arrived = panel("step 3", "tariff 100", "step 2")
     assert food(raised)["grain_in_transit"] == 1 and still_arrived["date"] == arrived["date"]
     assert food(still_arrived) == food(arrived) and still_arrived["treasury"] == 53
