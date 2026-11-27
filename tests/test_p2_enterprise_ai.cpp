@@ -237,7 +237,7 @@ static void sales_fund_expansion_on_an_ordinary_day() {
                   int law=0, int rival_capacity=-1, bool manufacturing=true,
                   bool different_good=false, bool coproduct=false,
                   bool different_region=false, bool retrofit=false,
-                  int byproduct_case=0,int wage_priority=0) {
+                  int byproduct_case=0,int wage_priority=0,bool public_template=false) {
         phasegh::World gh{24000};
         auto& geo=gh.seed_geography();
         geo.seed_province(1,"R","STATE");
@@ -383,7 +383,14 @@ static void sales_fund_expansion_on_an_ordinary_day() {
             clock.advance_day(prior_wage);
         }
         p0::DailyGame game(std::move(clock),policy);
-        game.advance_day();
+        phasegh::World::Plan initial_mark;
+        if(public_template)
+            initial_mark[9].push_back([](phasegh::Stage& stage) {
+                // Mark the existing completed government order with the
+                // same canonical receipt as the public build dispatcher.
+                stage.phase_c().command_once("P0:PUBLIC-BUILD:BUILT_FARM",[](auto&){});
+            });
+        game.advance_day(initial_mark);
         const auto& day1=game.world().engine().base().core();
         if(wage_priority) {
             const auto earned=day1.core().outstanding_worker_wages("OWNER");
@@ -424,6 +431,11 @@ static void sales_fund_expansion_on_an_ordinary_day() {
         const auto count=day2.state().constructions.size();
         const bool owner_used_quota=proposer=="OWNER" ||
             (proposer.empty()&&current_owner=="OWNER");
+        if(public_template) {
+            check(count==initial_projects,
+                  "private investment copied a completed public order into a new project");
+            return;
+        }
         if(funded&&!owner_used_quota) {
             check(count==initial_projects+1,
                   "cash-backed expansion did not follow real sales (the regional share must not block it)");
@@ -449,6 +461,7 @@ static void sales_fund_expansion_on_an_ordinary_day() {
     check(!priority_failed,"automatic expansion and queued work must not spend earned wages");
     run(3,false,"","");
     run(16,true,"","");
+    run(16,true,"","",0,-1,true,false,false,false,false,0,0,true);
     run(16,true,"","OWNER"); // proposal saved by the old monthly scheduler
     run(16,true,"OWNER","BUILDER"); // the due allowance stays with the proposer
     run(16,true,"BUILDER","OWNER"); // buying a factory does not spend an allowance

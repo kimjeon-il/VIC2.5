@@ -3776,7 +3776,10 @@ public:
                 }
                 std::map<std::string,Candidate> best_by_owner;
                 for(const auto& [id,p]:domain.constructions) {
-                    if(owners_already_proposed.contains(p.client)||
+                    // A commissioned public order is not a private
+                    // investment blueprint or a new fiscal authorization.
+                    if(c.command_processed(public_build_key(id))||
+                       owners_already_proposed.contains(p.client)||
                        !p.commissioned||p.permit_required||p.inspection_required||
                        p.allow_accrued_invoice_commission||
                        c.firm_bankrupt(p.client)||c.firm_bankrupt(p.contractor)||
