@@ -86,15 +86,29 @@ struct IndustryRecipe {
     bool needs_retrofit{}; // retrofit pipeline remains unsupported by this slice
     bool requires_same_stage_nonstorable_energy{}; // I2-DISPATCH not yet contracted
 };
-// Imported historical methods may use a complete, output-specific
-// intermediate mix instead of the generic electrics prototype. This also
-// preserves saved prototype and radio recipes that already require steel.
-inline bool building_recipe_has_inputs(const building::OperatingProfile& spec,
+// Check output-specific material requirements for both recipe seeds and saves.
+// Optional methods do not alter existing bakery or electrics prototype inputs.
+inline bool building_recipe_materials_match(const building::OperatingProfile& spec,
                                        const IndustryRecipe& recipe) {
     const auto has=[&](std::string_view good){
         return std::any_of(recipe.inputs.begin(),recipe.inputs.end(),
             [&](const Input& input){return input.good==good;});
     };
+    const auto has_liquor=[](const std::vector<Input>& outputs) {
+        return std::any_of(outputs.begin(),outputs.end(),
+            [](const Input& output){return output.good=="liquor";});
+    };
+    if(spec.id=="vic3_115.urban.food_industries"&&
+       (has_liquor(recipe.outputs)||has_liquor(recipe.byproducts))) {
+        // Distillation shifts part of the grocery output to liquor. It never
+        // buys groceries; the declared method can also require copper.
+        bool groceries=false;
+        for(const auto& output:recipe.outputs) {
+            if(!spec.output_allowed(output.good))return false;
+            groceries|=output.good=="groceries";
+        }
+        if(!groceries||!has("sugar")||!has("glass"))return false;
+    }
     const bool four_input_telephones=spec.id=="vic3_115.urban.electrics_industries"&&
         recipe.outputs.size()==1&&recipe.outputs.front().good=="telephones"&&
         has("iron")&&has("rubber")&&has("copper");
@@ -428,8 +442,8 @@ struct DomainState {
             for(const auto& output:r.outputs)
                 output_valid|=spec->output_allowed(output.good);
             require(output_valid,"bound recipe produces incorrect goods");
-            require(building_recipe_has_inputs(*spec,r),
-                    "bound recipe missing original mandatory material");
+            require(building_recipe_materials_match(*spec,r),
+                    "bound recipe has incompatible materials or coproducts");
         }
         for(const auto& [id,resource]:resource_sites) {
             (void)id;
@@ -1775,8 +1789,8 @@ public:
         for(const auto& good:recipe.outputs)
             valid_output|=spec->output_allowed(good.good);
         require(valid_output,"recipe output incompatible with physical building");
-        require(building_recipe_has_inputs(*spec,recipe),
-                "recipe missing required intermediate good");
+        require(building_recipe_materials_match(*spec,recipe),
+                "recipe has incompatible materials or coproducts");
         if(!recipe.tech_id.empty())
             require(domain_.technologies.contains(recipe.tech_id),
                     "recipe technology unknown in local research catalog");
