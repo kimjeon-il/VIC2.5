@@ -2105,9 +2105,13 @@ fs::path checkpoint_path_utf8(std::string_view value) {
 
 p0::Policies history_policies(const daily::World& world,const history_play::ScenarioSettings& works) {
     p0::Policies result;
-    // The first local-history economy supplies food only. Do not report unmet
-    // demand for clothing or automatically create inventory to cover it.
+    // Most historical starts only supply food. Extra demand comes only from
+    // authored trial populations, not from missing campaign markets.
     result.monthly_clothing_units_per_person=0;
+    const auto& industry=world.engine().base().core().state();
+    if(std::any_of(industry.recipes.begin(),industry.recipes.end(),
+        [](const auto& entry){return history_play::copper_trial_recipe(entry.second);}))
+        result.household_basket.push_back({"telephones",history_start::copper_trial_household_class,31,2});
     for(const auto& [id,reserve]:works.food_owners)
         result.registered_dividend_reserves.emplace(history_start::food_seller(id),reserve);
     if(works.freight) {
@@ -2174,6 +2178,11 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
             out<<",\"grain_farm\":{\"sites\":"<<food.farms.sites
                <<",\"harvested\":"<<food.farms.harvested<<",\"saleable\":"<<food.farms.saleable
                <<",\"cash\":"<<food.farms.cash<<'}';
+        if(const auto copper=history_play::copper_trial_overview(world,selected))
+            out<<",\"copper_telephone\":{\"copper_extracted\":"<<copper->copper_extracted
+               <<",\"copper_sale_receipts\":"<<copper->copper_receipts
+               <<",\"telephones_made\":"<<copper->telephones_made
+               <<",\"telephone_sale_receipts\":"<<copper->telephone_receipts<<'}';
         if(food.prices)
             out<<",\"local_food_prices\":{\"minimum\":"<<food.prices->minimum
                <<",\"maximum\":"<<food.prices->maximum
