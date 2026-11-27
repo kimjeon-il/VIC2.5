@@ -3108,6 +3108,52 @@ static void public_construction_purchases_uses_and_pays_real_inputs() {
                  daily::SnapshotCodec::encode(running.world())==
                      daily::SnapshotCodec::encode(capped_replay.world()),
                  "capped construction must conserve cash, commission, and replay from mid-project");
+
+    auto auto_policy=funded.policies();
+    auto_policy.public_budget.clear();
+    auto_policy.public_construction_daily_caps["A"]=20;
+    auto_policy.public_construction_offers.front().priority_category="infrastructure";
+    auto second=auto_policy.public_construction_offers.front();
+    second.project.id="PUBLIC-SECOND";
+    second.project.target_site="SITE2";
+    second.recipe.site="SITE2";
+    second.recipe.id="METHOD2";
+    second.priority_category="services";
+    auto_policy.public_construction_offers.push_back(second);
+    const auto initial=daily::SnapshotCodec::encode(funded.world());
+    const auto choose=[&](const auto& policy) {
+        p0::DailyGame result(daily::SnapshotCodec::decode(initial),policy);
+        result.advance_day();
+        return result;
+    };
+    auto_policy.public_construction_priorities["A"]={"services","infrastructure"};
+    auto services=choose(auto_policy);
+    require_test(domain(services).state().constructions.contains("PUBLIC-SECOND")&&
+                 !domain(services).state().constructions.contains("PUBLIC-TOOLS-A")&&
+                 c(services).cash("A")==200,
+                 "public automation must choose the preferred eligible category, not spend on ordering");
+    auto replay_services=choose(auto_policy);
+    services.advance_day();replay_services.advance_day();
+    require_test(daily::SnapshotCodec::encode(services.world())==
+                     daily::SnapshotCodec::encode(replay_services.world())&&
+                 !domain(services).state().constructions.contains("PUBLIC-TOOLS-A"),
+                 "a running order must occupy the single treasury slot deterministically");
+    reject(services,"PM"); // Competing manual order cannot bypass the shared slot.
+    auto_policy.public_construction_priorities["A"]={"infrastructure","services"};
+    auto infrastructure=choose(auto_policy);
+    require_test(domain(infrastructure).state().constructions.contains("PUBLIC-TOOLS-A")&&
+                 !domain(infrastructure).state().constructions.contains("PUBLIC-SECOND"),
+                 "reversing broad priorities must choose a different viable project");
+    auto_policy.public_construction_offers.front().project.material_good="unavailable-material";
+    auto fallback=choose(auto_policy);
+    require_test(domain(fallback).state().constructions.contains("PUBLIC-SECOND")&&
+                 fallback.world().day_index()==funded.world().day_index()+1,
+                 "an ineligible preferred project must not stop the simulation or block a viable fallback");
+    auto_policy.public_construction_daily_caps["A"]=0;
+    auto no_order=choose(auto_policy);
+    require_test(domain(no_order).state().constructions.empty()&&c(no_order).cash("A")==200,
+                 "zero budget must not automatically commit a project");
+
 }
 
 static void selected_players_own_tax_without_disabling_rival_ai() {

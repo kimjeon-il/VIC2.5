@@ -132,6 +132,7 @@ struct PublicConstructionOffer {
     phased::IndustryRecipe recipe;
     Money treasury_cash_reserve{};
     bool elected_appropriation{};
+    std::string priority_category; // empty: manual scenario offer
 };
 // A campaign-supplied blueprint can create a new company and a new type of
 // factory even when that region has no commissioned template to copy. The
@@ -376,7 +377,15 @@ struct Policies {
     // Per-country ceiling for paid public construction work, separate from
     // operating services. Omission preserves existing scenario behavior.
     std::map<std::string,Money> public_construction_daily_caps;
+    std::map<std::string,std::vector<std::string>> public_construction_priorities;
     void validate() const {
+        for(const auto& [country,priorities]:public_construction_priorities) {
+            if(country.empty())throw std::invalid_argument("P0_INVALID_PUBLIC_CONSTRUCTION_PRIORITIES");
+            std::set<std::string> seen;
+            for(const auto& category:priorities)
+                if(category.empty()||!seen.insert(category).second)
+                    throw std::invalid_argument("P0_INVALID_PUBLIC_CONSTRUCTION_PRIORITIES");
+        }
         for(const auto& [country,cap]:public_construction_daily_caps)
             if(country.empty()||cap<0)
                 throw std::invalid_argument("P0_INVALID_PUBLIC_CONSTRUCTION_DAILY_CAP");
@@ -417,19 +426,25 @@ struct Policies {
                (opportunity.new_firm_equity==0&&p.client.empty()))
                 throw std::invalid_argument("P0_INVALID_INDUSTRY_OPPORTUNITY");
         }
-        std::set<std::string> offer_ids,offer_treasuries;
+        std::set<std::string> offer_ids;
+        std::map<std::string,bool> offer_treasuries;
         std::set<std::string> offer_sites,offer_recipes;
         for(const auto& offer:public_construction_offers) {
             const auto& p=offer.project;
             const auto& r=offer.recipe;
+            const bool categorized=!offer.priority_category.empty()&&!offer.elected_appropriation;
+            const auto [treasury,fresh]=offer_treasuries.try_emplace(p.client,categorized);
             const auto invalid=[](const auto& item){return item.good.empty()||item.per_unit<=0;};
             if(p.id.empty()||p.id.starts_with("AUTO:")||p.client.empty()||
                p.contractor.empty()||p.contractor==p.client||p.region.empty()||
                p.material_good.empty()||p.target_site.empty()||
-               !offer_ids.insert(p.id).second||!offer_treasuries.insert(p.client).second||
+               !offer_ids.insert(p.id).second||
+               (offer.elected_appropriation&&!offer.priority_category.empty())||
+               (!fresh&&!(treasury->second&&categorized))||
                !offer_sites.insert(p.target_site).second||!offer_recipes.insert(r.id).second||
                p.work_required<=0||p.material_per_work<=0||p.workers_per_work<=0||
                p.target_capacity<=0||p.cash_price_per_work<=0||
+               p.work_required>std::numeric_limits<Money>::max()/p.cash_price_per_work||
                p.permit_required||p.inspection_required||p.allow_accrued_invoice_commission||
                p.ready||p.commissioned||p.ready_month!=-1||p.planned_work!=0||
                p.accepted_work!=0||p.paid_work!=0||p.capitalized_work!=0||p.capitalized_value!=0||
@@ -1062,6 +1077,14 @@ class DailyGame {
         }
         return key;
     }
+    static bool has_active_public_project(phasegh::Stage& gh,const std::string& treasury) {
+        const auto& projects=gh.phase_d().state().constructions;
+        const auto& c=gh.phase_c();
+        return std::any_of(projects.begin(),projects.end(),[&](const auto& entry) {
+            return entry.second.client==treasury&&!entry.second.commissioned&&
+                   c.command_processed(public_build_key(entry.first));
+        });
+    }
     static std::string elected_public_approval_key(const std::string& id) {
         return "P0:ELECTED-PUBLIC-BUILD:approved:"+id;
     }
@@ -1131,6 +1154,8 @@ public:
             if(offer.elected_appropriation&&
                !c.command_processed(public_budget_key(country,offer)))
                 throw std::invalid_argument("missing elected public construction budget");
+            if(has_active_public_project(gh,offer.project.client))
+                throw std::invalid_argument("public construction already active for treasury");
             c.command_once(public_build_key(offer.project.id),[&](auto&) {
                 gh.phase_d().order_public_construction(country,proposer,offer.project,
                     offer.recipe,offer.treasury_cash_reserve,offer.elected_appropriation);
@@ -1476,10 +1501,7 @@ public:
             const Quantity invoice_work_limit=cap==decisions.public_construction_daily_caps.end()
                 ?std::numeric_limits<Quantity>::max():cap->second/p.cash_price_per_work;
             active_public_builds.emplace(p.id,PublicBuild{&offer,invoice_work_limit});
-            // No work order or preparatory local purchase while paused.
-            if(invoice_work_limit>0)
-                decisions.investments.push_back({p.id,offer.recipe.outputs.front().good,
-                    offer.treasury_cash_reserve,1,1});
+
         }
         // Provider payouts happen after the real invoice payment callback.
         // If that callback paid today's final work, protect just the floor;
@@ -1489,10 +1511,21 @@ public:
             Money cash_floor,next_invoice;
         };
         std::map<std::string,PublicBuildReserve> public_build_reserves;
-        for(const auto& [id,build]:active_public_builds)
-            public_build_reserves.emplace(build.offer->project.client,PublicBuildReserve{
-                id,build.offer->treasury_cash_reserve,
-                build.invoice_work_limit>0?build.offer->project.cash_price_per_work:0});
+        for(const auto& [id,build]:active_public_builds) {
+            const auto& offer=*build.offer;
+            const bool taking_work=build.invoice_work_limit>0;
+            // Native ordering allows one unfinished order per treasury.
+            // Protect the cap even on older saves restored with new offers.
+            public_build_reserves.try_emplace(offer.project.client,PublicBuildReserve{
+                id,offer.treasury_cash_reserve,taking_work?offer.project.cash_price_per_work:0});
+        }
+        for(const auto& offer:decisions.public_construction_offers) {
+            const auto slot=public_build_reserves.find(offer.project.client);
+            if(slot!=public_build_reserves.end()&&slot->second.project==offer.project.id&&
+               slot->second.next_invoice>0)
+                decisions.investments.push_back({offer.project.id,offer.recipe.outputs.front().good,
+                    offer.treasury_cash_reserve,1,1});
+        }
         const auto public_build_floor=[reserves=std::move(public_build_reserves)]
             (phasegh::Stage& gh,const std::string& treasury) {
                 const auto reserve=reserves.find(treasury);
@@ -4069,6 +4102,42 @@ public:
         for(std::size_t i=0;i<plan.size();++i)
             plan[i].insert(plan[i].end(),
                 additional_today[i].begin(),additional_today[i].end());
+        // Explicit scenario orders run first. Automatic ordering uses the
+        // same authority, treasury, materials, contractor and order receipt.
+        if(!decisions.public_construction_priorities.empty())
+            plan[9].push_back([priorities=decisions.public_construction_priorities,
+                caps=decisions.public_construction_daily_caps,
+                offers=decisions.public_construction_offers](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                auto& d=gh.phase_d();
+                for(const auto& [country,categories]:priorities) {
+                    if(categories.empty()||!c.has_country_treasury(country))continue;
+                    const auto cap=caps.find(country);
+                    if(cap==caps.end()||cap->second<=0)continue;
+                    const auto& treasury=c.country_treasury(country);
+                    if(has_active_public_project(gh,treasury))continue;
+                    const auto& proposer=c.government(country).prime_minister;
+                    const PublicConstructionOffer* chosen=nullptr;
+                    for(const auto& category:categories) {
+                        for(const auto& offer:offers) {
+                            const auto& p=offer.project;
+                            if(offer.priority_category!=category||offer.elected_appropriation||
+                               p.client!=treasury||p.cash_price_per_work>cap->second||
+                               (chosen&&chosen->project.id<p.id)||
+                               c.command_processed(public_build_key(p.id))||
+                               d.public_construction_rejection(country,proposer,p,
+                                   offer.recipe,offer.treasury_cash_reserve,false))continue;
+                            chosen=&offer;
+                        }
+                        if(chosen)break;
+                    }
+                    if(!chosen)continue;
+                    c.command_once(public_build_key(chosen->project.id),[&](auto&) {
+                        d.order_public_construction(country,proposer,chosen->project,
+                            chosen->recipe,chosen->treasury_cash_reserve,false);
+                    });
+                }
+            });
         // Person transfers are LAST in Stage10, after explicit and automatic
         // combat, so new reservists/regulars cannot fight retroactively.
         if(decisions.allow_autonomous_peacetime_military_ai)
