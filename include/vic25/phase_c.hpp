@@ -3774,7 +3774,14 @@ public:
             const int tax=claim.country.empty()?income_tax_ppm_:
                 (governments_.contains(claim.country)?
                     income_tax_ppm(claim.country):income_tax_ppm_);
-            const Money withholding=positive_product(paid,tax)/1'000'000;
+            const auto tax_key=std::pair{claim.worker,claim.treasury};
+            const auto prior=wage_tax_fraction_.find(tax_key);
+            const Money fraction=(paid%wage_tax_denominator_)*tax+
+                (prior==wage_tax_fraction_.end()?0:prior->second);
+            // Split first to avoid overflowing paid * tax. Carry only
+            // uncollected fractions, never a separate balance of money.
+            const Money withholding=(paid/wage_tax_denominator_)*tax+
+                fraction/wage_tax_denominator_;
             const Money net=paid-withholding;
             const bool public_wage=claim.employer==claim.treasury;
             std::vector<Posting> journal{
@@ -3796,6 +3803,9 @@ public:
             }
             money_.post({unique("wage-claim-paid"),
                          "settlement of previously earned wages",journal});
+            const Money remainder=fraction%wage_tax_denominator_;
+            if(remainder)wage_tax_fraction_.insert_or_assign(tax_key,remainder);
+            else if(prior!=wage_tax_fraction_.end())wage_tax_fraction_.erase(prior);
             paid_staff_this_month_[claim.employer]=phaseb::add_checked(
                 paid_staff_this_month_[claim.employer],paid);
             claim.outstanding-=paid;
@@ -5713,6 +5723,10 @@ public:
             ensure(money_.has_account(account(holder,"bond_coupon_receivable"))&&
                    money_.balance(account(holder,"bond_coupon_receivable"))==
                      amount,"sovereign bond coupon creditor not backed");
+        for(const auto& [key,fraction]:wage_tax_fraction_)
+            ensure(key.first!=key.second&&actors_.contains(key.first)&&
+                   actors_.contains(key.second)&&fraction>0&&
+                   fraction<wage_tax_denominator_,"invalid wage tax fraction");
         for(const auto& [id,claim]:wage_arrears_) {
             ensure(id==claim.id&&claim.accrued>0&&claim.outstanding>0&&
                    claim.outstanding<=claim.accrued&&claim.issued_day>=0&&
@@ -5907,6 +5921,8 @@ private:
     std::map<std::pair<std::string,std::string>,Money> sovereign_coupon_due_;
     std::map<std::pair<std::string,std::string>,Money> sovereign_coupon_fraction_;
     std::map<std::string,WageArrearsClaim> wage_arrears_;
+    static constexpr Money wage_tax_denominator_=1'000'000;
+    std::map<std::pair<std::string,std::string>,Money> wage_tax_fraction_;
     std::map<std::string,std::int64_t> bankrupt_firms_;
     std::map<std::string,std::int64_t> completed_liquidations_;
     std::map<std::string,People> regional_food_grievance_;

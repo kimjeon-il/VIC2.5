@@ -249,6 +249,82 @@ static void colonial_subsistence_ceiling() {
     run(0,false,false,true,false);
 }
 
+static void daily_wage_withholding_preserves_fraction() {
+    const auto run=[](int rate,bool split) {
+        F f;
+        f.w.seed_legacy_income_tax(rate);
+        const auto settle=[](IntegratedWorld& w,Money gross,const std::string& id) {
+            IntegratedWorld::Plan plan;
+            plan[5].push_back([&](auto& day){
+                day.phase_time_accrue_contract_wage(id,"F","H","G","",gross,24000);
+                day.phase_time_settle_wage_arrears(24000);
+            });
+            w.advance(plan);
+        };
+        if(!split) {
+            settle(f.w,93,"whole");
+        } else {
+            settle(f.w,3,"w0");
+            verify(f.w.cash("G")==0,"tax was rounded up instead of carried");
+            auto loaded=SnapshotCodec::decode(SnapshotCodec::encode(f.w));
+            for(int n=1;n<30;++n) {
+                const auto gross=n<27?3:4;
+                const auto id="w"+std::to_string(n);
+                settle(f.w,gross,id);
+                settle(loaded,gross,id);
+            }
+            verify(SnapshotCodec::encode(f.w)==SnapshotCodec::encode(loaded),
+                   "save/reload lost fractional withholding");
+        }
+        const Money expected=rate==0?0:13;
+        verify(f.w.cash("G")==expected&&f.w.cash("F")==907&&
+               f.w.cash("H")==143-expected&&f.w.wage_arrears().empty()&&
+               f.w.financial().balanced(),
+               "daily wage splitting changed treasury tax or household take-home pay");
+    };
+    run(0,true);
+    run(150'000,false);
+    run(150'000,true);
+
+    F f;
+    f.w.seed_legacy_income_tax(150'000);
+    f.w.seed_actor("PART",3);
+    IntegratedWorld::Plan first;
+    first[5].push_back([](auto& w){
+        w.phase_time_accrue_contract_wage("partial","PART","H","G","",7,24000);
+        w.phase_time_settle_wage_arrears(24000);
+    });
+    first[9].push_back([](auto& w){w.enact_income_tax(200'000);});
+    f.w.advance(first);
+    verify(f.w.cash("G")==0&&f.w.cash("H")==53&&
+           f.w.wage_arrears().at("partial").outstanding==4,
+           "tax applied before a wage was paid");
+    auto loaded=SnapshotCodec::decode(SnapshotCodec::encode(f.w));
+    IntegratedWorld::Plan next;
+    next[5].push_back([](auto& w){
+        w.pay("F","PART",4);
+        w.phase_time_accrue_contract_wage("second-treasury","F","H","S","",3,24001);
+        w.phase_time_settle_wage_arrears(24001);
+    });
+    f.w.advance(next);
+    loaded.advance(next);
+    verify(f.w.cash("G")==1&&f.w.cash("S")==0&&f.w.cash("H")==59&&
+           f.w.wage_arrears().empty()&&
+           SnapshotCodec::encode(f.w)==SnapshotCodec::encode(loaded),
+           "partial wage payment lost its tax fraction or moved it to another treasury");
+    IntegratedWorld::Plan last;
+    last[5].push_back([](auto& w){
+        // 0.45 at 15% plus 0.8 and then 0.6 at 20% is still
+        // less than two units, not two units from taxing all ten at 20%.
+        w.phase_time_accrue_contract_wage("after-rate-change","F","H","G","",3,24002);
+        w.phase_time_settle_wage_arrears(24002);
+    });
+    f.w.advance(last);
+    verify(f.w.cash("G")==1&&f.w.cash("S")==0&&f.w.cash("H")==62&&
+           f.w.cash("F")==990&&f.w.financial().balanced(),
+           "a new tax rate retroactively changed the fraction of wages already paid");
+}
+
 int main() {
     Suite test;
     test.run(1, []{ F f;verify(f.w.people().population()==600,"duplicated population"); });
@@ -989,10 +1065,12 @@ int main() {
     verify(test.status.size()==48,"missing test IDs");
     // This regression is outside the frozen 48 designed D4 cases.
     try {
+        daily_wage_withholding_preserves_fraction();
+        std::cout << "daily_wage_withholding_preserves_fraction PASS\n";
         colonial_subsistence_ceiling();
         std::cout << "colonial_subsistence_ceiling PASS\n";
     } catch (const std::exception& ex) {
-        std::cerr << "colonial_subsistence_ceiling FAIL: " << ex.what() << '\n';
+        std::cerr << "additional Phase C regression FAIL: " << ex.what() << '\n';
         return 1;
     }
     return test.failed ? 1 : 0;

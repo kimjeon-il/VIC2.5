@@ -493,6 +493,10 @@ struct SnapshotCodec {
             ar(w.wage_arrears_);
             ar(w.bankrupt_firms_);
         }
+        if(!w.wage_tax_fraction_.empty()) {
+            ar(std::string("VIC25_PHASEC_WAGE_TAX_FRACTION_1"));
+            ar(w.wage_tax_fraction_);
+        }
         if(!w.bank_principal_by_borrower_.empty()||
            !w.sovereign_bonds_.empty()||
            !w.sovereign_coupon_due_.empty()||
@@ -701,7 +705,7 @@ struct SnapshotCodec {
         all(ar,w);
         bool seen_elections=false,seen_fiscal=false,seen_interest=false,
              seen_civilian_spending=false,
-             seen_birth_days=false,seen_wages=false,seen_bonds=false,
+             seen_birth_days=false,seen_wages=false,seen_wage_tax=false,seen_bonds=false,
              seen_armies=false,seen_estates=false,seen_p1=false,
              seen_p1_capacities=false,seen_p1_bureaucracy=false,
              seen_value_added=false,seen_military_standing=false,
@@ -778,6 +782,11 @@ struct SnapshotCodec {
                 if(w.wage_arrears_.size()>5'000'000||
                    w.bankrupt_firms_.size()>1'000'000)
                     throw std::runtime_error("oversized real wage debt state");
+            } else if(extension=="VIC25_PHASEC_WAGE_TAX_FRACTION_1"&&!seen_wage_tax) {
+                seen_wage_tax=true;
+                ar(w.wage_tax_fraction_);
+                if(w.wage_tax_fraction_.size()>5'000'000)
+                    throw std::runtime_error("oversized wage tax fraction state");
             } else if(extension=="VIC25_PHASEC_SOVEREIGN_BONDS_1"&&
                       !seen_bonds) {
                 seen_bonds=true;

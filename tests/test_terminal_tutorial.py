@@ -444,7 +444,8 @@ def main():
         boundary, settled = budgets[5]["status"], budgets[6]["status"]
         require(boundary["public_program_paid"] == 155
                 and boundary["pending_civilian_spending_cap"] == 0
-                and settled["public_program_paid"] == 155 and settled["treasury"] == 45
+                and settled["public_program_paid"] == 155 and settled["revenue"] == 3
+                and settled["treasury"] == 48
                 and settled["civilian_spending_cap"] == 0
                 and settled["pending_civilian_spending_cap"] is None
                 and settled["peer_public_program_paid"] == 160,
@@ -460,7 +461,8 @@ def main():
         positive = panel("new BUDGET-B", "spending-cap 3", "step 31", "step 4", "quit")
         require(positive[2]["status"]["public_program_paid"] == 158
                 and positive[2]["status"]["civilian_spending_cap"] == 3
-                and positive[3]["status"]["public_program_paid"] == 160
+                and positive[3]["status"]["public_program_paid"] == 163
+                and positive[3]["status"]["revenue"] == 3
                 and positive[3]["status"]["treasury"] == 40,
                 "both programs must share one daily cap and stop at actual treasury reserve")
         budget_cli = run("spending-cap 3\nstep 31\nquit\n",
@@ -500,7 +502,7 @@ def main():
                 and queued["public_construction"]["state"] == "queued"
                 and queued["public_construction"]["commissioned_capacity"] == 0
                 and queued["public_construction"]["contractor_steel"] == 0
-                and queued["treasury"] == 70,
+                and queued["treasury"] == 72 and queued["revenue"] == 2,
                 "accepting the real order must not invent a facility, material or paid work")
         require(not builds[4]["ok"] and builds[4]["status"] == queued,
                 "duplicate order changed the actual pending public construction")
@@ -508,7 +510,7 @@ def main():
         require(bought["public_construction"]["contractor_steel"] == 2
                 and bought["public_construction"]["supplier_receipts"] == 6
                 and bought["public_construction"]["paid_work"] == 0
-                and bought["treasury"] == 65,
+                and bought["treasury"] == 67 and bought["revenue"] == 2,
                 f"steel must be bought locally before construction: {bought}")
         paid, commissioned = builds[6]["status"], builds[7]["status"]
         require(paid["public_construction"]["state"] == "paid"
@@ -516,12 +518,12 @@ def main():
                 and paid["public_construction"]["contractor_steel"] == 0
                 and paid["public_construction"]["contractor_receipts"] == 20
                 and paid["public_construction"]["commissioned_capacity"] == 0
-                and paid["treasury"] == 40 and paid["public_program_paid"] == 140,
+                and paid["treasury"] == 42 and paid["public_program_paid"] == 140,
                 f"real paid construction must consume steel and leave the treasury reserve: {paid}")
         require(commissioned["public_construction"]["state"] == "commissioned"
                 and commissioned["public_construction"]["commissioned_capacity"] == 31
                 and commissioned["treasury"] == 40
-                and commissioned["public_program_paid"] == 140
+                and commissioned["public_program_paid"] == 142
                 and commissioned["peer_public_program_paid"] == 145,
                 "only following-day physical commissioning should add capacity, not free money")
         rerun = panel(f"load BUDGET-B {build_pending}", f"load BUDGET-A {build_pending}",
@@ -785,8 +787,9 @@ def main():
                 return a[field] - b[field]
             require(gain("household_fittings_bought") >= 4,
                     "after starter inventories are gone, each full late month must have paid fittings sales")
+            # A 31 gross wage costs each firm 31 and pays each worker 28 after tax.
             require(gain("logs_harvested") == 8 and gain("logger_receipts") == 32
-                    and gain("logger_worker_cash") == gain("mill_worker_cash") == 31
+                    and gain("logger_worker_cash") == gain("mill_worker_cash") == 28
                     and gain("wood_seller_cash") == 32 - 31,
                     "renewal and actual wood sales must support genuinely paid wood-industry wages")
             require(gain("mill_boards_produced") == gain("tools_batches") == 4
@@ -795,7 +798,7 @@ def main():
                     and gain("tools_sold") == 4,
                     "both real wood-production branches must replenish paid workshop inputs")
             require(gain("household_fittings_bought") == 4 and gain("fittings_sales_receipts") == 360
-                    and gain("workshop_worker_cash") == 31
+                    and gain("workshop_worker_cash") == 28
                     and gain("mill_cash") == 80 - 4 * 4 - 31
                     and gain("tool_buyer_cash") == 360 - 4 * 60 - 80 - 31,
                     "real purchases, paid workers and no prime-stock drawdown must reconcile")
