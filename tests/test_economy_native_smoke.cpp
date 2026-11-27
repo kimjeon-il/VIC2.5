@@ -586,7 +586,100 @@ static void registered_household_dividend(DividendTrial trial) {
     }
 }
 
+// A fixture ratio, not a claim about the official 1.15 production values.
+static void copper_mine_supplies_paid_telephone_sales(bool has_mine) {
+    phasegh::World gh(24000);
+    auto& geo=gh.seed_geography();
+    geo.seed_province(1,"R","A");
+    geo.seed_unit(1,"A","Copper fixture");
+    geo.seed_assignment(1,1);
+    auto& d=geo.seed_core();
+    auto& c=d.seed_core();
+    c.seed_actor("A",0);
+    c.seed_government("A","HEAD","PM",5,3);
+    c.seed_actor("PLANT",100);
+    c.seed_actor("MINER",100);
+    c.seed_market("R","copper",3,3,3,3);
+    c.seed_market("R","tools",2,2,2,0);
+    c.seed_market("R","steel",2,2,2,0);
+    c.seed_market("R","telephones",11,11,11,2);
+    c.seed_stock("PLANT","R","tools",4);
+    c.seed_stock("PLANT","R","steel",4);
+    d.seed_standard_industries();
+    d.seed_building_facility("ELECTRICS","PLANT","R",31,
+                             "vic3_115.urban.electrics_industries");
+    phased::IndustryRecipe recipe;
+    recipe.id="WIRED";recipe.site="ELECTRICS";recipe.industry_class="MANU";
+    recipe.inputs={{"tools",1},{"steel",1},{"copper",1}};
+    recipe.outputs={{"telephones",1}};
+    recipe.workers_per_batch=recipe.capacity_per_batch=1;
+    d.seed_building_recipe(recipe);
+    if(has_mine) {
+        d.seed_building_facility("MINE","MINER","R",31,
+                                 "vic3_115.rural.copper_mines");
+        phased::ResourceSite mine;
+        mine.id="EXTRACT";mine.site="MINE";mine.owner="MINER";mine.region="R";
+        mine.good="copper";mine.monthly_capacity=31;
+        d.seed_building_resource_site(mine);
+    }
+    auto& pop=c.seed_population();
+    auto hire=[&](const std::string& actor) {
+        const auto home=pop.household_profile({"R",actor,"shared",1});
+        const auto eco=pop.economic_profile({"R","worker","wage","employee",
+                                             pop.default_education()});
+        const auto demo=pop.demographic_profile({"R",23640,phaseb::Sex::female,
+            "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+        const auto worker=pop.seed_population(demo,eco,home,1);
+        const auto wallet="HH:"+std::to_string(home);
+        c.seed_actor(wallet,actor=="PLANT"?22:0);
+        pop.hire(worker,1,actor,"worker",31,{});
+        return wallet;
+    };
+    const auto buyer=hire("PLANT");
+    const auto miner=hire("MINER");
+    p0::Policies rules;
+    rules.daily_food_units_per_person=0;
+    rules.monthly_clothing_units_per_person=0;
+    rules.allow_endogenous_staffing=false;
+    rules.household_basket={{"telephones","employee",31,0}};
+    p0::DailyGame game(daily::World::adopt(std::move(gh),17),rules);
+    game.advance_day();
+    const auto state=[&]() -> const phased::World& {
+        return game.world().engine().base().core();
+    };
+    check(state().core().firm_finance("PLANT").receipts==0,
+          "telephones appeared before extraction made copper available");
+    const auto saved=daily::SnapshotCodec::encode(game.world());
+    p0::DailyGame replay(daily::SnapshotCodec::decode(saved),rules);
+    for(int day=2;day<=3;++day) {
+        game.advance_day();
+        replay.advance_day();
+        const auto& ledger=state().core();
+        const auto made=state().realized_batches("MANU",24000,24001);
+        const auto extracted=has_mine?state().resource_site("EXTRACT").cumulative_output:0;
+        const auto mine_stock=ledger.stock("MINER","R","copper");
+        const auto plant_stock=ledger.stock("PLANT","R","copper");
+        const auto sales=ledger.firm_finance("PLANT").receipts;
+        check(mine_stock+plant_stock+made==extracted &&
+              ledger.firm_finance("MINER").receipts==3*(plant_stock+made),
+              "copper moved or disappeared without purchase and conversion");
+        check(ledger.stock("PLANT","R","tools")==4-made &&
+              ledger.stock("PLANT","R","steel")==4-made &&
+              sales==11*(made-ledger.stock("PLANT","R","telephones")),
+              "real components and telephone purchases do not reconcile");
+        check(ledger.cash("A")+ledger.cash("MINER")+ledger.cash("PLANT")+
+              ledger.cash(buyer)+ledger.cash(miner)==222&&ledger.financial().balanced(),
+              "cash was created or lost in the copper-to-telephone chain");
+        check(daily::SnapshotCodec::encode(game.world())==
+              daily::SnapshotCodec::encode(replay.world()),"copper replay diverged");
+        if(has_mine)check(made>0 && sales>0,"extracted copper never reached a real telephone buyer");
+        else check(made==0 && sales==0,"telephone recipe bypassed its copper requirement");
+    }
+}
+
 int main() {
+    copper_mine_supplies_paid_telephone_sales(false);
+    copper_mine_supplies_paid_telephone_sales(true);
     for(const auto trial:{DividendTrial::enabled,DividendTrial::disabled,
                           DividendTrial::no_title,DividendTrial::no_income,
                           DividendTrial::indebted,DividendTrial::forgiven,

@@ -114,6 +114,7 @@ def run(exe):
             assert "준공" in panel.budget.get()
             run_industry(root, panel, save)
             run_history(root, panel, Path(directory))
+            run_copper_trial(root, panel)
             run_history_tax(root, panel, Path(directory))
             run_bundled_trial(root, panel, Path(directory))
             run_public_freight_works(root, panel)
@@ -921,6 +922,25 @@ def run_history(root, panel, directory):
         panel.load_button.invoke()
         wait(root, panel)
     assert panel.current == saved and panel.history_choice.get() == "AAA"
+
+
+def run_copper_trial(root, panel):
+    bundled = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-copper-telephone.txt"
+    panel.country.set(panel.HISTORY)
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(bundled)):
+        panel.new_button.invoke()
+        wait(root, panel)
+    panel.history_choice.current(0)
+    panel.history_choice.event_generate("<<ComboboxSelected>>")
+    wait(root, panel)
+    assert panel.current["country"] == "WIRE-LAND"
+    assert "구리 누적 채굴: 0 · 판매액: 0" in panel.market.get()
+    panel._send("step 3")
+    wait(root, panel)
+    row = panel.current["history"]["economy"]["copper_telephone"]
+    assert row["telephones_made"] > 0 and row["telephone_sale_receipts"] > 0
+    assert (f"전화기 누적 생산: {row['telephones_made']} · 판매액: "
+            f"{row['telephone_sale_receipts']}") in panel.market.get()
 
 
 def run_history_tax(root, panel, directory):

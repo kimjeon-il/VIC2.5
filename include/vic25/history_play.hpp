@@ -26,6 +26,50 @@ inline Countries country_catalog(const daily::World& world) {
     return result;
 }
 
+inline bool copper_trial_recipe(const phased::IndustryRecipe& recipe) {
+    static constexpr std::string_view prefix="history-copper-telephone-";
+    return recipe.id==recipe.site&&recipe.id.starts_with(prefix)&&
+        recipe.outputs.size()==1&&recipe.outputs.front().good=="telephones"&&
+        std::any_of(recipe.inputs.begin(),recipe.inputs.end(),
+            [](const auto& input){return input.good=="copper"&&input.per_unit>0;});
+}
+
+struct CopperTrialOverview {
+    Quantity copper_extracted{},telephones_made{};
+    phasec::Money copper_receipts{},telephone_receipts{};
+};
+
+inline std::optional<CopperTrialOverview> copper_trial_overview(
+        const daily::World& world,const std::string& country) {
+    const auto& geo=world.engine().base();
+    const auto& d=geo.core();
+    const auto& c=d.core();
+    std::set<std::string> plants;
+    std::optional<CopperTrialOverview> result;
+    for(const auto id:geo.sovereign_provinces(country)) {
+        const auto plant=history_start::copper_trial_plant(id);
+        const auto recipe=d.state().recipes.find(plant);
+        if(recipe==d.state().recipes.end()||!copper_trial_recipe(recipe->second))continue;
+        plants.insert(plant);
+        if(!result)result.emplace();
+        result->telephone_receipts=phaseb::add_checked(
+            result->telephone_receipts,c.firm_finance(c.facility(plant).owner).receipts);
+        const auto mine=d.state().resource_sites.find(history_start::copper_trial_mine(id));
+        if(mine==d.state().resource_sites.end())continue;
+        result->copper_extracted=phaseb::add_checked(
+            result->copper_extracted,mine->second.cumulative_output);
+        result->copper_receipts=phaseb::add_checked(
+            result->copper_receipts,c.firm_finance(mine->second.owner).receipts);
+    }
+    if(result)
+        for(const auto& actual:d.state().actual_production_runs)
+            if(plants.contains(actual.recipe))
+                result->telephones_made=phaseb::add_checked(result->telephones_made,
+                    phaseb::mul_checked(actual.batches,
+                        d.state().recipes.at(actual.recipe).outputs.front().per_unit));
+    return result;
+}
+
 struct FoodPriceOverview {
     phasec::Money minimum{},maximum{};
     Quantity purchase_gap{};

@@ -758,6 +758,59 @@ def history_public_works(work):
     assert not reply[2]["ok"] and reply[2]["status"] == reply[1]["status"]
 
 
+def copper_telephone_trial(work):
+    bundled = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-copper-telephone.txt"
+    source = bundled.read_text(encoding="ascii")
+    start = work / "copper.txt"
+    start.write_text(source, encoding="ascii")
+    save = work / "copper checkpoint.sav"
+    exact = work / "copper exact.sav"
+    result = run("--panel-stdio", script=(f"history-open {start}\nchoose-country WIRE-LAND\n"
+        f"step 1\nsave {save}\nstep 2\nsave {exact}\nquit\n"))
+    success(result)
+    opened, opening, mined, saved, sold, finished, _ = map(json.loads, result.stdout.splitlines())
+    assert opened["ok"], opened
+    assert opening["status"]["history"]["economy"]["copper_telephone"] == {
+        "copper_extracted": 0, "copper_sale_receipts": 0,
+        "telephones_made": 0, "telephone_sale_receipts": 0,
+    }
+    first = mined["status"]["history"]["economy"]["copper_telephone"]
+    assert first == {"copper_extracted": 1, "copper_sale_receipts": 3,
+                     "telephones_made": 0, "telephone_sale_receipts": 0}, first
+    last = sold["status"]["history"]["economy"]["copper_telephone"]
+    assert last == {"copper_extracted": 3, "copper_sale_receipts": 9,
+                    "telephones_made": 2, "telephone_sale_receipts": 22}, last
+    food = sold["status"]["history"]["economy"]
+    assert (food["food_stock"], food["seller_cash"], food["household_cash"]) == (2, 30, 34), food
+    assert finished["ok"] and saved["ok"]
+    # Replay with no start file or external policies.
+    start.unlink()
+    replay = work / "copper replay.sav"
+    result = run("--panel-stdio", script=(
+        f"history-load {save}\nstep 2\nsave {replay}\nquit\n"))
+    success(result)
+    restored, replayed, resaved, _ = map(json.loads, result.stdout.splitlines())
+    assert restored == mined and replayed == sold and resaved["ok"]
+    assert replay.read_bytes() == exact.read_bytes()
+    row = "copper-telephones 7 31 100 4 31 31"
+    assert row in source
+    start.write_text(source.replace(row, "copper-telephones 7 31 100 4 0 31"), encoding="ascii")
+    result = run("--panel-stdio", script=f"history-open {start}\nchoose-country WIRE-LAND\nstep 3\nquit\n")
+    success(result)
+    control = json.loads(result.stdout.splitlines()[2])
+    assert control["ok"] and all(
+        value == 0 for value in control["status"]["history"]["economy"]["copper_telephone"].values()
+    ), control
+    for contents, error in (
+        (source + row + "\n", "duplicate copper-telephones"),
+        (source.replace(row, row.replace(" 7 ", " 8 ")), "matching food-start"),
+        (source.replace(row, row.replace(" 4 ", " -1 ")), "invalid copper-telephones stock"),
+        (source.replace("food-start 7 2", "food-start 7 1"), "invalid copper-telephones employment"),
+    ):
+        start.write_text(contents, encoding="ascii")
+        rejected(run("--history", start), error)
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -820,6 +873,7 @@ def main():
         cross_border_grain(work)
         bundled_border_trade()
         history_public_works(work)
+        copper_telephone_trial(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (

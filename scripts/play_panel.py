@@ -535,6 +535,9 @@ class PlayPanel:
             if farms := economy.get("grain_farm"):
                 market += (f"\n곡물 농장: {farms['sites']}곳 · 누적 수확: {farms['harvested']} "
                            f"· 출하 가능: {farms['saleable']}")
+            if copper := economy.get("copper_telephone"):
+                market += (f"\n구리 누적 채굴: {copper['copper_extracted']} · 판매액: {copper['copper_sale_receipts']}"
+                           f"\n전화기 누적 생산: {copper['telephones_made']} · 판매액: {copper['telephone_sale_receipts']}")
             if prices := economy.get("local_food_prices"):
                 low, high = prices["minimum"], prices["maximum"]
                 price = str(low) if low == high else f"{low}~{high}"
@@ -545,8 +548,9 @@ class PlayPanel:
                  "새 세율은 다음 달 첫날 처리부터 임금 원천징수에 적용됩니다."
                  if has_fiscal else "이 국가에는 조작 가능한 재정·정부 자료가 없습니다.")
         self.diplomacy.set(scope + " 식량 생산·임금·구매는 입력된 지역에서 자동으로 처리됩니다.")
+        market_title = "지역 식량·산업 시장" if economy and economy.get("copper_telephone") else "지역 식량 시장"
         titles = ("영토·국고" if has_fiscal else "선택 국가의 영토",
-                  "자료·소득세" if has_fiscal else "시작 자료", "지역 식량 시장", "미리보기 범위")
+                  "자료·소득세" if has_fiscal else "시작 자료", market_title, "미리보기 범위")
         for card, title in zip(self.cards, titles):
             card.configure(text=title)
         self.current = status
