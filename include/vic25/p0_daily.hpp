@@ -395,7 +395,13 @@ struct Policies {
     // operating services. Omission preserves existing scenario behavior.
     std::map<std::string,Money> public_construction_daily_caps;
     std::map<std::string,std::vector<std::string>> public_construction_priorities;
+    // Opening reserve supplied by a scenario for each eligible private
+    // company. Old scenarios remain unchanged without this native policy.
+    std::map<std::string,Money> registered_dividend_reserves;
     void validate() const {
+        for(const auto& [firm,reserve]:registered_dividend_reserves)
+            if(firm.empty()||reserve<0)
+                throw std::invalid_argument("invalid registered company dividend reserve");
         for(const auto& [country,priorities]:public_construction_priorities) {
             if(country.empty())throw std::invalid_argument("P0_INVALID_PUBLIC_CONSTRUCTION_PRIORITIES");
             std::set<std::string> seen;
@@ -1954,6 +1960,18 @@ public:
             gh.phase_c().phase_time_settle_wage_arrears(today);
             gh.phase_c().phase_time_settle_bankrupt_reparations();
         });
+        if(date.day==1&&!decisions.registered_dividend_reserves.empty())
+            plan[5].push_back([firms=decisions.registered_dividend_reserves](phasegh::Stage& gh) {
+                auto& c=gh.phase_c();
+                std::set<std::string> living_wallets;
+                for(const auto& [id,pop]:c.people().slices()) {
+                    (void)id;
+                    if(pop.count>0)
+                        living_wallets.insert("HH:"+std::to_string(pop.key.household));
+                }
+                for(const auto& [firm,reserve]:firms)
+                    c.phase_time_share_private_goods_surplus(firm,reserve,living_wallets);
+            });
         if(date.day==1 && decisions.autonomous_tax_step_ppm>0)
             plan[9].push_back(
                 [step=decisions.autonomous_tax_step_ppm,

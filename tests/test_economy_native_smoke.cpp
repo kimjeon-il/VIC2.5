@@ -517,7 +517,81 @@ static void substitute_food_sales_redirect_next_day_production() {
          get().stock("GROWER","R","food")==1,
          "depleted cheap food should redirect forecast to real alternative production and sales");
 }
+enum class DividendTrial { enabled, disabled, no_title, no_income, indebted, forgiven, reserve };
+static void registered_household_dividend(DividendTrial trial) {
+    phasegh::World engine(24000);
+    auto& geo=engine.seed_geography();
+    geo.seed_province(1,"R","A");geo.seed_unit(11,"A","ROOT");geo.seed_assignment(1,11);
+    auto& c=geo.seed_core().seed_core();
+    const bool support_only=trial==DividendTrial::no_income;
+    c.seed_actor("A",support_only?10:0);c.seed_actor("SELLER",4);
+    c.seed_government("A","HEAD","PRIME",5,3);
+    c.seed_market("R","food",5,5,5,0);c.seed_stock("SELLER","R","food",2);
+    auto& pop=c.seed_population();
+    const auto payer=pop.household_profile({"R","payer","shared",1});
+    const auto owner=pop.household_profile({"R","worker-owner","shared",1});
+    const auto d=pop.demographic_profile({"R",engine.month()-300,phaseb::Sex::female,
+        "culture","faith","citizen","free",pop.default_health(),phaseb::Service::civilian});
+    const auto e=pop.economic_profile({"R","worker","wage","employee",pop.default_education()});
+    pop.seed_population(d,e,payer,1);pop.seed_population(d,e,owner,1);
+    const auto payer_actor="HH:"+std::to_string(payer);
+    const auto owner_actor="HH:"+std::to_string(owner);
+    const phasec::Money payer_open=(support_only||trial==DividendTrial::forgiven)?0:5;
+    c.seed_actor(payer_actor,payer_open);c.seed_actor(owner_actor,0);
+    if(trial!=DividendTrial::no_title)c.seed_shares("company:SELLER",owner_actor,1);
+    p0::Policies p;p.monthly_clothing_units_per_person=0;
+    p.allow_endogenous_debt_repayment=false;
+    if(trial!=DividendTrial::disabled)
+        p.registered_dividend_reserves["SELLER"]=trial==DividendTrial::reserve?10:4;
+    p0::DailyGame game(daily::World::adopt(std::move(engine),8),p);
+    const auto get=[&]()->const phasec::IntegratedWorld&{return game.world().engine().base().core().core();};
+    phasegh::World::Plan borrow{};
+    const phasec::Money borrowing=trial==DividendTrial::forgiven?7:
+        (trial==DividendTrial::indebted?2:0);
+    if(borrowing>0)borrow[1].push_back([borrowing](phasegh::Stage& stage){
+        stage.phase_c().lend("SELLER",borrowing);
+    });
+    if(trial==DividendTrial::forgiven)borrow[8].push_back([borrowing](phasegh::Stage& stage){
+        stage.phase_c().forgive_defaulted_loan("SELLER",borrowing);
+    });
+    if(support_only)borrow[3].push_back([](phasegh::Stage& stage){
+        stage.phase_c().pay("A","SELLER",10);
+    });
+    game.advance_day(borrow);
+    while(game.world().date().day<31)game.advance_day();
+    game.advance_day();
+    p0::DailyGame restored(daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(game.world())),p);
+    const Quantity initial_sales=payer_open>0?1:0;
+    check(get().stock("SELLER","R","food")==2-initial_sales,"new funds or food were fabricated before month close");
+    game.advance_day();restored.advance_day();
+    const auto extra=trial==DividendTrial::enabled?1:0;
+    check(get().stock("SELLER","R","food")==2-initial_sales-extra,
+          "real share dividend should fund exactly one extra purchase");
+    check(daily::SnapshotCodec::encode(game.world())==daily::SnapshotCodec::encode(restored.world()),
+          "automatic payout changed across save and replay");
+    check(get().cash("SELLER")+get().cash(payer_actor)+get().cash(owner_actor)==
+          4+payer_open+(support_only?10:0)+borrowing,"dividend or purchase minted money");
+    if(trial==DividendTrial::enabled) {
+        // The February purchase earned one new real receipt. The next
+        // payout can transfer that receipt, but the idle fourth month
+        // must not distribute it again simply because the firm has cash.
+        while(game.world().date().month==2)game.advance_day();
+        game.advance_day();
+        check(get().cash(owner_actor)==5&&get().cash("SELLER")==4,
+              "only newly realized sales may be distributed a second time");
+        while(game.world().date().month==3)game.advance_day();
+        game.advance_day();
+        check(get().cash(owner_actor)==5&&get().cash("SELLER")==4,
+              "the same monthly earnings must not be paid repeatedly");
+    }
+}
+
 int main() {
+    for(const auto trial:{DividendTrial::enabled,DividendTrial::disabled,
+                          DividendTrial::no_title,DividendTrial::no_income,
+                          DividendTrial::indebted,DividendTrial::forgiven,
+                          DividendTrial::reserve})
+        registered_household_dividend(trial);
     staple_food_substitutes_share_one_need();
     substitute_food_sales_redirect_next_day_production();
     grocery_shortage_cannot_cancel_a_different_goods_tariff();
