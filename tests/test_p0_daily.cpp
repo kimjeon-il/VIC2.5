@@ -1989,6 +1989,67 @@ static void bounded_paid_freight_recovers_only_after_physical_arrival() {
                  "only the physically received ore can restore production and paid customer purchases");
 }
 
+static void commissioned_public_site_enables_paid_civilian_freight() {
+    phasegh::World opening(24000);
+    auto& geo=opening.seed_geography();
+    geo.seed_province(1,"SOURCE","A");geo.seed_unit(1,"A","DISTRICT_A");
+    geo.seed_province(2,"PORT","B");geo.seed_unit(2,"B","DISTRICT_B");
+    geo.seed_border(1,2);geo.seed_assignment(1,1);geo.seed_assignment(2,2);
+    auto& ledger=geo.seed_core().seed_core();
+    for(const auto* actor:{"A","B","BUILDER","SELLER","TRADER","CARRIER"})
+        ledger.seed_actor(actor,actor==std::string_view("A")?200:
+                           actor==std::string_view("TRADER")?1000:0);
+    ledger.seed_government("A","HEAD","PM",5,3);
+    ledger.seed_p1_constitution("A",{phasec::P1GovernancePrinciple::monarchy,
+        phasec::P1PowerDistribution::autocracy,phasec::P1LegislatureKind::none,"fixture"});
+    ledger.seed_government("B","HEAD_B","PM_B",5,3);
+    ledger.seed_market("SOURCE","ore",4,4,4);
+    ledger.seed_market("PORT","ore",10,10,10,1);
+    ledger.seed_market("SOURCE","steel",2,2,2);
+    ledger.seed_market("SOURCE","wood",1,1,1);
+    ledger.seed_market("SOURCE","tools",5,5,5);
+    ledger.seed_stock("SELLER","SOURCE","ore",10);
+    ledger.seed_stock("BUILDER","SOURCE","steel",1);
+    const auto worker=people(opening,"SOURCE",1,"worker");
+    ledger.seed_population().hire(worker,1,"BUILDER","worker",0,{});
+    opening.seed_verified_geographic_link("fixture-link",1,2,"rail");
+    phasegh::TransportEdge edge;
+    edge.id="FREIGHT";edge.carrier="CARRIER";edge.mode="rail";
+    edge.from=1;edge.to=2;edge.monthly_capacity=7;edge.freight_per_unit=2;
+    edge.transit_days=2;edge.evidence_id="fixture-rail";
+    edge.valid_from_month=23999;edge.valid_through_month=24012;
+    edge.capacity_site="TERMINAL";
+    opening.seed_transport_edge(edge);
+    p0::Policies policy;
+    policy.daily_food_units_per_person=0;
+    policy.merchant_offices.push_back({"TRADER","PORT",1,0,0});
+    phased::ConstructionProject p;
+    p.id="TERMINAL-WORKS";p.client="A";p.contractor="BUILDER";p.region="SOURCE";
+    p.material_good="steel";p.target_site="TERMINAL";p.work_required=1;
+    p.material_per_work=1;p.workers_per_work=1;p.cash_price_per_work=20;p.target_capacity=24;
+    phased::IndustryRecipe r;
+    r.id="TERMINAL-RECIPE";r.site=p.target_site;r.inputs={{"wood",1}};r.outputs={{"tools",1}};
+    r.workers_per_batch=r.capacity_per_batch=1;
+    policy.public_construction_offers.push_back({p,r,40});
+    const auto fills=[](const p0::DailyGame& game)->const auto& {return game.world().engine().commerce().fills;};
+    p0::DailyGame work(daily::World::adopt(std::move(opening),81),policy);
+    p0::DailyGame control(daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(work.world())),policy);
+    work.order_public_construction("A","PM",p.id);
+    work.advance_day();control.advance_day();control.advance_day();
+    require_test(fills(work).empty()&&fills(control).empty()&&!c(work).facilities().contains("TERMINAL")&&
+                 c(work).cash("A")==180,"unfinished terminal cannot increase capacity before commissioning");
+    p0::DailyGame replay(daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(work.world())),policy);
+    work.advance_day();replay.advance_day();control.advance_day();
+    require_test(c(work).facilities().contains("TERMINAL")&&fills(work).size()==1&&fills(control).empty()&&
+                 fills(work).front().quantity==1&&c(work).cash("SELLER")==4&&c(work).cash("CARRIER")==2&&
+                 c(work).stock("TRADER","PORT","ore")==0,
+                 "commissioning must enable an earlier real freight booking, payment and transit");
+    work.advance_day();replay.advance_day();work.advance_day();replay.advance_day();
+    require_test(c(work).stock("TRADER","PORT","ore")==1&&fills(work).size()==1&&
+                 daily::SnapshotCodec::encode(work.world())==daily::SnapshotCodec::encode(replay.world()),
+                 "site-supported freight must physically arrive once, with deterministic save replay");
+}
+
 static void producer_import_counts_real_on_site_and_inbound_stock_once() {
     p0::Policies options;
     options.daily_food_units_per_person=0;
@@ -4048,6 +4109,7 @@ int main(){
         explicit_and_automatic_dues_keep_live_payment_priority();
         loss_of_paid_freight_constrains_output_and_solvent_customers();
         bounded_paid_freight_recovers_only_after_physical_arrival();
+        commissioned_public_site_enables_paid_civilian_freight();
         producer_import_counts_real_on_site_and_inbound_stock_once();
         expired_trade_leg_uses_alternate_that_can_carry_full_lot();
         autonomous_f_two_hop_freight_and_save_replay();
