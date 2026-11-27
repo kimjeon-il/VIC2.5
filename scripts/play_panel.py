@@ -250,15 +250,19 @@ class PlayPanel:
             else:
                 widget.grid_remove()
         budget = self._budget(self.current)
-        spending_ready = ready and (spending_vote or
+        history_works = history and "public_works" in self.current
+        spending_ready = ready and (history_works or spending_vote or
                     (budget and self.current["pending_civilian_spending_cap"] is None))
-        self.spending_button.configure(text="지출 한도 표결 후 하루 진행" if elected_spending
+        self.spending_label.configure(text="운송 기반시설 일간 한도:" if history_works
+                                      else "하루 공공사업 한도:")
+        self.spending_button.configure(text="한도 설정" if history_works else
+                                       "지출 한도 표결 후 하루 진행" if elected_spending
                                        else "지출 한도 제출 후 하루 진행")
         for widget in (self.spending_label, self.spending_entry, self.spending_button):
             can_edit = spending_ready and (not elected_spending or campaign_party or
                                           widget is not self.spending_button)
             widget.state(["!disabled"] if can_edit else ["disabled"])
-            if budget or elected_spending:
+            if budget or elected_spending or history_works:
                 widget.grid()
             else:
                 widget.grid_remove()
@@ -501,6 +505,17 @@ class PlayPanel:
             tariff = self._percent(grain_trade["tariff_ppm"])
             self.tariff.set(tariff)
             policy += f"\n곡물 수입 관세율: {tariff}% · 누적 관세 수입: {grain_trade['duties_paid']}"
+        if works := status.get("public_works"):
+            cap = works["daily_cap"]
+            self.spending.set(str(cap))
+            if works["commissioned"]:
+                phase = "준공"
+            elif cap < works["invoice_per_work"]:
+                phase = "일시정지" if works["ordered"] else "발주 대기"
+            else:
+                phase = "공사 중" if works["ordered"] else "자동 발주 대기"
+            policy += (f"\n운송 기반시설: {phase} · 공사 {works['paid_work']}/{works['required_work']}"
+                       f"\n일간 한도: {cap} · 작업 1회 비용: {works['invoice_per_work']}")
         self.policy.set(policy)
         economy = history["economy"]
         if economy is None:
@@ -829,6 +844,13 @@ class PlayPanel:
             self._send("income-tax " + value)
 
     def set_spending_cap(self):
+        if self._history(self.current) and "public_works" in self.current:
+            value = self.spending.get().strip()
+            if not value or not value.isascii() or not value.isdecimal() or len(value) > 7 or int(value) > 1_000_000:
+                self.notice.set("오류: 한도를 0부터 1000000 사이의 정수로 입력하세요.")
+                return
+            self._send("public-works " + value)
+            return
         elected = self._campaign_spending_scope(self.current)
         if not (elected or self._budget(self.current)) or self.current["pending_civilian_spending_cap"] is not None:
             return

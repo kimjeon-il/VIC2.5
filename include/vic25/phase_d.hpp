@@ -628,7 +628,7 @@ class Stage {
     friend class vic25::p0::DailyGame;
     const char* public_construction_rejection(const std::string& country,
             const std::string& proposer,const ConstructionProject& project,
-            const IndustryRecipe& recipe,Money cash_reserve,bool elected) const {
+            const IndustryRecipe* recipe,Money cash_reserve,bool elected) const {
         must(9);
         if(!c_.has_country_treasury(country)||
            c_.country_treasury(country)!=project.client||
@@ -641,26 +641,33 @@ class Stage {
                    : (!c_.country_tax_uses_direct_executive(country)||
                       legislature!=phasec::P1LegislatureKind::none))
             return "unauthorized public construction offer";
-        if(d_.constructions.contains(project.id)||d_.recipes.contains(recipe.id)||
+        if(d_.constructions.contains(project.id)||(recipe&&d_.recipes.contains(recipe->id))||
            c_.facilities().contains(project.target_site)||
            std::any_of(d_.constructions.begin(),d_.constructions.end(),
                [&](const auto& entry){return entry.second.target_site==project.target_site;}))
             return "public construction offer already queued";
+        if(!recipe&&std::any_of(d_.recipes.begin(),d_.recipes.end(),
+               [&](const auto& entry){return entry.second.site==project.target_site;}))
+            return "public freight capacity site already has an operating recipe";
         if(!c_.has_actor(project.contractor)||c_.firm_bankrupt(project.contractor)||
            c_.phase_d_workforce(project.contractor)<project.workers_per_work||
            c_.outstanding_worker_wages(project.contractor)!=0||
            c_.outstanding_worker_wages(project.client)!=0||c_.firm_bankrupt(project.client)||
-           (!recipe.industry_class.empty()&&!d_.industry_classes.contains(recipe.industry_class)))
+           (recipe&&!recipe->industry_class.empty()&&!d_.industry_classes.contains(recipe->industry_class)))
             return "public construction lacks a qualified operating contractor";
         const Money cost=product(project.work_required,project.cash_price_per_work);
         const Money free=c_.phase_d_cash_available(project.client);
         if(free<cash_reserve||free-cash_reserve<cost)
             return "public construction invoice and reserve are unfunded";
-        if(!c_.has_market(project.region,recipe.outputs.front().good))
-            return "public construction lacks a local output market";
-        for(const auto& input:recipe.inputs)
-            if(!c_.has_market(project.region,input.good))
-                return "public construction lacks a local recipe input market";
+        if(recipe) {
+            if(!c_.has_market(project.region,recipe->outputs.front().good))
+                return "public construction lacks a local output market";
+            for(const auto& input:recipe->inputs)
+                if(!c_.has_market(project.region,input.good))
+                    return "public construction lacks a local recipe input market";
+        } else if(!c_.has_market(project.region,project.material_good)) {
+            return "public freight construction lacks a local material market";
+        }
         auto shortage=std::max<Quantity>(0,project.material_per_work-
             c_.phase_d_material_available(project.contractor,project.region,project.material_good));
         if(shortage>0) {
@@ -682,14 +689,13 @@ class Stage {
     }
     void order_public_construction(const std::string& country,
             const std::string& proposer,ConstructionProject project,
-            IndustryRecipe recipe,Money cash_reserve,bool elected) {
+            const IndustryRecipe* recipe,Money cash_reserve,bool elected) {
         if(const auto* reason=public_construction_rejection(
                 country,proposer,project,recipe,cash_reserve,elected))
             throw std::invalid_argument(reason);
         const auto id=project.id;
-        const auto method=recipe.id;
         d_.constructions.emplace(id,std::move(project));
-        d_.recipes.emplace(method,std::move(recipe));
+        if(recipe)d_.recipes.emplace(recipe->id,*recipe);
         d_.append(c_.month(),"funded-public-construction-order",id);
     }
     void occupy_labor(const std::string& owner,People people) {
