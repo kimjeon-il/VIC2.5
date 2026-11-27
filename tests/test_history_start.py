@@ -539,6 +539,34 @@ def cross_border_grain(work):
         rejected(run("--history", start), error)
 
 
+
+def bundled_border_trade():
+    sample = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-grain-border-trade.txt"
+    prefix = (f"history-open {sample}", "choose-country MILL-LAND")
+
+    def panel(*commands):
+        result = run("--panel-stdio", script="\n".join((*prefix, *commands, "quit", "")))
+        success(result)
+        replies = [json.loads(line) for line in result.stdout.splitlines()[:-1]]
+        assert all(reply["ok"] for reply in replies), replies
+        return [reply["status"] for reply in replies][2:]
+
+    def food(status):
+        return status["history"]["economy"]
+
+    departure, arrived, exporter = panel("step 3", "step 3", "choose-country FIELD-LAND")
+    assert departure["date"] == "1840-01-04" and departure["treasury"] == 53
+    assert food(departure)["grain_in_transit"] == 1
+    assert arrived["date"] == "1840-01-07" and food(arrived)["food_stock"] == 1
+    assert arrived["grain_trade"]["duties_paid"] == 3
+    assert exporter["treasury"] == 20 and food(exporter)["grain_farm"]["harvested"] == 2
+    _, blocked = panel("tariff 100", "step 6")
+    assert blocked["grain_trade"]["duties_paid"] == 0 and food(blocked)["food_stock"] == 0
+    _, raised, still_arrived = panel("step 3", "tariff 100", "step 2")
+    assert food(raised)["grain_in_transit"] == 1 and still_arrived["date"] == arrived["date"]
+    assert food(still_arrived) == food(arrived) and still_arrived["treasury"] == 53
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -597,6 +625,7 @@ def main():
         staple_price_shock(work)
         staffed_grain_farm(work)
         cross_border_grain(work)
+        bundled_border_trade()
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (
