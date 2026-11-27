@@ -1013,9 +1013,10 @@ inline Quantity local_material_shortfall(const phasec::IntegratedWorld& c,
 // less this firm's existing stock. The primary stock policy is unchanged.
 inline Money projected_operating_revenue(const phasec::IntegratedWorld& c,
         const phasec::ProductionFacility& f,const phased::IndustryRecipe& r,
-        std::int64_t today) {
+        std::int64_t today,Quantity batches=1) {
     const auto& primary=r.outputs.front();
-    Money revenue=times(primary.per_unit,c.market(f.region,primary.good).price);
+    Money revenue=times(times(primary.per_unit,batches),
+                        c.market(f.region,primary.good).price);
     if(r.outputs.size()==1)return revenue;
     std::map<std::string_view,Quantity> remaining;
     for(std::size_t i=1;i<r.outputs.size();++i) {
@@ -1029,11 +1030,38 @@ inline Money projected_operating_revenue(const phasec::IntegratedWorld& c,
             const auto held=c.stock(f.owner,f.region,extra.good);
             it=remaining.emplace(extra.good,wanted>held?wanted-held:0).first;
         }
-        const auto units=std::min(it->second,extra.per_unit);
+        const auto units=batches>it->second/extra.per_unit?it->second:
+            times(batches,extra.per_unit);
         revenue=phaseb::add_checked(revenue,times(units,quote.price));
         it->second-=units;
     }
     return revenue;
+}
+
+// Extra sales flatten as the one market gap is filled. With linear input
+// and wage costs, a profitable aggregate volume is a prefix of the feasible
+// volumes. Keep the largest volume with a positive margin, not one gap per
+// batch. Ordinary single-output recipes retain their single-batch fast path.
+inline Quantity profitable_operating_batches(const phasec::IntegratedWorld& c,
+        const phasec::ProductionFacility& f,const phased::IndustryRecipe& r,
+        std::int64_t today,Quantity limit,Money input_cost,
+        Money daily_wage,Money monthly_wage,int days) {
+    if(limit<=0)return 0;
+    const auto covers_costs=[&](Quantity batches) {
+        return positive_projected_operating_margin(
+            projected_operating_revenue(c,f,r,today,batches),
+            times(input_cost,batches),times(r.workers_per_batch,batches),
+            daily_wage,monthly_wage,days);
+    };
+    if(!covers_costs(1))return 0;
+    if(limit==1||r.outputs.size()==1||covers_costs(limit))return limit;
+    Quantity low=1,high=limit;
+    while(high-low>1) {
+        const Quantity mid=low+(high-low)/2;
+        if(covers_costs(mid))low=mid;
+        else high=mid;
+    }
+    return low;
 }
 
 inline Quantity available_production(const phased::Stage& d,
@@ -1058,13 +1086,6 @@ inline Quantity available_production(const phased::Stage& d,
         const auto& iq=c.market(f.region,input.good);
         cost_per_batch=phaseb::add_checked(cost_per_batch,times(input.per_unit,iq.price));
     }
-    const Money revenue=projected_operating_revenue(c,f,r,today);
-    // An explicit scenario wage overrides the ordinary contract projection.
-    const Money scheduled=policy.wage_per_worker_per_day;
-    if(!positive_projected_operating_margin(revenue,cost_per_batch,
-            r.workers_per_batch,scheduled,
-            scheduled>0?0:highest_monthly_contract_wage(c,f.owner),days))
-        return 0;
     const Quantity stock_shortfall=policy.target_inventory-c.stock(f.owner,f.region,primary.good);
     Quantity batches=stock_shortfall/primary.per_unit+
         (stock_shortfall%primary.per_unit!=0?1:0);
@@ -1080,7 +1101,10 @@ inline Quantity available_production(const phased::Stage& d,
     if(policy.wage_per_worker_per_day>0)
         batches=std::min(batches,c.phase_d_cash_available(f.owner)/
             times(r.workers_per_batch,policy.wage_per_worker_per_day));
-    return std::max<Quantity>(0,batches);
+    // An explicit scenario wage overrides the ordinary contract projection.
+    const Money scheduled=policy.wage_per_worker_per_day;
+    return profitable_operating_batches(c,f,r,today,batches,cost_per_batch,
+        scheduled,scheduled>0?0:highest_monthly_contract_wage(c,f.owner),days);
 }
 
 inline phasec::CombatLoss tactical_losses(People victim,
@@ -1514,14 +1538,15 @@ public:
                         times(input.per_unit,
                               game_c.market(facility.region,input.good).price));
                 }
+                if(!priced)continue;
                 const Money wage_day=daily_increment(wage,date.day,dim);
-                if(!priced||projected_operating_revenue(game_c,facility,recipe,world_.day_index())<=
-                    phaseb::add_checked(input_cost,
-                        times(recipe.workers_per_batch,wage_day)))continue;
                 const Quantity capacity=facility.capacity-facility.damaged;
-                const Quantity batches=(
+                const Quantity limit=(
                     capacity/dim+(capacity%dim!=0?1:0))/
                     recipe.capacity_per_batch;
+                const Quantity batches=profitable_operating_batches(
+                    game_c,facility,recipe,world_.day_index(),limit,input_cost,
+                    wage_day,0,dim);
                 if(batches<=0)continue;
                 const People desired=times(batches,recipe.workers_per_batch);
                 const auto site_key=std::make_tuple(
@@ -2957,10 +2982,10 @@ public:
                        recipe.capacity_per_batch<=0)continue;
                     const Quantity monthly=facility.capacity-facility.damaged;
                     const Quantity day_cap=monthly/dim+(monthly%dim!=0?1:0);
-                    const Quantity batches=std::min<Quantity>(
+                    const Quantity limit=std::min<Quantity>(
                         day_cap/recipe.capacity_per_batch,
                         employed/recipe.workers_per_batch);
-                    if(batches<=0)continue;
+                    if(limit<=0)continue;
                     const auto inputs=phased::recipe_input_totals(recipe);
                     Money input_cost=0;
                     bool priced=true;
@@ -2972,11 +2997,11 @@ public:
                             times(item.per_unit,
                                 c.market(facility.region,item.good).price));
                     }
-                    if(!priced||!positive_projected_operating_margin(
-                            projected_operating_revenue(c,facility,recipe,today),input_cost,
-                            recipe.workers_per_batch,0,
-                            highest_monthly_contract_wage(c,facility.owner),dim))
-                        continue;
+                    if(!priced)continue;
+                    const Quantity batches=profitable_operating_batches(
+                        c,facility,recipe,today,limit,input_cost,0,
+                        highest_monthly_contract_wage(c,facility.owner),dim);
+                    if(batches<=0)continue;
                     for(const auto& item:inputs) {
                         const auto key=std::make_tuple(
                             facility.owner,facility.region,item.good);
