@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <locale>
+#include <optional>
 #include <sstream>
 
 namespace vic25::history_start {
@@ -206,11 +207,38 @@ inline GrainRoad parse_grain_road(std::istringstream& row) {
             std::move(evidence)};
 }
 
+struct FreightWorks {
+    phasee::Id source{},destination{};
+    std::string sponsor;
+    Quantity work{},monthly_capacity{};
+    phasec::Money invoice{},reserve{};
+    bool operator==(const FreightWorks&) const = default;
+
+    std::string edge() const {
+        return "history-grain-road-"+std::to_string(source)+"-"+std::to_string(destination);
+    }
+    std::string project() const {return edge()+"-works";}
+    std::string site() const {return edge()+"-terminal";}
+    std::string builder() const {return edge()+"-builder";}
+};
+inline constexpr std::string_view freight_material="wood";
+
+inline FreightWorks parse_freight_works(phasee::Id source,std::istringstream& row) {
+    std::string destination,sponsor,work,capacity,invoice,reserve,extra;
+    if(!(row>>destination>>sponsor>>work>>capacity>>invoice>>reserve)||row>>extra||!identifier(sponsor))
+        throw std::invalid_argument("malformed freight-works record");
+    return {source,positive(destination,"invalid freight-works destination"),std::move(sponsor),
+        start_value(work,1,1'000'000,"invalid freight-works work"),
+        start_value(capacity,1,1'000'000,"invalid freight-works capacity"),
+        start_value(invoice,1,1'000'000,"invalid freight-works invoice"),
+        start_value(reserve,0,1'000'000,"invalid freight-works reserve")};
+}
+
 inline void seed_grain_freight(phasegh::World& engine,
         const std::map<phasee::Id,GrainSupply>& supplies,
         const std::map<phasee::Id,FarmStart>& farms,
         const std::map<std::pair<phasee::Id,phasee::Id>,GrainRoad>& roads,
-        std::int64_t month) {
+        std::int64_t month,const std::optional<FreightWorks>& works) {
     const auto& geo=engine.base();
     auto& core=engine.seed_geography().seed_core().seed_core();
     for(const auto& [id,supply]:supplies) {
@@ -238,13 +266,15 @@ inline void seed_grain_freight(phasegh::World& engine,
         edge.evidence_id=road.evidence;
         edge.valid_from_month=month;
         edge.valid_through_month=daily::legacy_month({9999,12,1});
+        if(works&&works->source==source&&works->destination==dest)
+            edge.capacity_site=works->site();
         engine.seed_transport_edge(std::move(edge));
     }
 }
 
 inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,FoodStart>& starts,
         const std::map<phasee::Id,MillStart>& mills,const std::map<phasee::Id,FarmStart>& farms,
-        bool government_mode,std::int64_t month) {
+        bool government_mode,std::int64_t month,const std::optional<FreightWorks>& works) {
     auto& industry=world.seed_core();
     auto& core=industry.seed_core();
     auto& pop=core.seed_population();
@@ -264,7 +294,9 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
         const auto economy=pop.economic_profile({region,"unassigned","unassigned","unassigned",
                                                   pop.default_education()});
         const auto home=pop.household_profile({region,"scenario-pool","shared",0});
-        const auto slice=pop.seed_population(demographic,economy,home,seed.people);
+        const bool construction_crew=works&&works->source==id;
+        const auto slice=pop.seed_population(demographic,economy,home,
+                                             seed.people-(construction_crew?1:0));
         core.seed_actor("HH:"+std::to_string(home),seed.household_cash);
         const auto seller=food_seller(id);
         const auto mill=mills.find(id);
@@ -273,6 +305,15 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
         core.seed_actor(seller,seed.seller_cash);
         core.seed_market(region,good,seed.price,seed.price_floor,seed.price_ceiling);
         if(seed.stock>0)core.seed_stock(seller,region,good,seed.stock);
+        if(construction_crew) {
+            const auto builder=works->builder();
+            const std::string material(freight_material);
+            core.seed_actor(builder,0);
+            core.seed_market(region,material,2,2,2);
+            core.seed_stock(builder,region,material,works->work);
+            const auto crew=pop.seed_population(demographic,economy,home,1,2);
+            pop.hire(crew,1,builder,"worker",0,{});
+        }
         if(mill==mills.end()&&farm==farms.end())continue;
         // Normal no-government payroll requires a distinct country actor.
         // It has zero initial funds, and is not registered as a treasury.
@@ -319,7 +360,8 @@ inline void seed_food_starts(phasee::World& world,const std::map<phasee::Id,Food
 
 // Read a bounded, explicit startup dataset. Geographic contacts never
 // bootstrap ports, markets or transport services, even across the same sea.
-inline daily::World open(const std::filesystem::path& path) {
+inline daily::World open(const std::filesystem::path& path,
+                         std::optional<FreightWorks>* opened_works=nullptr) {
     namespace geo=phasee::geography_import;
     namespace fs=std::filesystem;
     using phasee::Id;
@@ -358,6 +400,7 @@ inline daily::World open(const std::filesystem::path& path) {
     std::map<Id,GrainSupply> supplies;
     std::map<Id,FarmStart> farms;
     std::map<std::pair<Id,Id>,GrainRoad> roads;
+    std::optional<FreightWorks> works;
     while(std::getline(input,line)) {
         std::istringstream row(std::move(line));
         row.imbue(std::locale::classic());
@@ -391,6 +434,11 @@ inline daily::World open(const std::filesystem::path& path) {
             if(!economy_allowed)throw std::invalid_argument("grain-farm requires VIC25-HISTORY-2");
             if(!farms.emplace(id,parse_farm_start(row)).second)
                 throw std::invalid_argument("duplicate grain-farm province");
+            continue;
+        }
+        if(type=="freight-works") {
+            if(!economy_allowed||works)throw std::invalid_argument("unexpected or duplicate freight-works");
+            works=parse_freight_works(id,row);
             continue;
         }
         if(type=="grain-road") {
@@ -504,6 +552,17 @@ inline daily::World open(const std::filesystem::path& path) {
             grain_importers.insert(importer);
         }
     }
+    if(works) {
+        if(!roads.contains({works->source,works->destination})||
+           !food_starts.contains(works->source)||!farms.contains(works->source)||
+           !executives.contains(works->sponsor)||nodes.at(works->source).country!=works->sponsor)
+            throw std::invalid_argument("freight-works requires an authorized source grain road");
+        const auto& seed=food_starts.at(works->source);
+        const phaseb::JobRequirements job;
+        if(seed.people<=farms.at(works->source).workers||seed.age_months<job.minimum_age_months||
+           seed.age_months>job.maximum_age_months)
+            throw std::invalid_argument("freight-works requires one available construction worker");
+    }
     for(const auto& [country,ppm]:grain_tariffs) {
         (void)ppm;
         if(!grain_importers.contains(country))
@@ -550,11 +609,12 @@ inline daily::World open(const std::filesystem::path& path) {
             throw std::invalid_argument("grain-road requires adjacent land provinces");
     }
     if(!food_starts.empty())
-        seed_food_starts(world,food_starts,mills,farms,!executives.empty(),daily::legacy_month(date));
+        seed_food_starts(world,food_starts,mills,farms,!executives.empty(),daily::legacy_month(date),works);
     if(!supplies.empty())
-        seed_grain_freight(engine,supplies,farms,roads,daily::legacy_month(date));
+        seed_grain_freight(engine,supplies,farms,roads,daily::legacy_month(date),works);
     for(const auto& [country,ppm]:grain_tariffs)
         engine.seed_tariff(country,grain_good,ppm);
+    if(opened_works)*opened_works=works;
     return daily::World::adopt(std::move(engine),0,std::string(origin_prefix)+dataset);
 }
 

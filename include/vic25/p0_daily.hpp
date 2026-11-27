@@ -133,6 +133,23 @@ struct PublicConstructionOffer {
     Money treasury_cash_reserve{};
     bool elected_appropriation{};
     std::string priority_category; // empty: manual scenario offer
+    std::string freight_edge; // nonempty: passive route facility, no goods recipe
+
+    [[nodiscard]] const phased::IndustryRecipe* operating_recipe() const {
+        return freight_edge.empty()?&recipe:nullptr;
+    }
+    [[nodiscard]] bool has_capacity_binding(const phasegh::TradeState& trade,
+            const phasee::SpatialState& geo) const {
+        if(freight_edge.empty())return true;
+        const auto edge=trade.transport_edges.find(freight_edge);
+        if(edge==trade.transport_edges.end()||edge->second.capacity_site!=project.target_site)
+            return false;
+        const auto endpoint=[&](auto id) {
+            const auto prov=geo.provinces.find(id);
+            return prov!=geo.provinces.end()&&prov->second.region==project.region;
+        };
+        return endpoint(edge->second.from)||endpoint(edge->second.to);
+    }
 };
 // A campaign-supplied blueprint can create a new company and a new type of
 // factory even when that region has no commissioned template to copy. The
@@ -435,25 +452,30 @@ struct Policies {
             const bool categorized=!offer.priority_category.empty()&&!offer.elected_appropriation;
             const auto [treasury,fresh]=offer_treasuries.try_emplace(p.client,categorized);
             const auto invalid=[](const auto& item){return item.good.empty()||item.per_unit<=0;};
+            const bool has_recipe=offer.operating_recipe()!=nullptr;
+            const bool invalid_operation=has_recipe?
+                (r.id.empty()||r.site!=p.target_site||r.inputs.empty()||r.outputs.empty()||
+                 r.workers_per_batch<=0||r.capacity_per_batch<=0||!r.tech_id.empty()||
+                 r.needs_retrofit||r.requires_same_stage_nonstorable_energy||
+                 std::any_of(r.inputs.begin(),r.inputs.end(),invalid)||
+                 std::any_of(r.outputs.begin(),r.outputs.end(),invalid)||
+                 std::any_of(r.byproducts.begin(),r.byproducts.end(),invalid)||
+                 !offer_recipes.insert(r.id).second):
+                (offer.elected_appropriation||!r.id.empty()||!r.site.empty()||
+                 !r.inputs.empty()||!r.outputs.empty()||!r.byproducts.empty());
             if(p.id.empty()||p.id.starts_with("AUTO:")||p.client.empty()||
                p.contractor.empty()||p.contractor==p.client||p.region.empty()||
                p.material_good.empty()||p.target_site.empty()||
                !offer_ids.insert(p.id).second||
                (offer.elected_appropriation&&!offer.priority_category.empty())||
                (!fresh&&!(treasury->second&&categorized))||
-               !offer_sites.insert(p.target_site).second||!offer_recipes.insert(r.id).second||
+               !offer_sites.insert(p.target_site).second||invalid_operation||
                p.work_required<=0||p.material_per_work<=0||p.workers_per_work<=0||
                p.target_capacity<=0||p.cash_price_per_work<=0||
                p.work_required>std::numeric_limits<Money>::max()/p.cash_price_per_work||
                p.permit_required||p.inspection_required||p.allow_accrued_invoice_commission||
                p.ready||p.commissioned||p.ready_month!=-1||p.planned_work!=0||
                p.accepted_work!=0||p.paid_work!=0||p.capitalized_work!=0||p.capitalized_value!=0||
-               r.id.empty()||r.site!=p.target_site||r.inputs.empty()||r.outputs.empty()||
-               r.workers_per_batch<=0||r.capacity_per_batch<=0||!r.tech_id.empty()||
-               r.needs_retrofit||r.requires_same_stage_nonstorable_energy||
-               std::any_of(r.inputs.begin(),r.inputs.end(),invalid)||
-               std::any_of(r.outputs.begin(),r.outputs.end(),invalid)||
-               std::any_of(r.byproducts.begin(),r.byproducts.end(),invalid)||
                offer.treasury_cash_reserve<0||
                std::any_of(investments.begin(),investments.end(),[&](const auto& investment) {
                    return investment.construction_project==p.id;
@@ -1113,6 +1135,12 @@ public:
       :DailyGame(std::move(world),Policies{}){}
     [[nodiscard]] const daily::World& world()const {return world_;}
     [[nodiscard]] const Policies& policies()const {return policies_;}
+    void set_public_construction_daily_cap(const std::string& country,Money cap) {
+        auto found=policies_.public_construction_daily_caps.find(country);
+        if(cap<0||found==policies_.public_construction_daily_caps.end())
+            throw std::invalid_argument("no valid public construction cap for this country");
+        found->second=cap;
+    }
     [[nodiscard]] bool has_public_construction_budget(const std::string& country,
             const std::string& project_id) const {
         const auto& offer=public_offer(project_id);
@@ -1154,11 +1182,13 @@ public:
             if(offer.elected_appropriation&&
                !c.command_processed(public_budget_key(country,offer)))
                 throw std::invalid_argument("missing elected public construction budget");
+            if(!offer.has_capacity_binding(gh.commerce(),gh.geography().spatial()))
+                throw std::invalid_argument("public construction lacks its authored freight capacity binding");
             if(has_active_public_project(gh,offer.project.client))
                 throw std::invalid_argument("public construction already active for treasury");
             c.command_once(public_build_key(offer.project.id),[&](auto&) {
                 gh.phase_d().order_public_construction(country,proposer,offer.project,
-                    offer.recipe,offer.treasury_cash_reserve,offer.elected_appropriation);
+                    offer.operating_recipe(),offer.treasury_cash_reserve,offer.elected_appropriation);
                 if(offer.elected_appropriation)
                     c.record_command_once(elected_public_order_key(offer.project.id),[](auto&){});
             });
@@ -1484,6 +1514,7 @@ public:
             const auto& p=found->second;
             const auto& country=game_c.sovereignty(p.region);
             if(p.ready||p.commissioned||p.paid_work>=p.work_required||
+               !offer.has_capacity_binding(world_.engine().commerce(),world_.engine().base().spatial())||
                !game_c.has_country_treasury(country)||
                game_c.country_treasury(country)!=p.client||
                (game_c.command_processed(elected_public_order_key(p.id))!=offer.elected_appropriation)||
@@ -1521,9 +1552,12 @@ public:
         }
         for(const auto& offer:decisions.public_construction_offers) {
             const auto slot=public_build_reserves.find(offer.project.client);
+            // A passive facility has no sellable output. Reuse the actual
+            // construction material market for the ordinary work gate.
             if(slot!=public_build_reserves.end()&&slot->second.project==offer.project.id&&
                slot->second.next_invoice>0)
-                decisions.investments.push_back({offer.project.id,offer.recipe.outputs.front().good,
+                decisions.investments.push_back({offer.project.id,
+                    offer.operating_recipe()?offer.recipe.outputs.front().good:offer.project.material_good,
                     offer.treasury_cash_reserve,1,1});
         }
         const auto public_build_floor=[reserves=std::move(public_build_reserves)]
@@ -4125,8 +4159,9 @@ public:
                                p.client!=treasury||p.cash_price_per_work>cap->second||
                                (chosen&&chosen->project.id<p.id)||
                                c.command_processed(public_build_key(p.id))||
+                               !offer.has_capacity_binding(gh.commerce(),gh.geography().spatial())||
                                d.public_construction_rejection(country,proposer,p,
-                                   offer.recipe,offer.treasury_cash_reserve,false))continue;
+                                   offer.operating_recipe(),offer.treasury_cash_reserve,false))continue;
                             chosen=&offer;
                         }
                         if(chosen)break;
@@ -4134,7 +4169,7 @@ public:
                     if(!chosen)continue;
                     c.command_once(public_build_key(chosen->project.id),[&](auto&) {
                         d.order_public_construction(country,proposer,chosen->project,
-                            chosen->recipe,chosen->treasury_cash_reserve,false);
+                            chosen->operating_recipe(),chosen->treasury_cash_reserve,false);
                     });
                 }
             });

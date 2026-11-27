@@ -116,6 +116,7 @@ def run(exe):
             run_history(root, panel, Path(directory))
             run_history_tax(root, panel, Path(directory))
             run_bundled_trial(root, panel, Path(directory))
+            run_public_freight_works(root, panel)
             run_variable_food_prices(root, panel, Path(directory))
             run_staffed_grain_farm(root, panel, Path(directory))
             run_grain_tariff(root, panel, Path(directory))
@@ -1001,6 +1002,33 @@ def run_bundled_trial(root, panel, directory):
     panel._send("step 25")
     wait(root, panel)
     assert panel.current["date"] == "1840-02-02" and "소득세율: 50%" in panel.policy.get()
+
+
+def run_public_freight_works(root, panel):
+    start = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-grain-freight-works.txt"
+    panel.country.set(panel.HISTORY)
+    with patch.object(play_panel.filedialog, "askopenfilename", return_value=str(start)):
+        panel.new_button.invoke()
+        wait(root, panel)
+    panel.history_choice.current(0)
+    panel.history_choice.event_generate("<<ComboboxSelected>>")
+    wait(root, panel)
+    assert panel.history_choice.get() == "FIELD-LAND"
+    assert panel.spending_button.winfo_ismapped() and panel.spending.get() == "0"
+    assert "운송 기반시설" in panel.policy.get()
+    old_date = panel.current["date"]
+    panel.spending.set("20")
+    panel.spending_button.invoke()
+    wait(root, panel)
+    assert panel.current["date"] == old_date
+    assert panel.current["public_works"]["daily_cap"] == 20
+    panel.step_button.invoke()
+    wait(root, panel)
+    assert panel.current["public_works"]["ordered"]
+    panel.history_choice.current(1)
+    panel.history_choice.event_generate("<<ComboboxSelected>>")
+    wait(root, panel)
+    assert panel.history_choice.get() == "MILL-LAND" and not panel.spending_button.winfo_ismapped()
 
 
 def run_variable_food_prices(root, panel, directory):

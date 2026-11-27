@@ -2006,8 +2006,6 @@ static void commissioned_public_site_enables_paid_civilian_freight() {
     ledger.seed_market("SOURCE","ore",4,4,4);
     ledger.seed_market("PORT","ore",10,10,10,1);
     ledger.seed_market("SOURCE","steel",2,2,2);
-    ledger.seed_market("SOURCE","wood",1,1,1);
-    ledger.seed_market("SOURCE","tools",5,5,5);
     ledger.seed_stock("SELLER","SOURCE","ore",10);
     ledger.seed_stock("BUILDER","SOURCE","steel",1);
     const auto worker=people(opening,"SOURCE",1,"worker");
@@ -2027,20 +2025,36 @@ static void commissioned_public_site_enables_paid_civilian_freight() {
     p.id="TERMINAL-WORKS";p.client="A";p.contractor="BUILDER";p.region="SOURCE";
     p.material_good="steel";p.target_site="TERMINAL";p.work_required=1;
     p.material_per_work=1;p.workers_per_work=1;p.cash_price_per_work=20;p.target_capacity=24;
-    phased::IndustryRecipe r;
-    r.id="TERMINAL-RECIPE";r.site=p.target_site;r.inputs={{"wood",1}};r.outputs={{"tools",1}};
-    r.workers_per_batch=r.capacity_per_batch=1;
-    policy.public_construction_offers.push_back({p,r,40});
+    policy.public_construction_offers.push_back({p,{},40,false,"infrastructure","FREIGHT"});
+    policy.public_construction_priorities["A"]={"infrastructure"};
+    policy.public_construction_daily_caps["A"]=20;
     const auto fills=[](const p0::DailyGame& game)->const auto& {return game.world().engine().commerce().fills;};
     p0::DailyGame work(daily::World::adopt(std::move(opening),81),policy);
-    p0::DailyGame control(daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(work.world())),policy);
-    work.order_public_construction("A","PM",p.id);
+    const auto initial=daily::SnapshotCodec::encode(work.world());
+    auto paused=policy;
+    paused.public_construction_daily_caps["A"]=0;
+    p0::DailyGame control(daily::SnapshotCodec::decode(initial),paused);
+    auto mismatch=policy;
+    mismatch.public_construction_offers.front().freight_edge="not-a-route";
+    p0::DailyGame invalid(daily::SnapshotCodec::decode(initial),mismatch);
+    invalid.advance_day();
+    require_test(invalid.world().engine().base().core().state().constructions.empty(),
+                 "an unmatched freight offer must not start or block day advance");
+    const auto before_rejection=daily::SnapshotCodec::encode(invalid.world());
+    bool rejected=false;
+    try {invalid.order_public_construction("A","PM",p.id);}
+    catch(const std::invalid_argument&) {rejected=true;}
+    require_test(rejected&&daily::SnapshotCodec::encode(invalid.world())==before_rejection,
+                 "manual public order cannot bypass the same freight binding");
+    work.advance_day();
     work.advance_day();control.advance_day();control.advance_day();
     require_test(fills(work).empty()&&fills(control).empty()&&!c(work).facilities().contains("TERMINAL")&&
                  c(work).cash("A")==180,"unfinished terminal cannot increase capacity before commissioning");
     p0::DailyGame replay(daily::SnapshotCodec::decode(daily::SnapshotCodec::encode(work.world())),policy);
     work.advance_day();replay.advance_day();control.advance_day();
-    require_test(c(work).facilities().contains("TERMINAL")&&fills(work).size()==1&&fills(control).empty()&&
+    require_test(c(work).facilities().contains("TERMINAL")&&
+                 work.world().engine().base().core().state().recipes.empty()&&
+                 fills(work).size()==1&&fills(control).empty()&&
                  fills(work).front().quantity==1&&c(work).cash("SELLER")==4&&c(work).cash("CARRIER")==2&&
                  c(work).stock("TRADER","PORT","ore")==0,
                  "commissioning must enable an earlier real freight booking, payment and transit");

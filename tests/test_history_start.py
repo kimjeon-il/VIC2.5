@@ -574,6 +574,66 @@ def bundled_border_trade():
     assert food(still_arrived) == food(arrived) and still_arrived["treasury"] == 53
 
 
+def history_public_works(work):
+    sample = Path(__file__).resolve().parents[1] / "data/scenarios/fictional-grain-freight-works.txt"
+    start = work / "public-works.txt"
+    start.write_bytes(sample.read_bytes())
+    save = work / "public-works.sav"
+    resumed = work / "public-works-resumed.sav"
+
+    def panels(*commands):
+        result = run("--panel-stdio", script="\n".join((*commands, "quit", "")))
+        success(result)
+        rows = [json.loads(line) for line in result.stdout.splitlines()][:-1]
+        assert all(row["ok"] for row in rows), rows
+        return [row["status"] for row in rows]
+
+    _, ready, enabled, paid, paused, switched, _ = panels(
+        f"history-open {start}", "choose-country FIELD-LAND",
+        "public-works 20", "step 2", "public-works 0",
+        "choose-country MILL-LAND", f"save {save}",
+    )
+    assert ready["public_works"]["daily_cap"] == 0
+    assert enabled["date"] == ready["date"]
+    assert paid["public_works"]["paid_work"] == 1
+    assert paused["public_works"]["daily_cap"] == 0
+    assert "public_works" not in switched
+    start.unlink()
+    terminal = run("--resume-history", save, script=f"step 2\nsave {resumed}\nquit\n")
+    success(terminal)
+    assert not terminal.stderr, terminal.stderr
+    _, paused_after, unpaused, finished = panels(
+        f"history-load {resumed}", "choose-country FIELD-LAND",
+        "public-works 20", "step 2",
+    )
+    assert paused_after["public_works"]["daily_cap"] == 0
+    assert paused_after["public_works"]["paid_work"] == 1
+    assert finished["public_works"]["paid_work"] == 2
+    assert finished["public_works"]["commissioned"]
+
+    fixed = (f"history-open {sample}", "choose-country FIELD-LAND")
+    _, _, _, funded = panels(*fixed, "public-works 20", "step 4")
+    _, _, delayed = panels(*fixed, "step 4")
+    assert funded["public_works"]["commissioned"]
+    assert not delayed["public_works"]["commissioned"]
+    funded_day, funded_delivery = panels(
+        *fixed, "public-works 20", "step 4", "choose-country MILL-LAND", "step 3")[-2:]
+    delayed_day, delayed_delivery = panels(
+        *fixed, "step 4", "choose-country MILL-LAND", "step 3")[-2:]
+    assert funded_day["date"] == delayed_day["date"] == "1840-01-05"
+    assert funded_day["grain_trade"]["duties_paid"] == 3
+    assert delayed_day["grain_trade"]["duties_paid"] == 0
+    assert funded_delivery["date"] == delayed_delivery["date"] == "1840-01-08"
+    assert funded_delivery["history"]["economy"]["mill_output_this_month"] == 6
+    assert delayed_delivery["history"]["economy"]["mill_output_this_month"] == 3
+
+    denied = run("--panel-stdio", script="\n".join((
+        f"history-open {sample}", "choose-country MILL-LAND", "public-works 20", "quit", "")))
+    success(denied)
+    reply = [json.loads(line) for line in denied.stdout.splitlines()]
+    assert not reply[2]["ok"] and reply[2]["status"] == reply[1]["status"]
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
@@ -633,6 +693,7 @@ def main():
         staffed_grain_farm(work)
         cross_border_grain(work)
         bundled_border_trade()
+        history_public_works(work)
         rejected(run("--history", start), "regular file")
         rejected(run("--history", work), "regular file")
         for invalid, message in (

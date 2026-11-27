@@ -411,19 +411,20 @@ void save_new(const daily::World& world,const fs::path& destination) {
     });
 }
 
-void save_history(const daily::World& world,std::string_view selected,const fs::path& destination) {
-    if(selected.empty()) {
+void save_history(const daily::World& world,std::string_view selected,const fs::path& destination,
+                  const history_play::PublicWorks& works={}) {
+    if(selected.empty()&&!works.freight) {
         save_new(world,destination);
         return;
     }
     publish_new_checkpoint(destination,[&](const fs::path& pending) {
-        const auto bytes=history_play::encode(world,selected);
+        const auto bytes=history_play::encode(world,selected,works);
         std::ofstream out(pending,std::ios::binary|std::ios::trunc);
         out.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));
         out.close();
         if(!out)throw std::runtime_error("historical checkpoint write failed");
         const auto check=history_play::load(pending);
-        if(check.selected!=selected||
+        if(check.selected!=selected||check.works!=works||
            daily::SnapshotCodec::encode(check.world)!=daily::SnapshotCodec::encode(world))
             throw std::runtime_error("historical checkpoint verification failed before publication");
     });
@@ -2102,11 +2103,29 @@ fs::path checkpoint_path_utf8(std::string_view value) {
     return fs::path(std::u8string(value.begin(),value.end()));
 }
 
-p0::Policies history_policies() {
+p0::Policies history_policies(const daily::World& world,const history_play::PublicWorks& works) {
     p0::Policies result;
     // The first local-history economy supplies food only. Do not report unmet
     // demand for clothing or automatically create inventory to cover it.
     result.monthly_clothing_units_per_person=0;
+    if(works.freight) {
+        const auto& f=*works.freight;
+        const auto& geo=world.engine().base();
+        phased::ConstructionProject project;
+        project.id=f.project();
+        project.target_site=f.site();
+        project.client=geo.core().core().country_treasury(f.sponsor);
+        project.contractor=f.builder();
+        project.region=geo.province(f.source).region;
+        project.material_good=history_start::freight_material;
+        project.work_required=f.work;
+        project.material_per_work=project.workers_per_work=1;
+        project.cash_price_per_work=f.invoice;
+        project.target_capacity=f.monthly_capacity;
+        result.public_construction_offers.push_back({project,{},f.reserve,false,"infrastructure",f.edge()});
+        result.public_construction_priorities[f.sponsor]={"infrastructure"};
+        result.public_construction_daily_caps[f.sponsor]=works.daily_cap;
+    }
     return result;
 }
 
@@ -2116,7 +2135,7 @@ bool history_direct_tax(const phasec::IntegratedWorld& core,const std::string& c
 }
 
 std::string history_panel_status(const p0::DailyGame& game,const std::string& selected,
-                                 const history_play::Countries& countries) {
+                                 const history_play::Countries& countries,const history_play::PublicWorks& works) {
     const auto& world=game.world();
     const auto date=world.date();
     std::ostringstream out;
@@ -2170,6 +2189,17 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
            <<",\"pending_income_tax_ppm\":"<<(pending?std::to_string(pending->second):"null")
            <<",\"pending_income_tax_date\":"<<(pending?json_string(month_opening(pending->first)):"null");
     }
+    if(works.freight&&works.freight->sponsor==selected&&history_direct_tax(core,selected)) {
+        const auto& spec=*works.freight;
+        const auto& projects=world.engine().base().core().state().constructions;
+        const auto p=projects.find(spec.project());
+        out<<",\"public_works\":{\"daily_cap\":"<<works.daily_cap
+           <<",\"invoice_per_work\":"<<spec.invoice
+           <<",\"required_work\":"<<spec.work
+           <<",\"ordered\":"<<(p!=projects.end()?"true":"false")
+           <<",\"paid_work\":"<<(p!=projects.end()?p->second.paid_work:0)
+           <<",\"commissioned\":"<<(p!=projects.end()&&p->second.commissioned?"true":"false")<<'}';
+    }
     const auto& tariffs=world.engine().diplomacy().tariffs;
     const auto grain=tariffs.find({selected,history_start::grain_good});
     if(history_direct_tax(core,selected)&&grain!=tariffs.end()) {
@@ -2188,6 +2218,7 @@ void run_panel() {
         std::string tag;
         p0::DailyGame game;
         history_play::Countries history{};
+        history_play::PublicWorks works{};
     };
     std::unique_ptr<Session> session;
     std::string last_status="null";
@@ -2210,18 +2241,20 @@ void run_panel() {
             else if(command=="status"&&arg.empty()) {}
             else if(command=="history-open"||command=="history-load") {
                 const auto path=checkpoint_path_utf8(arg);
-                auto opened=command=="history-open"?history_play::Opened{history_start::open(path),{}}:
+                auto opened=command=="history-open"?history_play::open(path):
                     history_play::load(path);
                 auto countries=history_play::country_catalog(opened.world);
+                auto policy=history_policies(opened.world,opened.works);
                 auto replacement=std::make_unique<Session>(Session{std::move(opened.selected),
-                    p0::DailyGame(std::move(opened.world),history_policies()),std::move(countries)});
-                last_status=history_panel_status(replacement->game,replacement->tag,replacement->history);
+                    p0::DailyGame(std::move(opened.world),std::move(policy)),std::move(countries),
+                    std::move(opened.works)});
+                last_status=history_panel_status(replacement->game,replacement->tag,replacement->history,replacement->works);
                 session=std::move(replacement);
             } else if(session&&!session->history.empty()&&command!="new"&&command!="load") {
                 if(command=="choose-country") {
                     const std::string tag(arg);
                     if(!session->history.contains(tag))throw std::invalid_argument("unknown historical country");
-                    last_status=history_panel_status(session->game,tag,session->history);
+                    last_status=history_panel_status(session->game,tag,session->history,session->works);
                     session->tag=tag;
                 } else if(command=="step") {
                     if(session->tag.empty())throw std::invalid_argument("choose a historical country first");
@@ -2229,10 +2262,10 @@ void run_panel() {
                     try {
                         for(int i=0;i<days;++i)session->game.advance_day();
                     } catch(...) {
-                        last_status=history_panel_status(session->game,session->tag,session->history);
+                        last_status=history_panel_status(session->game,session->tag,session->history,session->works);
                         throw;
                     }
-                    last_status=history_panel_status(session->game,session->tag,session->history);
+                    last_status=history_panel_status(session->game,session->tag,session->history,session->works);
                 } else if(command=="tariff") {
                     const auto& engine=session->game.world().engine();
                     const auto& core=engine.base().core().core();
@@ -2241,16 +2274,25 @@ void run_panel() {
                         throw std::invalid_argument("no editable grain tariff for the selected country");
                     session->game.advance_day(tariff_order(session->game,session->tag,
                         history_start::grain_good,command_number(arg,0,100),"HISTORY-GRAIN-TARIFF:"));
-                    last_status=history_panel_status(session->game,session->tag,session->history);
+                    last_status=history_panel_status(session->game,session->tag,session->history,session->works);
                 } else if(command=="income-tax") {
                     const auto& core=session->game.world().engine().base().core().core();
                     if(!history_direct_tax(core,session->tag))
                         throw std::invalid_argument("no modeled fiscal government for the selected country");
                     propose_direct_income_tax(session->game,session->tag,command_number(arg,0,100));
-                    last_status=history_panel_status(session->game,session->tag,session->history);
+                    last_status=history_panel_status(session->game,session->tag,session->history,session->works);
+                } else if(command=="public-works") {
+                    const auto& core=session->game.world().engine().base().core().core();
+                    if(!session->works.freight||session->works.freight->sponsor!=session->tag||
+                       !history_direct_tax(core,session->tag))
+                        throw std::invalid_argument("no editable public works for the selected country");
+                    const auto cap=command_number(arg,0,1'000'000);
+                    session->game.set_public_construction_daily_cap(session->tag,cap);
+                    session->works.daily_cap=cap;
+                    last_status=history_panel_status(session->game,session->tag,session->history,session->works);
                 } else if(command=="save") {
                     if(session->tag.empty())throw std::invalid_argument("choose a historical country first");
-                    save_history(session->game.world(),session->tag,checkpoint_path_utf8(arg));
+                    save_history(session->game.world(),session->tag,checkpoint_path_utf8(arg),session->works);
                 } else throw std::invalid_argument("historical preview supports country selection, step and save only");
             } else if(command=="inspect"&&(arg=="A"||arg=="B")) {
                 if(!session||!is_campaign_world(session->game.world()))
@@ -2437,7 +2479,8 @@ void history_province(const daily::World& world,std::string_view argument) {
     std::cout<<'\n';
 }
 
-void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool history=false,std::string_view history_country={}) {
+void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool history=false,std::string_view history_country={},
+         const history_play::PublicWorks& works={}) {
     const auto show_help=[&] {
         if(history)std::cout<<"Commands: status | province <ID> | water <ID> | step [days] | save <new path> | help | quit\n";
         else if(selected)trial_help(budget_world(game.world()));
@@ -2493,7 +2536,7 @@ void run(p0::DailyGame game,const std::optional<std::string>& selected={},bool h
                 order_trial_public_build(game,*selected);
                 show_status();
             } else if(command=="save"&&!arg.empty()) {
-                if(history)save_history(game.world(),history_country,checkpoint_path_utf8(arg));
+                if(history)save_history(game.world(),history_country,checkpoint_path_utf8(arg),works);
                 else save_new(game.world(),checkpoint_path_utf8(arg));
                 std::cout<<"saved\n";
             } else throw std::invalid_argument("unknown or malformed command; type help");
@@ -2544,9 +2587,10 @@ int main(int argc,char** argv) {
         if(history_file||history_save) {
             if((history_file&&history_save)||explicit_tutorial||explicit_trial||selected||resume)
                 throw std::invalid_argument("historical start, resume, tutorial and trial modes are mutually exclusive");
-            auto opened=history_file?history_play::Opened{history_start::open(*history_file),{}}:
+            auto opened=history_file?history_play::open(*history_file):
                 history_play::load(*history_save);
-            run(p0::DailyGame(std::move(opened.world),history_policies()),{},true,opened.selected);
+            auto policy=history_policies(opened.world,opened.works);
+            run(p0::DailyGame(std::move(opened.world),std::move(policy)),{},true,opened.selected,opened.works);
             return 0;
         }
         if(explicit_trial!=selected.has_value()||(explicit_trial&&explicit_tutorial))

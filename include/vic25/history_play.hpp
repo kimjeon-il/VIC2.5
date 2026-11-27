@@ -131,12 +131,24 @@ inline FoodOverview food_overview(const daily::World& world,const std::string& c
     return result;
 }
 
+struct PublicWorks {
+    std::optional<history_start::FreightWorks> freight;
+    phasec::Money daily_cap{};
+    bool operator==(const PublicWorks&) const = default;
+};
 struct Opened {
     daily::World world;
     std::string selected;
+    PublicWorks works;
 };
+inline Opened open(const std::filesystem::path& path) {
+    PublicWorks works;
+    auto world=history_start::open(path,&works.freight);
+    return {std::move(world),{},std::move(works)};
+}
 
 inline constexpr std::string_view magic="VIC25-HISTORY-PLAY-1\n";
+inline constexpr std::string_view works_magic="VIC25-HISTORY-PLAY-2\n";
 inline constexpr std::uint64_t max_snapshot=850'000'000;
 
 inline void validate(const Opened& state) {
@@ -147,17 +159,36 @@ inline void validate(const Opened& state) {
            state.world.engine().base().sovereign_provinces(state.selected).empty())
             throw std::invalid_argument("unknown historical country in checkpoint");
     }
+    if(state.works.freight) {
+        const auto& works=*state.works.freight;
+        const auto& engine=state.world.engine();
+        const auto& edges=engine.commerce().transport_edges;
+        const auto edge=edges.find(works.edge());
+        const auto& c=engine.base().core().core();
+        if(edge==edges.end()||edge->second.capacity_site!=works.site()||
+           edge->second.from!=works.source||edge->second.to!=works.destination||
+           !c.has_country_treasury(works.sponsor)||!c.has_actor(works.builder()))
+            throw std::invalid_argument("invalid historical public works binding");
+    }
 }
 
 // The checksum covers the selected country as well as the unaltered native
 // snapshot. Older history saves without any player selection keep native bytes.
-inline std::string encode(const daily::World& world,std::string_view selected) {
+inline std::string encode(const daily::World& world,std::string_view selected,
+                          const PublicWorks& works={}) {
     auto snapshot=daily::SnapshotCodec::encode(world);
     if(snapshot.size()>max_snapshot)throw std::invalid_argument("historical checkpoint exceeds save limit");
-    if(selected.empty())return snapshot;
-    std::string bytes(magic);
+    if(selected.empty()&&!works.freight)return snapshot;
+    std::string bytes(works.freight?works_magic:magic);
     bytes+=selected;
     bytes+='\n';
+    if(works.freight) {
+        const auto& f=*works.freight;
+        bytes+=std::to_string(f.source)+' '+std::to_string(f.destination)+' '+f.sponsor+' '+
+               std::to_string(f.work)+' '+std::to_string(f.monthly_capacity)+' '+
+               std::to_string(f.invoice)+' '+std::to_string(f.reserve)+'\n';
+        bytes+=std::to_string(works.daily_cap)+'\n';
+    }
     bytes+=snapshot;
     std::ostringstream trailer(std::ios::binary|std::ios::out);
     phasec::persistence_detail::BinaryWriter writer{trailer};
@@ -171,7 +202,7 @@ inline Opened load(const std::filesystem::path& path) {
     if(!fs::is_regular_file(path))
         throw std::invalid_argument("historical checkpoint must use a regular file");
     const auto size=fs::file_size(path);
-    if(size>max_snapshot+magic.size()+64+1+8)
+    if(size>max_snapshot+works_magic.size()+64+1+257+17+8)
         throw std::invalid_argument("historical checkpoint exceeds save limit");
     std::ifstream file(path,std::ios::binary);
     if(!file)throw std::invalid_argument("cannot open historical checkpoint");
@@ -180,12 +211,15 @@ inline Opened load(const std::filesystem::path& path) {
        file.peek()!=std::char_traits<char>::eof()||file.bad())
         throw std::invalid_argument("historical checkpoint changed or could not be read");
     std::string selected;
-    if(bytes.starts_with(magic)) {
-        const auto eol=bytes.find('\n',magic.size());
-        if(eol==bytes.npos||eol-magic.size()>64||bytes.size()-eol<=9)
+    PublicWorks works;
+    const bool with_works=bytes.starts_with(works_magic);
+    if(with_works||bytes.starts_with(magic)) {
+        const auto header_size=with_works?works_magic.size():magic.size();
+        const auto eol=bytes.find('\n',header_size);
+        if(eol==bytes.npos||eol-header_size>64||bytes.size()-eol<=9)
             throw std::invalid_argument("invalid historical checkpoint header");
-        selected=bytes.substr(magic.size(),eol-magic.size());
-        if(!history_start::identifier(selected))
+        selected=bytes.substr(header_size,eol-header_size);
+        if((!with_works||!selected.empty())&&!history_start::identifier(selected))
             throw std::invalid_argument("invalid historical checkpoint country");
         std::istringstream trailer(bytes.substr(bytes.size()-8),std::ios::binary|std::ios::in);
         std::uint64_t expected{};
@@ -194,9 +228,28 @@ inline Opened load(const std::filesystem::path& path) {
         bytes.resize(bytes.size()-8);
         if(phasec::persistence_detail::checksum(bytes)!=expected)
             throw std::invalid_argument("historical checkpoint checksum mismatch");
-        bytes.erase(0,eol+1);
+        auto payload=eol+1;
+        if(with_works) {
+            const auto end=bytes.find('\n',payload);
+            if(end==bytes.npos||end-payload>256)
+                throw std::invalid_argument("invalid historical public works header");
+            std::istringstream row(bytes.substr(payload,end-payload));
+            row.imbue(std::locale::classic());
+            std::string source;
+            if(!(row>>source))throw std::invalid_argument("missing historical public works source");
+            works.freight=history_start::parse_freight_works(
+                history_start::positive(source,"invalid historical public works source"),row);
+            payload=end+1;
+            const auto cap_end=bytes.find('\n',payload);
+            if(cap_end==bytes.npos||cap_end-payload>16)
+                throw std::invalid_argument("invalid historical public works ceiling");
+            works.daily_cap=history_start::start_value(bytes.substr(payload,cap_end-payload),
+                0,1'000'000,"invalid historical public works ceiling");
+            payload=cap_end+1;
+        }
+        bytes.erase(0,payload);
     }
-    Opened result{daily::SnapshotCodec::decode(bytes),std::move(selected)};
+    Opened result{daily::SnapshotCodec::decode(bytes),std::move(selected),std::move(works)};
     validate(result);
     return result;
 }
