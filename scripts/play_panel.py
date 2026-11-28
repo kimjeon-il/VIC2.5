@@ -492,13 +492,15 @@ class PlayPanel:
                          f"해안 프로빈스: {territory['coastal']}")
                         if territory is not None else "목록에서 미리 볼 국가를 선택하세요.")
         policy = f"자료 ID: {history['dataset']}"
-        if "treasury" in status:
+        has_treasury = "treasury" in status
+        can_edit_tax = "income_tax_ppm" in status
+        if has_treasury:
             budget = (self.budget.get() + f"\n국고: {status['treasury']} · 국가 부채: {status['debt']}"
                       f"\n누적 세입: {status['revenue']} · 누적 경상 지출: {status['expenditure']}")
             if works := status.get("public_works"):
                 budget += f"\n누적 공사 지급액: {works['invoice_paid']}"
             self.budget.set(budget)
-        if "income_tax_ppm" in status:
+        if can_edit_tax:
             pending = status["pending_income_tax_ppm"]
             policy += f"\n소득세율: {self._percent(status['income_tax_ppm'])}%"
             if pending is not None:
@@ -552,11 +554,11 @@ class PlayPanel:
         self.market.set(market)
         scope = ("입력된 시험용 정부에서만 소득세를 바꿀 수 있습니다. "
                  "새 세율은 다음 달 첫날 처리부터 임금 원천징수에 적용됩니다."
-                 if has_fiscal else "이 국가에는 조작 가능한 재정·정부 자료가 없습니다.")
+                 if can_edit_tax else "이 국가에는 소득세를 조작할 수 있는 정부 자료가 없습니다.")
         self.diplomacy.set(scope + " 식량 생산·임금·구매는 입력된 지역에서 자동으로 처리됩니다.")
         market_title = "지역 식량·산업 시장" if economy and economy.get("copper_telephone") else "지역 식량 시장"
-        titles = ("영토·국고" if has_fiscal else "선택 국가의 영토",
-                  "자료·소득세" if has_fiscal else "시작 자료", market_title, "미리보기 범위")
+        titles = ("영토·국고" if has_treasury else "선택 국가의 영토",
+                  "자료·소득세" if can_edit_tax else "시작 자료", market_title, "미리보기 범위")
         for card, title in zip(self.cards, titles):
             card.configure(text=title)
         self.current = status
