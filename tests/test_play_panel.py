@@ -1060,6 +1060,8 @@ def run_public_freight_works(root, panel):
     assert panel.history_choice.get() == "FIELD-LAND"
     assert panel.spending_button.winfo_ismapped() and panel.spending.get() == "0"
     assert "운송 기반시설" in panel.policy.get()
+    assert "누적 공사 지급액: 0" in panel.budget.get()
+    assert "누적 경상 지출: 0" in panel.budget.get() and "국가 부채: 0" in panel.budget.get()
     old_date = panel.current["date"]
     panel.spending.set("20")
     panel.spending_button.invoke()
@@ -1079,14 +1081,17 @@ def run_public_freight_works(root, panel):
     wait(root, panel)
     assert panel.current["date"] == paid_date
     assert "준공 대기 · 공사 2/2" in panel.policy.get()
+    assert "누적 공사 지급액: 40" in panel.budget.get()
     panel.step_button.invoke()
     wait(root, panel)
     assert panel.current["public_works"]["commissioned"]
     assert "준공 · 공사 2/2" in panel.policy.get()
+    assert "누적 공사 지급액: 40" in panel.budget.get()
     panel.history_choice.current(1)
     panel.history_choice.event_generate("<<ComboboxSelected>>")
     wait(root, panel)
     assert panel.history_choice.get() == "MILL-LAND" and not panel.spending_button.winfo_ismapped()
+    assert "누적 공사 지급액:" not in panel.budget.get()
     with TemporaryDirectory() as tmp:
         low_funds = Path(tmp) / "low-funds.txt"
         low_funds.write_text(start.read_text(encoding="ascii").replace(

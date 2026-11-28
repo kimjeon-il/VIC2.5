@@ -492,9 +492,13 @@ class PlayPanel:
                          f"해안 프로빈스: {territory['coastal']}")
                         if territory is not None else "목록에서 미리 볼 국가를 선택하세요.")
         policy = f"자료 ID: {history['dataset']}"
-        has_fiscal = "income_tax_ppm" in status
-        if has_fiscal:
-            self.budget.set(self.budget.get() + f"\n국고: {status['treasury']} · 누적 세입: {status['revenue']}")
+        if "treasury" in status:
+            budget = (self.budget.get() + f"\n국고: {status['treasury']} · 국가 부채: {status['debt']}"
+                      f"\n누적 세입: {status['revenue']} · 누적 경상 지출: {status['expenditure']}")
+            if works := status.get("public_works"):
+                budget += f"\n누적 공사 지급액: {works['invoice_paid']}"
+            self.budget.set(budget)
+        if "income_tax_ppm" in status:
             pending = status["pending_income_tax_ppm"]
             policy += f"\n소득세율: {self._percent(status['income_tax_ppm'])}%"
             if pending is not None:

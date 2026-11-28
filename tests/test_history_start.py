@@ -706,10 +706,16 @@ def history_public_works(work):
         "choose-country MILL-LAND", f"save {save}",
     )
     assert ready["public_works"]["daily_cap"] == 0
+    assert ready["expenditure"] == ready["debt"] == 0
+    assert ready["public_works"]["invoice_paid"] == enabled["public_works"]["invoice_paid"] == 0
     assert enabled["date"] == ready["date"]
     assert paid["public_works"]["paid_work"] == 1
+    assert paid["public_works"]["invoice_paid"] == paused["public_works"]["invoice_paid"] == 20
+    assert paid["expenditure"] == paid["debt"] == 0
+    assert paid["treasury"] == ready["treasury"] + paid["revenue"] - 20
     assert paused["public_works"]["daily_cap"] == 0
     assert "public_works" not in switched
+    assert switched["expenditure"] == switched["debt"] == 0
     start.unlink()
     terminal = run("--resume-history", save, script=f"step 2\nsave {resumed}\nquit\n")
     success(terminal)
@@ -720,8 +726,11 @@ def history_public_works(work):
     )
     assert paused_after["public_works"]["daily_cap"] == 0
     assert paused_after["public_works"]["paid_work"] == 1
+    assert paused_after["public_works"]["invoice_paid"] == 20
     assert finished["public_works"]["paid_work"] == 2
     assert finished["public_works"]["commissioned"]
+    assert finished["public_works"]["invoice_paid"] == 40
+    assert finished["treasury"] == ready["treasury"] + finished["revenue"] - 40
 
     for cash in (79, 80):
         narrow = work / f"freight-funding-{cash}.txt"
@@ -733,6 +742,7 @@ def history_public_works(work):
         assert chosen["treasury"] == cash
         assert funded_view["public_works"]["funding_ready"] == (cash == 80)
         assert after_step["public_works"]["ordered"] == (cash == 80)
+        assert after_step["public_works"]["invoice_paid"] == 0
         assert funded_view["date"] == chosen["date"]  # a status report pays nothing
 
     fixed = (f"history-open {sample}", "choose-country FIELD-LAND")
