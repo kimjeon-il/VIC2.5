@@ -1928,6 +1928,14 @@ void current_conflict_status(std::ostringstream& out,const phasegh::DiplomacySta
     out<<']';
 }
 
+void fiscal_status(std::ostringstream& out,const phasec::CountryFiscalView& fiscal) {
+    out<<",\"treasury\":"<<fiscal.cash
+       <<",\"revenue\":"<<fiscal.realized_revenue
+       <<",\"expenditure\":"<<fiscal.realized_expenditure
+       <<",\"debt\":"<<phaseb::add_checked(fiscal.bank_debt,
+            phaseb::add_checked(fiscal.bond_principal,fiscal.unpaid_coupons));
+}
+
 std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
     const auto& world=game.world();
     const auto& engine=world.engine();
@@ -1938,12 +1946,8 @@ std::string panel_status(const p0::DailyGame& game,const std::string& tag) {
     out<<"{\"country\":"<<json_string(tag)<<",\"date\":\""
        <<std::setfill('0')<<std::setw(4)<<date.year<<'-'<<std::setw(2)<<date.month
        <<'-'<<std::setw(2)<<date.day<<"\""
-       <<",\"commit\":"<<engine.commit_id()
-       <<",\"treasury\":"<<fiscal.cash
-       <<",\"revenue\":"<<fiscal.realized_revenue
-       <<",\"expenditure\":"<<fiscal.realized_expenditure
-       <<",\"debt\":"<<phaseb::add_checked(fiscal.bank_debt,
-            phaseb::add_checked(fiscal.bond_principal,fiscal.unpaid_coupons));
+       <<",\"commit\":"<<engine.commit_id();
+    fiscal_status(out,fiscal);
     if(is_staples_world(world)) {
         staples_status(out,world);
         return out.str();
@@ -2201,14 +2205,15 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
     }
     out<<'}';
     const auto& core=world.engine().base().core().core();
-    if(history_direct_tax(core,selected)) {
+    if(core.has_country_treasury(selected)) {
         const auto fiscal=core.country_fiscal(selected);
-        const auto pending=core.pending_country_tax(selected);
-        out<<",\"treasury\":"<<fiscal.cash
-           <<",\"revenue\":"<<fiscal.realized_revenue
-           <<",\"income_tax_ppm\":"<<fiscal.income_tax_ppm
-           <<",\"pending_income_tax_ppm\":"<<(pending?std::to_string(pending->second):"null")
-           <<",\"pending_income_tax_date\":"<<(pending?json_string(month_opening(pending->first)):"null");
+        fiscal_status(out,fiscal);
+        if(history_direct_tax(core,selected)) {
+            const auto pending=core.pending_country_tax(selected);
+            out<<",\"income_tax_ppm\":"<<fiscal.income_tax_ppm
+               <<",\"pending_income_tax_ppm\":"<<(pending?std::to_string(pending->second):"null")
+               <<",\"pending_income_tax_date\":"<<(pending?json_string(month_opening(pending->first)):"null");
+        }
     }
     if(works.freight&&works.freight->sponsor==selected&&history_direct_tax(core,selected)) {
         const auto& spec=*works.freight;
@@ -2223,6 +2228,7 @@ std::string history_panel_status(const p0::DailyGame& game,const std::string& se
         out<<",\"public_works\":{\"daily_cap\":"<<works.daily_cap
            <<",\"invoice_per_work\":"<<spec.invoice
            <<",\"funding_ready\":"<<(funding_ready?"true":"false")
+           <<",\"invoice_paid\":"<<phased::product(ordered?p->second.paid_work:0,spec.invoice)
            <<",\"required_work\":"<<spec.work
            <<",\"ordered\":"<<(p!=projects.end()?"true":"false")
            <<",\"paid_work\":"<<(p!=projects.end()?p->second.paid_work:0)
